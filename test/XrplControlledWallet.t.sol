@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.13;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, console2} from "forge-std/Test.sol";
 import {
     MasterAccountController,
     IGovernanceSettings,
@@ -14,7 +14,9 @@ import {PersonalAccount} from "../contracts/xrpcw/implementation/PersonalAccount
 import {PersonalAccountProxy} from "../contracts/xrpcw/proxy/PersonalAccountProxy.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
+import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 
+// solhint-disable-next-line max-states-count
 contract XrplControlledWalletTest is Test {
     MasterAccountController private masterAccountController;
     MasterAccountController private masterAccountControllerImpl;
@@ -87,9 +89,7 @@ contract XrplControlledWalletTest is Test {
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.responseBody.sourceAddressHash = keccak256(abi.encodePacked(xrplAccount1));
         proof.data.requestBody.transactionId = bytes32("tx1");
-        // instruction id is 3, amount is 12345
-        proof.data.responseBody.standardPaymentReference =
-            0x0300000000000000000000000000000000000000000000000000000000003039;
+        proof.data.responseBody.standardPaymentReference = _encodePaymentReferenceAmount(3, 12345);
         _mockVerifyPayment(true);
 
         assertEq(
@@ -97,6 +97,12 @@ contract XrplControlledWalletTest is Test {
             address(PersonalAccount(address(0)))
         );
         vm.prank(operator);
+        vm.expectEmit();
+        emit IPersonalAccount.Approved(
+            address(fxrp),
+            address(depositVault),
+            12345
+        );
         masterAccountController.executeTransaction(proof, xrplAccount1);
 
         // PersonalAccount should be created
@@ -141,7 +147,7 @@ contract XrplControlledWalletTest is Test {
     }
 
 
-    function _mockVerifyPayment(bool _result) internal {
+    function _mockVerifyPayment(bool _result) private {
         vm.mockCall(
             contractRegistryMock,
             abi.encodeWithSelector(
@@ -158,6 +164,40 @@ contract XrplControlledWalletTest is Test {
             ),
             abi.encode(_result)
         );
+    }
+
+    function _encodePaymentReferenceAmount(
+        uint8 instructionId,
+        uint248 amount
+    )
+        private pure
+        returns (bytes32)
+    {
+        require(instructionId >= 1 && instructionId <= 3, "Invalid instructionId for deposit/withdrawal/approval");
+        return bytes32((uint256(instructionId) << 248) | amount);
+    }
+
+    function _encodePaymentReferenceRedeem(
+        uint8 instructionId,
+        uint88 lots
+    )
+        private pure
+        returns (bytes32)
+    {
+        require(instructionId == 4, "Invalid instructionId for redeem");
+        return bytes32((uint256(instructionId) << 248) | (uint256(lots) << 168));
+    }
+
+    function _encodePaymentReferenceReserve(
+        uint8 instructionId,
+        uint88 lots,
+        address agent // uint160
+    )
+        private pure
+        returns (bytes32)
+    {
+        require(instructionId == 5, "Invalid instructionId for collateral reservation");
+        return bytes32((uint256(instructionId) << 248) | (uint256(lots) << 168) | (uint256(uint160(agent))));
     }
 
 }

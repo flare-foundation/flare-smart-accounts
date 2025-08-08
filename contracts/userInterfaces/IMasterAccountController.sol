@@ -36,6 +36,9 @@ interface IMasterAccountController {
     error TransactionAlreadyExecuted();
     error InvalidInstructionId(uint256 instructionId);
     error InvalidExecutorFee();
+    error AmountZero();
+    error LotsZero();
+    error InvalidAgentVaultAddress();
 
     /**
      * @notice Execute an XRPL instruction for a given Ripple account.

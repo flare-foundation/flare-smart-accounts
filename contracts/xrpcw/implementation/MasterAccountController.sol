@@ -217,6 +217,7 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         PersonalAccount _personalAccount,
         string memory _xrplOwner
     ) internal {
+        // TODO _xrplOwner could maybe be removed from here. Probably not needed in events?
         // byte 0
         uint256 instructionId = (_paymentReference >> 248) & 0xFF;
         if (instructionId >= 1 && instructionId <= 4) {
@@ -224,10 +225,12 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
                 // bytes 1–11: lots
                 // bytes 12–31: empty (ignored)
                 uint88 lots = uint88((_paymentReference >> 168) & 0xFFFFFFFFFFFFFFFFFFFFFFFF);
+                require(lots > 0, LotsZero());
                 _personalAccount.redeem(lots, executor, executorFee);
             } else {
                 // bytes 1-31: amount
-                uint256 amount = _paymentReference & ((uint256(1) << 248) - 1); // mask out the first byte
+                uint256 amount = _paymentReference & ((uint256(1) << 248) - 1);
+                require(amount > 0, AmountZero());
                 if (instructionId == 1) {
                     // Deposit
                     _personalAccount.deposit(amount, depositVault);
@@ -243,8 +246,10 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
             // bytes 1–11: lots
             // bytes 12–31: agent vault address
             uint88 lots = uint88((_paymentReference >> 168) & 0xFFFFFFFFFFFFFFFFFFFFFFFF);
-            address agent = address(uint160(_paymentReference & ((uint256(1) << 160) - 1)));
-            _personalAccount.reserveCollateral{value: msg.value}(lots, agent, executor, executorFee);
+            require(lots > 0, LotsZero());
+            address agentVault = address(uint160(_paymentReference & ((uint256(1) << 160) - 1)));
+            require(agentVault != address(0), InvalidAgentVaultAddress());
+            _personalAccount.reserveCollateral{value: msg.value}(lots, agentVault, executor, executorFee);
         } else {
             revert InvalidInstructionId(instructionId);
         }
