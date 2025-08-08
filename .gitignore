@@ -1,0 +1,38 @@
+.env
+node_modules
+yarn-error.log
+
+## Test deploys info
+deployment/deploys/scdev.json
+deployment/deploys/all/scdev.json
+
+# Foundry files
+cache-forge/
+artifacts-forge/
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+
+# coverage files
+coverage/
+coverage-forge/
+lcov.info
+lcov.info.pruned
+coverage.json
+
+# Hardhat files
+cache
+artifacts
+
+# Typescript
+dist
+typechain
+typechain-truffle
+typechain-web3
+
+# misc
+nul
+.DS_Store
+
+# slither
+slither.json

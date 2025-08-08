@@ -1,0 +1,10 @@
+artifacts
+artifacts-forge
+cache
+cache-forge
+coverage
+node_modules
+typechain
+typechain-truffle
+typechain-web3
+

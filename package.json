@@ -1,0 +1,75 @@
+{
+  "name": "xrpcw-contracts",
+  "version": "0.0.1",
+  "description": "Smart contracts implementing XRPL control wallet.",
+  "main": "",
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitlab.com/flarenetwork/xrpcw-contracts.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "Flare SC team",
+  "license": "MIT",
+  "directories": {},
+  "scripts": {
+    "---------TEST---SCRIPTS": "",
+    "---------COMPILE---SCRIPTS": "",
+    "compile": "yarn hardhat compile && yarn typechain-ethers-v6 && yarn typechain-truffle-v5 && yarn typechain-web3-v1",
+    "c": "yarn compile",
+    "typechain-ethers-v6": "yarn typechain --target=ethers-v6 --out-dir typechain \"artifacts/!(build-info)/**/+([a-zA-Z0-9_]).json\" 1> nul",
+    "typechain-truffle-v5": "yarn typechain --target=truffle-v5 --out-dir typechain-truffle \"artifacts/!(build-info)/**/+([a-zA-Z0-9_]).json\" 1> nul",
+    "typechain-web3-v1": "yarn typechain --target=web3-v1 --out-dir typechain-web3 \"artifacts/!(build-info)/**/+([a-zA-Z0-9_]).json\" 1> nul",
+    "---------DEPLOY---SCRIPTS": "",
+    "---------REDEPLOY---SCRIPTS": ""
+  },
+  "dependencies": {
+    "@flarenetwork/flare-periphery-contract-artifacts": "0.1.34",
+    "@flarenetwork/flare-periphery-contracts": "0.1.34",
+    "@openzeppelin/contracts": "^5.2.0",
+    "@typescript-eslint/eslint-plugin": "^7.3.1",
+    "@typescript-eslint/parser": "^7.3.1",
+    "ethers": "^6.11.1",
+    "hardhat": "^2.22.18",
+    "solhint": "^4.5.2"
+  },
+  "devDependencies": {
+    "@coverage.rocks/genhtml": "^1.16.0",
+    "@gnosis.pm/mock-contract": "^4.0.0",
+    "@nomicfoundation/hardhat-chai-matchers": "^2.0.6",
+    "@nomicfoundation/hardhat-ethers": "^3.0.5",
+    "@nomicfoundation/hardhat-network-helpers": "^1.0.10",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.6",
+    "@nomiclabs/hardhat-ethers": "^2.2.3",
+    "@nomiclabs/hardhat-truffle5": "^2.0.7",
+    "@nomiclabs/hardhat-web3": "^2.0.0",
+    "@openzeppelin/test-helpers": "^0.5.16",
+    "@typechain/ethers-v6": "^0.5.1",
+    "@typechain/hardhat": "^9.1.0",
+    "@typechain/truffle-v5": "^8.0.7",
+    "@typechain/web3-v1": "^6.0.7",
+    "@types/chai": "^4.3.13",
+    "@types/elliptic": "^6.4.18",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.29",
+    "elliptic": "^6.5.5",
+    "intercept-stdout": "0.1.2",
+    "pascal-case": "^3.1.2",
+    "solidity-coverage": "^0.8.11",
+    "sqlite3": "^5.1.7",
+    "ts-node": "^10.9.2",
+    "typechain": "^8.3.2",
+    "typeorm": "^0.3.20",
+    "typescript": "^5.4.2"
+  },
+  "prettier": {
+    "printWidth": 120,
+    "semi": true,
+    "singleQuote": false,
+    "trailingComma": "es5",
+    "tabWidth": 2,
+    "arrowParens": "avoid"
+  }
+}
