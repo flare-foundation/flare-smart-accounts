@@ -157,6 +157,7 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
     /**
      * @notice  Updates the operator-only window (in seconds).
      * @param   _newWindowSeconds  New execution window duration in seconds.
+     * Can only be called by the governance.
      */
     function setOperatorExecutionWindowSeconds(uint256 _newWindowSeconds) external onlyGovernance {
         require(_newWindowSeconds > 0, InvalidOperatorExecutionWindowSeconds());
