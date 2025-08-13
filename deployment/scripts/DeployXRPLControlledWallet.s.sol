@@ -22,13 +22,17 @@ contract DeployXRPLControlledWallet is Script {
         address governanceSettings = 0x1000000000000000000000000000000000000007;
         address governance = deployer;
 
-        string memory configFile;
+        string memory configFile = "deployment/chain-config/";
+        string memory network;
         uint256 chainId = block.chainid;
+
         if (chainId == 114) {
-            configFile = "deployment/chain-config/coston2.json";
+            network = "coston2";
         } else {
-            configFile = "deployment/chain-config/scdev.json";
+            configFile = "scdev";
         }
+        configFile = string.concat(configFile, network, ".json");
+        console2.log(string.concat("NETWORK: ", network));
 
         string memory config = vm.readFile(configFile);
         address depositVault = vm.parseJsonAddress(config, ".depositVault");
@@ -66,11 +70,21 @@ contract DeployXRPLControlledWallet is Script {
         masterAccountController.switchToProductionMode();
 
         vm.stopBroadcast();
-        console2.log("Personal Account Implementation Address:");
-        console2.log(personalAccountImplAddress);
-        console2.log("Master Account Controller Proxy Address:");
-        console2.log(masterAccountControllerAddress);
-        console2.log("Master Account Controller Implementation Address:");
-        console2.log(address(masterAccountControllerImpl));
+        // Log deployment info for post-processing
+        console2.log(string.concat(
+            "DEPLOYED: PersonalAccountImplementation, ",
+            "PersonalAccount.sol: ",
+            vm.toString(personalAccountImplAddress)
+        ));
+        console2.log(string.concat(
+            "DEPLOYED: MasterAccountController, ",
+            "MasterAccountControllerProxy.sol:  ",
+            vm.toString(masterAccountControllerAddress)
+        ));
+        console2.log(string.concat(
+            "DEPLOYED: MasterAccountControllerImplementation, ",
+            "MasterAccountController.sol: ",
+            vm.toString(address(masterAccountControllerImpl))
+        ));
     }
 }
