@@ -2,16 +2,16 @@
   {
     "name": "PersonalAccountImplementation",
     "contractName": "PersonalAccount.sol",
-    "address": "0xD0BcC686252bda1cbFA551dFf24e0786adC4685a"
+    "address": "0xBc696A456E351C8a5f170135868a3850eB29135A"
   },
   {
     "name": "MasterAccountController",
     "contractName": "MasterAccountControllerProxy.sol",
-    "address": "0x157D6316475765F13348DfA897C503Af0161B232"
+    "address": "0x2Ce1d8653BbCa3F636A63E35136f4e015f0b4647"
   },
   {
     "name": "MasterAccountControllerImplementation",
     "contractName": "MasterAccountController.sol",
-    "address": "0xA1a9B8aB5BB798EeE536A23669AD744DCF8537a3"
+    "address": "0xCe7472A48754A2AFe34951c6F35f7BFE01bb8FeE"
   }
 ]
