@@ -225,7 +225,7 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
             if (instructionId == 4) {
                 // bytes 1–11: lots
                 // bytes 12–31: empty (ignored)
-                uint88 lots = uint88((_paymentReference >> 168) & 0xFFFFFFFFFFFFFFFFFFFFFFFF);
+                uint88 lots = uint88((_paymentReference >> 160) & ((uint256(1) << 88) - 1));
                 require(lots > 0, LotsZero());
                 _personalAccount.redeem(lots, executor, executorFee);
             } else {
@@ -246,7 +246,7 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         } else if (instructionId == 5) {
             // bytes 1–11: lots
             // bytes 12–31: agent vault address
-            uint88 lots = uint88((_paymentReference >> 168) & 0xFFFFFFFFFFFFFFFFFFFFFFFF);
+            uint88 lots = uint88((_paymentReference >> 160) & ((uint256(1) << 88) - 1));
             require(lots > 0, LotsZero());
             address agentVault = address(uint160(_paymentReference & ((uint256(1) << 160) - 1)));
             require(agentVault != address(0), InvalidAgentVaultAddress());

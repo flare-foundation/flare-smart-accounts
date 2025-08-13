@@ -185,7 +185,7 @@ contract XrplControlledWalletTest is Test {
         returns (bytes32)
     {
         require(instructionId == 4, "Invalid instructionId for redeem");
-        return bytes32((uint256(instructionId) << 248) | (uint256(lots) << 168));
+        return bytes32((uint256(instructionId) << 248) | (uint256(lots) << 160));
     }
 
     function _encodePaymentReferenceReserve(
@@ -197,7 +197,7 @@ contract XrplControlledWalletTest is Test {
         returns (bytes32)
     {
         require(instructionId == 5, "Invalid instructionId for collateral reservation");
-        return bytes32((uint256(instructionId) << 248) | (uint256(lots) << 168) | (uint256(uint160(agent))));
+        return bytes32((uint256(instructionId) << 248) | (uint256(lots) << 160) | (uint256(uint160(agent))));
     }
 
 }
