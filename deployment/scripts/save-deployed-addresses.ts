@@ -1,4 +1,4 @@
-const fs = require('fs');
+import * as fs from 'fs';
 
 // Read Forge output from a output file
 const outputPath = "forge-deploy-output.txt";

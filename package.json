@@ -22,7 +22,7 @@
     "typechain-truffle-v5": "yarn typechain --target=truffle-v5 --out-dir typechain-truffle \"artifacts/!(build-info)/**/+([a-zA-Z0-9_]).json\" 1> nul",
     "typechain-web3-v1": "yarn typechain --target=web3-v1 --out-dir typechain-web3 \"artifacts/!(build-info)/**/+([a-zA-Z0-9_]).json\" 1> nul",
     "---------DEPLOY---SCRIPTS": "",
-    "deploy_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY' | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts",
+    "deploy_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY' --broadcast | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts",
     "---------REDEPLOY---SCRIPTS": ""
   },
   "dependencies": {
