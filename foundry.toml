@@ -9,5 +9,8 @@ libs = [
     "lib",
     "node_modules",
 ]
+fs_permissions = [
+    { access = "read", path = "deployment/chain-config/" }
+]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

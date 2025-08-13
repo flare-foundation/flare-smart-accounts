@@ -41,3 +41,38 @@ The default behavior for forge test is to only display a summary of passing and 
 - `-vvv`: shows execution traces for failing tests, in addition to logs;
 - `-vvvv`: displays execution traces for all tests and setup traces for failing tests;
 - `-vvvvv`: provides the most detailed output, showing execution and setup traces for all tests, including storage changes.
+
+## Deployment
+
+### Prerequisites
+- Install dependencies:
+  ```bash
+  yarn
+  ```
+- Create a `.env` file in the project root with:
+  ```env
+  <NETWORK>_RPC_URL=
+  DEPLOYER_PRIVATE_KEY=0x...
+  ```
+  See .env.template for an example environment file.
+- Ensure chain config (`deployment/chain-config/<network>.json`) is set up as needed.
+
+### Deploying Contracts
+
+Run the following command to deploy contracts:
+```bash
+yarn deploy_contracts_<network>
+```
+This will:
+- Load environment variables from `.env`
+- Use Forge to deploy contracts with parameters from your config files
+
+#### Example for Coston2
+Set `COSTON2_RPC_URL` and `DEPLOYER_PRIVATE_KEY` in your `.env` file.
+
+Check and if needed update config file [`deployment/chain-config/coston2.json`](deployment/chain-config/coston2.json).
+
+Run
+```bash
+yarn deploy_contracts_coston2
+```

@@ -21,16 +21,25 @@ contract DeployXRPLControlledWallet is Script {
         address deployer = vm.addr(deployerPrivateKey);
         address governanceSettings = 0x1000000000000000000000000000000000000007;
         address governance = deployer;
-        address depositVault = makeAddr("DepositVault");
-        address fxrp = makeAddr("FXRP");
-        address executor = makeAddr("Executor");
-        uint256 executorFee = 100;
-        string memory xrplProviderWallet = "rXrplProviderWallet";
-        address operator = makeAddr("Operator");
-        uint256 operatorExecutionWindowSeconds = 60;
+
+        string memory configFile;
+        uint256 chainId = block.chainid;
+        if (chainId == 114) {
+            configFile = "deployment/chain-config/coston2.json";
+        } else {
+            configFile = "deployment/chain-config/scdev.json";
+        }
+
+        string memory config = vm.readFile(configFile);
+        address depositVault = vm.parseJsonAddress(config, ".depositVault");
+        address fxrp = vm.parseJsonAddress(config, ".fxrp");
+        address executor = vm.parseJsonAddress(config, ".executor");
+        uint256 executorFee = vm.parseJsonUint(config, ".executorFee");
+        string memory xrplProviderWallet = vm.parseJsonString(config, ".xrplProviderWallet");
+        address operator = vm.parseJsonAddress(config, ".operator");
+        uint256 operatorExecutionWindowSeconds = vm.parseJsonUint(config, ".operatorExecutionWindowSeconds");
 
         vm.startBroadcast();
-
         // deploy personal account implementation
         personalAccountImpl = new PersonalAccount();
         personalAccountImplAddress = address(personalAccountImpl);
@@ -56,13 +65,12 @@ contract DeployXRPLControlledWallet is Script {
         // switch to production mode
         masterAccountController.switchToProductionMode();
 
+        vm.stopBroadcast();
         console2.log("Personal Account Implementation Address:");
         console2.log(personalAccountImplAddress);
         console2.log("Master Account Controller Proxy Address:");
         console2.log(masterAccountControllerAddress);
         console2.log("Master Account Controller Implementation Address:");
         console2.log(address(masterAccountControllerImpl));
-
-        vm.stopBroadcast();
     }
 }

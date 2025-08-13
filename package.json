@@ -22,6 +22,7 @@
     "typechain-truffle-v5": "yarn typechain --target=truffle-v5 --out-dir typechain-truffle \"artifacts/!(build-info)/**/+([a-zA-Z0-9_]).json\" 1> nul",
     "typechain-web3-v1": "yarn typechain --target=web3-v1 --out-dir typechain-web3 \"artifacts/!(build-info)/**/+([a-zA-Z0-9_]).json\" 1> nul",
     "---------DEPLOY---SCRIPTS": "",
+    "deploy_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast'",
     "---------REDEPLOY---SCRIPTS": ""
   },
   "dependencies": {
@@ -30,6 +31,7 @@
     "@openzeppelin/contracts": "^5.2.0",
     "@typescript-eslint/eslint-plugin": "^7.3.1",
     "@typescript-eslint/parser": "^7.3.1",
+    "dotenv-cli": "^10.0.0",
     "ethers": "^6.11.1",
     "hardhat": "^2.22.18",
     "solhint": "^4.5.2"
