@@ -227,7 +227,7 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
                 // bytes 12–31: empty (ignored)
                 uint88 lots = uint88((_paymentReference >> 160) & ((uint256(1) << 88) - 1));
                 require(lots > 0, LotsZero());
-                _personalAccount.redeem(lots, executor, executorFee);
+                _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
             } else {
                 // bytes 1-31: amount
                 uint256 amount = _paymentReference & ((uint256(1) << 248) - 1);
