@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
-import {ContractRegistry} from "@flarenetwork/flare-periphery-contracts/flare/ContractRegistry.sol";
-import {IAssetManager} from "@flarenetwork/flare-periphery-contracts/flare/IAssetManager.sol";
-import {AgentInfo} from "@flarenetwork/flare-periphery-contracts/flare/data/AvailableAgentInfo.sol";
+import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
+import {IAssetManager} from "flare-periphery/src/coston2/IAssetManager.sol";
+import {AgentInfo} from "flare-periphery/src/coston2/data/AvailableAgentInfo.sol";
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+// TODO - update flare-periphery to coston2
 
 /// @title Personal Account contract
 /// @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
@@ -109,7 +111,7 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
         require(msg.value >= totalFee, InsufficientFundsForCollateralReservation(collateralReservationFee));
         uint256 reservationId = assetManager.reserveCollateral{
             value: collateralReservationFee + _executorFee
-        } (_agentVault, _lots, agentInfo.feeBIPS, _executor, new string[](0));
+        } (_agentVault, _lots, agentInfo.feeBIPS, _executor);
         assert(reservationId > 0);
         emit CollateralReserved(_lots, _agentVault, _executor, _executorFee, reservationId);
     }

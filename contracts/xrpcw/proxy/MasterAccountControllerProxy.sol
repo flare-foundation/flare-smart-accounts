@@ -3,7 +3,7 @@ pragma solidity ^0.8.25;
 
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../implementation/MasterAccountController.sol";
-import {IGovernanceSettings} from "@flarenetwork/flare-periphery-contracts/flare/IGovernanceSettings.sol";
+import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 
 contract MasterAccountControllerProxy is ERC1967Proxy {
     constructor(

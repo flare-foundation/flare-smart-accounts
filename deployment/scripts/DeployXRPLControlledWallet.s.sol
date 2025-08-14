@@ -5,7 +5,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {PersonalAccount} from "../../contracts/xrpcw/implementation/PersonalAccount.sol";
 import {MasterAccountController} from "../../contracts/xrpcw/implementation/MasterAccountController.sol";
 import {MasterAccountControllerProxy} from "../../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
-import {IGovernanceSettings} from "@flarenetwork/flare-periphery-contracts/flare/IGovernanceSettings.sol";
+import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 
 contract DeployXRPLControlledWallet is Script {
 

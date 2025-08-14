@@ -23,12 +23,10 @@
     "typechain-web3-v1": "yarn typechain --target=web3-v1 --out-dir typechain-web3 \"artifacts/!(build-info)/**/+([a-zA-Z0-9_]).json\" 1> nul",
     "---------DEPLOY---SCRIPTS": "",
     "deploy_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast' | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts",
-    "---------REDEPLOY---SCRIPTS": ""
+    "---------VERIFIER---SCRIPTS": "",
+    "verify_contracts_coston2": "ts-node deployment/scripts/verify-contracts.ts coston2"
   },
   "dependencies": {
-    "@flarenetwork/flare-periphery-contract-artifacts": "0.1.34",
-    "@flarenetwork/flare-periphery-contracts": "0.1.34",
-    "@openzeppelin/contracts": "^5.2.0",
     "@typescript-eslint/eslint-plugin": "^7.3.1",
     "@typescript-eslint/parser": "^7.3.1",
     "dotenv-cli": "^10.0.0",
@@ -47,7 +45,6 @@
     "@nomiclabs/hardhat-ethers": "^2.2.3",
     "@nomiclabs/hardhat-truffle5": "^2.0.7",
     "@nomiclabs/hardhat-web3": "^2.0.0",
-    "@openzeppelin/test-helpers": "^0.5.16",
     "@typechain/ethers-v6": "^0.5.1",
     "@typechain/hardhat": "^9.1.0",
     "@typechain/truffle-v5": "^8.0.7",

@@ -7,8 +7,8 @@ import {
     IGovernanceSettings,
     IPayment
 } from "../contracts/xrpcw/implementation/MasterAccountController.sol";
-import {IPaymentVerification} from "@flarenetwork/flare-periphery-contracts/flare/IPaymentVerification.sol";
-import {IFlareContractRegistry} from "@flarenetwork/flare-periphery-contracts/flare/IFlareContractRegistry.sol";
+import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
+import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {MasterAccountControllerProxy} from "../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
 import {PersonalAccount} from "../contracts/xrpcw/implementation/PersonalAccount.sol";
 import {PersonalAccountProxy} from "../contracts/xrpcw/proxy/PersonalAccountProxy.sol";

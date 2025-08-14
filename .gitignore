@@ -10,6 +10,7 @@ deployment/deploys/all/scdev.json
 cache-forge/
 artifacts-forge/
 broadcast/
+dependencies/
 
 # coverage files
 coverage/
