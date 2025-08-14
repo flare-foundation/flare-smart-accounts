@@ -76,3 +76,17 @@ Run
 ```bash
 yarn deploy_contracts_coston2
 ```
+
+### Contract Verification
+
+To verify (on Blockscout explorer) all deployed contracts on a supported network run:
+
+```
+yarn verify_contracts_<network>
+```
+For example, to verify on coston2:
+```
+yarn verify_contracts_coston2
+```
+
+This will automatically verify all contracts listed in the deployment JSON for the selected network.
