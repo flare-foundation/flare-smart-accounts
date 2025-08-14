@@ -2,17 +2,17 @@ import * as fs from 'fs';
 import { execSync } from 'child_process';
 import glob from 'glob';
 
-// Get network from command line argument (mandatory)
+// get network from command line argument (mandatory)
 const network = process.argv[2];
 if (!network) {
-  throw new Error('Usage: ts-node verify-all-contracts.ts <network>');
+  throw new Error('Usage: ts-node verify-contracts.ts <network>');
 }
 // check if network is valid (flare/songbird/coston/coston2/scdev)
 if (!['coston2', 'coston', 'flare', 'songbird', 'scdev'].includes(network)) {
   throw new Error(`Invalid network: ${network}`);
 }
 
-// Set paths and URLs based on network
+// set paths and URLs based on network
 const jsonPath = `deployment/deploys/${network}.json`;
 const rpcUrl = `https://${network}-api.flare.network/ext/C/rpc`;
 const verifierUrl = `https://${network}-explorer.flare.network/api/`;
@@ -23,13 +23,12 @@ const contracts = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 contracts.forEach((contract: any) => {
   const address = contract.address;
   const contractFile = contract.contractName;
-  // Remove .sol from contractFile for the contract name
+  // remove .sol from contractFile for the contract name
   const contractName = contractFile.replace('.sol', '');
-  // Find the full path of the contract file, excluding folders with 'interface' in their name
+  // find the full path of the contract file, excluding folders with 'interface' in their name
   const matches = glob.sync(`contracts/xrpcw/**/*${contractFile}`).filter(
     (path: string) => !/interface/i.test(path)
   );
-  console.log(matches);
   if (matches.length === 0) {
     throw new Error(`Contract file not found: ${contractFile}`);
   }
