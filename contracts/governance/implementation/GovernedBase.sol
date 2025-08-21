@@ -33,9 +33,17 @@ abstract contract GovernedBase {
     event GovernanceCallTimelocked(bytes4 selector, uint256 allowedAfterTimestamp, bytes encodedCall);
     event TimelockedGovernanceCallExecuted(bytes4 selector, uint256 timestamp);
     event TimelockedGovernanceCallCanceled(bytes4 selector, uint256 timestamp);
-
     event GovernanceInitialised(address initialGovernance);
     event GovernedProductionModeEntered(address governanceSettings);
+
+    error OnlyExecutor();
+    error TimelockInvalidSelector();
+    error TimelockNotAllowedYet();
+    error AlreadyInProductionMode();
+    error AlreadyInitialised();
+    error GovernanceSettingsZero();
+    error GovernanceZero();
+    error OnlyGovernance();
 
     modifier onlyGovernance {
         if (executing || !productionMode) {
@@ -60,10 +68,10 @@ abstract contract GovernedBase {
      * @param _selector The method selector (only one timelocked call per method is stored).
      */
     function executeGovernanceCall(bytes4 _selector) external {
-        require(isExecutor(msg.sender), "only executor");
+        require(isExecutor(msg.sender), OnlyExecutor());
         TimelockedCall storage call = timelockedCalls[_selector];
-        require(call.allowedAfterTimestamp != 0, "timelock: invalid selector");
-        require(block.timestamp >= call.allowedAfterTimestamp, "timelock: not allowed yet");
+        require(call.allowedAfterTimestamp != 0, TimelockInvalidSelector());
+        require(block.timestamp >= call.allowedAfterTimestamp, TimelockNotAllowedYet());
         bytes memory encodedCall = call.encodedCall;
         delete timelockedCalls[_selector];
         executing = true;
@@ -80,7 +88,7 @@ abstract contract GovernedBase {
      * @param _selector The method selector.
      */
     function cancelGovernanceCall(bytes4 _selector) external onlyImmediateGovernance {
-        require(timelockedCalls[_selector].allowedAfterTimestamp != 0, "timelock: invalid selector");
+        require(timelockedCalls[_selector].allowedAfterTimestamp != 0, TimelockInvalidSelector());
         emit TimelockedGovernanceCallCanceled(_selector, block.timestamp);
         delete timelockedCalls[_selector];
     }
@@ -92,7 +100,7 @@ abstract contract GovernedBase {
      */
     function switchToProductionMode() external {
         _checkOnlyGovernance();
-        require(!productionMode, "already in production mode");
+        require(!productionMode, AlreadyInProductionMode());
         initialGovernance = address(0);
         productionMode = true;
         emit GovernedProductionModeEntered(address(governanceSettings));
@@ -102,9 +110,9 @@ abstract contract GovernedBase {
      * Initialize the governance address if not first initialized.
      */
     function initialise(IGovernanceSettings _governanceSettings, address _initialGovernance) public virtual {
-        require(initialised == false, "initialised != false");
-        require(address(_governanceSettings) != address(0), "governance settings zero");
-        require(_initialGovernance != address(0), "_governance zero");
+        require(initialised == false, AlreadyInitialised());
+        require(address(_governanceSettings) != address(0), GovernanceSettingsZero());
+        require(_initialGovernance != address(0), GovernanceZero());
         initialised = true;
         governanceSettings = _governanceSettings;
         initialGovernance = _initialGovernance;
@@ -155,7 +163,7 @@ abstract contract GovernedBase {
     }
 
     function _checkOnlyGovernance() private view {
-        require(msg.sender == governance(), "only governance");
+        require(msg.sender == governance(), OnlyGovernance());
     }
 
     function _passReturnOrRevert(bool _success) private pure {

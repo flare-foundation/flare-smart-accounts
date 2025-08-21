@@ -25,12 +25,14 @@ contracts.forEach((contract: any) => {
   const contractFile = contract.contractName;
   // remove .sol from contractFile for the contract name
   const contractName = contractFile.replace('.sol', '');
-  // find the full path of the contract file, excluding folders with 'interface' in their name
-  const matches = glob.sync(`contracts/xrpcw/**/*${contractFile}`).filter(
-    (path: string) => !/interface/i.test(path)
-  );
+  // find the full path of the contract file
+  const matches = glob.sync(`contracts/xrpcw/**/${contractFile}`);
+  console.log(matches)
   if (matches.length === 0) {
     throw new Error(`Contract file not found: ${contractFile}`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`Multiple contract files found for ${contractFile}: ${matches.join(', ')}`);
   }
   let contractPath = matches[0];
   const verifyCmd = `forge verify-contract \
