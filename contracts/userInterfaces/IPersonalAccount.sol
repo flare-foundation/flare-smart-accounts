@@ -9,6 +9,7 @@ interface IPersonalAccount {
 
     event Deposited(address vault, uint256 amount, uint256 actualAmount);
     event Withdrawn(address vault, uint256 amount, uint256 actualAmount);
+    event WithdrawalClaimed(address vault, uint256 rewardEpochId, uint256 amount);
     event Approved(address fxrp, address vault, uint256 amount);
     event Redeemed(uint256 lots, address executor, uint256 executorFee);
     event CollateralReserved(

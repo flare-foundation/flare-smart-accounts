@@ -39,6 +39,7 @@ interface IMasterAccountController {
     error AmountZero();
     error LotsZero();
     error InvalidAgentVaultAddress();
+    error RewardEpochIdZero();
 
     /**
      * @notice Execute an XRPL instruction for a given Ripple account.

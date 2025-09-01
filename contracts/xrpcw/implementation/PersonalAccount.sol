@@ -4,14 +4,14 @@ pragma solidity ^0.8.25;
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/coston2/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/coston2/data/AvailableAgentInfo.sol";
-import {ERC4626} from "@openzeppelin-contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
 import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
+import {IFirelightVault} from "../interface/IFirelightVault.sol";
 import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
 
-// TODO - update flare-periphery to coston2
+// TODO - update flare-periphery to flare
 
 /// @title Personal Account contract
 /// @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
@@ -49,16 +49,30 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
     }
 
     /// @inheritdoc IIPersonalAccount
-    function deposit(uint256 _amount, address _vault) external onlyController nonReentrant {
-        uint256 actualAmount = ERC4626(_vault).mint(_amount, address(this));
-        emit Deposited(_vault, _amount, actualAmount);
+    function deposit(
+        uint256 _amount,
+        address _vault
+    )
+        external
+        onlyController
+        nonReentrant
+    {
+        uint256 actualAmount = IFirelightVault(_vault).mint(_amount, address(this));
+        emit Deposited(_vault, _amount, actualAmount); // TODO: amount is shares? and return value is amount (assets)? that wont be the same always?
         // require(amount == actualAmount, "Deposited != amount requested");
         // TODO that will not always be true, as ERC4626.mint can return less than requested due to rounding?
     }
 
     /// @inheritdoc IIPersonalAccount
-    function withdraw(uint256 _amount, address _vault) external onlyController nonReentrant {
-        uint256 actualAmount = ERC4626(_vault).withdraw(
+    function withdraw(
+        uint256 _amount,
+        address _vault
+    )
+        external
+        onlyController
+        nonReentrant
+    {
+        uint256 actualAmount = IFirelightVault(_vault).withdraw(
             _amount,
             address(this),
             address(this)
@@ -66,8 +80,28 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
         emit Withdrawn(_vault, _amount, actualAmount);
     }
 
+    function claimWithdraw(
+        uint256 _rewardEpochId,
+        address _vault
+    )
+        external
+        onlyController
+        nonReentrant
+    {
+        uint256 amount = IFirelightVault(_vault).claimWithdraw(_rewardEpochId);
+        emit WithdrawalClaimed(_vault, _rewardEpochId, amount);
+    }
+
     /// @inheritdoc IIPersonalAccount
-    function approve(uint256 _amount, address _fxrp, address _vault) external onlyController nonReentrant {
+    function approve(
+        uint256 _amount,
+        address _fxrp,
+        address _vault
+    )
+        external
+        onlyController
+        nonReentrant
+    {
         require(IERC20(_fxrp).approve(_vault, _amount), ApprovalFailed());
         emit Approved(_fxrp, _vault, _amount);
     }
@@ -78,7 +112,9 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
         address payable _executor,
         uint256 _executorFee
     )
-        external payable onlyController nonReentrant
+        external payable
+        onlyController
+        nonReentrant
     {
         require(msg.value >= _executorFee, InsufficientFundsForRedeemExecutor());
         IAssetManager assetManager = _getFxrpAssetManager();
@@ -97,7 +133,11 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
         address _agentVault,
         address payable _executor,
         uint256 _executorFee
-    ) external payable onlyController nonReentrant {
+    )
+        external payable
+        onlyController
+        nonReentrant
+    {
         IAssetManager assetManager = _getFxrpAssetManager();
 
         AgentInfo.Info memory agentInfo = assetManager.getAgentInfo(

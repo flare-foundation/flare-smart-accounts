@@ -221,28 +221,23 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         // TODO _xrplOwner could maybe be removed from here. Probably not needed in events?
         // byte 0
         uint256 instructionId = (_paymentReference >> 248) & 0xFF;
-        if (instructionId >= 1 && instructionId <= 4) {
-            if (instructionId == 4) {
-                // bytes 1–11: lots
-                // bytes 12–31: empty (ignored)
-                uint88 lots = uint88((_paymentReference >> 160) & ((uint256(1) << 88) - 1));
-                require(lots > 0, LotsZero());
-                _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
-            } else {
-                // bytes 1-31: amount
-                uint256 amount = _paymentReference & ((uint256(1) << 248) - 1);
-                require(amount > 0, AmountZero());
-                if (instructionId == 1) {
-                    // Deposit
-                    _personalAccount.deposit(amount, depositVault);
-                } else if (instructionId == 2) {
-                    // Withdraw
-                    _personalAccount.withdraw(amount, depositVault);
-                } else if (instructionId == 3) {
-                    // Approve ERC20
-                    _personalAccount.approve(amount, fxrp, depositVault);
-                }
+        if (instructionId >= 1 && instructionId <= 3) {
+            // bytes 1-31: amount
+            uint256 amount = _paymentReference & ((uint256(1) << 248) - 1);
+            require(amount > 0, AmountZero());
+            if (instructionId == 1) {
+                _personalAccount.deposit(amount, depositVault);
+            } else if (instructionId == 2) {
+                _personalAccount.withdraw(amount, depositVault);
+            } else if (instructionId == 3) {
+                _personalAccount.approve(amount, fxrp, depositVault);
             }
+        } else if (instructionId == 4) {
+            // bytes 1–11: lots
+            // bytes 12–31: empty (ignored)
+            uint88 lots = uint88((_paymentReference >> 160) & ((uint256(1) << 88) - 1));
+            require(lots > 0, LotsZero());
+            _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
         } else if (instructionId == 5) {
             // bytes 1–11: lots
             // bytes 12–31: agent vault address
@@ -251,6 +246,12 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
             address agentVault = address(uint160(_paymentReference & ((uint256(1) << 160) - 1)));
             require(agentVault != address(0), InvalidAgentVaultAddress());
             _personalAccount.reserveCollateral{value: msg.value}(lots, agentVault, executor, executorFee);
+        } else if (instructionId == 6) {
+            // bytes 1-3: reward epoch id
+            // bytes 4-31: empty (ignored)
+            uint24 rewardEpochId = uint24((_paymentReference >> 224) & ((uint256(1) << 24) - 1));
+            require(rewardEpochId > 0, RewardEpochIdZero());
+            _personalAccount.claimWithdraw(rewardEpochId, depositVault);
         } else {
             revert InvalidInstructionId(instructionId);
         }
