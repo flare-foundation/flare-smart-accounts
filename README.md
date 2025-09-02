@@ -14,10 +14,10 @@
 curl -L https://foundry.paradigm.xyz | bash
 foundryup
 
-# initialize the forge-std submodule
-git submodule update --init --recursive
+# install dependencies
+forge soldeer install
 
-# compile contracts for forge
+# compile contracts
 forge build
 ```
 
