@@ -70,7 +70,6 @@ contract XrplControlledWalletTest is Test {
             IGovernanceSettings(makeAddr("governanceSettings")),
             governance,
             address(depositVault),
-            address(fxrp),
             payable(executor),
             executorFee,
             xrplProviderWallet,

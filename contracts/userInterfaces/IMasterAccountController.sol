@@ -19,11 +19,11 @@ interface IMasterAccountController {
         address indexed personalAccount,
         string indexed xrplOwner,
         uint256 indexed instructionId,
-        uint256 paymentReference
+        uint256 paymentReference,
+        bytes32 transactionId
     );
 
     error InvalidDepositVault();
-    error InvalidFxrp();
     error InvalidExecutor();
     error InvalidXrplProviderWallet();
     error InvalidOperatorAddress();

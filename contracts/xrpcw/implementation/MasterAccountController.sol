@@ -12,6 +12,7 @@ import {GovernedProxyImplementation} from "../../governance/implementation/Gover
 import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
 import {IFdcVerification} from "flare-periphery/src/flare/IFdcVerification.sol";
 import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
+import {IFirelightVault} from "../interface/IFirelightVault.sol";
 
 /**
  * @title   MasterAccountController contract
@@ -44,7 +45,7 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
     /// @notice Mapping from hashed Ripple Address to Ripple address
     mapping(bytes32 xrplAddressHash => string) public hashToAccount;
     /// @notice Indicates if payment instruction has already been executed.
-    mapping(bytes32 transactionId => uint256) public usedPaymentHashes;
+    mapping(bytes32 transactionId => bool) public usedPaymentHashes;
 
 
     constructor() {}
@@ -57,7 +58,6 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         IGovernanceSettings _governanceSettings,
         address _initialGovernance,
         address _depositVault,
-        address _fxrp,
         address payable _executor,
         uint256 _executorFee,
         string memory _xrplProviderWallet,
@@ -68,7 +68,6 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         external virtual
     {
         require(_depositVault != address(0), InvalidDepositVault());
-        require(_fxrp != address(0), InvalidFxrp());
         require(_executor != address(0), InvalidExecutor());
         require(bytes(_xrplProviderWallet).length > 0, InvalidXrplProviderWallet());
         require(_operatorAddress != address(0), InvalidOperatorAddress());
@@ -77,7 +76,7 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
 
         GovernedBase.initialise(_governanceSettings, _initialGovernance);
         depositVault = _depositVault;
-        fxrp = _fxrp;
+        fxrp = IFirelightVault(_depositVault).asset();
         executor = _executor;
         xrplProviderWalletHash = keccak256(abi.encodePacked(_xrplProviderWallet));
         xrplProviderWallet = _xrplProviderWallet;
@@ -123,7 +122,7 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
             MismatchingSourceAndXrplAddr()
         );
         require(
-            usedPaymentHashes[_proof.data.requestBody.transactionId] == 0,
+            !usedPaymentHashes[_proof.data.requestBody.transactionId],
             TransactionAlreadyExecuted()
         );
 
@@ -139,12 +138,13 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
             personalAccount.upgradeToAndCall(personalAccountImplementation, bytes(""));
         }
 
-        usedPaymentHashes[_proof.data.requestBody.transactionId] = 1;
+        usedPaymentHashes[_proof.data.requestBody.transactionId] = true;
 
         _executeInstruction(
             uint256(_proof.data.responseBody.standardPaymentReference),
             personalAccount,
-            _rippleAccount
+            _rippleAccount,
+            _proof.data.requestBody.transactionId
         );
     }
 
@@ -221,7 +221,8 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
     function _executeInstruction(
         uint256 _paymentReference,
         PersonalAccount _personalAccount,
-        string memory _xrplOwner
+        string memory _xrplOwner,
+        bytes32 _transactionId
     ) internal {
         // TODO _xrplOwner could maybe be removed from here. Probably not needed in events?
         // byte 0
@@ -265,7 +266,8 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
             address(_personalAccount),
             _xrplOwner,
             instructionId,
-            _paymentReference
+            _paymentReference,
+            _transactionId
         );
     }
 

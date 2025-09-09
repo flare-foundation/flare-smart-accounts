@@ -17,6 +17,7 @@
     "---------TEST---SCRIPTS": "",
     "---------DEPLOY---SCRIPTS": "",
     "deploy_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast' | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts",
+    "deploy_my_erc462_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast'",
     "---------VERIFIER---SCRIPTS": "",
     "verify_contracts_coston2": "ts-node deployment/scripts/verify-contracts.ts coston2"
   },

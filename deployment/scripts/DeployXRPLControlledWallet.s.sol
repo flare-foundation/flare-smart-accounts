@@ -36,7 +36,6 @@ contract DeployXRPLControlledWallet is Script {
 
         string memory config = vm.readFile(configFile);
         address depositVault = vm.parseJsonAddress(config, ".depositVault");
-        address fxrp = vm.parseJsonAddress(config, ".fxrp");
         address executor = vm.parseJsonAddress(config, ".executor");
         uint256 executorFee = vm.parseJsonUint(config, ".executorFee");
         string memory xrplProviderWallet = vm.parseJsonString(config, ".xrplProviderWallet");
@@ -55,7 +54,6 @@ contract DeployXRPLControlledWallet is Script {
             IGovernanceSettings(governanceSettings),
             governance,
             address(depositVault),
-            address(fxrp),
             payable(executor),
             executorFee,
             xrplProviderWallet,

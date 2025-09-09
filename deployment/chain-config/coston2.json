@@ -1,6 +1,5 @@
 {
-  "depositVault": "0x8ad03dd5b56577CEB956063245d67F1CCA3b39dC",
-  "fxrp": "0x8b4abA9C4BD7DD961659b02129beE20c6286e17F",
+  "depositVault": "0x1639b3b8cB5E52491b9c2A1c59898205540060e3",
   "executor": "0x63E3447d7d80E2be3D6Ee09Bafc161001993dD45",
   "executorFee": 100,
   "xrplProviderWallet": "rBNkSvAFebTRYB5ksRXbNtJAPa6NeVPbRj",
