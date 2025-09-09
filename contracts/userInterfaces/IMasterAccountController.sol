@@ -32,6 +32,7 @@ interface IMasterAccountController {
     error OnlyOperatorCanExecute();
     error InvalidTransactionProof();
     error InvalidReceivingAddressHash();
+    error InvalidTransactionStatus();
     error MismatchingSourceAndXrplAddr();
     error TransactionAlreadyExecuted();
     error InvalidInstructionId(uint256 instructionId);

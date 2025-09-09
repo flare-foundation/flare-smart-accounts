@@ -105,6 +105,11 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
 
         // FDC verification
         require(
+            _proof.data.responseBody.status == 0,
+            InvalidTransactionStatus()
+        );
+
+        require(
             IFdcVerification(ContractRegistry.getContractAddressByName("FdcVerification")).verifyPayment(_proof),
             InvalidTransactionProof()
         );
