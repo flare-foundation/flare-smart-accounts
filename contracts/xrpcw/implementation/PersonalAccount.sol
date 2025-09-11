@@ -55,8 +55,10 @@ contract PersonalAccount is
         uint256 _amount,
         address _vault
     ) external onlyController nonReentrant {
-        require(IERC20(_fxrp).approve(_vault, _amount), ApprovalFailed());
-        emit Approved(_fxrp, _vault, _amount);
+        address fxrp = IFirelightVault(_vault).asset();
+        require(IERC20(fxrp).approve(_vault, _amount), ApprovalFailed());
+        emit Approved(fxrp, _vault, _amount);
+
         uint256 actualAmount = IFirelightVault(_vault).mint(
             _amount,
             address(this)
