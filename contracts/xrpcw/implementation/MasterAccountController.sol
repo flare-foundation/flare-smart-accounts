@@ -23,6 +23,7 @@ contract MasterAccountController is
     UUPSUpgradeable,
     GovernedProxyImplementation
 {
+    uint256[] public allCallHashes;
     /// @notice Mapping from PersonalAccount address to XRPL address
     mapping(address personalAccount => string xrplAddress)
         public personalAccountToXrpl;
@@ -51,6 +52,8 @@ contract MasterAccountController is
     mapping(bytes32 xrplAddressHash => string) public hashToAccount;
     /// @notice Indicates if payment instruction has already been executed.
     mapping(bytes32 transactionId => bool) public usedPaymentHashes;
+    /// @notice Mapping that stores custom instructions
+    mapping(uint256 callHash => CustomInstruction) public customInstructions;
 
     constructor() {}
 
@@ -210,6 +213,16 @@ contract MasterAccountController is
         emit ExecutorFeeSet(_newExecutorFee);
     }
 
+    function registerCustomInstruction(
+        CustomInstruction memory _customInstruction
+    ) external {
+        // We drop the last byte of the keccak256 hash
+        uint256 callHash = encodeCustomInstruction(_customInstruction);
+        customInstructions[callHash] = _customInstruction;
+        allCallHashes.push(callHash);
+        emit CustomInstructionRegistered(callHash);
+    }
+
     /**
      * @inheritdoc IMasterAccountController
      */
@@ -217,6 +230,16 @@ contract MasterAccountController is
         string calldata xrplOwner
     ) external view returns (PersonalAccount) {
         return personalAccounts[xrplOwner];
+    }
+
+    function getCustomInstruction(
+        uint256 callHash
+    ) external view returns (CustomInstruction memory) {
+        return customInstructions[callHash];
+    }
+
+    function getAllCallHashes() external view returns (uint256[] memory) {
+        return allCallHashes;
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
@@ -237,6 +260,12 @@ contract MasterAccountController is
         bytes memory data
     ) public payable override onlyGovernance onlyProxy {
         super.upgradeToAndCall(newImplementation, data);
+    }
+
+    function encodeCustomInstruction(
+        CustomInstruction memory _customInstruction
+    ) public view returns (uint256) {
+        return uint256(keccak256(abi.encode(_customInstruction))) >> 8;
     }
 
     /**
@@ -303,6 +332,10 @@ contract MasterAccountController is
             );
             require(rewardEpochId > 0, RewardEpochIdZero());
             _personalAccount.claimWithdraw(rewardEpochId, depositVault);
+        } else if (instructionId == 99) {
+            // shift left 30 bytes
+            uint256 callHash = _paymentReference & ((uint256(1) << 248) - 1);
+            _executeCustomInstruction(callHash);
         } else {
             revert InvalidInstructionId(instructionId);
         }
@@ -337,5 +370,15 @@ contract MasterAccountController is
         );
         personalAccountToXrpl[address(personalAccountProxy)] = _xrplOwner;
         emit PersonalAccountCreated(_xrplOwner, address(personalAccountProxy));
+    }
+
+    function _executeCustomInstruction(uint256 callHash) internal {
+        CustomInstruction memory customInstruction = customInstructions[
+            callHash
+        ];
+        // TODO:(Nik) requires
+        customInstruction._contract.call{value: customInstruction._value}(
+            customInstruction._calldata
+        );
     }
 }

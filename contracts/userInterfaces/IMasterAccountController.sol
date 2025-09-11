@@ -10,6 +10,11 @@ import {PersonalAccount} from "../xrpcw/implementation/PersonalAccount.sol";
  which manages personal accounts and executes XRPL instructions.
  */
 interface IMasterAccountController {
+  struct CustomInstruction {
+    address _contract;
+    uint256 _value;
+    bytes _calldata;
+  }
 
     event PersonalAccountImplementationSet(address newImplementation);
     event OperatorExecutionWindowSecondsSet(uint256 newWindowSeconds);
@@ -22,6 +27,7 @@ interface IMasterAccountController {
         uint256 paymentReference,
         bytes32 transactionId
     );
+  event CustomInstructionRegistered(uint256 callHash);
 
     error InvalidDepositVault();
     error InvalidExecutor();
