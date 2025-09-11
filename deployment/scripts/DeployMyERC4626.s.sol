@@ -12,8 +12,8 @@ contract DeployMyERC4626 is Script {
         vm.startBroadcast();
         depositVault = new MyERC4626(
             IERC20(0x0b6A3645c240605887a5532109323A3E12273dc7),
-            "FTestXRP",
-            "FTXRP"
+            "TESTstXRP",
+            "TESTstXRP"
         );
         vm.stopBroadcast();
 
