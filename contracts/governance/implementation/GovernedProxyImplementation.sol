@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import { GovernedBase } from "./GovernedBase.sol";
+import {GovernedBase} from "./GovernedBase.sol";
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 
 /**
@@ -12,7 +12,8 @@ import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings
  * called through proxy constructor or in diamond cut initializer.
  **/
 abstract contract GovernedProxyImplementation is GovernedBase {
-    address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
+    address private constant EMPTY_ADDRESS =
+        0x0000000000000000000000000000000000001111;
 
     // Mark as initialised and set governance to an invalid address.
     constructor() {

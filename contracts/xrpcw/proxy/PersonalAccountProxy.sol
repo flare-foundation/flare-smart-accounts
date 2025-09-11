@@ -10,14 +10,12 @@ contract PersonalAccountProxy is ERC1967Proxy {
         string memory _xrplOwner,
         address _controllerAddress
     )
-        ERC1967Proxy(_implementationAddress,
+        ERC1967Proxy(
+            _implementationAddress,
             abi.encodeCall(
                 PersonalAccount.initialize,
-                (
-                    _xrplOwner,
-                    _controllerAddress
-                )
+                (_xrplOwner, _controllerAddress)
             )
         )
-    { }
+    {}
 }

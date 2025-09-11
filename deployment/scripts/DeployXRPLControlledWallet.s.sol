@@ -8,7 +8,6 @@ import {MasterAccountControllerProxy} from "../../contracts/xrpcw/proxy/MasterAc
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 
 contract DeployXRPLControlledWallet is Script {
-
     PersonalAccount private personalAccountImpl;
     address private personalAccountImplAddress;
     MasterAccountControllerProxy private masterAccountControllerProxy;
@@ -38,9 +37,15 @@ contract DeployXRPLControlledWallet is Script {
         address depositVault = vm.parseJsonAddress(config, ".depositVault");
         address executor = vm.parseJsonAddress(config, ".executor");
         uint256 executorFee = vm.parseJsonUint(config, ".executorFee");
-        string memory xrplProviderWallet = vm.parseJsonString(config, ".xrplProviderWallet");
+        string memory xrplProviderWallet = vm.parseJsonString(
+            config,
+            ".xrplProviderWallet"
+        );
         address operator = vm.parseJsonAddress(config, ".operator");
-        uint256 operatorExecutionWindowSeconds = vm.parseJsonUint(config, ".operatorExecutionWindowSeconds");
+        uint256 operatorExecutionWindowSeconds = vm.parseJsonUint(
+            config,
+            ".operatorExecutionWindowSeconds"
+        );
 
         vm.startBroadcast();
         // deploy personal account implementation
@@ -61,7 +66,9 @@ contract DeployXRPLControlledWallet is Script {
             operatorExecutionWindowSeconds,
             personalAccountImplAddress
         );
-        masterAccountController = MasterAccountController(address(masterAccountControllerProxy));
+        masterAccountController = MasterAccountController(
+            address(masterAccountControllerProxy)
+        );
         masterAccountControllerAddress = address(masterAccountControllerProxy);
 
         // switch to production mode
@@ -69,20 +76,26 @@ contract DeployXRPLControlledWallet is Script {
 
         vm.stopBroadcast();
         // Log deployment info for post-processing
-        console2.log(string.concat(
-            "DEPLOYED: PersonalAccountImplementation, ",
-            "PersonalAccount.sol: ",
-            vm.toString(personalAccountImplAddress)
-        ));
-        console2.log(string.concat(
-            "DEPLOYED: MasterAccountController, ",
-            "MasterAccountControllerProxy.sol:  ",
-            vm.toString(masterAccountControllerAddress)
-        ));
-        console2.log(string.concat(
-            "DEPLOYED: MasterAccountControllerImplementation, ",
-            "MasterAccountController.sol: ",
-            vm.toString(address(masterAccountControllerImpl))
-        ));
+        console2.log(
+            string.concat(
+                "DEPLOYED: PersonalAccountImplementation, ",
+                "PersonalAccount.sol: ",
+                vm.toString(personalAccountImplAddress)
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: MasterAccountController, ",
+                "MasterAccountControllerProxy.sol:  ",
+                vm.toString(masterAccountControllerAddress)
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: MasterAccountControllerImplementation, ",
+                "MasterAccountController.sol: ",
+                vm.toString(address(masterAccountControllerImpl))
+            )
+        );
     }
 }

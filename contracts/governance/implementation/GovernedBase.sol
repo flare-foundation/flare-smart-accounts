@@ -30,7 +30,11 @@ abstract contract GovernedBase {
 
     mapping(bytes4 selector => TimelockedCall) public timelockedCalls;
 
-    event GovernanceCallTimelocked(bytes4 selector, uint256 allowedAfterTimestamp, bytes encodedCall);
+    event GovernanceCallTimelocked(
+        bytes4 selector,
+        uint256 allowedAfterTimestamp,
+        bytes encodedCall
+    );
     event TimelockedGovernanceCallExecuted(bytes4 selector, uint256 timestamp);
     event TimelockedGovernanceCallCanceled(bytes4 selector, uint256 timestamp);
     event GovernanceInitialised(address initialGovernance);
@@ -45,7 +49,7 @@ abstract contract GovernedBase {
     error GovernanceZero();
     error OnlyGovernance();
 
-    modifier onlyGovernance {
+    modifier onlyGovernance() {
         if (executing || !productionMode) {
             _beforeExecute();
             _;
@@ -54,13 +58,12 @@ abstract contract GovernedBase {
         }
     }
 
-    modifier onlyImmediateGovernance () {
+    modifier onlyImmediateGovernance() {
         _checkOnlyGovernance();
         _;
     }
 
-    constructor() {
-    }
+    constructor() {}
 
     /**
      * Execute the timelocked governance calls once the timelock period expires.
@@ -71,12 +74,15 @@ abstract contract GovernedBase {
         require(isExecutor(msg.sender), OnlyExecutor());
         TimelockedCall storage call = timelockedCalls[_selector];
         require(call.allowedAfterTimestamp != 0, TimelockInvalidSelector());
-        require(block.timestamp >= call.allowedAfterTimestamp, TimelockNotAllowedYet());
+        require(
+            block.timestamp >= call.allowedAfterTimestamp,
+            TimelockNotAllowedYet()
+        );
         bytes memory encodedCall = call.encodedCall;
         delete timelockedCalls[_selector];
         executing = true;
         //solhint-disable-next-line avoid-low-level-calls
-        (bool success,) = address(this).call(encodedCall);
+        (bool success, ) = address(this).call(encodedCall);
         executing = false;
         emit TimelockedGovernanceCallExecuted(_selector, block.timestamp);
         _passReturnOrRevert(success);
@@ -87,8 +93,13 @@ abstract contract GovernedBase {
      * @dev Only governance can call this method.
      * @param _selector The method selector.
      */
-    function cancelGovernanceCall(bytes4 _selector) external onlyImmediateGovernance {
-        require(timelockedCalls[_selector].allowedAfterTimestamp != 0, TimelockInvalidSelector());
+    function cancelGovernanceCall(
+        bytes4 _selector
+    ) external onlyImmediateGovernance {
+        require(
+            timelockedCalls[_selector].allowedAfterTimestamp != 0,
+            TimelockInvalidSelector()
+        );
         emit TimelockedGovernanceCallCanceled(_selector, block.timestamp);
         delete timelockedCalls[_selector];
     }
@@ -109,9 +120,15 @@ abstract contract GovernedBase {
     /**
      * Initialize the governance address if not first initialized.
      */
-    function initialise(IGovernanceSettings _governanceSettings, address _initialGovernance) public virtual {
+    function initialise(
+        IGovernanceSettings _governanceSettings,
+        address _initialGovernance
+    ) public virtual {
         require(initialised == false, AlreadyInitialised());
-        require(address(_governanceSettings) != address(0), GovernanceSettingsZero());
+        require(
+            address(_governanceSettings) != address(0),
+            GovernanceSettingsZero()
+        );
         require(_initialGovernance != address(0), GovernanceZero());
         initialised = true;
         governanceSettings = _governanceSettings;
@@ -123,7 +140,10 @@ abstract contract GovernedBase {
      * Returns the current effective governance address.
      */
     function governance() public view returns (address) {
-        return productionMode ? governanceSettings.getGovernanceAddress() : initialGovernance;
+        return
+            productionMode
+                ? governanceSettings.getGovernanceAddress()
+                : initialGovernance;
     }
 
     /**

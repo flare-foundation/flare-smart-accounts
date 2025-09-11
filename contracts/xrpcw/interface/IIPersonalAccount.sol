@@ -35,7 +35,11 @@ interface IIPersonalAccount is IPersonalAccount {
      * @param _executor Executor address.
      * @param _executorFee Executor fee to be paid.
      */
-    function redeem(uint256 _lots, address payable _executor, uint256 _executorFee) external payable;
+    function redeem(
+        uint256 _lots,
+        address payable _executor,
+        uint256 _executorFee
+    ) external payable;
 
     /**
      * @notice Reserve collateral for minting operation.

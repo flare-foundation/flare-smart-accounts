@@ -52,7 +52,9 @@ contract XrplControlledWalletTest is Test {
             "DV"
         );
         xrplProviderWallet = "rXrplProviderWallet";
-        xrplProviderWalletHash = keccak256(abi.encodePacked(xrplProviderWallet));
+        xrplProviderWalletHash = keccak256(
+            abi.encodePacked(xrplProviderWallet)
+        );
         operator = makeAddr("operator");
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
         fdcVerificationMock = makeAddr("FDCVerificationMock");
@@ -77,18 +79,24 @@ contract XrplControlledWalletTest is Test {
             operatorExecutionWindowSeconds,
             personalAccountImplementation
         );
-        masterAccountController = MasterAccountController(address(masterAccountControllerProxy));
+        masterAccountController = MasterAccountController(
+            address(masterAccountControllerProxy)
+        );
         xrplAccount1 = "xrplAccount1";
         xrplAccount2 = "xrplAccount2";
-
     }
 
     function test() public {
         IPayment.Proof memory proof;
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
-        proof.data.responseBody.sourceAddressHash = keccak256(abi.encodePacked(xrplAccount1));
+        proof.data.responseBody.sourceAddressHash = keccak256(
+            abi.encodePacked(xrplAccount1)
+        );
         proof.data.requestBody.transactionId = bytes32("tx1");
-        proof.data.responseBody.standardPaymentReference = _encodePaymentReferenceAmount(3, 12345);
+        proof
+            .data
+            .responseBody
+            .standardPaymentReference = _encodePaymentReferenceAmount(3, 12345);
         _mockVerifyPayment(true);
 
         assertEq(
@@ -109,19 +117,42 @@ contract XrplControlledWalletTest is Test {
             address(masterAccountController.getPersonalAccount(xrplAccount1)),
             address(PersonalAccount(address(0)))
         );
-        personalAccount1 = masterAccountController.getPersonalAccount(xrplAccount1);
-        assertEq(personalAccount1.implementation(), address(personalAccountImpl));
+        personalAccount1 = masterAccountController.getPersonalAccount(
+            xrplAccount1
+        );
+        assertEq(
+            personalAccount1.implementation(),
+            address(personalAccountImpl)
+        );
         assertEq(personalAccount1.xrplOwner(), xrplAccount1);
-        assertEq(personalAccount1.controllerAddress(), address(masterAccountController));
+        assertEq(
+            personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
 
         // change implementation of MasterAccountController
-        assertEq(masterAccountController.implementation(), address(masterAccountControllerImpl));
+        assertEq(
+            masterAccountController.implementation(),
+            address(masterAccountControllerImpl)
+        );
         MasterAccountController newMasterAccountControllerImpl = new MasterAccountController();
         vm.prank(governance);
-        masterAccountController.upgradeToAndCall(address(newMasterAccountControllerImpl), bytes(""));
-        assertEq(masterAccountController.implementation(), address(newMasterAccountControllerImpl));
-        assertEq(address(masterAccountController.getPersonalAccount(xrplAccount1)), address(personalAccount1));
-        assertEq(personalAccount1.controllerAddress(), address(masterAccountController));
+        masterAccountController.upgradeToAndCall(
+            address(newMasterAccountControllerImpl),
+            bytes("")
+        );
+        assertEq(
+            masterAccountController.implementation(),
+            address(newMasterAccountControllerImpl)
+        );
+        assertEq(
+            address(masterAccountController.getPersonalAccount(xrplAccount1)),
+            address(personalAccount1)
+        );
+        assertEq(
+            personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
 
         // deploy a new PersonalAccount implementation
         PersonalAccount newPersonalAccountImpl = new PersonalAccount();
@@ -129,22 +160,38 @@ contract XrplControlledWalletTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx2");
         vm.prank(operator);
         masterAccountController.executeTransaction(proof, xrplAccount1);
-        assertEq(personalAccount1.implementation(), address(personalAccountImpl));
+        assertEq(
+            personalAccount1.implementation(),
+            address(personalAccountImpl)
+        );
 
         // update PersonalAccount implementation on MasterAccountController
         vm.prank(governance);
-        masterAccountController.setPersonalAccountImplementation(address(newPersonalAccountImpl));
-        assertEq(masterAccountController.personalAccountImplementation(), address(newPersonalAccountImpl));
+        masterAccountController.setPersonalAccountImplementation(
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            masterAccountController.personalAccountImplementation(),
+            address(newPersonalAccountImpl)
+        );
         // create new transaction; personal account should be upgraded
         proof.data.requestBody.transactionId = bytes32("tx3");
         vm.prank(operator);
         masterAccountController.executeTransaction(proof, xrplAccount1);
-        assertEq(address(masterAccountController.getPersonalAccount(xrplAccount1)), address(personalAccount1));
-        assertEq(personalAccount1.implementation(), address(newPersonalAccountImpl));
+        assertEq(
+            address(masterAccountController.getPersonalAccount(xrplAccount1)),
+            address(personalAccount1)
+        );
+        assertEq(
+            personalAccount1.implementation(),
+            address(newPersonalAccountImpl)
+        );
         assertEq(personalAccount1.xrplOwner(), xrplAccount1);
-        assertEq(personalAccount1.controllerAddress(), address(masterAccountController));
+        assertEq(
+            personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
     }
-
 
     function _mockVerifyPayment(bool _result) private {
         vm.mockCall(
@@ -158,9 +205,7 @@ contract XrplControlledWalletTest is Test {
 
         vm.mockCall(
             fdcVerificationMock,
-            abi.encodeWithSelector(
-                IPaymentVerification.verifyPayment.selector
-            ),
+            abi.encodeWithSelector(IPaymentVerification.verifyPayment.selector),
             abi.encode(_result)
         );
     }
@@ -168,35 +213,37 @@ contract XrplControlledWalletTest is Test {
     function _encodePaymentReferenceAmount(
         uint8 instructionId,
         uint248 amount
-    )
-        private pure
-        returns (bytes32)
-    {
-        require(instructionId >= 1 && instructionId <= 3, "Invalid instructionId for deposit/withdrawal/approval");
+    ) private pure returns (bytes32) {
+        require(
+            instructionId >= 1 && instructionId <= 3,
+            "Invalid instructionId for deposit/withdrawal/approval"
+        );
         return bytes32((uint256(instructionId) << 248) | amount);
     }
 
     function _encodePaymentReferenceRedeem(
         uint8 instructionId,
         uint88 lots
-    )
-        private pure
-        returns (bytes32)
-    {
+    ) private pure returns (bytes32) {
         require(instructionId == 4, "Invalid instructionId for redeem");
-        return bytes32((uint256(instructionId) << 248) | (uint256(lots) << 160));
+        return
+            bytes32((uint256(instructionId) << 248) | (uint256(lots) << 160));
     }
 
     function _encodePaymentReferenceReserve(
         uint8 instructionId,
         uint88 lots,
         address agent // uint160
-    )
-        private pure
-        returns (bytes32)
-    {
-        require(instructionId == 5, "Invalid instructionId for collateral reservation");
-        return bytes32((uint256(instructionId) << 248) | (uint256(lots) << 160) | (uint256(uint160(agent))));
+    ) private pure returns (bytes32) {
+        require(
+            instructionId == 5,
+            "Invalid instructionId for collateral reservation"
+        );
+        return
+            bytes32(
+                (uint256(instructionId) << 248) |
+                    (uint256(lots) << 160) |
+                    (uint256(uint160(agent)))
+            );
     }
-
 }
