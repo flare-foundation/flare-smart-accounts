@@ -6,7 +6,6 @@ import {MyERC4626} from "../../contracts/mock/MyERC4626.sol";
 import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 
 contract DeployMyERC4626 is Script {
-
     MyERC4626 private depositVault;
 
     function run() external {

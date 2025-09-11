@@ -18,7 +18,8 @@ contract MasterAccountControllerProxy is ERC1967Proxy {
         uint256 _operatorExecutionWindowSeconds,
         address _personalAccountImplementation
     )
-        ERC1967Proxy(_implementationAddress,
+        ERC1967Proxy(
+            _implementationAddress,
             abi.encodeCall(
                 MasterAccountController.initialize,
                 (
@@ -34,5 +35,5 @@ contract MasterAccountControllerProxy is ERC1967Proxy {
                 )
             )
         )
-    { }
+    {}
 }

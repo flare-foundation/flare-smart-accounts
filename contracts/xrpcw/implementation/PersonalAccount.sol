@@ -15,7 +15,11 @@ import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol
 
 /// @title Personal Account contract
 /// @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
-contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard {
+contract PersonalAccount is
+    IIPersonalAccount,
+    UUPSUpgradeable,
+    ReentrancyGuard
+{
     /// @dev Initialization flag
     bool private initialised;
     /// @notice MasterAccountController contract address
@@ -36,9 +40,7 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
     function initialize(
         string memory _xrplOwner,
         address _controllerAddress
-    )
-        external virtual
-    {
+    ) external virtual {
         require(!initialised, AlreadyInitialized());
         require(_controllerAddress != address(0), InvalidControllerAddress());
         require(bytes(_xrplOwner).length > 0, InvalidXrplOwner());
@@ -52,12 +54,11 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
     function deposit(
         uint256 _amount,
         address _vault
-    )
-        external
-        onlyController
-        nonReentrant
-    {
-        uint256 actualAmount = IFirelightVault(_vault).mint(_amount, address(this));
+    ) external onlyController nonReentrant {
+        uint256 actualAmount = IFirelightVault(_vault).mint(
+            _amount,
+            address(this)
+        );
         emit Deposited(_vault, _amount, actualAmount); // TODO: amount is shares? and return value is amount (assets)? that wont be the same always?
         // require(amount == actualAmount, "Deposited != amount requested");
         // TODO that will not always be true, as ERC4626.mint can return less than requested due to rounding?
@@ -67,11 +68,7 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
     function withdraw(
         uint256 _amount,
         address _vault
-    )
-        external
-        onlyController
-        nonReentrant
-    {
+    ) external onlyController nonReentrant {
         uint256 actualAmount = IFirelightVault(_vault).withdraw(
             _amount,
             address(this),
@@ -83,11 +80,7 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
     function claimWithdraw(
         uint256 _rewardEpochId,
         address _vault
-    )
-        external
-        onlyController
-        nonReentrant
-    {
+    ) external onlyController nonReentrant {
         uint256 amount = IFirelightVault(_vault).claimWithdraw(_rewardEpochId);
         emit WithdrawalClaimed(_vault, _rewardEpochId, amount);
     }
@@ -97,11 +90,7 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
         uint256 _amount,
         address _fxrp,
         address _vault
-    )
-        external
-        onlyController
-        nonReentrant
-    {
+    ) external onlyController nonReentrant {
         require(IERC20(_fxrp).approve(_vault, _amount), ApprovalFailed());
         emit Approved(_fxrp, _vault, _amount);
     }
@@ -111,18 +100,13 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
         uint256 _lots,
         address payable _executor,
         uint256 _executorFee
-    )
-        external payable
-        onlyController
-        nonReentrant
-    {
-        require(msg.value >= _executorFee, InsufficientFundsForRedeemExecutor());
-        IAssetManager assetManager = _getFxrpAssetManager();
-        assetManager.redeem{value: _executorFee} (
-            _lots,
-            xrplOwner,
-            _executor
+    ) external payable onlyController nonReentrant {
+        require(
+            msg.value >= _executorFee,
+            InsufficientFundsForRedeemExecutor()
         );
+        IAssetManager assetManager = _getFxrpAssetManager();
+        assetManager.redeem{value: _executorFee}(_lots, xrplOwner, _executor);
         // require(redeemedAmount == amount, "Failed to fully redeem");
         emit Redeemed(_lots, _executor, _executorFee);
     }
@@ -133,27 +117,35 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
         address _agentVault,
         address payable _executor,
         uint256 _executorFee
-    )
-        external payable
-        onlyController
-        nonReentrant
-    {
+    ) external payable onlyController nonReentrant {
         IAssetManager assetManager = _getFxrpAssetManager();
 
         AgentInfo.Info memory agentInfo = assetManager.getAgentInfo(
             _agentVault
         );
-        require(agentInfo.status == AgentInfo.Status.NORMAL, AgentNotAvailable());
+        require(
+            agentInfo.status == AgentInfo.Status.NORMAL,
+            AgentNotAvailable()
+        );
 
         uint256 collateralReservationFee = assetManager
             .collateralReservationFee(_lots);
         uint256 totalFee = collateralReservationFee + _executorFee;
-        require(msg.value >= totalFee, InsufficientFundsForCollateralReservation(collateralReservationFee));
+        require(
+            msg.value >= totalFee,
+            InsufficientFundsForCollateralReservation(collateralReservationFee)
+        );
         uint256 reservationId = assetManager.reserveCollateral{
             value: collateralReservationFee + _executorFee
-        } (_agentVault, _lots, agentInfo.feeBIPS, _executor);
+        }(_agentVault, _lots, agentInfo.feeBIPS, _executor);
         assert(reservationId > 0);
-        emit CollateralReserved(_lots, _agentVault, _executor, _executorFee, reservationId);
+        emit CollateralReserved(
+            _lots,
+            _agentVault,
+            _executor,
+            _executorFee,
+            reservationId
+        );
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
@@ -165,11 +157,10 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
      * @inheritdoc UUPSUpgradeable
      * @dev Only governance can call this method.
      */
-    function upgradeToAndCall(address newImplementation, bytes memory data)
-        public payable override
-        onlyProxy
-        onlyController
-    {
+    function upgradeToAndCall(
+        address newImplementation,
+        bytes memory data
+    ) public payable override onlyProxy onlyController {
         super.upgradeToAndCall(newImplementation, data);
     }
 
@@ -181,7 +172,9 @@ contract PersonalAccount is IIPersonalAccount, UUPSUpgradeable, ReentrancyGuard 
 
     /////////////////////////////// INTERNAL FUNCTIONS ///////////////////////////////
     function _getFxrpAssetManager() internal view returns (IAssetManager) {
-        address assetManagerAddress = ContractRegistry.getContractAddressByName("AssetManagerFXRP");
+        address assetManagerAddress = ContractRegistry.getContractAddressByName(
+            "AssetManagerFXRP"
+        );
         IAssetManager assetManager = IAssetManager(assetManagerAddress);
         require(address(assetManager) != address(0), FxrpAssetManagerNotSet());
         return assetManager;

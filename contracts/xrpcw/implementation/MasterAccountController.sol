@@ -18,11 +18,16 @@ import {IFirelightVault} from "../interface/IFirelightVault.sol";
  * @title   MasterAccountController contract
  * @notice  The contract controlling personal accounts (XRPL master controller)
  */
-contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, GovernedProxyImplementation {
+contract MasterAccountController is
+    IMasterAccountController,
+    UUPSUpgradeable,
+    GovernedProxyImplementation
+{
     /// @notice Mapping from PersonalAccount address to XRPL address
-    mapping(address personalAccount => string xrplAddress) public personalAccountToXrpl;
+    mapping(address personalAccount => string xrplAddress)
+        public personalAccountToXrpl;
     /// @notice The minting executor.
-    address payable public  executor;
+    address payable public executor;
     /// @notice Executor fee for reserveCollateral (in wei)
     uint256 public executorFee;
     /// @notice Deposit vault
@@ -47,7 +52,6 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
     /// @notice Indicates if payment instruction has already been executed.
     mapping(bytes32 transactionId => bool) public usedPaymentHashes;
 
-
     constructor() {}
 
     /**
@@ -64,21 +68,27 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         address _operatorAddress,
         uint256 _operatorExecutionWindowSeconds,
         address _personalAccountImplementation
-    )
-        external virtual
-    {
+    ) external virtual {
         require(_depositVault != address(0), InvalidDepositVault());
         require(_executor != address(0), InvalidExecutor());
-        require(bytes(_xrplProviderWallet).length > 0, InvalidXrplProviderWallet());
+        require(
+            bytes(_xrplProviderWallet).length > 0,
+            InvalidXrplProviderWallet()
+        );
         require(_operatorAddress != address(0), InvalidOperatorAddress());
-        require(_personalAccountImplementation != address(0), InvalidPersonalAccountImplementation());
+        require(
+            _personalAccountImplementation != address(0),
+            InvalidPersonalAccountImplementation()
+        );
         require(_executorFee > 0, InvalidExecutorFee());
 
         GovernedBase.initialise(_governanceSettings, _initialGovernance);
         depositVault = _depositVault;
         fxrp = IFirelightVault(_depositVault).asset();
         executor = _executor;
-        xrplProviderWalletHash = keccak256(abi.encodePacked(_xrplProviderWallet));
+        xrplProviderWalletHash = keccak256(
+            abi.encodePacked(_xrplProviderWallet)
+        );
         xrplProviderWallet = _xrplProviderWallet;
         operatorAddress = _operatorAddress;
         personalAccountImplementation = _personalAccountImplementation;
@@ -98,7 +108,11 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         IPayment.Proof calldata _proof,
         string calldata _rippleAccount
     ) external payable {
-        if (block.timestamp < _proof.data.responseBody.blockTimestamp + operatorExecutionWindowSeconds) {
+        if (
+            block.timestamp <
+            _proof.data.responseBody.blockTimestamp +
+                operatorExecutionWindowSeconds
+        ) {
             require(msg.sender == operatorAddress, OnlyOperatorCanExecute());
         }
 
@@ -109,11 +123,14 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         );
 
         require(
-            IFdcVerification(ContractRegistry.getContractAddressByName("FdcVerification")).verifyPayment(_proof),
+            IFdcVerification(
+                ContractRegistry.getContractAddressByName("FdcVerification")
+            ).verifyPayment(_proof),
             InvalidTransactionProof()
         );
         require(
-           _proof.data.responseBody.receivingAddressHash == xrplProviderWalletHash,
+            _proof.data.responseBody.receivingAddressHash ==
+                xrplProviderWalletHash,
             InvalidReceivingAddressHash()
         );
         require(
@@ -131,11 +148,16 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         // ] = _rippleAccount;
 
         // create or get existing Personal Account for the XRPL account
-        PersonalAccount personalAccount = _getOrCreatePersonalAccount(_rippleAccount);
+        PersonalAccount personalAccount = _getOrCreatePersonalAccount(
+            _rippleAccount
+        );
         // implementation upgrade
         address personalAccountImpl = personalAccount.implementation();
         if (personalAccountImpl != personalAccountImplementation) {
-            personalAccount.upgradeToAndCall(personalAccountImplementation, bytes(""));
+            personalAccount.upgradeToAndCall(
+                personalAccountImplementation,
+                bytes("")
+            );
         }
 
         usedPaymentHashes[_proof.data.requestBody.transactionId] = true;
@@ -153,8 +175,13 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
      * @param   _newImplementation  New implementation address.
      * Can only be called by the governance.
      */
-    function setPersonalAccountImplementation(address _newImplementation) external onlyGovernance {
-        require(_newImplementation != address(0), InvalidPersonalAccountImplementation());
+    function setPersonalAccountImplementation(
+        address _newImplementation
+    ) external onlyGovernance {
+        require(
+            _newImplementation != address(0),
+            InvalidPersonalAccountImplementation()
+        );
         personalAccountImplementation = _newImplementation;
         emit PersonalAccountImplementationSet(_newImplementation);
     }
@@ -164,7 +191,9 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
      * @param   _newWindowSeconds  New execution window duration in seconds.
      * Can only be called by the governance.
      */
-    function setOperatorExecutionWindowSeconds(uint256 _newWindowSeconds) external onlyGovernance {
+    function setOperatorExecutionWindowSeconds(
+        uint256 _newWindowSeconds
+    ) external onlyGovernance {
         require(_newWindowSeconds > 0, InvalidOperatorExecutionWindowSeconds());
         operatorExecutionWindowSeconds = _newWindowSeconds;
         emit OperatorExecutionWindowSecondsSet(_newWindowSeconds);
@@ -203,11 +232,10 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
      * @inheritdoc UUPSUpgradeable
      * @dev Only governance can call this method.
      */
-    function upgradeToAndCall(address newImplementation, bytes memory data)
-        public payable override
-        onlyGovernance
-        onlyProxy
-    {
+    function upgradeToAndCall(
+        address newImplementation,
+        bytes memory data
+    ) public payable override onlyGovernance onlyProxy {
         super.upgradeToAndCall(newImplementation, data);
     }
 
@@ -241,21 +269,38 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
         } else if (instructionId == 4) {
             // bytes 1–11: lots
             // bytes 12–31: empty (ignored)
-            uint88 lots = uint88((_paymentReference >> 160) & ((uint256(1) << 88) - 1));
+            uint88 lots = uint88(
+                (_paymentReference >> 160) & ((uint256(1) << 88) - 1)
+            );
             require(lots > 0, LotsZero());
-            _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+            _personalAccount.redeem{value: msg.value}(
+                lots,
+                executor,
+                executorFee
+            );
         } else if (instructionId == 5) {
             // bytes 1–11: lots
             // bytes 12–31: agent vault address
-            uint88 lots = uint88((_paymentReference >> 160) & ((uint256(1) << 88) - 1));
+            uint88 lots = uint88(
+                (_paymentReference >> 160) & ((uint256(1) << 88) - 1)
+            );
             require(lots > 0, LotsZero());
-            address agentVault = address(uint160(_paymentReference & ((uint256(1) << 160) - 1)));
+            address agentVault = address(
+                uint160(_paymentReference & ((uint256(1) << 160) - 1))
+            );
             require(agentVault != address(0), InvalidAgentVaultAddress());
-            _personalAccount.reserveCollateral{value: msg.value}(lots, agentVault, executor, executorFee);
+            _personalAccount.reserveCollateral{value: msg.value}(
+                lots,
+                agentVault,
+                executor,
+                executorFee
+            );
         } else if (instructionId == 6) {
             // bytes 1-3: reward epoch id
             // bytes 4-31: empty (ignored)
-            uint24 rewardEpochId = uint24((_paymentReference >> 224) & ((uint256(1) << 24) - 1));
+            uint24 rewardEpochId = uint24(
+                (_paymentReference >> 224) & ((uint256(1) << 24) - 1)
+            );
             require(rewardEpochId > 0, RewardEpochIdZero());
             _personalAccount.claimWithdraw(rewardEpochId, depositVault);
         } else {
@@ -287,11 +332,10 @@ contract MasterAccountController is IMasterAccountController, UUPSUpgradeable, G
             _xrplOwner,
             address(this)
         );
-        personalAccounts[_xrplOwner] = PersonalAccount(address(personalAccountProxy));
-        personalAccountToXrpl[address(personalAccountProxy)] = _xrplOwner;
-        emit PersonalAccountCreated(
-            _xrplOwner,
+        personalAccounts[_xrplOwner] = PersonalAccount(
             address(personalAccountProxy)
         );
+        personalAccountToXrpl[address(personalAccountProxy)] = _xrplOwner;
+        emit PersonalAccountCreated(_xrplOwner, address(personalAccountProxy));
     }
 }
