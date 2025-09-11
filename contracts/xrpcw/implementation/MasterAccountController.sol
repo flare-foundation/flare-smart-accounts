@@ -213,14 +213,17 @@ contract MasterAccountController is
         emit ExecutorFeeSet(_newExecutorFee);
     }
 
+    /**
+     * @inheritdoc IMasterAccountController
+     */
     function registerCustomInstruction(
         CustomInstruction memory _customInstruction
-    ) external {
-        // We drop the last byte of the keccak256 hash
+    ) external returns (uint256) {
         uint256 callHash = encodeCustomInstruction(_customInstruction);
         customInstructions[callHash] = _customInstruction;
         allCallHashes.push(callHash);
         emit CustomInstructionRegistered(callHash);
+        return callHash;
     }
 
     /**
@@ -262,6 +265,9 @@ contract MasterAccountController is
         super.upgradeToAndCall(newImplementation, data);
     }
 
+    /**
+     * @inheritdoc IMasterAccountController
+     */
     function encodeCustomInstruction(
         CustomInstruction memory _customInstruction
     ) public view returns (uint256) {
@@ -372,6 +378,11 @@ contract MasterAccountController is
         emit PersonalAccountCreated(_xrplOwner, address(personalAccountProxy));
     }
 
+    /**
+     * @notice  Executes a custom instruction stored under the given hash.
+     * @param   callHash  Hash of the custom instruction, as returned by encodeCustomInstruction.
+     * The function calls the given address with the given calldata, paying the specified value.
+     */
     function _executeCustomInstruction(uint256 callHash) internal {
         CustomInstruction memory customInstruction = customInstructions[
             callHash
