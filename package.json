@@ -8,12 +8,13 @@
     "url": "git+https://gitlab.com/flarenetwork/xrpcw-contracts.git"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "author": "Flare SC team",
   "license": "MIT",
   "directories": {},
   "scripts": {
+    "format": "prettier --write .",
     "---------TEST---SCRIPTS": "",
     "---------DEPLOY---SCRIPTS": "",
     "deploy_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast' | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts",
@@ -51,19 +52,13 @@
     "elliptic": "^6.5.5",
     "intercept-stdout": "0.1.2",
     "pascal-case": "^3.1.2",
+    "prettier": "^3.6.2",
+    "prettier-plugin-solidity": "^2.1.0",
     "solidity-coverage": "^0.8.11",
     "sqlite3": "^5.1.7",
     "ts-node": "^10.9.2",
     "typechain": "^8.3.2",
     "typeorm": "^0.3.20",
     "typescript": "^5.4.2"
-  },
-  "prettier": {
-    "printWidth": 120,
-    "semi": true,
-    "singleQuote": false,
-    "trailingComma": "es5",
-    "tabWidth": 2,
-    "arrowParens": "avoid"
   }
 }
