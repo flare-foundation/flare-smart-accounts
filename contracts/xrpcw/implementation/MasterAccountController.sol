@@ -302,8 +302,8 @@ contract MasterAccountController is
                 _personalAccount.approve(amount, fxrp, depositVault);
             }
         } else if (instructionId == 4) {
-            // bytes 1–11: lots
-            // bytes 12–31: empty (ignored)
+            // bytes 1-11: lots
+            // bytes 12-31: empty (ignored)
             uint88 lots = uint88(
                 (_paymentReference >> 160) & ((uint256(1) << 88) - 1)
             );
@@ -314,8 +314,8 @@ contract MasterAccountController is
                 executorFee
             );
         } else if (instructionId == 5) {
-            // bytes 1–11: lots
-            // bytes 12–31: agent vault address
+            // bytes 1-11: lots
+            // bytes 12-31: agent vault address
             uint88 lots = uint88(
                 (_paymentReference >> 160) & ((uint256(1) << 88) - 1)
             );
