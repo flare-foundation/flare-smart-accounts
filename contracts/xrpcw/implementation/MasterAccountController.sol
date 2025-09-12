@@ -336,7 +336,7 @@ contract MasterAccountController is
             uint24 rewardEpochId = uint24(
                 (_paymentReference >> 224) & ((uint256(1) << 24) - 1)
             );
-            require(rewardEpochId > 0, RewardEpochIdZero());
+            require(rewardEpochId > 0, RewardEpochIdZero()); // TODO are 0 epoch ids possible?
             _personalAccount.claimWithdraw(rewardEpochId, depositVault);
         } else if (instructionId == 99) {
             // shift left 30 bytes
