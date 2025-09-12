@@ -361,7 +361,8 @@ contract MasterAccountController is
     function _getOrCreatePersonalAccount(
         string memory _xrplOwner
     ) internal returns (PersonalAccount) {
-        if (personalAccounts[_xrplOwner] == PersonalAccount(payable(address(0)))
+        if (
+            personalAccounts[_xrplOwner] == PersonalAccount(payable(address(0)))
         ) {
             _createPersonalAccount(_xrplOwner);
         }

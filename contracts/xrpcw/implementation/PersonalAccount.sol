@@ -159,9 +159,9 @@ contract PersonalAccount is
     function custom(
         IMasterAccountController.CustomInstruction memory customInstruction
     ) external onlyController nonReentrant {
-        (bool success, ) = customInstruction.targetContract.call{value: customInstruction.value}(
-            customInstruction.data
-        );
+        (bool success, ) = customInstruction.targetContract.call{
+            value: customInstruction.value
+        }(customInstruction.data);
         require(success, CustomInstructionCallFailed());
     }
 
