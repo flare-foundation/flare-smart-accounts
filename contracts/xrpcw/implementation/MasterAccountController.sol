@@ -259,10 +259,10 @@ contract MasterAccountController is
      * @dev Only governance can call this method.
      */
     function upgradeToAndCall(
-        address newImplementation,
-        bytes memory data
+        address _newImplementation,
+        bytes memory _data
     ) public payable override onlyGovernance onlyProxy {
-        super.upgradeToAndCall(newImplementation, data);
+        super.upgradeToAndCall(_newImplementation, _data);
     }
 
     /**
@@ -278,7 +278,7 @@ contract MasterAccountController is
      * Unused. Present just to satisfy UUPSUpgradeable requirement.
      * The real check is in onlyGovernance modifier on upgradeToAndCall.
      */
-    function _authorizeUpgrade(address newImplementation) internal override {}
+    function _authorizeUpgrade(address _newImplementation) internal override {}
 
     /////////////////////////////// INTERNAL FUNCTIONS ///////////////////////////////
     function _executeInstruction(
@@ -361,8 +361,7 @@ contract MasterAccountController is
     function _getOrCreatePersonalAccount(
         string memory _xrplOwner
     ) internal returns (PersonalAccount) {
-        if (
-            personalAccounts[_xrplOwner] == PersonalAccount(payable(address(0)))
+        if (personalAccounts[_xrplOwner] == PersonalAccount(payable(address(0)))
         ) {
             _createPersonalAccount(_xrplOwner);
         }

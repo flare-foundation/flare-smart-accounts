@@ -10,11 +10,12 @@ import {PersonalAccount} from "../xrpcw/implementation/PersonalAccount.sol";
  which manages personal accounts and executes XRPL instructions.
  */
 interface IMasterAccountController {
-  struct CustomInstruction {
-    address _contract;
-    uint256 _value;
-    bytes _calldata;
-  }
+
+    struct CustomInstruction {
+        address targetContract;
+        uint256 value;
+        bytes data;
+    }
 
     event PersonalAccountImplementationSet(address newImplementation);
     event OperatorExecutionWindowSecondsSet(uint256 newWindowSeconds);
@@ -27,7 +28,7 @@ interface IMasterAccountController {
         uint256 paymentReference,
         bytes32 transactionId
     );
-  event CustomInstructionRegistered(uint256 callHash);
+    event CustomInstructionRegistered(uint256 callHash);
 
     error InvalidDepositVault();
     error InvalidExecutor();
@@ -61,12 +62,10 @@ interface IMasterAccountController {
 
     /**
      * @notice Get the PersonalAccount contract for a given XRPL owner.
-     * @param xrplOwner The XRPL address of the owner.
+     * @param _xrplOwner The XRPL address of the owner.
      * @return The PersonalAccount contract associated with the XRPL owner.
      */
-    function getPersonalAccount(
-        string calldata xrplOwner
-    )
+    function getPersonalAccount(string calldata _xrplOwner)
         external returns (PersonalAccount);
 
     /**
@@ -81,7 +80,7 @@ interface IMasterAccountController {
      * @notice  Registers a custom instruction.
      * @param   _customInstruction  Custom instruction.
      * @return  31 bytes of the keccak256 hash of the custom instruction.
-     * The custom instruction is stored in a mapping from the first 31 bytes of the keccak256 hash of the custom 
+     * The custom instruction is stored in a mapping from the first 31 bytes of the keccak256 hash of the custom
      * instruction to the custom instruction.
      */
     function registerCustomInstruction(CustomInstruction memory _customInstruction)

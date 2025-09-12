@@ -4,7 +4,6 @@
 pragma solidity ^0.8.27;
 
 import {Test, console2} from "forge-std/Test.sol";
-// solhint-disable-next-line max-line-length
 import {
     MasterAccountController,
     IGovernanceSettings,
@@ -109,13 +108,13 @@ contract MasterAccountControllerTest is Test {
                 .getCustomInstruction(callHash);
 
         console2.log("storedCustomInstruction: ");
-        console2.log("  contract:", storedCustomInstruction._contract);
-        console2.log("  value:", storedCustomInstruction._value);
-        // console2.log("  calldata:", storedCustomInstruction._calldata);
+        console2.log("  contract:", storedCustomInstruction.targetContract);
+        console2.log("  value:", storedCustomInstruction.value);
+        // console2.log("  calldata:", storedCustomInstruction.calldata);
         console2.log("customInstruction: ");
-        console2.log("  contract:", customInstruction._contract);
-        console2.log("  value:", customInstruction._value);
-        // console2.log("  calldata:", customInstruction._calldata);
+        console2.log("  contract:", customInstruction.targetContract);
+        console2.log("  value:", customInstruction.value);
+        // console2.log("  calldata:", customInstruction.calldata);
 
         console2.log("hashes of all custom instructions: ");
         for (
@@ -181,14 +180,14 @@ contract MasterAccountControllerTest is Test {
         masterAccountController.executeTransaction(proof, xrplAccount1);
 
         console2.log("simpleExample.map(1): ", simpleExample.map(1));
-        console2.log("customInstruction._value: ", customInstruction._value);
+        console2.log("customInstruction._value: ", customInstruction.value);
         console2.log("allKeys: ");
         for (uint256 i = 0; i < simpleExample.getAllKeys().length; i++) {
             console2.log("  ", simpleExample.allKeys(i));
         }
 
         // The state of the example contract should be updated by the master account controller
-        assertEq(simpleExample.map(1), customInstruction._value);
+        assertEq(simpleExample.map(1), customInstruction.value);
     }
 
     function _mockVerifyPayment(bool _result) private {

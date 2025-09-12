@@ -159,8 +159,8 @@ contract PersonalAccount is
     function custom(
         IMasterAccountController.CustomInstruction memory customInstruction
     ) external onlyController nonReentrant {
-        customInstruction._contract.call{value: customInstruction._value}(
-            customInstruction._calldata
+        customInstruction.targetContract.call{value: customInstruction.value}(
+            customInstruction.data
         );
     }
 
