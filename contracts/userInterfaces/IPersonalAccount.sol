@@ -29,4 +29,5 @@ interface IPersonalAccount {
     error AgentNotAvailable();
     error ApprovalFailed();
     error FxrpAssetManagerNotSet();
+    error CustomInstructionCallFailed();
 }

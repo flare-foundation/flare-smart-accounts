@@ -159,9 +159,10 @@ contract PersonalAccount is
     function custom(
         IMasterAccountController.CustomInstruction memory customInstruction
     ) external onlyController nonReentrant {
-        customInstruction.targetContract.call{value: customInstruction.value}(
+        (bool success, ) = customInstruction.targetContract.call{value: customInstruction.value}(
             customInstruction.data
         );
+        require(success, CustomInstructionCallFailed());
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////

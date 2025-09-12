@@ -270,7 +270,7 @@ contract MasterAccountController is
      */
     function encodeCustomInstruction(
         CustomInstruction memory _customInstruction
-    ) public view returns (uint256) {
+    ) public pure returns (uint256) {
         return uint256(keccak256(abi.encode(_customInstruction))) >> 8;
     }
 
