@@ -23,6 +23,7 @@ contract MasterAccountController is
     UUPSUpgradeable,
     GovernedProxyImplementation
 {
+    uint256[] public allCallHashes;
     /// @notice Mapping from PersonalAccount address to XRPL address
     mapping(address personalAccount => string xrplAddress)
         public personalAccountToXrpl;
@@ -51,6 +52,8 @@ contract MasterAccountController is
     mapping(bytes32 xrplAddressHash => string) public hashToAccount;
     /// @notice Indicates if payment instruction has already been executed.
     mapping(bytes32 transactionId => bool) public usedPaymentHashes;
+    /// @notice Mapping that stores custom instructions
+    mapping(uint256 callHash => CustomInstruction) public customInstructions;
 
     constructor() {}
 
@@ -213,10 +216,33 @@ contract MasterAccountController is
     /**
      * @inheritdoc IMasterAccountController
      */
+    function registerCustomInstruction(
+        CustomInstruction memory _customInstruction
+    ) external returns (uint256) {
+        uint256 callHash = encodeCustomInstruction(_customInstruction);
+        customInstructions[callHash] = _customInstruction;
+        allCallHashes.push(callHash);
+        emit CustomInstructionRegistered(callHash);
+        return callHash;
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
     function getPersonalAccount(
         string calldata xrplOwner
     ) external view returns (PersonalAccount) {
         return personalAccounts[xrplOwner];
+    }
+
+    function getCustomInstruction(
+        uint256 callHash
+    ) external view returns (CustomInstruction memory) {
+        return customInstructions[callHash];
+    }
+
+    function getAllCallHashes() external view returns (uint256[] memory) {
+        return allCallHashes;
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
@@ -233,17 +259,26 @@ contract MasterAccountController is
      * @dev Only governance can call this method.
      */
     function upgradeToAndCall(
-        address newImplementation,
-        bytes memory data
+        address _newImplementation,
+        bytes memory _data
     ) public payable override onlyGovernance onlyProxy {
-        super.upgradeToAndCall(newImplementation, data);
+        super.upgradeToAndCall(_newImplementation, _data);
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
+    function encodeCustomInstruction(
+        CustomInstruction memory _customInstruction
+    ) public pure returns (uint256) {
+        return uint256(keccak256(abi.encode(_customInstruction))) >> 8;
     }
 
     /**
      * Unused. Present just to satisfy UUPSUpgradeable requirement.
      * The real check is in onlyGovernance modifier on upgradeToAndCall.
      */
-    function _authorizeUpgrade(address newImplementation) internal override {}
+    function _authorizeUpgrade(address _newImplementation) internal override {}
 
     /////////////////////////////// INTERNAL FUNCTIONS ///////////////////////////////
     function _executeInstruction(
@@ -267,8 +302,8 @@ contract MasterAccountController is
                 _personalAccount.approve(amount, fxrp, depositVault);
             }
         } else if (instructionId == 4) {
-            // bytes 1–11: lots
-            // bytes 12–31: empty (ignored)
+            // bytes 1-11: lots
+            // bytes 12-31: empty (ignored)
             uint88 lots = uint88(
                 (_paymentReference >> 160) & ((uint256(1) << 88) - 1)
             );
@@ -279,8 +314,8 @@ contract MasterAccountController is
                 executorFee
             );
         } else if (instructionId == 5) {
-            // bytes 1–11: lots
-            // bytes 12–31: agent vault address
+            // bytes 1-11: lots
+            // bytes 12-31: agent vault address
             uint88 lots = uint88(
                 (_paymentReference >> 160) & ((uint256(1) << 88) - 1)
             );
@@ -303,6 +338,13 @@ contract MasterAccountController is
             );
             require(rewardEpochId > 0, RewardEpochIdZero());
             _personalAccount.claimWithdraw(rewardEpochId, depositVault);
+        } else if (instructionId == 99) {
+            // shift left 30 bytes
+            uint256 callHash = _paymentReference & ((uint256(1) << 248) - 1);
+            CustomInstruction memory customInstruction = customInstructions[
+                callHash
+            ];
+            _personalAccount.custom(customInstruction);
         } else {
             revert InvalidInstructionId(instructionId);
         }
@@ -319,7 +361,9 @@ contract MasterAccountController is
     function _getOrCreatePersonalAccount(
         string memory _xrplOwner
     ) internal returns (PersonalAccount) {
-        if (personalAccounts[_xrplOwner] == PersonalAccount(address(0))) {
+        if (
+            personalAccounts[_xrplOwner] == PersonalAccount(payable(address(0)))
+        ) {
             _createPersonalAccount(_xrplOwner);
         }
         return personalAccounts[_xrplOwner];
@@ -333,7 +377,7 @@ contract MasterAccountController is
             address(this)
         );
         personalAccounts[_xrplOwner] = PersonalAccount(
-            address(personalAccountProxy)
+            payable(address(personalAccountProxy))
         );
         personalAccountToXrpl[address(personalAccountProxy)] = _xrplOwner;
         emit PersonalAccountCreated(_xrplOwner, address(personalAccountProxy));

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.27;
 
-import {Test, console2} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {
     MasterAccountController,
     IGovernanceSettings,
@@ -101,7 +101,7 @@ contract XrplControlledWalletTest is Test {
 
         assertEq(
             address(masterAccountController.getPersonalAccount(xrplAccount1)),
-            address(PersonalAccount(address(0)))
+            address(PersonalAccount(payable(address(0))))
         );
         vm.prank(operator);
         vm.expectEmit();
@@ -115,7 +115,7 @@ contract XrplControlledWalletTest is Test {
         // PersonalAccount should be created
         assertNotEq(
             address(masterAccountController.getPersonalAccount(xrplAccount1)),
-            address(PersonalAccount(address(0)))
+            address(PersonalAccount(payable(address(0))))
         );
         personalAccount1 = masterAccountController.getPersonalAccount(
             xrplAccount1

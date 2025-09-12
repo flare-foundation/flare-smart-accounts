@@ -10,6 +10,7 @@ import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.s
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IFirelightVault} from "../interface/IFirelightVault.sol";
 import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
+import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
 
 // TODO - update flare-periphery to flare
 
@@ -33,6 +34,8 @@ contract PersonalAccount is
     }
 
     constructor() {}
+
+    receive() external payable {}
 
     /**
      * Proxyable initialization method. Can be called only once, from the proxy constructor
@@ -63,7 +66,8 @@ contract PersonalAccount is
             _amount,
             address(this)
         );
-        emit Deposited(_vault, _amount, actualAmount); // TODO: amount is shares? and return value is amount (assets)? that wont be the same always?
+        emit Deposited(_vault, _amount, actualAmount);
+        // TODO: amount is shares? and return value is amount (assets)? that wont be the same always?
         // require(amount == actualAmount, "Deposited != amount requested");
         // TODO that will not always be true, as ERC4626.mint can return less than requested due to rounding?
     }
@@ -150,6 +154,15 @@ contract PersonalAccount is
             _executorFee,
             reservationId
         );
+    }
+
+    function custom(
+        IMasterAccountController.CustomInstruction memory customInstruction
+    ) external onlyController nonReentrant {
+        (bool success, ) = customInstruction.targetContract.call{
+            value: customInstruction.value
+        }(customInstruction.data);
+        require(success, CustomInstructionCallFailed());
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
