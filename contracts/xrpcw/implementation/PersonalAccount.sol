@@ -35,6 +35,8 @@ contract PersonalAccount is
 
     constructor() {}
 
+    receive() external payable {}
+
     /**
      * Proxyable initialization method. Can be called only once, from the proxy constructor
      */
