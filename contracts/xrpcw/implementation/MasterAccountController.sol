@@ -341,7 +341,10 @@ contract MasterAccountController is
         } else if (instructionId == 99) {
             // shift left 30 bytes
             uint256 callHash = _paymentReference & ((uint256(1) << 248) - 1);
-            _executeCustomInstruction(callHash);
+            CustomInstruction memory customInstruction = customInstructions[
+                callHash
+            ];
+            _personalAccount.custom(customInstruction);
         } else {
             revert InvalidInstructionId(instructionId);
         }
@@ -372,24 +375,9 @@ contract MasterAccountController is
             address(this)
         );
         personalAccounts[_xrplOwner] = PersonalAccount(
-            address(personalAccountProxy)
+            payable(address(personalAccountProxy))
         );
         personalAccountToXrpl[address(personalAccountProxy)] = _xrplOwner;
         emit PersonalAccountCreated(_xrplOwner, address(personalAccountProxy));
-    }
-
-    /**
-     * @notice  Executes a custom instruction stored under the given hash.
-     * @param   callHash  Hash of the custom instruction, as returned by encodeCustomInstruction.
-     * The function calls the given address with the given calldata, paying the specified value.
-     */
-    function _executeCustomInstruction(uint256 callHash) internal {
-        CustomInstruction memory customInstruction = customInstructions[
-            callHash
-        ];
-        // TODO:(Nik) requires
-        customInstruction._contract.call{value: customInstruction._value}(
-            customInstruction._calldata
-        );
     }
 }

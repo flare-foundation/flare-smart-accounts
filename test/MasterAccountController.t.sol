@@ -74,7 +74,6 @@ contract MasterAccountControllerTest is Test {
             IGovernanceSettings(makeAddr("governanceSettings")),
             governance,
             address(depositVault),
-            address(fxrp),
             payable(executor),
             executorFee,
             xrplProviderWallet,
@@ -166,8 +165,19 @@ contract MasterAccountControllerTest is Test {
         );
 
         _mockVerifyPayment(true);
-        deal(address(masterAccountController), 100 ether);
-        vm.prank(operator);
+
+        startHoax(operator);
+        masterAccountController.executeTransaction(proof, xrplAccount1);
+
+        address smartAddress = address(
+            masterAccountController.getPersonalAccount(xrplAccount1)
+        );
+        deal(smartAddress, 100 ether);
+
+        console2.log("smartAddress: ", address(smartAddress));
+        console2.log("smartAddress balance: ", address(smartAddress).balance);
+
+        proof.data.requestBody.transactionId = bytes32("tx2");
         masterAccountController.executeTransaction(proof, xrplAccount1);
 
         console2.log("simpleExample.map(1): ", simpleExample.map(1));

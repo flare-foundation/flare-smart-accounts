@@ -7,6 +7,9 @@ import {MasterAccountController} from "../../contracts/xrpcw/implementation/Mast
 import {MasterAccountControllerProxy} from "../../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 
+// solhint-disable-next-line max-line-length
+// forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
+
 contract DeployXRPLControlledWallet is Script {
     PersonalAccount private personalAccountImpl;
     address private personalAccountImplAddress;
