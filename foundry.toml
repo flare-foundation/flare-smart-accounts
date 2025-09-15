@@ -2,7 +2,7 @@
 src = "contracts"
 out = "artifacts-forge"
 cache_path = 'cache-forge'
-evm_version = 'london'
+evm_version = 'shanghai'
 optimizer = true
 optimizer_runs = 200
 libs = [
