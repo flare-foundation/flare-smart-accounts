@@ -53,7 +53,7 @@ contract MasterAccountController is
     /// @notice Indicates if payment instruction has already been executed.
     mapping(bytes32 transactionId => bool) public usedPaymentHashes;
     /// @notice Mapping that stores custom instructions
-    mapping(uint256 callHash => CustomInstruction) public customInstructions;
+    mapping(uint256 callHash => CustomInstruction[]) public customInstructions;
 
     constructor() {}
 
@@ -217,10 +217,13 @@ contract MasterAccountController is
      * @inheritdoc IMasterAccountController
      */
     function registerCustomInstruction(
-        CustomInstruction memory _customInstruction
+        CustomInstruction[] memory _customInstruction
     ) external returns (uint256) {
         uint256 callHash = encodeCustomInstruction(_customInstruction);
-        customInstructions[callHash] = _customInstruction;
+        for (uint256 i = 0; i < _customInstruction.length; i++) {
+            customInstructions[callHash].push(_customInstruction[i]);
+        }
+        // customInstructions[callHash] = _customInstruction;
         allCallHashes.push(callHash);
         emit CustomInstructionRegistered(callHash);
         return callHash;
@@ -237,7 +240,7 @@ contract MasterAccountController is
 
     function getCustomInstruction(
         uint256 callHash
-    ) external view returns (CustomInstruction memory) {
+    ) external view returns (CustomInstruction[] memory) {
         return customInstructions[callHash];
     }
 
@@ -269,7 +272,7 @@ contract MasterAccountController is
      * @inheritdoc IMasterAccountController
      */
     function encodeCustomInstruction(
-        CustomInstruction memory _customInstruction
+        CustomInstruction[] memory _customInstruction
     ) public pure returns (uint256) {
         return uint256(keccak256(abi.encode(_customInstruction))) >> 8;
     }
@@ -341,7 +344,7 @@ contract MasterAccountController is
         } else if (instructionId == 99) {
             // shift left 30 bytes
             uint256 callHash = _paymentReference & ((uint256(1) << 248) - 1);
-            CustomInstruction memory customInstruction = customInstructions[
+            CustomInstruction[] memory customInstruction = customInstructions[
                 callHash
             ];
             _personalAccount.custom(customInstruction);
