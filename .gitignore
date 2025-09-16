@@ -35,3 +35,5 @@ nul
 
 # slither
 slither.json
+
+forge-deploy-output.txt

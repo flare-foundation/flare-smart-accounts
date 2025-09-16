@@ -12,13 +12,14 @@ if (!["coston2", "coston", "flare", "songbird", "scdev"].includes(network)) {
   throw new Error(`Invalid network: ${network}`);
 }
 
+const isMock = process.argv[3] === "mock";
 // set paths and URLs based on network
-const jsonPath = `deployment/deploys/${network}.json`;
+const addressesFilePath = `deployment/deploys/${network}${isMock ? "_mock" : ""}.json`;
 const rpcUrl = `https://${network}-api.flare.network/ext/C/rpc`;
 const verifierUrl = `https://${network}-explorer.flare.network/api/`;
 const verifier = "blockscout";
 
-const contracts = JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+const contracts = JSON.parse(fs.readFileSync(addressesFilePath, "utf8"));
 
 contracts.forEach((contract: any) => {
   const address = contract.address;
