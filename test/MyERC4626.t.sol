@@ -21,7 +21,7 @@ contract MyERC4626Test is Test {
         mintableERC20.mint(user, 1000);
         assertEq(mintableERC20.balanceOf(user), 1000);
 
-        mintableERC20.approve(address(myERC4626),1000);
+        mintableERC20.approve(address(myERC4626), 1000);
 
         // user deposits 1000 assets
         myERC4626.deposit(1000, user);
@@ -52,7 +52,7 @@ contract MyERC4626Test is Test {
         vm.startPrank(user);
         mintableERC20.mint(user, 1000);
         assertEq(mintableERC20.balanceOf(user), 1000);
-        mintableERC20.approve(address(myERC4626),1000);
+        mintableERC20.approve(address(myERC4626), 1000);
         myERC4626.deposit(1000, user);
         assertEq(myERC4626.balanceOf(user), 1000); // user's shares
         assertEq(myERC4626.totalAssets(), 1000); // total assets in the vault

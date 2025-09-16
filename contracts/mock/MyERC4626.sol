@@ -10,7 +10,6 @@ import {SafeERC20} from "@openzeppelin-contracts/token/ERC20/utils/SafeERC20.sol
 /// @author Filip Koprivec
 /// @notice This is the vault that is used by MasterAccountController contract only for demo purposes.
 contract MyERC4626 is ERC4626 {
-
     mapping(address => uint256 assets) public pendingWithdrawAssets;
 
     event WithdrawRequest(
@@ -38,7 +37,11 @@ contract MyERC4626 is ERC4626 {
         string memory symbol_
     ) ERC20(name_, symbol_) ERC4626(baseAsset) {}
 
-    function withdraw(uint256 assets, address receiver, address owner) public override returns (uint256) {
+    function withdraw(
+        uint256 assets,
+        address receiver,
+        address owner
+    ) public override returns (uint256) {
         uint256 maxAssets = maxWithdraw(owner);
         if (assets > maxAssets) {
             revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);

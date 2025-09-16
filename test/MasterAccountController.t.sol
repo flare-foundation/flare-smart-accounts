@@ -26,7 +26,7 @@ contract MasterAccountControllerTest is Test {
     MasterAccountControllerProxy private masterAccountControllerProxy;
     PersonalAccount private personalAccountImpl;
     PersonalAccountProxy private personalAccountProxy;
-    IMasterAccountController.CustomInstruction public customInstruction;
+    IMasterAccountController.CustomInstruction[] public customInstruction;
     SimpleExample public simpleExample;
 
     address private governance;
@@ -88,10 +88,12 @@ contract MasterAccountControllerTest is Test {
 
         simpleExample = new SimpleExample();
 
-        customInstruction = IMasterAccountController.CustomInstruction(
-            address(simpleExample),
-            1,
-            abi.encodeWithSignature("foo(uint256)", [uint256(1)])
+        customInstruction.push(
+            IMasterAccountController.CustomInstruction(
+                address(simpleExample),
+                1,
+                abi.encodeWithSignature("foo(uint256)", [uint256(1)])
+            )
         );
     }
 
@@ -103,18 +105,17 @@ contract MasterAccountControllerTest is Test {
             customInstruction
         );
         console2.log("callHash: ", callHash);
-        IMasterAccountController.CustomInstruction
-            memory storedCustomInstruction = masterAccountController
-                .getCustomInstruction(callHash);
+        IMasterAccountController.CustomInstruction[]
+            memory storedCustomInstruction = (
+                masterAccountController.getCustomInstruction(callHash)
+            );
 
         console2.log("storedCustomInstruction: ");
-        console2.log("  contract:", storedCustomInstruction.targetContract);
-        console2.log("  value:", storedCustomInstruction.value);
-        // console2.log("  calldata:", storedCustomInstruction.calldata);
+        console2.log("  contract:", storedCustomInstruction[0].targetContract);
+        console2.log("  value:", storedCustomInstruction[0].value);
         console2.log("customInstruction: ");
-        console2.log("  contract:", customInstruction.targetContract);
-        console2.log("  value:", customInstruction.value);
-        // console2.log("  calldata:", customInstruction.calldata);
+        console2.log("  contract:", customInstruction[0].targetContract);
+        console2.log("  value:", customInstruction[0].value);
 
         console2.log("hashes of all custom instructions: ");
         for (
@@ -133,6 +134,74 @@ contract MasterAccountControllerTest is Test {
 
     // solhint-disable-next-line func-name-mixedcase
     function test_executeCustomInstruction() public {
+        _mockVerifyPayment(true);
+        startHoax(operator);
+
+        _createPersonalAccount();
+
+        address smartAddress = address(
+            masterAccountController.getPersonalAccount(xrplAccount1)
+        );
+        deal(smartAddress, 100 ether);
+
+        _executeCustomInstruction();
+
+        console2.log("smartAddress: ", address(smartAddress));
+        console2.log("smartAddress balance: ", address(smartAddress).balance);
+
+        // The state of the example contract should be updated by the master account controller
+        assertEq(simpleExample.map(1), customInstruction[0].value);
+    }
+
+    // We need to perform some execute transaction call, to create the account, so we can transfer funds to it
+    function _createPersonalAccount() private {
+        console2.log("createPersonalAccount");
+        console2.log("");
+        IMasterAccountController.CustomInstruction[]
+            memory _customInstruction = new IMasterAccountController.CustomInstruction[](
+                1
+            );
+        _customInstruction[0] = IMasterAccountController.CustomInstruction(
+            address(simpleExample),
+            0,
+            abi.encodeWithSignature("bar(uint256)", [1])
+        );
+        masterAccountController.registerCustomInstruction(_customInstruction);
+        uint256 callHash = masterAccountController.encodeCustomInstruction(
+            _customInstruction
+        );
+        console2.log("callHash: ", callHash);
+
+        IPayment.Proof memory _proof;
+        _proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        _proof.data.responseBody.sourceAddressHash = keccak256(
+            abi.encodePacked(xrplAccount1)
+        );
+        _proof.data.requestBody.transactionId = bytes32("tx1");
+        _proof
+            .data
+            .responseBody
+            .standardPaymentReference = _encodePaymentReference(callHash);
+        console2.log("paymentReference: ");
+        console2.logBytes32(_proof.data.responseBody.standardPaymentReference);
+        console2.log("");
+        console2.log(
+            "instruction id:",
+            (uint256(_proof.data.responseBody.standardPaymentReference) >>
+                248) & 0xFF
+        );
+        console2.log(
+            "remainder: ",
+            uint256(_proof.data.responseBody.standardPaymentReference) &
+                ((uint256(1) << 248) - 1)
+        );
+
+        masterAccountController.executeTransaction(_proof, xrplAccount1);
+    }
+
+    function _executeCustomInstruction() private {
+        console2.log("executeCustomInstruction");
+        console2.log("");
         masterAccountController.registerCustomInstruction(customInstruction);
         uint256 callHash = masterAccountController.encodeCustomInstruction(
             customInstruction
@@ -163,31 +232,15 @@ contract MasterAccountControllerTest is Test {
                 ((uint256(1) << 248) - 1)
         );
 
-        _mockVerifyPayment(true);
-
-        startHoax(operator);
-        masterAccountController.executeTransaction(proof, xrplAccount1);
-
-        address smartAddress = address(
-            masterAccountController.getPersonalAccount(xrplAccount1)
-        );
-        deal(smartAddress, 100 ether);
-
-        console2.log("smartAddress: ", address(smartAddress));
-        console2.log("smartAddress balance: ", address(smartAddress).balance);
-
         proof.data.requestBody.transactionId = bytes32("tx2");
         masterAccountController.executeTransaction(proof, xrplAccount1);
 
         console2.log("simpleExample.map(1): ", simpleExample.map(1));
-        console2.log("customInstruction._value: ", customInstruction.value);
+        console2.log("customInstruction._value: ", customInstruction[0].value);
         console2.log("allKeys: ");
         for (uint256 i = 0; i < simpleExample.getAllKeys().length; i++) {
             console2.log("  ", simpleExample.allKeys(i));
         }
-
-        // The state of the example contract should be updated by the master account controller
-        assertEq(simpleExample.map(1), customInstruction.value);
     }
 
     function _mockVerifyPayment(bool _result) private {
@@ -225,6 +278,10 @@ contract SimpleExample {
             allKeys.push(a);
         }
         map[a] = map[a] + msg.value;
+    }
+
+    function bar(uint256 a) public view returns (bool) {
+        return a == 1;
     }
 
     function getAllKeys() public view returns (uint256[] memory) {

@@ -73,7 +73,7 @@ interface IMasterAccountController {
      * @return  31 bytes of the keccak256 hash of the custom instruction.
      */
     function encodeCustomInstruction(
-        CustomInstruction memory _customInstruction
+        CustomInstruction[] memory _customInstruction
     ) external returns (uint256);
 
     /**
@@ -84,6 +84,6 @@ interface IMasterAccountController {
      * instruction to the custom instruction.
      */
     function registerCustomInstruction(
-        CustomInstruction memory _customInstruction
+        CustomInstruction[] memory _customInstruction
     ) external returns (uint256);
 }

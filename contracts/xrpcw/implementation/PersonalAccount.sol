@@ -157,12 +157,14 @@ contract PersonalAccount is
     }
 
     function custom(
-        IMasterAccountController.CustomInstruction memory customInstruction
+        IMasterAccountController.CustomInstruction[] memory customInstruction
     ) external onlyController nonReentrant {
-        (bool success, ) = customInstruction.targetContract.call{
-            value: customInstruction.value
-        }(customInstruction.data);
-        require(success, CustomInstructionCallFailed());
+        for (uint256 i = 0; i < customInstruction.length; i++) {
+            (bool success, ) = customInstruction[i].targetContract.call{
+                value: customInstruction[i].value
+            }(customInstruction[i].data);
+            require(success, CustomInstructionCallFailed());
+        }
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
