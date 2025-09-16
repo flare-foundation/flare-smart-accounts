@@ -1,0 +1,17 @@
+[
+  {
+    "name": "PersonalAccountImplementation",
+    "contractName": "PersonalAccount.sol",
+    "address": "0x24A03B99f2f26F246Ca1CdF99B81A347Af6284ab"
+  },
+  {
+    "name": "MasterAccountControllerDevMock",
+    "contractName": "MasterAccountControllerDevMockProxy.sol",
+    "address": "0x787419810116b29fbB45a7E679Ae6c3dfCA9600b"
+  },
+  {
+    "name": "MasterAccountControllerDevMockImplementation",
+    "contractName": "MasterAccountControllerDevMock.sol",
+    "address": "0xBB0a2A819C81948Fa6D5f1Fb47a3F01187386278"
+  }
+]

@@ -280,7 +280,7 @@ contract SimpleExample {
         map[a] = map[a] + msg.value;
     }
 
-    function bar(uint256 a) public view returns (bool) {
+    function bar(uint256 a) public pure returns (bool) {
         return a == 1;
     }
 
