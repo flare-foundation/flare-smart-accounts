@@ -46,9 +46,9 @@ contract MasterAccountController is
     /// @notice Time window (in seconds) for operator-only execution after XRPL transaction (default: 10 minutes)
     uint256 public operatorExecutionWindowSeconds;
 
-    /// Mapping from Ripple address to Personal Account
+    /// Mapping from XRPL address to Personal Account
     mapping(string xrplAddress => PersonalAccount) private personalAccounts;
-    /// @notice Mapping from hashed Ripple Address to Ripple address
+    /// @notice Mapping from hashed XRPL address to XRPL address
     mapping(bytes32 xrplAddressHash => string) public hashToAccount;
     /// @notice Indicates if payment instruction has already been executed.
     mapping(bytes32 transactionId => bool) public usedPaymentHashes;
@@ -109,7 +109,7 @@ contract MasterAccountController is
      */
     function executeTransaction(
         IPayment.Proof calldata _proof,
-        string calldata _rippleAccount
+        string calldata _xrplAddress
     ) external payable {
         if (
             block.timestamp <
@@ -138,7 +138,7 @@ contract MasterAccountController is
         );
         require(
             _proof.data.responseBody.sourceAddressHash ==
-                keccak256(abi.encodePacked(_rippleAccount)),
+                keccak256(abi.encodePacked(_xrplAddress)),
             MismatchingSourceAndXrplAddr()
         );
         require(
@@ -148,11 +148,11 @@ contract MasterAccountController is
 
         // hashToAccount[
         //     _proof.data.responseBody.sourceAddressHash
-        // ] = _rippleAccount;
+        // ] = _xrplAddress;
 
-        // create or get existing Personal Account for the XRPL account
+        // create or get existing Personal Account for the XRPL address
         PersonalAccount personalAccount = _getOrCreatePersonalAccount(
-            _rippleAccount
+            _xrplAddress
         );
         // implementation upgrade
         address personalAccountImpl = personalAccount.implementation();
@@ -168,7 +168,7 @@ contract MasterAccountController is
         _executeInstruction(
             uint256(_proof.data.responseBody.standardPaymentReference),
             personalAccount,
-            _rippleAccount,
+            _xrplAddress,
             _proof.data.requestBody.transactionId
         );
     }

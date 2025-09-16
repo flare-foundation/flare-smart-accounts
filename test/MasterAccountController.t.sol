@@ -39,14 +39,14 @@ contract MasterAccountControllerTest is Test {
     address private operator;
     address private personalAccountImplementation;
     uint256 private operatorExecutionWindowSeconds;
-    string private xrplAccount1;
+    string private xrplAddress1;
     address private contractRegistryMock;
     address private fdcVerificationMock;
 
     function setUp() public {
         governance = makeAddr("governance");
         executor = makeAddr("executor");
-        fxrp = new MintableERC20("F-ripple", "fXRP");
+        fxrp = new MintableERC20("F-XRP", "fXRP");
         depositVault = new MyERC4626(
             IERC20(address(fxrp)),
             "Deposit Vault",
@@ -84,7 +84,7 @@ contract MasterAccountControllerTest is Test {
             address(masterAccountControllerProxy)
         );
 
-        xrplAccount1 = "xrplAccount1";
+        xrplAddress1 = "xrplAddress1";
 
         simpleExample = new SimpleExample();
 
@@ -140,7 +140,7 @@ contract MasterAccountControllerTest is Test {
         _createPersonalAccount();
 
         address smartAddress = address(
-            masterAccountController.getPersonalAccount(xrplAccount1)
+            masterAccountController.getPersonalAccount(xrplAddress1)
         );
         deal(smartAddress, 100 ether);
 
@@ -175,7 +175,7 @@ contract MasterAccountControllerTest is Test {
         IPayment.Proof memory _proof;
         _proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         _proof.data.responseBody.sourceAddressHash = keccak256(
-            abi.encodePacked(xrplAccount1)
+            abi.encodePacked(xrplAddress1)
         );
         _proof.data.requestBody.transactionId = bytes32("tx1");
         _proof
@@ -196,7 +196,7 @@ contract MasterAccountControllerTest is Test {
                 ((uint256(1) << 248) - 1)
         );
 
-        masterAccountController.executeTransaction(_proof, xrplAccount1);
+        masterAccountController.executeTransaction(_proof, xrplAddress1);
     }
 
     function _executeCustomInstruction() private {
@@ -211,7 +211,7 @@ contract MasterAccountControllerTest is Test {
         IPayment.Proof memory proof;
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.responseBody.sourceAddressHash = keccak256(
-            abi.encodePacked(xrplAccount1)
+            abi.encodePacked(xrplAddress1)
         );
         proof.data.requestBody.transactionId = bytes32("tx1");
         proof
@@ -233,7 +233,7 @@ contract MasterAccountControllerTest is Test {
         );
 
         proof.data.requestBody.transactionId = bytes32("tx2");
-        masterAccountController.executeTransaction(proof, xrplAccount1);
+        masterAccountController.executeTransaction(proof, xrplAddress1);
 
         console2.log("simpleExample.map(1): ", simpleExample.map(1));
         console2.log("customInstruction._value: ", customInstruction[0].value);
