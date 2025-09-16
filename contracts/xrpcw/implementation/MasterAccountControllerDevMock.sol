@@ -107,7 +107,7 @@ contract MasterAccountControllerDevMock is
         string memory combinedXrplAccount = string.concat(string(abi.encodePacked(msg.sender)), _xrplAddress);
 
         // create or get existing Personal Account for the XRPL account
-        address personalAccountAddress = _getOrCreatePersonalAccount(combinedXrplAccount);
+        address personalAccountAddress = address(_getOrCreatePersonalAccount(combinedXrplAccount));
 
         payable(personalAccountAddress).transfer(msg.value);
     }
@@ -116,7 +116,6 @@ contract MasterAccountControllerDevMock is
         string calldata _rippleAccount,
         CustomInstruction[] memory customInstruction
     ) external payable {
-        
         string memory combinedRippleAccount = string.concat(string(abi.encodePacked(msg.sender)), _rippleAccount);
 
         // create or get existing Personal Account for the XRPL account
