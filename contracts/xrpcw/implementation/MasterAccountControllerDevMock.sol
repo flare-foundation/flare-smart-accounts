@@ -103,6 +103,15 @@ contract MasterAccountControllerDevMock is
         // TODO should we have set of operators?
     }
 
+    function createFundPersonalAccount(string calldata _xrplAddress) external payable {
+        string memory combinedXrplAccount = string.concat(string(abi.encodePacked(msg.sender)), _xrplAddress);
+
+        // create or get existing Personal Account for the XRPL account
+        address personalAccountAddress = _getOrCreatePersonalAccount(combinedXrplAccount);
+
+        payable(personalAccountAddress).transfer(msg.value);
+    }
+
     function executeCustomInstructionDevelopment(
         string calldata _rippleAccount,
         CustomInstruction[] memory customInstruction
