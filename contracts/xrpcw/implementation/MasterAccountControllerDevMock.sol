@@ -18,7 +18,7 @@ import {IFirelightVault} from "../interface/IFirelightVault.sol";
  * @title   MasterAccountController contract
  * @notice  The contract controlling personal accounts (XRPL master controller)
  */
-contract MasterAccountController is
+contract MasterAccountControllerDevMock is
     IMasterAccountController,
     UUPSUpgradeable,
     GovernedProxyImplementation
@@ -101,6 +101,37 @@ contract MasterAccountController is
         emit OperatorExecutionWindowSecondsSet(_operatorExecutionWindowSeconds);
         emit ExecutorFeeSet(_executorFee);
         // TODO should we have set of operators?
+    }
+
+    function createFundPersonalAccount(string calldata _xrplAddress) external payable {
+        string memory combinedXrplAddress = string.concat(string(abi.encodePacked(msg.sender)), _xrplAddress);
+
+        // create or get existing Personal Account for the XRPL address
+        address personalAccountAddress = address(_getOrCreatePersonalAccount(combinedXrplAddress));
+
+        payable(personalAccountAddress).transfer(msg.value);
+    }
+
+    function executeCustomInstructionDevelopment(
+        string calldata _xrplAddress,
+        CustomInstruction[] memory customInstruction
+    ) external payable {
+        string memory combinedXrplAddress = string.concat(string(abi.encodePacked(msg.sender)), _xrplAddress);
+
+        // create or get existing Personal Account for the XRPL address
+        PersonalAccount personalAccount = _getOrCreatePersonalAccount(
+            combinedXrplAddress
+        );
+        // implementation upgrade
+        address personalAccountImpl = personalAccount.implementation();
+        if (personalAccountImpl != personalAccountImplementation) {
+            personalAccount.upgradeToAndCall(
+                personalAccountImplementation,
+                bytes("")
+            );
+        }
+
+        personalAccount.custom(customInstruction);
     }
 
     // TODO should we use hashes of addresses instead of string addresses?

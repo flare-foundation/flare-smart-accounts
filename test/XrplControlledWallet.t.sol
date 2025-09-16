@@ -35,8 +35,8 @@ contract XrplControlledWalletTest is Test {
     bytes32 private xrplProviderWalletHash;
     address private operator;
     address private personalAccountImplementation;
-    string private xrplAccount1;
-    string private xrplAccount2;
+    string private xrplAddress1;
+    string private xrplAddress2;
     uint256 private operatorExecutionWindowSeconds;
 
     address private contractRegistryMock;
@@ -45,7 +45,7 @@ contract XrplControlledWalletTest is Test {
     function setUp() public {
         governance = makeAddr("governance");
         executor = makeAddr("executor");
-        fxrp = new MintableERC20("F-ripple", "fXRP");
+        fxrp = new MintableERC20("F-XRPL", "fXRP");
         depositVault = new MyERC4626(
             IERC20(address(fxrp)),
             "Deposit Vault",
@@ -82,15 +82,15 @@ contract XrplControlledWalletTest is Test {
         masterAccountController = MasterAccountController(
             address(masterAccountControllerProxy)
         );
-        xrplAccount1 = "xrplAccount1";
-        xrplAccount2 = "xrplAccount2";
+        xrplAddress1 = "xrplAddress1";
+        xrplAddress2 = "xrplAddress2";
     }
 
     function test() public {
         IPayment.Proof memory proof;
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.responseBody.sourceAddressHash = keccak256(
-            abi.encodePacked(xrplAccount1)
+            abi.encodePacked(xrplAddress1)
         );
         proof.data.requestBody.transactionId = bytes32("tx1");
         proof
@@ -100,7 +100,7 @@ contract XrplControlledWalletTest is Test {
         _mockVerifyPayment(true);
 
         assertEq(
-            address(masterAccountController.getPersonalAccount(xrplAccount1)),
+            address(masterAccountController.getPersonalAccount(xrplAddress1)),
             address(PersonalAccount(payable(address(0))))
         );
         vm.prank(operator);
@@ -110,21 +110,21 @@ contract XrplControlledWalletTest is Test {
             address(depositVault),
             12345
         );
-        masterAccountController.executeTransaction(proof, xrplAccount1);
+        masterAccountController.executeTransaction(proof, xrplAddress1);
 
         // PersonalAccount should be created
         assertNotEq(
-            address(masterAccountController.getPersonalAccount(xrplAccount1)),
+            address(masterAccountController.getPersonalAccount(xrplAddress1)),
             address(PersonalAccount(payable(address(0))))
         );
         personalAccount1 = masterAccountController.getPersonalAccount(
-            xrplAccount1
+            xrplAddress1
         );
         assertEq(
             personalAccount1.implementation(),
             address(personalAccountImpl)
         );
-        assertEq(personalAccount1.xrplOwner(), xrplAccount1);
+        assertEq(personalAccount1.xrplOwner(), xrplAddress1);
         assertEq(
             personalAccount1.controllerAddress(),
             address(masterAccountController)
@@ -146,7 +146,7 @@ contract XrplControlledWalletTest is Test {
             address(newMasterAccountControllerImpl)
         );
         assertEq(
-            address(masterAccountController.getPersonalAccount(xrplAccount1)),
+            address(masterAccountController.getPersonalAccount(xrplAddress1)),
             address(personalAccount1)
         );
         assertEq(
@@ -159,7 +159,7 @@ contract XrplControlledWalletTest is Test {
         // create new transaction; personal account should not be upgraded
         proof.data.requestBody.transactionId = bytes32("tx2");
         vm.prank(operator);
-        masterAccountController.executeTransaction(proof, xrplAccount1);
+        masterAccountController.executeTransaction(proof, xrplAddress1);
         assertEq(
             personalAccount1.implementation(),
             address(personalAccountImpl)
@@ -177,16 +177,16 @@ contract XrplControlledWalletTest is Test {
         // create new transaction; personal account should be upgraded
         proof.data.requestBody.transactionId = bytes32("tx3");
         vm.prank(operator);
-        masterAccountController.executeTransaction(proof, xrplAccount1);
+        masterAccountController.executeTransaction(proof, xrplAddress1);
         assertEq(
-            address(masterAccountController.getPersonalAccount(xrplAccount1)),
+            address(masterAccountController.getPersonalAccount(xrplAddress1)),
             address(personalAccount1)
         );
         assertEq(
             personalAccount1.implementation(),
             address(newPersonalAccountImpl)
         );
-        assertEq(personalAccount1.xrplOwner(), xrplAccount1);
+        assertEq(personalAccount1.xrplOwner(), xrplAddress1);
         assertEq(
             personalAccount1.controllerAddress(),
             address(masterAccountController)

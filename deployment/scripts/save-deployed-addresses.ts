@@ -31,8 +31,8 @@ lines.forEach((line: string) => {
 if (network === "unknown") {
   throw new Error("Network name not found in output.");
 }
-
 fs.mkdirSync("deployment/deploys", { recursive: true });
-fs.writeFileSync(`deployment/deploys/${network}.json`, JSON.stringify(contracts, null, 2));
+const isMock = process.argv[2] === "mock";
+fs.writeFileSync(`deployment/deploys/${network}${isMock ? "_mock" : ""}.json`, JSON.stringify(contracts, null, 2));
 fs.unlinkSync(outputPath);
-console.log(`Saved deployed addresses to deployment/deploys/${network}.json`);
+console.log(`Saved deployed addresses to deployment/deploys/${network}${isMock ? "_mock" : ""}.json`);

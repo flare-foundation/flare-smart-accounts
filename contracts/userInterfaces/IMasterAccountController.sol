@@ -49,13 +49,13 @@ interface IMasterAccountController {
     error RewardEpochIdZero();
 
     /**
-     * @notice Execute an XRPL instruction for a given Ripple account.
+     * @notice Execute an XRPL instruction for a given XRPL address.
      * @param _proof Proof of XRPL transaction.
-     * @param _rippleAccount The XRPL account requesting execution.
+     * @param _xrplAddress The XRPL address requesting execution.
      */
     function executeTransaction(
         IPayment.Proof calldata _proof,
-        string calldata _rippleAccount
+        string calldata _xrplAddress
     ) external payable;
 
     /**

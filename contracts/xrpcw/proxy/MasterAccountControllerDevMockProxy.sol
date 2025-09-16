@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.27;
+
+import {ERC1967Proxy} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {MasterAccountControllerDevMock} from "../implementation/MasterAccountControllerDevMock.sol";
+import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
+
+contract MasterAccountControllerDevMockProxy is ERC1967Proxy {
+    constructor(
+        address _implementationAddress,
+        IGovernanceSettings _governanceSettings,
+        address _initialGovernance,
+        address _depositVault,
+        address payable _executor,
+        uint256 _executorFee,
+        string memory _xrplProviderWallet,
+        address _operatorAddress,
+        uint256 _operatorExecutionWindowSeconds,
+        address _personalAccountImplementation
+    )
+        ERC1967Proxy(
+            _implementationAddress,
+            abi.encodeCall(
+                MasterAccountControllerDevMock.initialize,
+                (
+                    _governanceSettings,
+                    _initialGovernance,
+                    _depositVault,
+                    _executor,
+                    _executorFee,
+                    _xrplProviderWallet,
+                    _operatorAddress,
+                    _operatorExecutionWindowSeconds,
+                    _personalAccountImplementation
+                )
+            )
+        )
+    {}
+}

@@ -25,7 +25,7 @@ contract PersonalAccount is
     bool private initialised;
     /// @notice MasterAccountController contract address
     address public controllerAddress;
-    /// @notice Ripple address
+    /// @notice XRPL address
     string public xrplOwner;
 
     modifier onlyController() {
