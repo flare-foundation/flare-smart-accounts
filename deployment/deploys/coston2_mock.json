@@ -2,16 +2,16 @@
   {
     "name": "PersonalAccountImplementation",
     "contractName": "PersonalAccount.sol",
-    "address": "0x24A03B99f2f26F246Ca1CdF99B81A347Af6284ab"
+    "address": "0xA191B5D9DCBc855CE9Ea8950A69325dA7f623e4e"
   },
   {
     "name": "MasterAccountControllerDevMock",
     "contractName": "MasterAccountControllerDevMockProxy.sol",
-    "address": "0x787419810116b29fbB45a7E679Ae6c3dfCA9600b"
+    "address": "0x38d4C185B4844c062B462722BD632049F7C3C653"
   },
   {
     "name": "MasterAccountControllerDevMockImplementation",
     "contractName": "MasterAccountControllerDevMock.sol",
-    "address": "0xBB0a2A819C81948Fa6D5f1Fb47a3F01187386278"
+    "address": "0xE91DfAa83D0cf56EBF6176790865DCa93DDa3b6C"
   }
 ]
