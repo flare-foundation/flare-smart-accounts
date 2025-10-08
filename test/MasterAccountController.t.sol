@@ -26,8 +26,6 @@ contract MasterAccountControllerTest is Test {
     MasterAccountControllerProxy private masterAccountControllerProxy;
     PersonalAccount private personalAccountImpl;
     PersonalAccountProxy private personalAccountProxy;
-    IMasterAccountController.CustomInstruction[] public customInstruction;
-    SimpleExample public simpleExample;
 
     address private governance;
     address private executor;
@@ -85,163 +83,8 @@ contract MasterAccountControllerTest is Test {
         );
 
         xrplAddress1 = "xrplAddress1";
-
-        simpleExample = new SimpleExample();
-
-        customInstruction.push(
-            IMasterAccountController.CustomInstruction(
-                address(simpleExample),
-                1,
-                abi.encodeWithSignature("foo(uint256)", [uint256(1)])
-            )
-        );
     }
 
-    // solhint-disable-next-line func-name-mixedcase
-    function test_registerCustomInstruction() public {
-        masterAccountController.registerCustomInstruction(customInstruction);
-
-        uint256 callHash = masterAccountController.encodeCustomInstruction(
-            customInstruction
-        );
-        console2.log("callHash: ", callHash);
-        IMasterAccountController.CustomInstruction[]
-            memory storedCustomInstruction = (
-                masterAccountController.getCustomInstruction(callHash)
-            );
-
-        console2.log("storedCustomInstruction: ");
-        console2.log("  contract:", storedCustomInstruction[0].targetContract);
-        console2.log("  value:", storedCustomInstruction[0].value);
-        console2.log("customInstruction: ");
-        console2.log("  contract:", customInstruction[0].targetContract);
-        console2.log("  value:", customInstruction[0].value);
-
-        console2.log("hashes of all custom instructions: ");
-        for (
-            uint256 i = 0;
-            i < masterAccountController.getAllCallHashes().length;
-            i++
-        ) {
-            console2.log("  ", masterAccountController.allCallHashes(i));
-        }
-        // Custom instruction should be stored under the right hash
-        assertEq(
-            abi.encode(storedCustomInstruction),
-            abi.encode(customInstruction)
-        );
-    }
-
-    // solhint-disable-next-line func-name-mixedcase
-    function test_executeCustomInstruction() public {
-        _mockVerifyPayment(true);
-        startHoax(operator);
-
-        _createPersonalAccount();
-
-        address smartAddress = address(
-            masterAccountController.getPersonalAccount(xrplAddress1)
-        );
-        deal(smartAddress, 100 ether);
-
-        _executeCustomInstruction();
-
-        console2.log("smartAddress: ", address(smartAddress));
-        console2.log("smartAddress balance: ", address(smartAddress).balance);
-
-        // The state of the example contract should be updated by the master account controller
-        assertEq(simpleExample.map(1), customInstruction[0].value);
-    }
-
-    // We need to perform some execute transaction call, to create the account, so we can transfer funds to it
-    function _createPersonalAccount() private {
-        console2.log("createPersonalAccount");
-        console2.log("");
-        IMasterAccountController.CustomInstruction[]
-            memory _customInstruction = new IMasterAccountController.CustomInstruction[](
-                1
-            );
-        _customInstruction[0] = IMasterAccountController.CustomInstruction(
-            address(simpleExample),
-            0,
-            abi.encodeWithSignature("bar(uint256)", [1])
-        );
-        masterAccountController.registerCustomInstruction(_customInstruction);
-        uint256 callHash = masterAccountController.encodeCustomInstruction(
-            _customInstruction
-        );
-        console2.log("callHash: ", callHash);
-
-        IPayment.Proof memory _proof;
-        _proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
-        _proof.data.responseBody.sourceAddressHash = keccak256(
-            abi.encodePacked(xrplAddress1)
-        );
-        _proof.data.requestBody.transactionId = bytes32("tx1");
-        _proof
-            .data
-            .responseBody
-            .standardPaymentReference = _encodePaymentReference(callHash);
-        console2.log("paymentReference: ");
-        console2.logBytes32(_proof.data.responseBody.standardPaymentReference);
-        console2.log("");
-        console2.log(
-            "instruction id:",
-            (uint256(_proof.data.responseBody.standardPaymentReference) >>
-                248) & 0xFF
-        );
-        console2.log(
-            "remainder: ",
-            uint256(_proof.data.responseBody.standardPaymentReference) &
-                ((uint256(1) << 248) - 1)
-        );
-
-        masterAccountController.executeTransaction(_proof, xrplAddress1);
-    }
-
-    function _executeCustomInstruction() private {
-        console2.log("executeCustomInstruction");
-        console2.log("");
-        masterAccountController.registerCustomInstruction(customInstruction);
-        uint256 callHash = masterAccountController.encodeCustomInstruction(
-            customInstruction
-        );
-        console2.log("callHash: ", callHash);
-
-        IPayment.Proof memory proof;
-        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
-        proof.data.responseBody.sourceAddressHash = keccak256(
-            abi.encodePacked(xrplAddress1)
-        );
-        proof.data.requestBody.transactionId = bytes32("tx1");
-        proof
-            .data
-            .responseBody
-            .standardPaymentReference = _encodePaymentReference(callHash);
-        console2.log("paymentReference: ");
-        console2.logBytes32(proof.data.responseBody.standardPaymentReference);
-        console2.log("");
-        console2.log(
-            "instruction id:",
-            (uint256(proof.data.responseBody.standardPaymentReference) >> 248) &
-                0xFF
-        );
-        console2.log(
-            "remainder: ",
-            uint256(proof.data.responseBody.standardPaymentReference) &
-                ((uint256(1) << 248) - 1)
-        );
-
-        proof.data.requestBody.transactionId = bytes32("tx2");
-        masterAccountController.executeTransaction(proof, xrplAddress1);
-
-        console2.log("simpleExample.map(1): ", simpleExample.map(1));
-        console2.log("customInstruction._value: ", customInstruction[0].value);
-        console2.log("allKeys: ");
-        for (uint256 i = 0; i < simpleExample.getAllKeys().length; i++) {
-            console2.log("  ", simpleExample.allKeys(i));
-        }
-    }
 
     function _mockVerifyPayment(bool _result) private {
         vm.mockCall(
@@ -267,24 +110,3 @@ contract MasterAccountControllerTest is Test {
     }
 }
 
-contract SimpleExample {
-    mapping(uint256 => uint256) public map;
-    uint256[] public allKeys;
-
-    function foo(uint256 a) public payable {
-        require(a > 0, "a must be greater than 0");
-        require(msg.value > 0, "msg.value must be greater than 0");
-        if (map[a] == 0) {
-            allKeys.push(a);
-        }
-        map[a] = map[a] + msg.value;
-    }
-
-    function bar(uint256 a) public pure returns (bool) {
-        return a == 1;
-    }
-
-    function getAllKeys() public view returns (uint256[] memory) {
-        return allKeys;
-    }
-}

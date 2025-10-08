@@ -10,7 +10,7 @@ interface IPersonalAccount {
     event Withdrawn(address vault, uint256 amount, uint256 shares);
     event WithdrawalClaimed(
         address vault,
-        uint256 rewardEpochId,
+        uint256 period,
         uint256 amount
     );
     event Approved(address fxrp, address vault, uint256 amount);
@@ -35,4 +35,22 @@ interface IPersonalAccount {
     error ApprovalFailed();
     error FxrpAssetManagerNotSet();
     error CustomInstructionCallFailed();
+
+    /**
+     * @notice Returns the XRPL owner address associated with this personal account.
+     * @return The XRPL owner address
+     */
+    function xrplOwner() external view returns (string memory);
+
+    /**
+     * @notice Returns the controller address that manages this personal account.
+     * @return The controller address
+     */
+    function controllerAddress() external view returns (address);
+
+    /**
+     * @notice Returns implementation address of the personal account.
+     * @return The implementation address
+     */
+    function implementation() external view returns (address);
 }

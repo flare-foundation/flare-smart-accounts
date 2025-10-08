@@ -2,7 +2,7 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {PersonalAccount} from "../xrpcw/implementation/PersonalAccount.sol";
+import {IPersonalAccount} from "./IPersonalAccount.sol";
 
 /**
  * @title IMasterAccountController
@@ -10,24 +10,26 @@ import {PersonalAccount} from "../xrpcw/implementation/PersonalAccount.sol";
  which manages personal accounts and executes XRPL instructions.
  */
 interface IMasterAccountController {
-    struct CustomInstruction {
-        address targetContract;
-        uint256 value;
-        bytes data;
-    }
 
     event PersonalAccountImplementationSet(address newImplementation);
     event OperatorExecutionWindowSecondsSet(uint256 newWindowSeconds);
     event PersonalAccountCreated(string xrplOwner, address personalAccount);
     event ExecutorFeeSet(uint256 executorFee);
+    event CollateralReserved(
+        address indexed personalAccount,
+        string indexed xrplOwner,
+        uint256 indexed collateralReservationId,
+        uint256 lots,
+        address agentVault,
+        bytes32 transactionId
+    );
     event InstructionExecuted(
         address indexed personalAccount,
         string indexed xrplOwner,
         uint256 indexed instructionId,
-        uint256 paymentReference,
+        bytes32 paymentReference,
         bytes32 transactionId
     );
-    event CustomInstructionRegistered(uint256 callHash);
 
     error InvalidDepositVault();
     error InvalidExecutor();
@@ -35,7 +37,8 @@ interface IMasterAccountController {
     error InvalidOperatorAddress();
     error InvalidOperatorExecutionWindowSeconds();
     error InvalidPersonalAccountImplementation();
-    error OnlyOperatorCanExecute();
+    error OnlyOperator();
+    error InvalidTransactionId();
     error InvalidTransactionProof();
     error InvalidReceivingAddressHash();
     error InvalidTransactionStatus();
@@ -43,10 +46,43 @@ interface IMasterAccountController {
     error TransactionAlreadyExecuted();
     error InvalidInstructionId(uint256 instructionId);
     error InvalidExecutorFee();
-    error AmountZero();
-    error LotsZero();
-    error InvalidAgentVaultAddress();
+    error AmountOrLotsZero();
     error RewardEpochIdZero();
+    error UnknownCollateralReservationId();
+    error InvalidCollateralReservationId();
+    error InvalidAgentVaultAddress();
+    error InvalidDepositVaultAddress();
+    error FxrpAssetManagerNotSet();
+    error InvalidAmount();
+    error InvalidMinter();
+
+    /**
+     * @notice Reserve collateral for minting operation.
+     * @param _xrplAddress The XRPL address requesting the collateral reservation.
+     * @param _paymentReference The payment reference associated with the request.
+     * @param _transactionId The unique transaction ID for tracking.
+     * @return _collateralReservationId The ID of the collateral reservation.
+     */
+    function reserveCollateral(
+        string calldata _xrplAddress,
+        bytes32 _paymentReference,
+        bytes32 _transactionId
+    )
+        external payable
+        returns (uint256 _collateralReservationId);
+
+    /**
+     * @notice Execute deposit after successful minting for _collateralReservationId.
+     * @param _collateralReservationId The ID of the collateral reservation request returned by `reserveCollateral` call.
+     * @param _proof Proof of XRPL transaction.
+     * @param _xrplAddress The XRPL address requesting execution.
+     */
+    function executeDepositAfterMinting(
+        uint256 _collateralReservationId,
+        IPayment.Proof calldata _proof,
+        string calldata _xrplAddress
+    )
+        external;
 
     /**
      * @notice Execute an XRPL instruction for a given XRPL address.
@@ -56,34 +92,28 @@ interface IMasterAccountController {
     function executeTransaction(
         IPayment.Proof calldata _proof,
         string calldata _xrplAddress
-    ) external payable;
+    )
+        external payable;
+
+    /**
+     * @notice Create a PersonalAccount for a given XRPL owner, if already exists returns the existing one.
+     * @param _xrplOwner The XRPL address of the owner.
+     * @return The newly created PersonalAccount contract.
+     */
+    function createPersonalAccount(
+        string calldata _xrplOwner
+    )
+        external
+        returns (IPersonalAccount);
 
     /**
      * @notice Get the PersonalAccount contract for a given XRPL owner.
      * @param _xrplOwner The XRPL address of the owner.
-     * @return The PersonalAccount contract associated with the XRPL owner.
+     * @return The PersonalAccount contract associated with the XRPL owner or address(0) if none exists.
      */
     function getPersonalAccount(
         string calldata _xrplOwner
-    ) external returns (PersonalAccount);
-
-    /**
-     * @notice  Returns the first 31 bytes of the keccak256 hash of the custom instruction.
-     * @param   _customInstruction  Custom instruction.
-     * @return  31 bytes of the keccak256 hash of the custom instruction.
-     */
-    function encodeCustomInstruction(
-        CustomInstruction[] memory _customInstruction
-    ) external returns (uint256);
-
-    /**
-     * @notice  Registers a custom instruction.
-     * @param   _customInstruction  Custom instruction.
-     * @return  31 bytes of the keccak256 hash of the custom instruction.
-     * The custom instruction is stored in a mapping from the first 31 bytes of the keccak256 hash of the custom
-     * instruction to the custom instruction.
-     */
-    function registerCustomInstruction(
-        CustomInstruction[] memory _customInstruction
-    ) external returns (uint256);
+    )
+        external view
+        returns (IPersonalAccount);
 }

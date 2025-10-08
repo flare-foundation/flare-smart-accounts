@@ -35,8 +35,6 @@ contract PersonalAccount is
 
     constructor() {}
 
-    receive() external payable {}
-
     /**
      * Proxyable initialization method. Can be called only once, from the proxy constructor
      */
@@ -62,11 +60,11 @@ contract PersonalAccount is
         require(IERC20(fxrp).approve(_vault, _amount), ApprovalFailed());
         emit Approved(fxrp, _vault, _amount);
 
-        uint256 shares = IFirelightVault(_vault).deposit(
+        uint256 actualAmount = IFirelightVault(_vault).deposit(
             _amount,
             address(this)
         );
-        emit Deposited(_vault, _amount, shares);
+        emit Deposited(_vault, _amount, actualAmount);
     }
 
     /// @inheritdoc IIPersonalAccount
@@ -91,16 +89,6 @@ contract PersonalAccount is
     }
 
     /// @inheritdoc IIPersonalAccount
-    function approve(
-        uint256 _amount,
-        address _fxrp,
-        address _vault
-    ) external onlyController nonReentrant {
-        require(IERC20(_fxrp).approve(_vault, _amount), ApprovalFailed());
-        emit Approved(_fxrp, _vault, _amount);
-    }
-
-    /// @inheritdoc IIPersonalAccount
     function redeem(
         uint256 _lots,
         address payable _executor,
@@ -122,7 +110,7 @@ contract PersonalAccount is
         address _agentVault,
         address payable _executor,
         uint256 _executorFee
-    ) external payable onlyController nonReentrant {
+    ) external payable onlyController nonReentrant returns (uint256 _collateralReservationId) {
         IAssetManager assetManager = _getFxrpAssetManager();
 
         AgentInfo.Info memory agentInfo = assetManager.getAgentInfo(
@@ -140,28 +128,17 @@ contract PersonalAccount is
             msg.value >= totalFee,
             InsufficientFundsForCollateralReservation(collateralReservationFee)
         );
-        uint256 reservationId = assetManager.reserveCollateral{
+        _collateralReservationId = assetManager.reserveCollateral{
             value: collateralReservationFee + _executorFee
         }(_agentVault, _lots, agentInfo.feeBIPS, _executor);
-        assert(reservationId > 0);
+        assert(_collateralReservationId > 0);
         emit CollateralReserved(
             _lots,
             _agentVault,
             _executor,
             _executorFee,
-            reservationId
+            _collateralReservationId
         );
-    }
-
-    function custom(
-        IMasterAccountController.CustomInstruction[] memory customInstruction
-    ) external onlyController nonReentrant {
-        for (uint256 i = 0; i < customInstruction.length; i++) {
-            (bool success, ) = customInstruction[i].targetContract.call{
-                value: customInstruction[i].value
-            }(customInstruction[i].data);
-            require(success, CustomInstructionCallFailed());
-        }
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
@@ -176,7 +153,7 @@ contract PersonalAccount is
     function upgradeToAndCall(
         address newImplementation,
         bytes memory data
-    ) public payable override onlyProxy onlyController {
+    ) public payable override(UUPSUpgradeable, IIPersonalAccount) onlyProxy onlyController {
         super.upgradeToAndCall(newImplementation, data);
     }
 

@@ -11,6 +11,7 @@ import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerificati
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {MasterAccountControllerProxy} from "../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
 import {PersonalAccount} from "../contracts/xrpcw/implementation/PersonalAccount.sol";
+import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {PersonalAccountProxy} from "../contracts/xrpcw/proxy/PersonalAccountProxy.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
@@ -23,8 +24,8 @@ contract XrplControlledWalletTest is Test {
     MasterAccountControllerProxy private masterAccountControllerProxy;
     PersonalAccount private personalAccountImpl;
     PersonalAccountProxy private personalAccountProxy;
-    PersonalAccount private personalAccount1;
-    PersonalAccount private personalAccount2;
+    IPersonalAccount private personalAccount1;
+    IPersonalAccount private personalAccount2;
 
     address private governance;
     address private executor;

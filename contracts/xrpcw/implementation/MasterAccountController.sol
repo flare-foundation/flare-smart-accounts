@@ -2,8 +2,9 @@
 pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
+import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {PersonalAccount} from "./PersonalAccount.sol";
+import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 import {GovernedBase} from "../../governance/implementation/GovernedBase.sol";
@@ -12,7 +13,25 @@ import {GovernedProxyImplementation} from "../../governance/implementation/Gover
 import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
 import {IFdcVerification} from "flare-periphery/src/flare/IFdcVerification.sol";
 import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
+import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 import {IFirelightVault} from "../interface/IFirelightVault.sol";
+
+import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
+
+// payment reference format (32 bytes):
+// bytes 00: instruction id
+    // 00: collateral reservation
+    // 01: redeem
+    // 10: deposit
+    // 11: withdraw
+    // 12: claim withdraw
+    // 20: collateral reservation and deposit
+    // 21: claim withdraw and redeem
+// bytes 01-16: uint128 -> amount/lots
+// bytes 17-18: uint16 -> agent vault address id
+// bytes 19-20: uint16 -> deposit vault address id
+// bytes 21-23: uint24 -> period
+// bytes 24-31: future use
 
 /**
  * @title   MasterAccountController contract
@@ -23,37 +42,31 @@ contract MasterAccountController is
     UUPSUpgradeable,
     GovernedProxyImplementation
 {
-    uint256[] public allCallHashes;
-    /// @notice Mapping from PersonalAccount address to XRPL address
-    mapping(address personalAccount => string xrplAddress)
-        public personalAccountToXrpl;
     /// @notice The minting executor.
     address payable public executor;
     /// @notice Executor fee for reserveCollateral (in wei)
     uint256 public executorFee;
-    /// @notice Deposit vault
-    address public depositVault;
-    /// @notice FXRP address
-    address public fxrp;
     /// @notice XRPL provider wallet address
     string public xrplProviderWallet;
     /// @notice XRPL provider wallet hash
     bytes32 public xrplProviderWalletHash;
     /// @notice Operator address
     address public operatorAddress;
-    /// @notice PersonalAccount implementation address
-    address public personalAccountImplementation;
     /// @notice Time window (in seconds) for operator-only execution after XRPL transaction (default: 10 minutes)
     uint256 public operatorExecutionWindowSeconds;
+    /// @notice PersonalAccount implementation address
+    address public personalAccountImplementation;
 
     /// Mapping from XRPL address to Personal Account
-    mapping(string xrplAddress => PersonalAccount) private personalAccounts;
-    /// @notice Mapping from hashed XRPL address to XRPL address
-    mapping(bytes32 xrplAddressHash => string) public hashToAccount;
+    mapping(string xrplAddress => IIPersonalAccount) private personalAccounts;
     /// @notice Indicates if payment instruction has already been executed.
     mapping(bytes32 transactionId => bool) public usedPaymentHashes;
-    /// @notice Mapping that stores custom instructions
-    mapping(uint256 callHash => CustomInstruction[]) public customInstructions;
+    /// @notice Mapping from collateral reservation ID to XRPL transaction ID
+    mapping(uint256 collateralReservationId => bytes32 transactionId) public collateralReservationIdToTransactionId;
+    /// @notice Mapping from agent vault ID to agent vault address
+    mapping(uint256 agentVaultId => address agentVaultAddress) public agentVaults;
+    /// @notice Mapping from deposit vault ID to deposit vault address
+    mapping(uint256 vaultId => address depositVaultAddress) public depositVaults;
 
     constructor() {}
 
@@ -74,33 +87,126 @@ contract MasterAccountController is
     ) external virtual {
         require(_depositVault != address(0), InvalidDepositVault());
         require(_executor != address(0), InvalidExecutor());
-        require(
-            bytes(_xrplProviderWallet).length > 0,
-            InvalidXrplProviderWallet()
-        );
+        require(bytes(_xrplProviderWallet).length > 0, InvalidXrplProviderWallet());
         require(_operatorAddress != address(0), InvalidOperatorAddress());
-        require(
-            _personalAccountImplementation != address(0),
-            InvalidPersonalAccountImplementation()
-        );
+        require(_personalAccountImplementation != address(0), InvalidPersonalAccountImplementation());
         require(_executorFee > 0, InvalidExecutorFee());
 
         GovernedBase.initialise(_governanceSettings, _initialGovernance);
-        depositVault = _depositVault;
-        fxrp = IFirelightVault(_depositVault).asset();
+        depositVaults[0] = _depositVault; // TODO
         executor = _executor;
         xrplProviderWalletHash = keccak256(
             abi.encodePacked(_xrplProviderWallet)
         );
         xrplProviderWallet = _xrplProviderWallet;
         operatorAddress = _operatorAddress;
-        personalAccountImplementation = _personalAccountImplementation;
         operatorExecutionWindowSeconds = _operatorExecutionWindowSeconds;
+        personalAccountImplementation = _personalAccountImplementation;
         executorFee = _executorFee;
         emit PersonalAccountImplementationSet(_personalAccountImplementation);
         emit OperatorExecutionWindowSecondsSet(_operatorExecutionWindowSeconds);
         emit ExecutorFeeSet(_executorFee);
         // TODO should we have set of operators?
+
+        // TODO
+        // set up agent vaults - there are <= 10 for now, can be extended in the future
+        (address[] memory availableAgentVaults, uint256 totalLength) =
+            _getAssetManager().getAvailableAgentsList(0, 100);
+        require(totalLength <= 100, "Too many agent vaults");
+        for (uint256 i = 0; i < availableAgentVaults.length; i++) {
+            agentVaults[i] = availableAgentVaults[i];
+        }
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
+    function reserveCollateral(
+        string calldata _xrplAddress,
+        bytes32 _paymentReference,
+        bytes32 _transactionId
+    )
+        external payable
+        returns (uint256 _collateralReservationId)
+    {
+        // check instruction id
+        uint256 instructionId = _getInstructionId(_paymentReference);
+        require(instructionId == 0 || instructionId == 20, InvalidInstructionId(instructionId));
+        // check transaction id
+        require(_transactionId != bytes32(0), InvalidTransactionId());
+        // create or get existing Personal Account for the XRPL address
+        IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
+        // reserve collateral
+        uint256 lots = _getAmountOrLots(_paymentReference);
+        address agentVault = _getAgentVaultAddress(_paymentReference);
+        _collateralReservationId = personalAccount.reserveCollateral{value: msg.value}(
+            lots,
+            agentVault,
+            executor,
+            executorFee
+        );
+        // set mapping from collateral reservation id to transaction id
+        collateralReservationIdToTransactionId[_collateralReservationId] = _transactionId;
+        // emit event
+        emit CollateralReserved(
+            address(personalAccount),
+            _xrplAddress,
+            _collateralReservationId,
+            lots,
+            agentVault,
+            _transactionId
+        );
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
+    function executeDepositAfterMinting(
+        uint256 _collateralReservationId,
+        IPayment.Proof calldata _proof,
+        string calldata _xrplAddress
+    )
+        external
+    {
+        // check operator-only window
+        _checkOperatorOnlyWindow(_proof.data.responseBody.blockTimestamp);
+
+        // check instruction id
+        uint256 instructionId = _getInstructionId(_proof.data.responseBody.standardPaymentReference);
+        require(instructionId == 20, InvalidInstructionId(instructionId));
+
+        // check that crtId and txId match
+        bytes32 transactionId = _proof.data.requestBody.transactionId;
+        require(
+            transactionId != bytes32(0) &&
+            collateralReservationIdToTransactionId[_collateralReservationId] == transactionId,
+            UnknownCollateralReservationId()
+        );
+
+        // check if minting was successful
+        CollateralReservationInfo.Data memory reservationInfo =
+            _getAssetManager().collateralReservationInfo(_collateralReservationId);
+        require(
+            reservationInfo.status == CollateralReservationInfo.Status.SUCCESSFUL,
+            InvalidCollateralReservationId()
+        );
+
+        // verify payment proof
+        _verifyPayment(_proof, _xrplAddress);
+        // check that minter and amount match
+        IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
+        require(address(personalAccount) == reservationInfo.minter, InvalidMinter());
+        uint256 lots = _getAmountOrLots(_proof.data.responseBody.standardPaymentReference);
+        uint256 amount = _lotsToAmount(lots);
+        // could revert if lot size changes between minting and deposit, but very unlikely
+        // user should call deposit in that case
+        require(amount == reservationInfo.valueUBA, InvalidAmount());
+        // mark transaction as used
+        usedPaymentHashes[transactionId] = true;
+
+        // execute deposit
+        address depositVault = _getDepositVaultAddress(_proof.data.responseBody.standardPaymentReference);
+        personalAccount.deposit(amount, depositVault);
     }
 
     // TODO should we use hashes of addresses instead of string addresses?
@@ -110,63 +216,23 @@ contract MasterAccountController is
     function executeTransaction(
         IPayment.Proof calldata _proof,
         string calldata _xrplAddress
-    ) external payable {
-        if (
-            block.timestamp <
-            _proof.data.responseBody.blockTimestamp +
-                operatorExecutionWindowSeconds
-        ) {
-            require(msg.sender == operatorAddress, OnlyOperatorCanExecute());
-        }
+    )
+        external payable
+    {
+        // check operator-only window
+        _checkOperatorOnlyWindow(_proof.data.responseBody.blockTimestamp);
 
-        // FDC verification
-        require(
-            _proof.data.responseBody.status == 0,
-            InvalidTransactionStatus()
-        );
-
-        require(
-            IFdcVerification(
-                ContractRegistry.getContractAddressByName("FdcVerification")
-            ).verifyPayment(_proof),
-            InvalidTransactionProof()
-        );
-        require(
-            _proof.data.responseBody.receivingAddressHash ==
-                xrplProviderWalletHash,
-            InvalidReceivingAddressHash()
-        );
-        require(
-            _proof.data.responseBody.sourceAddressHash ==
-                keccak256(abi.encodePacked(_xrplAddress)),
-            MismatchingSourceAndXrplAddr()
-        );
-        require(
-            !usedPaymentHashes[_proof.data.requestBody.transactionId],
-            TransactionAlreadyExecuted()
-        );
-
-        // hashToAccount[
-        //     _proof.data.responseBody.sourceAddressHash
-        // ] = _xrplAddress;
+        // verify payment proof
+        _verifyPayment(_proof, _xrplAddress);
 
         // create or get existing Personal Account for the XRPL address
-        PersonalAccount personalAccount = _getOrCreatePersonalAccount(
-            _xrplAddress
-        );
-        // implementation upgrade
-        address personalAccountImpl = personalAccount.implementation();
-        if (personalAccountImpl != personalAccountImplementation) {
-            personalAccount.upgradeToAndCall(
-                personalAccountImplementation,
-                bytes("")
-            );
-        }
-
+        IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
+        // mark transaction as used
         usedPaymentHashes[_proof.data.requestBody.transactionId] = true;
 
+        // execute instruction
         _executeInstruction(
-            uint256(_proof.data.responseBody.standardPaymentReference),
+            _proof.data.responseBody.standardPaymentReference,
             personalAccount,
             _xrplAddress,
             _proof.data.requestBody.transactionId
@@ -216,17 +282,10 @@ contract MasterAccountController is
     /**
      * @inheritdoc IMasterAccountController
      */
-    function registerCustomInstruction(
-        CustomInstruction[] memory _customInstruction
-    ) external returns (uint256) {
-        uint256 callHash = encodeCustomInstruction(_customInstruction);
-        for (uint256 i = 0; i < _customInstruction.length; i++) {
-            customInstructions[callHash].push(_customInstruction[i]);
-        }
-        // customInstructions[callHash] = _customInstruction;
-        allCallHashes.push(callHash);
-        emit CustomInstructionRegistered(callHash);
-        return callHash;
+    function createPersonalAccount(
+        string calldata xrplOwner
+    ) external returns (IPersonalAccount) {
+        return _getOrCreatePersonalAccount(xrplOwner);
     }
 
     /**
@@ -234,18 +293,8 @@ contract MasterAccountController is
      */
     function getPersonalAccount(
         string calldata xrplOwner
-    ) external view returns (PersonalAccount) {
+    ) external view returns (IPersonalAccount) {
         return personalAccounts[xrplOwner];
-    }
-
-    function getCustomInstruction(
-        uint256 callHash
-    ) external view returns (CustomInstruction[] memory) {
-        return customInstructions[callHash];
-    }
-
-    function getAllCallHashes() external view returns (uint256[] memory) {
-        return allCallHashes;
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
@@ -268,14 +317,6 @@ contract MasterAccountController is
         super.upgradeToAndCall(_newImplementation, _data);
     }
 
-    /**
-     * @inheritdoc IMasterAccountController
-     */
-    function encodeCustomInstruction(
-        CustomInstruction[] memory _customInstruction
-    ) public pure returns (uint256) {
-        return uint256(keccak256(abi.encode(_customInstruction))) >> 8;
-    }
 
     /**
      * Unused. Present just to satisfy UUPSUpgradeable requirement.
@@ -285,69 +326,36 @@ contract MasterAccountController is
 
     /////////////////////////////// INTERNAL FUNCTIONS ///////////////////////////////
     function _executeInstruction(
-        uint256 _paymentReference,
-        PersonalAccount _personalAccount,
+        bytes32 _paymentReference,
+        IIPersonalAccount _personalAccount,
         string memory _xrplOwner,
         bytes32 _transactionId
     ) internal {
         // TODO _xrplOwner could maybe be removed from here. Probably not needed in events?
         // byte 0
-        uint256 instructionId = (_paymentReference >> 248) & 0xFF;
-        if (instructionId >= 1 && instructionId <= 3) {
-            // bytes 1-31: amount
-            uint256 amount = _paymentReference & ((uint256(1) << 248) - 1);
-            require(amount > 0, AmountZero());
-            if (instructionId == 1) {
+        uint256 instructionId = _getInstructionId(_paymentReference);
+        if (instructionId == 1) { // redeem
+            uint256 lots = _getAmountOrLots(_paymentReference);
+            _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+        } else if (instructionId == 10 || instructionId == 11) { // deposit or withdraw
+            uint256 amount = _getAmountOrLots(_paymentReference);
+            address depositVault = _getDepositVaultAddress(_paymentReference);
+            if (instructionId == 10) {
                 _personalAccount.deposit(amount, depositVault);
-            } else if (instructionId == 2) {
+            } else if (instructionId == 11) {
                 _personalAccount.withdraw(amount, depositVault);
-            } else if (instructionId == 3) {
-                _personalAccount.approve(amount, fxrp, depositVault);
             }
-        } else if (instructionId == 4) {
-            // bytes 1-11: lots
-            // bytes 12-31: empty (ignored)
-            uint88 lots = uint88(
-                (_paymentReference >> 160) & ((uint256(1) << 88) - 1)
-            );
-            require(lots > 0, LotsZero());
-            _personalAccount.redeem{value: msg.value}(
-                lots,
-                executor,
-                executorFee
-            );
-        } else if (instructionId == 5) {
-            // bytes 1-11: lots
-            // bytes 12-31: agent vault address
-            uint88 lots = uint88(
-                (_paymentReference >> 160) & ((uint256(1) << 88) - 1)
-            );
-            require(lots > 0, LotsZero());
-            address agentVault = address(
-                uint160(_paymentReference & ((uint256(1) << 160) - 1))
-            );
-            require(agentVault != address(0), InvalidAgentVaultAddress());
-            _personalAccount.reserveCollateral{value: msg.value}(
-                lots,
-                agentVault,
-                executor,
-                executorFee
-            );
-        } else if (instructionId == 6) {
-            // bytes 1-3: reward epoch id
-            // bytes 4-31: empty (ignored)
-            uint24 rewardEpochId = uint24(
-                (_paymentReference >> 224) & ((uint256(1) << 24) - 1)
-            );
-            require(rewardEpochId > 0, RewardEpochIdZero()); // TODO are 0 epoch ids possible?
-            _personalAccount.claimWithdraw(rewardEpochId, depositVault);
-        } else if (instructionId == 99) {
-            // shift left 30 bytes
-            uint256 callHash = _paymentReference & ((uint256(1) << 248) - 1);
-            CustomInstruction[] memory customInstruction = customInstructions[
-                callHash
-            ];
-            _personalAccount.custom(customInstruction);
+        } else if (instructionId == 12) { // claim withdraw
+            uint256 period = _getPeriod(_paymentReference);
+            address depositVault = _getDepositVaultAddress(_paymentReference);
+            _personalAccount.claimWithdraw(period, depositVault);
+        } else if (instructionId == 21) {
+            uint256 period = _getPeriod(_paymentReference);
+            address depositVault = _getDepositVaultAddress(_paymentReference);
+            uint256 lots = _getAmountOrLots(_paymentReference);
+            _personalAccount.claimWithdraw(period, depositVault);
+            // TODO swap
+            _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
         } else {
             revert InvalidInstructionId(instructionId);
         }
@@ -363,26 +371,103 @@ contract MasterAccountController is
 
     function _getOrCreatePersonalAccount(
         string memory _xrplOwner
-    ) internal returns (PersonalAccount) {
-        if (
-            personalAccounts[_xrplOwner] == PersonalAccount(payable(address(0)))
-        ) {
-            _createPersonalAccount(_xrplOwner);
+    ) internal returns (IIPersonalAccount _personalAccount) {
+        _personalAccount = personalAccounts[_xrplOwner];
+        if (address(_personalAccount) == address(0)) {
+            // create new Personal Account
+            _personalAccount = _createPersonalAccount(_xrplOwner);
+        } else {
+            // check for implementation upgrade
+            address personalAccountImpl = _personalAccount.implementation();
+            if (personalAccountImpl != personalAccountImplementation) {
+                _personalAccount.upgradeToAndCall(personalAccountImplementation, bytes(""));
+            }
         }
-        return personalAccounts[_xrplOwner];
     }
 
-    function _createPersonalAccount(string memory _xrplOwner) internal {
-        // hashToAccount[keccak256(abi.encodePacked(_xrplOwner))] = _xrplOwner;
+    function _createPersonalAccount(string memory _xrplOwner) internal returns (IIPersonalAccount _personalAccount) {
         PersonalAccountProxy personalAccountProxy = new PersonalAccountProxy(
             personalAccountImplementation,
             _xrplOwner,
             address(this)
         );
-        personalAccounts[_xrplOwner] = PersonalAccount(
-            payable(address(personalAccountProxy))
-        );
-        personalAccountToXrpl[address(personalAccountProxy)] = _xrplOwner;
+        _personalAccount = IIPersonalAccount(payable(address(personalAccountProxy)));
+        personalAccounts[_xrplOwner] = _personalAccount;
         emit PersonalAccountCreated(_xrplOwner, address(personalAccountProxy));
+    }
+
+    function _verifyPayment(IPayment.Proof calldata _proof, string memory _xrplAddress) internal view {
+        // FDC verification
+        require(
+            _proof.data.responseBody.status == 0,
+            InvalidTransactionStatus()
+        );
+
+        require(
+            IFdcVerification(
+                ContractRegistry.getContractAddressByName("FdcVerification")
+            ).verifyPayment(_proof),
+            InvalidTransactionProof()
+        );
+        require(
+            _proof.data.responseBody.receivingAddressHash == xrplProviderWalletHash,
+            InvalidReceivingAddressHash()
+        );
+        require(
+            _proof.data.responseBody.sourceAddressHash == keccak256(abi.encodePacked(_xrplAddress)),
+            MismatchingSourceAndXrplAddr()
+        );
+        require(
+            !usedPaymentHashes[_proof.data.requestBody.transactionId],
+            TransactionAlreadyExecuted()
+        );
+    }
+
+    function _getAssetManager() internal view returns (IAssetManager) {
+        address assetManagerAddress = ContractRegistry.getContractAddressByName("AssetManagerFXRP");
+        require(assetManagerAddress != address(0), FxrpAssetManagerNotSet());
+        IAssetManager assetManager = IAssetManager(assetManagerAddress);
+        return assetManager;
+    }
+
+    function _checkOperatorOnlyWindow(uint256 _timestamp) internal view {
+        if (block.timestamp < _timestamp + operatorExecutionWindowSeconds) {
+            require(msg.sender == operatorAddress, OnlyOperator());
+        }
+    }
+
+    function _lotsToAmount(uint256 _lots) internal view returns (uint256) {
+        uint256 lotSize = _getAssetManager().lotSize();
+        return _lots * lotSize;
+    }
+
+    function _getAgentVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
+        // bytes 17-18: agent vault address id
+        uint256 vaultId = (uint256(_paymentReference) >> 104) & ((uint256(1) << 16) - 1);
+        _vault = agentVaults[vaultId];
+        require(_vault != address(0), InvalidAgentVaultAddress());
+    }
+
+    function _getDepositVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
+        // bytes 19-20: vault address id
+        uint256 vaultId = (uint256(_paymentReference) >> 88) & ((uint256(1) << 16) - 1);
+        _vault = depositVaults[vaultId];
+        require(address(_vault) != address(0), InvalidDepositVaultAddress());
+    }
+
+    function _getInstructionId(bytes32 _paymentReference) internal pure returns (uint256) {
+        // byte 0: instruction id
+        return (uint256(_paymentReference) >> 248) & 0xFF;
+    }
+
+    function _getAmountOrLots(bytes32 _paymentReference) internal pure returns (uint256 _amountOrLots) {
+        // bytes 1-16: amount/lots
+        _amountOrLots = (uint256(_paymentReference) >> 120) & ((uint256(1) << 128) - 1);
+        require(_amountOrLots > 0, AmountOrLotsZero());
+    }
+
+    function _getPeriod(bytes32 _paymentReference) internal pure returns (uint256) {
+        // bytes 21-23: period
+        return (uint256(_paymentReference) >> 64) & ((uint256(1) << 24) - 1);
     }
 }
