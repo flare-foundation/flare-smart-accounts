@@ -73,7 +73,8 @@ interface IMasterAccountController {
 
     /**
      * @notice Execute deposit after successful minting for _collateralReservationId.
-     * @param _collateralReservationId The ID of the collateral reservation request returned by `reserveCollateral` call.
+     * @param _collateralReservationId The ID of the collateral reservation request returned
+       by `reserveCollateral` call.
      * @param _proof Proof of XRPL transaction.
      * @param _xrplAddress The XRPL address requesting execution.
      */
@@ -116,4 +117,16 @@ interface IMasterAccountController {
     )
         external view
         returns (IPersonalAccount);
+
+
+    /**
+     * @notice  Computes the address of a PersonalAccount for a given XRPL owner.
+     * @param   _xrplOwner  The XRPL address.
+     * @return  The predicted address of the PersonalAccount.
+     */
+    function computePersonalAccountAddress(
+        string calldata _xrplOwner
+    )
+        external view
+        returns (address);
 }

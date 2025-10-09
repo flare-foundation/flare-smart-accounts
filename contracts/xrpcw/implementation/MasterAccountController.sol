@@ -14,9 +14,8 @@ import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
 import {IFdcVerification} from "flare-periphery/src/flare/IFdcVerification.sol";
 import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
-import {IFirelightVault} from "../interface/IFirelightVault.sol";
-
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
+import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
 
 // payment reference format (32 bytes):
 // bytes 00: instruction id
@@ -56,6 +55,8 @@ contract MasterAccountController is
     uint256 public operatorExecutionWindowSeconds;
     /// @notice PersonalAccount implementation address
     address public personalAccountImplementation;
+    /// @notice Seed PersonalAccount implementation address (for create2 deployment)
+    address public seedPersonalAccountImpl;
 
     /// Mapping from XRPL address to Personal Account
     mapping(string xrplAddress => IIPersonalAccount) private personalAccounts;
@@ -103,6 +104,7 @@ contract MasterAccountController is
         operatorExecutionWindowSeconds = _operatorExecutionWindowSeconds;
         personalAccountImplementation = _personalAccountImplementation;
         executorFee = _executorFee;
+        seedPersonalAccountImpl = _personalAccountImplementation;
         emit PersonalAccountImplementationSet(_personalAccountImplementation);
         emit OperatorExecutionWindowSecondsSet(_operatorExecutionWindowSeconds);
         emit ExecutorFeeSet(_executorFee);
@@ -291,6 +293,15 @@ contract MasterAccountController is
     /**
      * @inheritdoc IMasterAccountController
      */
+    function computePersonalAccountAddress(
+        string calldata _xrplOwner
+    ) external view returns (address) {
+        return _computePersonalAccountAddress(_xrplOwner);
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
     function getPersonalAccount(
         string calldata xrplOwner
     ) external view returns (IPersonalAccount) {
@@ -386,14 +397,47 @@ contract MasterAccountController is
     }
 
     function _createPersonalAccount(string memory _xrplOwner) internal returns (IIPersonalAccount _personalAccount) {
-        PersonalAccountProxy personalAccountProxy = new PersonalAccountProxy(
-            personalAccountImplementation,
-            _xrplOwner,
-            address(this)
+        bytes32 salt = _generateSalt(_xrplOwner);
+        // deploy proxy with seed implementation for stable address
+        bytes memory bytecode = abi.encodePacked(
+            type(PersonalAccountProxy).creationCode,
+            abi.encode(
+                seedPersonalAccountImpl,
+                _xrplOwner,
+                address(this)
+            )
         );
-        _personalAccount = IIPersonalAccount(payable(address(personalAccountProxy)));
+        // deploy PersonalAccountProxy using CREATE2
+        address personalAccountProxyAddress = Create2.deploy(0, salt, bytecode);
+        _personalAccount = IIPersonalAccount(payable(personalAccountProxyAddress));
+
+        // immediately upgrade to current implementation
+        if (personalAccountImplementation != seedPersonalAccountImpl) {
+            _personalAccount.upgradeToAndCall(personalAccountImplementation, bytes(""));
+        }
+
         personalAccounts[_xrplOwner] = _personalAccount;
-        emit PersonalAccountCreated(_xrplOwner, address(personalAccountProxy));
+        emit PersonalAccountCreated(_xrplOwner, personalAccountProxyAddress);
+    }
+
+    /**
+     * @notice  Computes the address of a PersonalAccount contract for the given XRPL owner.
+     * @param   _xrplOwner  The XRPL address.
+     * @return  The computed address of the PersonalAccount contract.
+     */
+    function _computePersonalAccountAddress(
+        string memory _xrplOwner
+    ) internal view returns (address) {
+        bytes32 salt = _generateSalt(_xrplOwner);
+        bytes memory bytecode = abi.encodePacked(
+            type(PersonalAccountProxy).creationCode,
+            abi.encode(
+                seedPersonalAccountImpl,
+                _xrplOwner,
+                address(this)
+            )
+        );
+        return Create2.computeAddress(salt, keccak256(bytecode), address(this));
     }
 
     function _verifyPayment(IPayment.Proof calldata _proof, string memory _xrplAddress) internal view {
@@ -469,5 +513,14 @@ contract MasterAccountController is
     function _getPeriod(bytes32 _paymentReference) internal pure returns (uint256) {
         // bytes 21-23: period
         return (uint256(_paymentReference) >> 64) & ((uint256(1) << 24) - 1);
+    }
+
+    /**
+     * @notice  Generates a deterministic salt for CREATE2 deployment based on XRPL address.
+     * @param   _xrplOwner  The XRPL address.
+     * @return  The salt to be used for CREATE2 deployment.
+     */
+    function _generateSalt(string memory _xrplOwner) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(_xrplOwner));
     }
 }

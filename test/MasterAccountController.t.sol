@@ -40,6 +40,7 @@ contract MasterAccountControllerTest is Test {
     string private xrplAddress1;
     address private contractRegistryMock;
     address private fdcVerificationMock;
+    address private assetManagerFxrpMock;
 
     function setUp() public {
         governance = makeAddr("governance");
@@ -64,6 +65,11 @@ contract MasterAccountControllerTest is Test {
         personalAccountImpl = new PersonalAccount();
         personalAccountImplementation = address(personalAccountImpl);
 
+        _mockGetContractAddressByName(
+            "AssetManagerFXRP",
+            assetManagerFxrpMock
+        );
+
         // deploy the controlled wallet
         masterAccountControllerImpl = new MasterAccountController();
         masterAccountControllerProxy = new MasterAccountControllerProxy(
@@ -85,6 +91,16 @@ contract MasterAccountControllerTest is Test {
         xrplAddress1 = "xrplAddress1";
     }
 
+    function _mockGetContractAddressByName(string memory name, address addr) private {
+        vm.mockCall(
+            contractRegistryMock,
+            abi.encodeWithSelector(
+                IFlareContractRegistry.getContractAddressByName.selector,
+                name
+            ),
+            abi.encode(addr)
+        );
+    }
 
     function _mockVerifyPayment(bool _result) private {
         vm.mockCall(

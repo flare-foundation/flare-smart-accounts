@@ -39,6 +39,8 @@ contract XrplControlledWalletTest is Test {
     string private xrplAddress1;
     string private xrplAddress2;
     uint256 private operatorExecutionWindowSeconds;
+    address private assetManagerFxrpMock;
+    address private agent;
 
     address private contractRegistryMock;
     address private fdcVerificationMock;
@@ -61,10 +63,27 @@ contract XrplControlledWalletTest is Test {
         fdcVerificationMock = makeAddr("FDCVerificationMock");
         executorFee = 100;
         operatorExecutionWindowSeconds = 3600;
+        assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
+        agent = makeAddr("agent");
 
         // deploy the personal account implementation
         personalAccountImpl = new PersonalAccount();
         personalAccountImplementation = address(personalAccountImpl);
+
+        _mockGetContractAddressByName(
+            "AssetManagerFXRP",
+            assetManagerFxrpMock
+        );
+
+        address[] memory agents = new address[](1);
+        agents[0] = agent;
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                bytes4(keccak256("getAvailableAgentsList(uint256,uint256)")), 0, 100
+            ),
+            abi.encode(agents, 1)
+        );
 
         // deploy the controlled wallet
         masterAccountControllerImpl = new MasterAccountController();
@@ -97,8 +116,11 @@ contract XrplControlledWalletTest is Test {
         proof
             .data
             .responseBody
-            .standardPaymentReference = _encodePaymentReferenceAmount(3, 12345);
+            .standardPaymentReference = _encodePaymentReferenceDeposit(12345);
         _mockVerifyPayment(true);
+
+        address predictedAddress1 = masterAccountController.computePersonalAccountAddress(xrplAddress1);
+        fxrp.mint(predictedAddress1, 12345);
 
         assertEq(
             address(masterAccountController.getPersonalAccount(xrplAddress1)),
@@ -120,6 +142,11 @@ contract XrplControlledWalletTest is Test {
         );
         personalAccount1 = masterAccountController.getPersonalAccount(
             xrplAddress1
+        );
+        // check that the personal account was created at the expected address
+        assertEq(
+            address(masterAccountController.getPersonalAccount(xrplAddress1)),
+            predictedAddress1
         );
         assertEq(
             personalAccount1.implementation(),
@@ -159,12 +186,16 @@ contract XrplControlledWalletTest is Test {
         PersonalAccount newPersonalAccountImpl = new PersonalAccount();
         // create new transaction; personal account should not be upgraded
         proof.data.requestBody.transactionId = bytes32("tx2");
+        fxrp.mint(predictedAddress1, 12345);
         vm.prank(operator);
         masterAccountController.executeTransaction(proof, xrplAddress1);
         assertEq(
             personalAccount1.implementation(),
             address(personalAccountImpl)
         );
+
+        // compute address of personal account for xrplAddress2 before implementation change
+        address predictedAddress2 = masterAccountController.computePersonalAccountAddress(xrplAddress2);
 
         // update PersonalAccount implementation on MasterAccountController
         vm.prank(governance);
@@ -177,6 +208,7 @@ contract XrplControlledWalletTest is Test {
         );
         // create new transaction; personal account should be upgraded
         proof.data.requestBody.transactionId = bytes32("tx3");
+        fxrp.mint(predictedAddress1, 12345);
         vm.prank(operator);
         masterAccountController.executeTransaction(proof, xrplAddress1);
         assertEq(
@@ -190,6 +222,34 @@ contract XrplControlledWalletTest is Test {
         assertEq(personalAccount1.xrplOwner(), xrplAddress1);
         assertEq(
             personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
+
+        // execute transaction for xrplAddress2; new personal account should be created with new implementation
+        // and at the expected address
+        proof.data.requestBody.transactionId = bytes32("tx4");
+        proof.data.responseBody.sourceAddressHash = keccak256(
+            abi.encodePacked(xrplAddress2)
+        );
+        fxrp.mint(predictedAddress2, 12345);
+        vm.prank(operator);
+        masterAccountController.executeTransaction(proof, xrplAddress2);
+        personalAccount2 = masterAccountController.getPersonalAccount(
+            xrplAddress2
+        );
+        // check that the personal account was created at the expected address
+        assertEq(
+            address(masterAccountController.getPersonalAccount(xrplAddress2)),
+            predictedAddress2
+        );
+        // check implementation of the new personal account
+        assertEq(
+            personalAccount2.implementation(),
+            address(newPersonalAccountImpl)
+        );
+        assertEq(personalAccount2.xrplOwner(), xrplAddress2);
+        assertEq(
+            personalAccount2.controllerAddress(),
             address(masterAccountController)
         );
     }
@@ -211,15 +271,22 @@ contract XrplControlledWalletTest is Test {
         );
     }
 
-    function _encodePaymentReferenceAmount(
-        uint8 instructionId,
-        uint248 amount
-    ) private pure returns (bytes32) {
-        require(
-            instructionId >= 1 && instructionId <= 3,
-            "Invalid instructionId for deposit/withdrawal/approval"
+    function _mockGetContractAddressByName(string memory name, address addr) private {
+        vm.mockCall(
+            contractRegistryMock,
+            abi.encodeWithSelector(
+                IFlareContractRegistry.getContractAddressByName.selector,
+                name
+            ),
+            abi.encode(addr)
         );
-        return bytes32((uint256(instructionId) << 248) | amount);
+    }
+
+    function _encodePaymentReferenceDeposit(
+        uint128 amount
+    ) private pure returns (bytes32) {
+        // Place instructionId in the highest 8 bits, amount in the next 128 bits
+        return bytes32((uint256(10) << 248) | (uint256(amount) << 120));
     }
 
     function _encodePaymentReferenceRedeem(
@@ -232,19 +299,20 @@ contract XrplControlledWalletTest is Test {
     }
 
     function _encodePaymentReferenceReserve(
-        uint8 instructionId,
-        uint88 lots,
-        address agent // uint160
+        uint8 _instructionId,
+        uint88 _lots,
+        address _agent // uint160
     ) private pure returns (bytes32) {
         require(
-            instructionId == 5,
+            _instructionId == 5,
             "Invalid instructionId for collateral reservation"
         );
         return
             bytes32(
-                (uint256(instructionId) << 248) |
-                    (uint256(lots) << 160) |
-                    (uint256(uint160(agent)))
+                (uint256(_instructionId) << 248) |
+                    (uint256(_lots) << 160) |
+                    (uint256(uint160(_agent)))
             );
     }
+
 }
