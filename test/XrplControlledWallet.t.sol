@@ -133,7 +133,7 @@ contract XrplControlledWalletTest is Test {
             address(depositVault),
             12345
         );
-        masterAccountController.executeTransaction(proof, xrplAddress1);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
 
         // PersonalAccount should be created
         assertNotEq(
@@ -188,7 +188,7 @@ contract XrplControlledWalletTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx2");
         fxrp.mint(predictedAddress1, 12345);
         vm.prank(operator);
-        masterAccountController.executeTransaction(proof, xrplAddress1);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
         assertEq(
             personalAccount1.implementation(),
             address(personalAccountImpl)
@@ -210,7 +210,7 @@ contract XrplControlledWalletTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx3");
         fxrp.mint(predictedAddress1, 12345);
         vm.prank(operator);
-        masterAccountController.executeTransaction(proof, xrplAddress1);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
         assertEq(
             address(masterAccountController.getPersonalAccount(xrplAddress1)),
             address(personalAccount1)
@@ -233,7 +233,7 @@ contract XrplControlledWalletTest is Test {
         );
         fxrp.mint(predictedAddress2, 12345);
         vm.prank(operator);
-        masterAccountController.executeTransaction(proof, xrplAddress2);
+        masterAccountController.executeInstruction(proof, xrplAddress2);
         personalAccount2 = masterAccountController.getPersonalAccount(
             xrplAddress2
         );
@@ -258,8 +258,8 @@ contract XrplControlledWalletTest is Test {
         vm.mockCall(
             contractRegistryMock,
             abi.encodeWithSelector(
-                IFlareContractRegistry.getContractAddressByName.selector,
-                "FdcVerification"
+                IFlareContractRegistry.getContractAddressByHash.selector,
+                keccak256(abi.encode("FdcVerification"))
             ),
             abi.encode(fdcVerificationMock)
         );
@@ -285,34 +285,7 @@ contract XrplControlledWalletTest is Test {
     function _encodePaymentReferenceDeposit(
         uint128 amount
     ) private pure returns (bytes32) {
-        // Place instructionId in the highest 8 bits, amount in the next 128 bits
-        return bytes32((uint256(10) << 248) | (uint256(amount) << 120));
+        // Place instructionId in the highest 8 bits, skip wallet identifier and put amount in the next 128 bits
+        return bytes32((uint256(11) << 248) | (uint256(amount) << 112));
     }
-
-    function _encodePaymentReferenceRedeem(
-        uint8 instructionId,
-        uint88 lots
-    ) private pure returns (bytes32) {
-        require(instructionId == 4, "Invalid instructionId for redeem");
-        return
-            bytes32((uint256(instructionId) << 248) | (uint256(lots) << 160));
-    }
-
-    function _encodePaymentReferenceReserve(
-        uint8 _instructionId,
-        uint88 _lots,
-        address _agent // uint160
-    ) private pure returns (bytes32) {
-        require(
-            _instructionId == 5,
-            "Invalid instructionId for collateral reservation"
-        );
-        return
-            bytes32(
-                (uint256(_instructionId) << 248) |
-                    (uint256(_lots) << 160) |
-                    (uint256(uint160(_agent)))
-            );
-    }
-
 }

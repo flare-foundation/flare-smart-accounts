@@ -31,7 +31,7 @@ interface IMasterAccountController {
         bytes32 transactionId
     );
 
-    error InvalidDepositVault();
+    error InvalidVault();
     error InvalidExecutor();
     error InvalidXrplProviderWallet();
     error InvalidOperatorAddress();
@@ -47,11 +47,9 @@ interface IMasterAccountController {
     error InvalidInstructionId(uint256 instructionId);
     error InvalidExecutorFee();
     error AmountOrLotsZero();
-    error RewardEpochIdZero();
     error UnknownCollateralReservationId();
-    error InvalidCollateralReservationId();
-    error InvalidAgentVaultAddress();
-    error InvalidDepositVaultAddress();
+    error MintingNotCompleted();
+    error InvalidAgentVault();
     error FxrpAssetManagerNotSet();
     error InvalidAmount();
     error InvalidMinter();
@@ -90,18 +88,18 @@ interface IMasterAccountController {
      * @param _proof Proof of XRPL transaction.
      * @param _xrplAddress The XRPL address requesting execution.
      */
-    function executeTransaction(
+    function executeInstruction(
         IPayment.Proof calldata _proof,
         string calldata _xrplAddress
     )
         external payable;
 
     /**
-     * @notice Create a PersonalAccount for a given XRPL owner, if already exists returns the existing one.
+     * @notice Create or update PersonalAccount for a given XRPL owner.
      * @param _xrplOwner The XRPL address of the owner.
-     * @return The newly created PersonalAccount contract.
+     * @return The PersonalAccount contract associated with the XRPL owner.
      */
-    function createPersonalAccount(
+    function createOrUpdatePersonalAccount(
         string calldata _xrplOwner
     )
         external

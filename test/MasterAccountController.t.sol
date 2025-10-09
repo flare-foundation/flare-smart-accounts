@@ -106,8 +106,8 @@ contract MasterAccountControllerTest is Test {
         vm.mockCall(
             contractRegistryMock,
             abi.encodeWithSelector(
-                IFlareContractRegistry.getContractAddressByName.selector,
-                "FdcVerification"
+                IFlareContractRegistry.getContractAddressByHash.selector,
+                keccak256(abi.encode("FdcVerification"))
             ),
             abi.encode(fdcVerificationMock)
         );

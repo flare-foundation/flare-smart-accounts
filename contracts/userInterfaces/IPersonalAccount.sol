@@ -6,27 +6,21 @@ pragma solidity >=0.8.4 <0.9;
  * @notice Interface for PersonalAccount contract.
  */
 interface IPersonalAccount {
-    event Deposited(address vault, uint256 amount, uint256 shares);
-    event Withdrawn(address vault, uint256 amount, uint256 shares);
-    event WithdrawalClaimed(
-        address vault,
-        uint256 period,
-        uint256 amount
-    );
-    event Approved(address fxrp, address vault, uint256 amount);
-    event Redeemed(uint256 lots, address executor, uint256 executorFee);
     event CollateralReserved(
         uint256 lots,
         address agentVault,
         address executor,
         uint256 executorFee,
-        uint256 reservationId
+        uint256 collateralReservationId
     );
+    event Redeemed(uint256 lots, address executor, uint256 executorFee);
+    event Approved(address fxrp, address vault, uint256 amount);
+    event Deposited(address vault, uint256 amount, uint256 shares);
+    event Withdrawn(address vault, uint256 amount, uint256 shares);
+    event WithdrawalClaimed(address vault, uint256 period, uint256 amount);
 
+    error InsufficientFundsForCollateralReservation(uint256 collateralReservationFee);
     error InsufficientFundsForRedeemExecutor();
-    error InsufficientFundsForCollateralReservation(
-        uint256 collateralReservationFee
-    );
     error OnlyController();
     error AlreadyInitialized();
     error InvalidControllerAddress();
@@ -34,7 +28,6 @@ interface IPersonalAccount {
     error AgentNotAvailable();
     error ApprovalFailed();
     error FxrpAssetManagerNotSet();
-    error CustomInstructionCallFailed();
 
     /**
      * @notice Returns the XRPL owner address associated with this personal account.

@@ -18,19 +18,28 @@ import {CollateralReservationInfo} from "flare-periphery/src/flare/data/Collater
 import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
 
 // payment reference format (32 bytes):
-// bytes 00: instruction id
+// FXRP
+// bytes 00: uint8 -> instruction id
     // 00: collateral reservation
     // 01: redeem
-    // 10: deposit
-    // 11: withdraw
-    // 12: claim withdraw
-    // 20: collateral reservation and deposit
-    // 21: claim withdraw and redeem
-// bytes 01-16: uint128 -> amount/lots
-// bytes 17-18: uint16 -> agent vault address id
-// bytes 19-20: uint16 -> deposit vault address id
-// bytes 21-23: uint24 -> period
-// bytes 24-31: future use
+// bytes 01: uint8 -> wallet identifier
+// bytes 02-17: uint128 -> lots
+// bytes 18-19: uint16 -> agent vault address id
+// bytes 20-31: future use
+
+// Vaults (Firelight, ...)
+// bytes 00: uint8 -> instruction id
+    // 10: collateral reservation and deposit
+    // 11: deposit
+    // 12: withdraw
+    // 13: claim withdraw
+    // 14: claim withdraw and redeem
+// bytes 01: uint8 -> wallet identifier
+// bytes 02-17: uint128 -> amount/lots
+// bytes 18-19: uint16 -> agent vault address id
+// bytes 20-21: uint16 -> deposit/withdraw vault address id
+// bytes 22-24: uint24 -> period
+// bytes 25-31: future use
 
 /**
  * @title   MasterAccountController contract
@@ -56,7 +65,7 @@ contract MasterAccountController is
     /// @notice PersonalAccount implementation address
     address public personalAccountImplementation;
     /// @notice Seed PersonalAccount implementation address (for create2 deployment)
-    address public seedPersonalAccountImpl;
+    address public seedPersonalAccountImplementation;
 
     /// Mapping from XRPL address to Personal Account
     mapping(string xrplAddress => IIPersonalAccount) private personalAccounts;
@@ -66,8 +75,8 @@ contract MasterAccountController is
     mapping(uint256 collateralReservationId => bytes32 transactionId) public collateralReservationIdToTransactionId;
     /// @notice Mapping from agent vault ID to agent vault address
     mapping(uint256 agentVaultId => address agentVaultAddress) public agentVaults;
-    /// @notice Mapping from deposit vault ID to deposit vault address
-    mapping(uint256 vaultId => address depositVaultAddress) public depositVaults;
+    /// @notice Mapping from vault ID to vault address
+    mapping(uint256 vaultId => address vaultAddress) private vaults;
 
     constructor() {}
 
@@ -78,15 +87,17 @@ contract MasterAccountController is
     function initialize(
         IGovernanceSettings _governanceSettings,
         address _initialGovernance,
-        address _depositVault,
+        address _vault,
         address payable _executor,
         uint256 _executorFee,
         string memory _xrplProviderWallet,
         address _operatorAddress,
         uint256 _operatorExecutionWindowSeconds,
         address _personalAccountImplementation
-    ) external virtual {
-        require(_depositVault != address(0), InvalidDepositVault());
+    )
+        external
+    {
+        require(_vault != address(0), InvalidVault());
         require(_executor != address(0), InvalidExecutor());
         require(bytes(_xrplProviderWallet).length > 0, InvalidXrplProviderWallet());
         require(_operatorAddress != address(0), InvalidOperatorAddress());
@@ -94,7 +105,7 @@ contract MasterAccountController is
         require(_executorFee > 0, InvalidExecutorFee());
 
         GovernedBase.initialise(_governanceSettings, _initialGovernance);
-        depositVaults[0] = _depositVault; // TODO
+        vaults[0] = _vault; // TODO
         executor = _executor;
         xrplProviderWalletHash = keccak256(
             abi.encodePacked(_xrplProviderWallet)
@@ -104,7 +115,7 @@ contract MasterAccountController is
         operatorExecutionWindowSeconds = _operatorExecutionWindowSeconds;
         personalAccountImplementation = _personalAccountImplementation;
         executorFee = _executorFee;
-        seedPersonalAccountImpl = _personalAccountImplementation;
+        seedPersonalAccountImplementation = _personalAccountImplementation;
         emit PersonalAccountImplementationSet(_personalAccountImplementation);
         emit OperatorExecutionWindowSecondsSet(_operatorExecutionWindowSeconds);
         emit ExecutorFeeSet(_executorFee);
@@ -113,7 +124,7 @@ contract MasterAccountController is
         // TODO
         // set up agent vaults - there are <= 10 for now, can be extended in the future
         (address[] memory availableAgentVaults, uint256 totalLength) =
-            _getAssetManager().getAvailableAgentsList(0, 100);
+            _getFxrpAssetManager().getAvailableAgentsList(0, 100);
         require(totalLength <= 100, "Too many agent vaults");
         for (uint256 i = 0; i < availableAgentVaults.length; i++) {
             agentVaults[i] = availableAgentVaults[i];
@@ -133,7 +144,7 @@ contract MasterAccountController is
     {
         // check instruction id
         uint256 instructionId = _getInstructionId(_paymentReference);
-        require(instructionId == 0 || instructionId == 20, InvalidInstructionId(instructionId));
+        require(instructionId == 0 || instructionId == 10, InvalidInstructionId(instructionId));
         // check transaction id
         require(_transactionId != bytes32(0), InvalidTransactionId());
         // create or get existing Personal Account for the XRPL address
@@ -175,7 +186,7 @@ contract MasterAccountController is
 
         // check instruction id
         uint256 instructionId = _getInstructionId(_proof.data.responseBody.standardPaymentReference);
-        require(instructionId == 20, InvalidInstructionId(instructionId));
+        require(instructionId == 10, InvalidInstructionId(instructionId));
 
         // check that crtId and txId match
         bytes32 transactionId = _proof.data.requestBody.transactionId;
@@ -185,13 +196,10 @@ contract MasterAccountController is
             UnknownCollateralReservationId()
         );
 
-        // check if minting was successful
+        // check if minting was successfully completed
         CollateralReservationInfo.Data memory reservationInfo =
-            _getAssetManager().collateralReservationInfo(_collateralReservationId);
-        require(
-            reservationInfo.status == CollateralReservationInfo.Status.SUCCESSFUL,
-            InvalidCollateralReservationId()
-        );
+            _getFxrpAssetManager().collateralReservationInfo(_collateralReservationId);
+        require(reservationInfo.status == CollateralReservationInfo.Status.SUCCESSFUL, MintingNotCompleted());
 
         // verify payment proof
         _verifyPayment(_proof, _xrplAddress);
@@ -207,15 +215,15 @@ contract MasterAccountController is
         usedPaymentHashes[transactionId] = true;
 
         // execute deposit
-        address depositVault = _getDepositVaultAddress(_proof.data.responseBody.standardPaymentReference);
-        personalAccount.deposit(amount, depositVault);
+        address vault = _getVaultAddress(_proof.data.responseBody.standardPaymentReference);
+        personalAccount.deposit(amount, vault);
     }
 
     // TODO should we use hashes of addresses instead of string addresses?
     /**
      * @inheritdoc IMasterAccountController
      */
-    function executeTransaction(
+    function executeInstruction(
         IPayment.Proof calldata _proof,
         string calldata _xrplAddress
     )
@@ -242,13 +250,15 @@ contract MasterAccountController is
     }
 
     /**
-     * @notice  Sets new PersonalAccount implementation address.
-     * @param   _newImplementation  New implementation address.
+     * @notice Sets new PersonalAccount implementation address.
+     * @param _newImplementation New implementation address.
      * Can only be called by the governance.
      */
     function setPersonalAccountImplementation(
         address _newImplementation
-    ) external onlyGovernance {
+    )
+        external onlyGovernance
+    {
         require(
             _newImplementation != address(0),
             InvalidPersonalAccountImplementation()
@@ -258,24 +268,30 @@ contract MasterAccountController is
     }
 
     /**
-     * @notice  Updates the operator-only window (in seconds).
-     * @param   _newWindowSeconds  New execution window duration in seconds.
+     * @notice Updates the operator-only window (in seconds).
+     * @param _newWindowSeconds New execution window duration in seconds.
      * Can only be called by the governance.
      */
     function setOperatorExecutionWindowSeconds(
         uint256 _newWindowSeconds
-    ) external onlyGovernance {
+    )
+        external onlyGovernance
+    {
         require(_newWindowSeconds > 0, InvalidOperatorExecutionWindowSeconds());
         operatorExecutionWindowSeconds = _newWindowSeconds;
         emit OperatorExecutionWindowSecondsSet(_newWindowSeconds);
     }
 
     /**
-     * @notice  Sets new executor fee.
-     * @param   _newExecutorFee  New executor fee in wei.
+     * @notice Sets new executor fee.
+     * @param _newExecutorFee New executor fee in wei.
      * Can only be called by the governance.
      */
-    function setExecutorFee(uint256 _newExecutorFee) external onlyGovernance {
+    function setExecutorFee(
+        uint256 _newExecutorFee
+    )
+        external onlyGovernance
+    {
         require(_newExecutorFee > 0, InvalidExecutorFee());
         executorFee = _newExecutorFee;
         emit ExecutorFeeSet(_newExecutorFee);
@@ -284,9 +300,12 @@ contract MasterAccountController is
     /**
      * @inheritdoc IMasterAccountController
      */
-    function createPersonalAccount(
+    function createOrUpdatePersonalAccount(
         string calldata xrplOwner
-    ) external returns (IPersonalAccount) {
+    )
+        external
+        returns (IPersonalAccount)
+    {
         return _getOrCreatePersonalAccount(xrplOwner);
     }
 
@@ -295,8 +314,13 @@ contract MasterAccountController is
      */
     function computePersonalAccountAddress(
         string calldata _xrplOwner
-    ) external view returns (address) {
-        return _computePersonalAccountAddress(_xrplOwner);
+    )
+        external view
+        returns (address)
+    {
+        bytes32 salt = _generateSalt(_xrplOwner);
+        bytes memory bytecode = _generateBytecode(_xrplOwner);
+        return Create2.computeAddress(salt, keccak256(bytecode));
     }
 
     /**
@@ -304,7 +328,10 @@ contract MasterAccountController is
      */
     function getPersonalAccount(
         string calldata xrplOwner
-    ) external view returns (IPersonalAccount) {
+    )
+        external view
+        returns (IPersonalAccount)
+    {
         return personalAccounts[xrplOwner];
     }
 
@@ -313,7 +340,10 @@ contract MasterAccountController is
      * Returns current implementation address.
      * @return Current implementation address.
      */
-    function implementation() external view returns (address) {
+    function implementation()
+        external view
+        returns (address)
+    {
         return ERC1967Utils.getImplementation();
     }
 
@@ -324,10 +354,11 @@ contract MasterAccountController is
     function upgradeToAndCall(
         address _newImplementation,
         bytes memory _data
-    ) public payable override onlyGovernance onlyProxy {
+    )
+        public payable override onlyGovernance onlyProxy
+    {
         super.upgradeToAndCall(_newImplementation, _data);
     }
-
 
     /**
      * Unused. Present just to satisfy UUPSUpgradeable requirement.
@@ -341,30 +372,32 @@ contract MasterAccountController is
         IIPersonalAccount _personalAccount,
         string memory _xrplOwner,
         bytes32 _transactionId
-    ) internal {
+    )
+        internal
+    {
         // TODO _xrplOwner could maybe be removed from here. Probably not needed in events?
         // byte 0
         uint256 instructionId = _getInstructionId(_paymentReference);
         if (instructionId == 1) { // redeem
             uint256 lots = _getAmountOrLots(_paymentReference);
             _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
-        } else if (instructionId == 10 || instructionId == 11) { // deposit or withdraw
+        } else if (instructionId == 11 || instructionId == 12) { // deposit or withdraw
             uint256 amount = _getAmountOrLots(_paymentReference);
-            address depositVault = _getDepositVaultAddress(_paymentReference);
-            if (instructionId == 10) {
-                _personalAccount.deposit(amount, depositVault);
-            } else if (instructionId == 11) {
-                _personalAccount.withdraw(amount, depositVault);
+            address vault = _getVaultAddress(_paymentReference);
+            if (instructionId == 11) { // deposit
+                _personalAccount.deposit(amount, vault);
+            } else if (instructionId == 12) { // withdraw
+                _personalAccount.withdraw(amount, vault);
             }
-        } else if (instructionId == 12) { // claim withdraw
+        } else if (instructionId == 13) { // claim withdraw
             uint256 period = _getPeriod(_paymentReference);
-            address depositVault = _getDepositVaultAddress(_paymentReference);
-            _personalAccount.claimWithdraw(period, depositVault);
-        } else if (instructionId == 21) {
+            address vault = _getVaultAddress(_paymentReference);
+            _personalAccount.claimWithdraw(period, vault);
+        } else if (instructionId == 14) { // claim withdraw and redeem
             uint256 period = _getPeriod(_paymentReference);
-            address depositVault = _getDepositVaultAddress(_paymentReference);
+            address vault = _getVaultAddress(_paymentReference);
             uint256 lots = _getAmountOrLots(_paymentReference);
-            _personalAccount.claimWithdraw(period, depositVault);
+            _personalAccount.claimWithdraw(period, vault);
             // TODO swap
             _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
         } else {
@@ -382,7 +415,10 @@ contract MasterAccountController is
 
     function _getOrCreatePersonalAccount(
         string memory _xrplOwner
-    ) internal returns (IIPersonalAccount _personalAccount) {
+    )
+        internal
+        returns (IIPersonalAccount _personalAccount)
+    {
         _personalAccount = personalAccounts[_xrplOwner];
         if (address(_personalAccount) == address(0)) {
             // create new Personal Account
@@ -391,29 +427,26 @@ contract MasterAccountController is
             // check for implementation upgrade
             address personalAccountImpl = _personalAccount.implementation();
             if (personalAccountImpl != personalAccountImplementation) {
-                _personalAccount.upgradeToAndCall(personalAccountImplementation, bytes(""));
+                UUPSUpgradeable(address(_personalAccount)).upgradeToAndCall(personalAccountImplementation, bytes(""));
             }
         }
     }
 
-    function _createPersonalAccount(string memory _xrplOwner) internal returns (IIPersonalAccount _personalAccount) {
+    function _createPersonalAccount(
+        string memory _xrplOwner
+    )
+        internal
+        returns (IIPersonalAccount _personalAccount)
+    {
         bytes32 salt = _generateSalt(_xrplOwner);
-        // deploy proxy with seed implementation for stable address
-        bytes memory bytecode = abi.encodePacked(
-            type(PersonalAccountProxy).creationCode,
-            abi.encode(
-                seedPersonalAccountImpl,
-                _xrplOwner,
-                address(this)
-            )
-        );
+        bytes memory bytecode = _generateBytecode(_xrplOwner);
         // deploy PersonalAccountProxy using CREATE2
         address personalAccountProxyAddress = Create2.deploy(0, salt, bytecode);
         _personalAccount = IIPersonalAccount(payable(personalAccountProxyAddress));
 
         // immediately upgrade to current implementation
-        if (personalAccountImplementation != seedPersonalAccountImpl) {
-            _personalAccount.upgradeToAndCall(personalAccountImplementation, bytes(""));
+        if (personalAccountImplementation != seedPersonalAccountImplementation) {
+            UUPSUpgradeable(personalAccountProxyAddress).upgradeToAndCall(personalAccountImplementation, bytes(""));
         }
 
         personalAccounts[_xrplOwner] = _personalAccount;
@@ -421,23 +454,20 @@ contract MasterAccountController is
     }
 
     /**
-     * @notice  Computes the address of a PersonalAccount contract for the given XRPL owner.
-     * @param   _xrplOwner  The XRPL address.
-     * @return  The computed address of the PersonalAccount contract.
+     * @notice Generates the bytecode for deploying a PersonalAccountProxy contract with the given XRPL owner.
+     * @param _xrplOwner The XRPL address.
+     * @return The bytecode to be used for CREATE2 deployment.
      */
-    function _computePersonalAccountAddress(
-        string memory _xrplOwner
-    ) internal view returns (address) {
-        bytes32 salt = _generateSalt(_xrplOwner);
-        bytes memory bytecode = abi.encodePacked(
+    function _generateBytecode(string memory _xrplOwner) internal view returns (bytes memory) {
+        // deploy proxy with seed implementation for stable address
+        return abi.encodePacked(
             type(PersonalAccountProxy).creationCode,
             abi.encode(
-                seedPersonalAccountImpl,
+                seedPersonalAccountImplementation,
                 _xrplOwner,
                 address(this)
             )
         );
-        return Create2.computeAddress(salt, keccak256(bytecode), address(this));
     }
 
     function _verifyPayment(IPayment.Proof calldata _proof, string memory _xrplAddress) internal view {
@@ -448,9 +478,7 @@ contract MasterAccountController is
         );
 
         require(
-            IFdcVerification(
-                ContractRegistry.getContractAddressByName("FdcVerification")
-            ).verifyPayment(_proof),
+            ContractRegistry.getFdcVerification().verifyPayment(_proof),
             InvalidTransactionProof()
         );
         require(
@@ -467,11 +495,10 @@ contract MasterAccountController is
         );
     }
 
-    function _getAssetManager() internal view returns (IAssetManager) {
+    function _getFxrpAssetManager() internal view returns (IAssetManager) {
         address assetManagerAddress = ContractRegistry.getContractAddressByName("AssetManagerFXRP");
         require(assetManagerAddress != address(0), FxrpAssetManagerNotSet());
-        IAssetManager assetManager = IAssetManager(assetManagerAddress);
-        return assetManager;
+        return IAssetManager(assetManagerAddress);
     }
 
     function _checkOperatorOnlyWindow(uint256 _timestamp) internal view {
@@ -481,22 +508,22 @@ contract MasterAccountController is
     }
 
     function _lotsToAmount(uint256 _lots) internal view returns (uint256) {
-        uint256 lotSize = _getAssetManager().lotSize();
+        uint256 lotSize = _getFxrpAssetManager().lotSize();
         return _lots * lotSize;
     }
 
     function _getAgentVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
-        // bytes 17-18: agent vault address id
-        uint256 vaultId = (uint256(_paymentReference) >> 104) & ((uint256(1) << 16) - 1);
+        // bytes 18-19: agent vault address id
+        uint256 vaultId = (uint256(_paymentReference) >> 96) & ((uint256(1) << 16) - 1);
         _vault = agentVaults[vaultId];
-        require(_vault != address(0), InvalidAgentVaultAddress());
+        require(_vault != address(0), InvalidAgentVault());
     }
 
-    function _getDepositVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
-        // bytes 19-20: vault address id
-        uint256 vaultId = (uint256(_paymentReference) >> 88) & ((uint256(1) << 16) - 1);
-        _vault = depositVaults[vaultId];
-        require(address(_vault) != address(0), InvalidDepositVaultAddress());
+    function _getVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
+        // bytes 20-21: Firelight vault address id
+        uint256 vaultId = (uint256(_paymentReference) >> 80) & ((uint256(1) << 16) - 1);
+        _vault = vaults[vaultId];
+        require(address(_vault) != address(0), InvalidVault());
     }
 
     function _getInstructionId(bytes32 _paymentReference) internal pure returns (uint256) {
@@ -505,20 +532,20 @@ contract MasterAccountController is
     }
 
     function _getAmountOrLots(bytes32 _paymentReference) internal pure returns (uint256 _amountOrLots) {
-        // bytes 1-16: amount/lots
-        _amountOrLots = (uint256(_paymentReference) >> 120) & ((uint256(1) << 128) - 1);
+        // bytes 2-17: amount/lots
+        _amountOrLots = (uint256(_paymentReference) >> 112) & ((uint256(1) << 128) - 1);
         require(_amountOrLots > 0, AmountOrLotsZero());
     }
 
     function _getPeriod(bytes32 _paymentReference) internal pure returns (uint256) {
-        // bytes 21-23: period
-        return (uint256(_paymentReference) >> 64) & ((uint256(1) << 24) - 1);
+        // bytes 22-24: period
+        return (uint256(_paymentReference) >> 56) & ((uint256(1) << 24) - 1);
     }
 
     /**
-     * @notice  Generates a deterministic salt for CREATE2 deployment based on XRPL address.
-     * @param   _xrplOwner  The XRPL address.
-     * @return  The salt to be used for CREATE2 deployment.
+     * @notice Generates a deterministic salt for CREATE2 deployment based on XRPL address.
+     * @param _xrplOwner The XRPL address.
+     * @return The salt to be used for CREATE2 deployment.
      */
     function _generateSalt(string memory _xrplOwner) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(_xrplOwner));

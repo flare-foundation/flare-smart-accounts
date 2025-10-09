@@ -12,6 +12,6 @@ interface IFirelightVault {
         address _receiver,
         address _owner
     ) external returns (uint256 _shares);
-    function claimWithdraw(uint256 _period) external returns (uint256);
+    function claimWithdraw(uint256 _period) external returns (uint256 _amount);
     function asset() external view returns (address);
 }
