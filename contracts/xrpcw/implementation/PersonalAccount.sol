@@ -58,7 +58,7 @@ contract PersonalAccount is
         external payable onlyController nonReentrant
         returns (uint256 _collateralReservationId)
     {
-        IAssetManager assetManager = _getFxrpAssetManager();
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
 
         // Check agent vault status
         AgentInfo.Info memory agentInfo = assetManager.getAgentInfo(_agentVault);
@@ -95,7 +95,7 @@ contract PersonalAccount is
         external payable onlyController nonReentrant
     {
         require(msg.value >= _executorFee, InsufficientFundsForRedeemExecutor());
-        IAssetManager assetManager = _getFxrpAssetManager();
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
         assetManager.redeem{value: msg.value}(_lots, xrplOwner, _executor);
         emit Redeemed(_lots, _executor, _executorFee);
     }
@@ -150,15 +150,4 @@ contract PersonalAccount is
      * @dev Only the controller can call upgrade functions.
      */
     function _authorizeUpgrade(address _newImplementation) internal override onlyController {}
-
-    /////////////////////////////// INTERNAL FUNCTIONS ///////////////////////////////
-
-    function _getFxrpAssetManager()
-        internal view
-        returns (IAssetManager)
-    {
-        address assetManagerAddress = ContractRegistry.getContractAddressByName("AssetManagerFXRP");
-        require(assetManagerAddress != address(0), FxrpAssetManagerNotSet());
-        return IAssetManager(assetManagerAddress);
-    }
 }

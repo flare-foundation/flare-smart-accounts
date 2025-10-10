@@ -14,7 +14,11 @@ interface IMasterAccountController {
     event PersonalAccountImplementationSet(address newImplementation);
     event OperatorExecutionWindowSecondsSet(uint256 newWindowSeconds);
     event PersonalAccountCreated(string xrplOwner, address personalAccount);
+    event ExecutorSet(address executor);
     event ExecutorFeeSet(uint256 executorFee);
+    event VaultAdded(uint256 indexed vaultId, address indexed vaultAddress);
+    event AgentVaultAdded(uint256 indexed agentVaultId, address indexed agentVaultAddress);
+    event AgentVaultRemoved(uint256 indexed agentVaultId, address indexed agentVaultAddress);
     event CollateralReserved(
         address indexed personalAccount,
         string indexed xrplOwner,
@@ -31,8 +35,8 @@ interface IMasterAccountController {
         bytes32 transactionId
     );
 
-    error InvalidVault();
     error InvalidExecutor();
+    error InvalidExecutorFee();
     error InvalidXrplProviderWallet();
     error InvalidOperatorAddress();
     error InvalidOperatorExecutionWindowSeconds();
@@ -45,12 +49,15 @@ interface IMasterAccountController {
     error MismatchingSourceAndXrplAddr();
     error TransactionAlreadyExecuted();
     error InvalidInstructionId(uint256 instructionId);
-    error InvalidExecutorFee();
+    error LengthsMismatch();
+    error AgentVaultIdAlreadyUsed(uint256 agentVaultId);
+    error InvalidAgentVault(uint256 agentVaultId);
+    error AgentNotAvailable(address agentVault);
+    error VaultIdAlreadyUsed(uint256 vaultId);
+    error InvalidVault(uint256 vaultId);
     error AmountOrLotsZero();
     error UnknownCollateralReservationId();
     error MintingNotCompleted();
-    error InvalidAgentVault();
-    error FxrpAssetManagerNotSet();
     error InvalidAmount();
     error InvalidMinter();
 
@@ -118,13 +125,31 @@ interface IMasterAccountController {
 
 
     /**
-     * @notice  Computes the address of a PersonalAccount for a given XRPL owner.
-     * @param   _xrplOwner  The XRPL address.
-     * @return  The predicted address of the PersonalAccount.
+     * @notice Computes the address of a PersonalAccount for a given XRPL owner.
+     * @param _xrplOwner The XRPL address.
+     * @return The predicted address of the PersonalAccount.
      */
     function computePersonalAccountAddress(
         string calldata _xrplOwner
     )
         external view
         returns (address);
+
+    /**
+     * Returns the list of registered agent vault IDs and their corresponding addresses.
+     * @return _agentVaultIds The list of registered agent vault IDs.
+     * @return _agentVaultAddresses The list of registered agent vault addresses.
+     */
+    function getAgentVaults()
+        external view
+        returns (uint256[] memory _agentVaultIds, address[] memory _agentVaultAddresses);
+
+    /**
+     * Returns the list of registered vault IDs and their corresponding addresses.
+     * @return _vaultIds The list of registered vault IDs.
+     * @return _vaultAddresses The list of registered vault addresses.
+     */
+    function getVaults()
+        external view
+        returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses);
 }

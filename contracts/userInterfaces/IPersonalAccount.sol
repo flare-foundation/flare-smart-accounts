@@ -27,7 +27,6 @@ interface IPersonalAccount {
     error InvalidXrplOwner();
     error AgentNotAvailable();
     error ApprovalFailed();
-    error FxrpAssetManagerNotSet();
 
     /**
      * @notice Returns the XRPL owner address associated with this personal account.

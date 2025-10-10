@@ -11,6 +11,8 @@ import {
 } from "../contracts/xrpcw/implementation/MasterAccountController.sol";
 import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
+import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
+import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
 import {MasterAccountControllerProxy} from "../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
 import {PersonalAccount} from "../contracts/xrpcw/implementation/PersonalAccount.sol";
@@ -41,6 +43,8 @@ contract MasterAccountControllerTest is Test {
     address private contractRegistryMock;
     address private fdcVerificationMock;
     address private assetManagerFxrpMock;
+    address private agent;
+    AgentInfo.Info private agentInfo;
 
     function setUp() public {
         governance = makeAddr("governance");
@@ -60,15 +64,13 @@ contract MasterAccountControllerTest is Test {
         fdcVerificationMock = makeAddr("FDCVerificationMock");
         executorFee = 100;
         operatorExecutionWindowSeconds = 3600;
+        assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
+        agent = makeAddr("agent");
+        agentInfo.status = AgentInfo.Status.NORMAL;
 
         // deploy the personal account implementation
         personalAccountImpl = new PersonalAccount();
         personalAccountImplementation = address(personalAccountImpl);
-
-        _mockGetContractAddressByName(
-            "AssetManagerFXRP",
-            assetManagerFxrpMock
-        );
 
         // deploy the controlled wallet
         masterAccountControllerImpl = new MasterAccountController();
@@ -76,7 +78,6 @@ contract MasterAccountControllerTest is Test {
             address(masterAccountControllerImpl),
             IGovernanceSettings(makeAddr("governanceSettings")),
             governance,
-            address(depositVault),
             payable(executor),
             executorFee,
             xrplProviderWallet,
@@ -88,15 +89,34 @@ contract MasterAccountControllerTest is Test {
             address(masterAccountControllerProxy)
         );
 
+        _mockGetContractAddressByHash("FdcVerification", fdcVerificationMock);
+        _mockGetContractAddressByHash("AssetManagerFXRP", assetManagerFxrpMock);
+        _mockGetAgentInfo(agent, agentInfo);
+
+        // add agent vault
+        uint256[] memory agentVaultIds = new uint256[](1);
+        address[] memory agentVaultAddresses = new address[](1);
+        agentVaultIds[0] = 0;
+        agentVaultAddresses[0] = agent;
+        vm.prank(governance);
+        masterAccountController.addAgentVaults(agentVaultIds, agentVaultAddresses);
+        // add vault
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        vaultIds[0] = 0;
+        vaultAddresses[0] = address(depositVault);
+        vm.prank(governance);
+        masterAccountController.addVaults(vaultIds, vaultAddresses);
+
         xrplAddress1 = "xrplAddress1";
     }
 
-    function _mockGetContractAddressByName(string memory name, address addr) private {
+    function _mockGetContractAddressByHash(string memory name, address addr) private {
         vm.mockCall(
             contractRegistryMock,
             abi.encodeWithSelector(
-                IFlareContractRegistry.getContractAddressByName.selector,
-                name
+                IFlareContractRegistry.getContractAddressByHash.selector,
+                keccak256(abi.encode(name))
             ),
             abi.encode(addr)
         );
@@ -104,25 +124,21 @@ contract MasterAccountControllerTest is Test {
 
     function _mockVerifyPayment(bool _result) private {
         vm.mockCall(
-            contractRegistryMock,
-            abi.encodeWithSelector(
-                IFlareContractRegistry.getContractAddressByHash.selector,
-                keccak256(abi.encode("FdcVerification"))
-            ),
-            abi.encode(fdcVerificationMock)
-        );
-
-        vm.mockCall(
             fdcVerificationMock,
             abi.encodeWithSelector(IPaymentVerification.verifyPayment.selector),
             abi.encode(_result)
         );
     }
 
-    function _encodePaymentReference(
-        uint256 callHash
-    ) private pure returns (bytes32) {
-        return bytes32((uint256(99) << 248) | callHash);
+    function _mockGetAgentInfo(address agentAddress, AgentInfo.Info memory info) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.getAgentInfo.selector,
+                agentAddress
+            ),
+            abi.encode(info)
+        );
     }
 }
 

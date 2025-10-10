@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
+import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
@@ -42,8 +43,8 @@ import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
 // bytes 25-31: future use
 
 /**
- * @title   MasterAccountController contract
- * @notice  The contract controlling personal accounts (XRPL master controller)
+ * @title MasterAccountController contract
+ * @notice The contract controlling personal accounts (XRPL master controller)
  */
 contract MasterAccountController is
     IMasterAccountController,
@@ -71,12 +72,14 @@ contract MasterAccountController is
     mapping(string xrplAddress => IIPersonalAccount) private personalAccounts;
     /// @notice Indicates if payment instruction has already been executed.
     mapping(bytes32 transactionId => bool) public usedPaymentHashes;
-    /// @notice Mapping from collateral reservation ID to XRPL transaction ID
+    /// @notice Mapping from collateral reservation ID to XRPL transaction ID - used for deposit after minting
     mapping(uint256 collateralReservationId => bytes32 transactionId) public collateralReservationIdToTransactionId;
     /// @notice Mapping from agent vault ID to agent vault address
     mapping(uint256 agentVaultId => address agentVaultAddress) public agentVaults;
+    uint256[] private agentVaultIds;
     /// @notice Mapping from vault ID to vault address
-    mapping(uint256 vaultId => address vaultAddress) private vaults;
+    mapping(uint256 vaultId => address vaultAddress) public vaults;
+    uint256[] private vaultIds;
 
     constructor() {}
 
@@ -87,7 +90,6 @@ contract MasterAccountController is
     function initialize(
         IGovernanceSettings _governanceSettings,
         address _initialGovernance,
-        address _vault,
         address payable _executor,
         uint256 _executorFee,
         string memory _xrplProviderWallet,
@@ -97,38 +99,25 @@ contract MasterAccountController is
     )
         external
     {
-        require(_vault != address(0), InvalidVault());
         require(_executor != address(0), InvalidExecutor());
+        require(_executorFee > 0, InvalidExecutorFee());
         require(bytes(_xrplProviderWallet).length > 0, InvalidXrplProviderWallet());
         require(_operatorAddress != address(0), InvalidOperatorAddress());
         require(_personalAccountImplementation != address(0), InvalidPersonalAccountImplementation());
-        require(_executorFee > 0, InvalidExecutorFee());
 
         GovernedBase.initialise(_governanceSettings, _initialGovernance);
-        vaults[0] = _vault; // TODO
         executor = _executor;
-        xrplProviderWalletHash = keccak256(
-            abi.encodePacked(_xrplProviderWallet)
-        );
+        executorFee = _executorFee;
         xrplProviderWallet = _xrplProviderWallet;
+        xrplProviderWalletHash = keccak256(bytes(_xrplProviderWallet));
         operatorAddress = _operatorAddress;
         operatorExecutionWindowSeconds = _operatorExecutionWindowSeconds;
         personalAccountImplementation = _personalAccountImplementation;
-        executorFee = _executorFee;
         seedPersonalAccountImplementation = _personalAccountImplementation;
+        emit ExecutorSet(_executor);
+        emit ExecutorFeeSet(_executorFee);
         emit PersonalAccountImplementationSet(_personalAccountImplementation);
         emit OperatorExecutionWindowSecondsSet(_operatorExecutionWindowSeconds);
-        emit ExecutorFeeSet(_executorFee);
-        // TODO should we have set of operators?
-
-        // TODO
-        // set up agent vaults - there are <= 10 for now, can be extended in the future
-        (address[] memory availableAgentVaults, uint256 totalLength) =
-            _getFxrpAssetManager().getAvailableAgentsList(0, 100);
-        require(totalLength <= 100, "Too many agent vaults");
-        for (uint256 i = 0; i < availableAgentVaults.length; i++) {
-            agentVaults[i] = availableAgentVaults[i];
-        }
     }
 
     /**
@@ -184,8 +173,10 @@ contract MasterAccountController is
         // check operator-only window
         _checkOperatorOnlyWindow(_proof.data.responseBody.blockTimestamp);
 
+        bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
+
         // check instruction id
-        uint256 instructionId = _getInstructionId(_proof.data.responseBody.standardPaymentReference);
+        uint256 instructionId = _getInstructionId(paymentReference);
         require(instructionId == 10, InvalidInstructionId(instructionId));
 
         // check that crtId and txId match
@@ -198,7 +189,7 @@ contract MasterAccountController is
 
         // check if minting was successfully completed
         CollateralReservationInfo.Data memory reservationInfo =
-            _getFxrpAssetManager().collateralReservationInfo(_collateralReservationId);
+            ContractRegistry.getAssetManagerFXRP().collateralReservationInfo(_collateralReservationId);
         require(reservationInfo.status == CollateralReservationInfo.Status.SUCCESSFUL, MintingNotCompleted());
 
         // verify payment proof
@@ -206,7 +197,7 @@ contract MasterAccountController is
         // check that minter and amount match
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
         require(address(personalAccount) == reservationInfo.minter, InvalidMinter());
-        uint256 lots = _getAmountOrLots(_proof.data.responseBody.standardPaymentReference);
+        uint256 lots = _getAmountOrLots(paymentReference);
         uint256 amount = _lotsToAmount(lots);
         // could revert if lot size changes between minting and deposit, but very unlikely
         // user should call deposit in that case
@@ -215,11 +206,19 @@ contract MasterAccountController is
         usedPaymentHashes[transactionId] = true;
 
         // execute deposit
-        address vault = _getVaultAddress(_proof.data.responseBody.standardPaymentReference);
+        address vault = _getVaultAddress(paymentReference);
         personalAccount.deposit(amount, vault);
+
+        // emit event
+        emit InstructionExecuted(
+            address(personalAccount),
+            _xrplAddress,
+            instructionId,
+            paymentReference,
+            transactionId
+        );
     }
 
-    // TODO should we use hashes of addresses instead of string addresses?
     /**
      * @inheritdoc IMasterAccountController
      */
@@ -283,6 +282,21 @@ contract MasterAccountController is
     }
 
     /**
+     * @notice Sets new executor address.
+     * @param _newExecutor New executor address.
+     * Can only be called by the governance.
+     */
+    function setExecutor(
+        address payable _newExecutor
+    )
+        external onlyGovernance
+    {
+        require(_newExecutor != address(0), InvalidExecutor());
+        executor = _newExecutor;
+        emit ExecutorSet(_newExecutor);
+    }
+
+    /**
      * @notice Sets new executor fee.
      * @param _newExecutorFee New executor fee in wei.
      * Can only be called by the governance.
@@ -295,6 +309,85 @@ contract MasterAccountController is
         require(_newExecutorFee > 0, InvalidExecutorFee());
         executorFee = _newExecutorFee;
         emit ExecutorFeeSet(_newExecutorFee);
+    }
+
+    /**
+     * @notice Adds new agent vault addresses with the given IDs.
+     * @param _agentVaultIds The IDs of the agent vaults.
+     * @param _agentVaultAddresses The addresses of the agent vaults.
+     * Can only be called by the governance.
+     */
+    function addAgentVaults(
+        uint256[] calldata _agentVaultIds,
+        address[] calldata _agentVaultAddresses
+    )
+        external onlyGovernance
+    {
+        require(_agentVaultIds.length == _agentVaultAddresses.length, LengthsMismatch());
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
+        for (uint256 i = 0; i < _agentVaultIds.length; i++) {
+            uint256 agentVaultId = _agentVaultIds[i];
+            address agentVaultAddress = _agentVaultAddresses[i];
+            require(agentVaults[agentVaultId] == address(0), AgentVaultIdAlreadyUsed(agentVaultId));
+            require(agentVaultAddress != address(0), InvalidAgentVault(agentVaultId));
+            AgentInfo.Info memory agentInfo = assetManager.getAgentInfo(agentVaultAddress);
+            require(agentInfo.status == AgentInfo.Status.NORMAL, AgentNotAvailable(agentVaultAddress));
+            agentVaults[agentVaultId] = agentVaultAddress;
+            agentVaultIds.push(agentVaultId);
+            emit AgentVaultAdded(agentVaultId, agentVaultAddress);
+        }
+    }
+
+    /**
+     * @notice Removes existing agent vault addresses by their IDs.
+     * @param _agentVaultIds The IDs of the agent vaults to remove.
+     * Can only be called by the governance.
+     */
+    function removeAgentVaults(
+        uint256[] calldata _agentVaultIds
+    )
+        external onlyGovernance
+    {
+        for (uint256 i = 0; i < _agentVaultIds.length; i++) {
+            uint256 agentVaultId = _agentVaultIds[i];
+            address agentVault = agentVaults[agentVaultId];
+            require(agentVault != address(0), InvalidAgentVault(agentVaultId));
+            // remove from mapping
+            delete agentVaults[agentVaultId];
+            // remove from array
+            for (uint256 j = 0; j < agentVaultIds.length; j++) {
+                if (agentVaultIds[j] == agentVaultId) {
+                    agentVaultIds[j] = agentVaultIds[agentVaultIds.length - 1];
+                    agentVaultIds.pop();
+                    break;
+                }
+            }
+            emit AgentVaultRemoved(agentVaultId, agentVault);
+        }
+    }
+
+    /**
+     * @notice Adds new vault addresses with the given IDs.
+     * @param _vaultIds The IDs of the vaults.
+     * @param _vaultAddresses The addresses of the vaults.
+     * Can only be called by the governance.
+     */
+    function addVaults(
+        uint256[] calldata _vaultIds,
+        address[] calldata _vaultAddresses
+    )
+        external onlyGovernance
+    {
+        require(_vaultIds.length == _vaultAddresses.length, LengthsMismatch());
+        for (uint256 i = 0; i < _vaultIds.length; i++) {
+            uint256 vaultId = _vaultIds[i];
+            address vaultAddress = _vaultAddresses[i];
+            require(vaults[vaultId] == address(0), VaultIdAlreadyUsed(vaultId));
+            require(vaultAddress != address(0), InvalidVault(vaultId));
+            vaults[vaultId] = vaultAddress;
+            vaultIds.push(vaultId);
+            emit VaultAdded(vaultId, vaultAddress);
+        }
     }
 
     /**
@@ -333,6 +426,34 @@ contract MasterAccountController is
         returns (IPersonalAccount)
     {
         return personalAccounts[xrplOwner];
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
+    function getAgentVaults()
+        external view
+        returns (uint256[] memory _agentVaultIds, address[] memory _agentVaultAddresses)
+    {
+        _agentVaultIds = agentVaultIds;
+        _agentVaultAddresses = new address[](_agentVaultIds.length);
+        for (uint256 i = 0; i < _agentVaultIds.length; i++) {
+            _agentVaultAddresses[i] = agentVaults[_agentVaultIds[i]];
+        }
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
+    function getVaults()
+        external view
+        returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses)
+    {
+        _vaultIds = vaultIds;
+        _vaultAddresses = new address[](_vaultIds.length);
+        for (uint256 i = 0; i < _vaultIds.length; i++) {
+            _vaultAddresses[i] = vaults[_vaultIds[i]];
+        }
     }
 
     /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
@@ -486,19 +607,13 @@ contract MasterAccountController is
             InvalidReceivingAddressHash()
         );
         require(
-            _proof.data.responseBody.sourceAddressHash == keccak256(abi.encodePacked(_xrplAddress)),
+            _proof.data.responseBody.sourceAddressHash == keccak256(bytes(_xrplAddress)),
             MismatchingSourceAndXrplAddr()
         );
         require(
             !usedPaymentHashes[_proof.data.requestBody.transactionId],
             TransactionAlreadyExecuted()
         );
-    }
-
-    function _getFxrpAssetManager() internal view returns (IAssetManager) {
-        address assetManagerAddress = ContractRegistry.getContractAddressByName("AssetManagerFXRP");
-        require(assetManagerAddress != address(0), FxrpAssetManagerNotSet());
-        return IAssetManager(assetManagerAddress);
     }
 
     function _checkOperatorOnlyWindow(uint256 _timestamp) internal view {
@@ -508,22 +623,22 @@ contract MasterAccountController is
     }
 
     function _lotsToAmount(uint256 _lots) internal view returns (uint256) {
-        uint256 lotSize = _getFxrpAssetManager().lotSize();
+        uint256 lotSize = ContractRegistry.getAssetManagerFXRP().lotSize();
         return _lots * lotSize;
     }
 
-    function _getAgentVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
+    function _getAgentVaultAddress(bytes32 _paymentReference) internal view returns (address _agentVault) {
         // bytes 18-19: agent vault address id
-        uint256 vaultId = (uint256(_paymentReference) >> 96) & ((uint256(1) << 16) - 1);
-        _vault = agentVaults[vaultId];
-        require(_vault != address(0), InvalidAgentVault());
+        uint256 agentVaultId = (uint256(_paymentReference) >> 96) & ((uint256(1) << 16) - 1);
+        _agentVault = agentVaults[agentVaultId];
+        require(_agentVault != address(0), InvalidAgentVault(agentVaultId));
     }
 
     function _getVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
-        // bytes 20-21: Firelight vault address id
+        // bytes 20-21: vault address id
         uint256 vaultId = (uint256(_paymentReference) >> 80) & ((uint256(1) << 16) - 1);
         _vault = vaults[vaultId];
-        require(address(_vault) != address(0), InvalidVault());
+        require(address(_vault) != address(0), InvalidVault(vaultId));
     }
 
     function _getInstructionId(bytes32 _paymentReference) internal pure returns (uint256) {
@@ -548,6 +663,6 @@ contract MasterAccountController is
      * @return The salt to be used for CREATE2 deployment.
      */
     function _generateSalt(string memory _xrplOwner) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(_xrplOwner));
+        return keccak256(bytes(_xrplOwner));
     }
 }

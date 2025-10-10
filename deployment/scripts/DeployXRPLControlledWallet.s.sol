@@ -7,6 +7,7 @@ import {PersonalAccount} from "../../contracts/xrpcw/implementation/PersonalAcco
 import {MasterAccountController} from "../../contracts/xrpcw/implementation/MasterAccountController.sol";
 import {MasterAccountControllerProxy} from "../../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
+import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 
 // solhint-disable-next-line max-line-length
 // forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
@@ -62,7 +63,6 @@ contract DeployXRPLControlledWallet is Script {
             address(masterAccountControllerImpl),
             IGovernanceSettings(governanceSettings),
             governance,
-            address(depositVault),
             payable(executor),
             executorFee,
             xrplProviderWallet,
@@ -74,6 +74,20 @@ contract DeployXRPLControlledWallet is Script {
             address(masterAccountControllerProxy)
         );
         masterAccountControllerAddress = address(masterAccountControllerProxy);
+
+        // add agent vaults
+        (address[] memory agentVaultAddresses, ) = ContractRegistry.getAssetManagerFXRP().getAvailableAgentsList(0, 10);
+        uint256[] memory agentVaultIds = new uint256[](agentVaultAddresses.length);
+        for (uint256 i = 0; i < agentVaultAddresses.length; i++) {
+            agentVaultIds[i] = i;
+        }
+        masterAccountController.addAgentVaults(agentVaultIds, agentVaultAddresses);
+        // add vault
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        vaultIds[0] = 0;
+        vaultAddresses[0] = depositVault;
+        masterAccountController.addVaults(vaultIds, vaultAddresses);
 
         // switch to production mode
         masterAccountController.switchToProductionMode();
