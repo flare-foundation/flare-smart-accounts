@@ -17,6 +17,7 @@ import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol
 import {PersonalAccountProxy} from "../contracts/xrpcw/proxy/PersonalAccountProxy.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
+import {MockSingletonFactory} from "../contracts/mock/MockSingletonFactory.sol";
 
 // solhint-disable-next-line max-states-count
 contract XrplControlledWalletTest is Test {
@@ -27,6 +28,9 @@ contract XrplControlledWalletTest is Test {
     PersonalAccountProxy private personalAccountProxy;
     IPersonalAccount private personalAccount1;
     IPersonalAccount private personalAccount2;
+
+    address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+    MockSingletonFactory private mockFactory;
 
     address private governance;
     address private executor;
@@ -48,6 +52,9 @@ contract XrplControlledWalletTest is Test {
     address private fdcVerificationMock;
 
     function setUp() public {
+        mockFactory = new MockSingletonFactory();
+        vm.etch(SINGLETON_FACTORY, address(mockFactory).code);
+
         governance = makeAddr("governance");
         executor = makeAddr("executor");
         fxrp = new MintableERC20("F-XRPL", "fXRP");
@@ -68,7 +75,6 @@ contract XrplControlledWalletTest is Test {
         assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
         agent = makeAddr("agent");
         agentInfo.status = AgentInfo.Status.NORMAL;
-
 
         // deploy the personal account implementation
         personalAccountImpl = new PersonalAccount();

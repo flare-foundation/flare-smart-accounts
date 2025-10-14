@@ -60,6 +60,7 @@ interface IMasterAccountController {
     error MintingNotCompleted();
     error InvalidAmount();
     error InvalidMinter();
+    error PersonalAccountNotSuccessfullyDeployed(address personalAccountAddress);
 
     /**
      * @notice Reserve collateral for minting operation.

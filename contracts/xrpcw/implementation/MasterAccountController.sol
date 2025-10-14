@@ -2,21 +2,23 @@
 pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
+import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
+import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
-import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
-import {GovernedBase} from "../../governance/implementation/GovernedBase.sol";
-import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
-import {GovernedProxyImplementation} from "../../governance/implementation/GovernedProxyImplementation.sol";
-import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
 import {IFdcVerification} from "flare-periphery/src/flare/IFdcVerification.sol";
+import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
+import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
+import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
+import {PersonalAccount} from "../implementation/PersonalAccount.sol";
+import {GovernedBase} from "../../governance/implementation/GovernedBase.sol";
+import {GovernedProxyImplementation} from "../../governance/implementation/GovernedProxyImplementation.sol";
+import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
+import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
 import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
-import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
-import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
 
 // payment reference format (32 bytes):
 // FXRP
@@ -67,7 +69,8 @@ contract MasterAccountController is
     address public personalAccountImplementation;
     /// @notice Seed PersonalAccount implementation address (for create2 deployment)
     address public seedPersonalAccountImplementation;
-
+    /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
+    address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
     /// Mapping from XRPL address to Personal Account
     mapping(string xrplAddress => IIPersonalAccount) private personalAccounts;
     /// @notice Indicates if payment instruction has already been executed.
@@ -412,8 +415,8 @@ contract MasterAccountController is
         returns (address)
     {
         bytes32 salt = _generateSalt(_xrplOwner);
-        bytes memory bytecode = _generateBytecode(_xrplOwner);
-        return Create2.computeAddress(salt, keccak256(bytecode));
+        bytes memory bytecode = _generateBytecode();
+        return Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
     }
 
     /**
@@ -560,10 +563,20 @@ contract MasterAccountController is
         returns (IIPersonalAccount _personalAccount)
     {
         bytes32 salt = _generateSalt(_xrplOwner);
-        bytes memory bytecode = _generateBytecode(_xrplOwner);
-        // deploy PersonalAccountProxy using CREATE2
-        address personalAccountProxyAddress = Create2.deploy(0, salt, bytecode);
+        bytes memory bytecode = _generateBytecode();
+        // deploy via EIP-2470 singleton factory using CREATE2
+        address personalAccountProxyAddress = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+
         _personalAccount = IIPersonalAccount(payable(personalAccountProxyAddress));
+
+        // ensure the proxy address is a contract before calling initialize
+        uint256 codeSize;
+        // solhint-disable-next-line no-inline-assembly
+        assembly { codeSize := extcodesize(personalAccountProxyAddress) }
+        require(codeSize > 0, PersonalAccountNotSuccessfullyDeployed(personalAccountProxyAddress));
+
+        // initialize immediately after deployment
+        PersonalAccount(personalAccountProxyAddress).initialize(_xrplOwner, address(this));
 
         // immediately upgrade to current implementation
         if (personalAccountImplementation != seedPersonalAccountImplementation) {
@@ -575,18 +588,16 @@ contract MasterAccountController is
     }
 
     /**
-     * @notice Generates the bytecode for deploying a PersonalAccountProxy contract with the given XRPL owner.
-     * @param _xrplOwner The XRPL address.
+     * @notice Generates the bytecode for deploying a PersonalAccountProxy contract.
      * @return The bytecode to be used for CREATE2 deployment.
      */
-    function _generateBytecode(string memory _xrplOwner) internal view returns (bytes memory) {
-        // deploy proxy with seed implementation for stable address
+    function _generateBytecode() internal view returns (bytes memory) {
+        // deploy proxy with seed implementation only (no init data) for chain-agnostic init code
+        // note: xrpl owner and controller address are set post-deploy via initialize
         return abi.encodePacked(
             type(PersonalAccountProxy).creationCode,
             abi.encode(
-                seedPersonalAccountImplementation,
-                _xrplOwner,
-                address(this)
+                seedPersonalAccountImplementation
             )
         );
     }
