@@ -13,14 +13,14 @@ interface IPersonalAccount {
         uint256 executorFee,
         uint256 collateralReservationId
     );
-    event Redeemed(uint256 lots, address executor, uint256 executorFee);
+    event Redeemed(uint256 lots, uint256 amount, address executor, uint256 executorFee);
     event Approved(address fxrp, address vault, uint256 amount);
     event Deposited(address vault, uint256 amount, uint256 shares);
     event Withdrawn(address vault, uint256 amount, uint256 shares);
     event WithdrawalClaimed(address vault, uint256 period, uint256 amount);
 
-    error InsufficientFundsForCollateralReservation(uint256 collateralReservationFee);
-    error InsufficientFundsForRedeemExecutor();
+    error InsufficientFundsForCollateralReservation(uint256 collateralReservationFee, uint256 executorFee);
+    error InsufficientFundsForRedeem(uint256 executorFee);
     error OnlyController();
     error AlreadyInitialized();
     error InvalidControllerAddress();

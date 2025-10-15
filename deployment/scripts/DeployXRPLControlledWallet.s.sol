@@ -42,15 +42,9 @@ contract DeployXRPLControlledWallet is Script {
         address depositVault = vm.parseJsonAddress(config, ".depositVault");
         address executor = vm.parseJsonAddress(config, ".executor");
         uint256 executorFee = vm.parseJsonUint(config, ".executorFee");
-        string memory xrplProviderWallet = vm.parseJsonString(
-            config,
-            ".xrplProviderWallet"
-        );
-        address operator = vm.parseJsonAddress(config, ".operator");
-        uint256 operatorExecutionWindowSeconds = vm.parseJsonUint(
-            config,
-            ".operatorExecutionWindowSeconds"
-        );
+        uint256 paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
+        uint256 defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
+        string memory xrplProviderWallet = vm.parseJsonString(config, ".xrplProviderWallet");
 
         vm.startBroadcast();
         // deploy personal account implementation
@@ -65,9 +59,9 @@ contract DeployXRPLControlledWallet is Script {
             governance,
             payable(executor),
             executorFee,
+            paymentProofValidityDurationSeconds,
+            defaultInstructionFee,
             xrplProviderWallet,
-            operator,
-            operatorExecutionWindowSeconds,
             personalAccountImplAddress
         );
         masterAccountController = MasterAccountController(

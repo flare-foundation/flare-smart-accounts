@@ -37,8 +37,9 @@ contract MasterAccountControllerTest is Test {
     string private xrplProviderWallet;
     bytes32 private xrplProviderWalletHash;
     address private operator;
+    uint256 private paymentProofValidityDurationSeconds;
+    uint256 private defaultInstructionFee;
     address private personalAccountImplementation;
-    uint256 private operatorExecutionWindowSeconds;
     string private xrplAddress1;
     address private contractRegistryMock;
     address private fdcVerificationMock;
@@ -63,7 +64,8 @@ contract MasterAccountControllerTest is Test {
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
         fdcVerificationMock = makeAddr("FDCVerificationMock");
         executorFee = 100;
-        operatorExecutionWindowSeconds = 3600;
+        paymentProofValidityDurationSeconds = 1 days;
+        defaultInstructionFee = 1000000; // 1 XRP
         assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
         agent = makeAddr("agent");
         agentInfo.status = AgentInfo.Status.NORMAL;
@@ -80,9 +82,9 @@ contract MasterAccountControllerTest is Test {
             governance,
             payable(executor),
             executorFee,
+            paymentProofValidityDurationSeconds,
+            defaultInstructionFee,
             xrplProviderWallet,
-            operator,
-            operatorExecutionWindowSeconds,
             personalAccountImplementation
         );
         masterAccountController = MasterAccountController(

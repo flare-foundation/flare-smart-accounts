@@ -26,7 +26,7 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
     // 00: collateral reservation
     // 01: redeem
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-17: uint128 -> lots
+// bytes 02-17: uint128 -> value (lots)
 // bytes 18-19: uint16 -> agent vault address id
 // bytes 20-31: future use
 
@@ -38,11 +38,10 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
     // 13: claim withdraw
     // 14: claim withdraw and redeem
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-17: uint128 -> amount/lots
+// bytes 02-17: uint128 -> value (amount, lots, period,...)
 // bytes 18-19: uint16 -> agent vault address id
 // bytes 20-21: uint16 -> deposit/withdraw vault address id
-// bytes 22-24: uint24 -> period
-// bytes 25-31: future use
+// bytes 22-31: future use
 
 /**
  * @title MasterAccountController contract
@@ -53,24 +52,27 @@ contract MasterAccountController is
     UUPSUpgradeable,
     GovernedProxyImplementation
 {
+    /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
+    address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+
     /// @notice The minting executor.
     address payable public executor;
     /// @notice Executor fee for reserveCollateral (in wei)
     uint256 public executorFee;
-    /// @notice XRPL provider wallet address
-    string public xrplProviderWallet;
-    /// @notice XRPL provider wallet hash
-    bytes32 public xrplProviderWalletHash;
-    /// @notice Operator address
-    address public operatorAddress;
-    /// @notice Time window (in seconds) for operator-only execution after XRPL transaction (default: 10 minutes)
-    uint256 public operatorExecutionWindowSeconds;
+    /// @notice XRPL provider wallet addresses
+    string[] private xrplProviderWallets;
+    /// @notice XRPL provider wallet hashes
+    mapping(bytes32 => uint256 index) private xrplProviderWalletHashes; // 1-based index
+    /// @notice Default fee for instruction execution in underlying asset's smallest unit (e.g., drops for XRP)
+    uint256 public defaultInstructionFee;
+    /// @notice Override for default instruction fee (1-based to distinguish from default (0))
+    mapping(uint256 instructionId => uint256 fee) private instructionFees;
+    /// @notice Duration (in seconds) for which the payment proof is valid
+    uint256 public paymentProofValidityDurationSeconds;
     /// @notice PersonalAccount implementation address
     address public personalAccountImplementation;
     /// @notice Seed PersonalAccount implementation address (for create2 deployment)
     address public seedPersonalAccountImplementation;
-    /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
-    address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
     /// Mapping from XRPL address to Personal Account
     mapping(string xrplAddress => IIPersonalAccount) private personalAccounts;
     /// @notice Indicates if payment instruction has already been executed.
@@ -84,7 +86,7 @@ contract MasterAccountController is
     mapping(uint256 vaultId => address vaultAddress) public vaults;
     uint256[] private vaultIds;
 
-    constructor() {}
+    constructor() GovernedProxyImplementation() {}
 
     /**
      * Proxyable initialization method. Can be called only once, from the proxy constructor
@@ -95,32 +97,23 @@ contract MasterAccountController is
         address _initialGovernance,
         address payable _executor,
         uint256 _executorFee,
+        uint256 _paymentProofValidityDurationSeconds,
+        uint256 _defaultInstructionFee,
         string memory _xrplProviderWallet,
-        address _operatorAddress,
-        uint256 _operatorExecutionWindowSeconds,
         address _personalAccountImplementation
     )
         external
     {
-        require(_executor != address(0), InvalidExecutor());
-        require(_executorFee > 0, InvalidExecutorFee());
-        require(bytes(_xrplProviderWallet).length > 0, InvalidXrplProviderWallet());
-        require(_operatorAddress != address(0), InvalidOperatorAddress());
-        require(_personalAccountImplementation != address(0), InvalidPersonalAccountImplementation());
-
         GovernedBase.initialise(_governanceSettings, _initialGovernance);
-        executor = _executor;
-        executorFee = _executorFee;
-        xrplProviderWallet = _xrplProviderWallet;
-        xrplProviderWalletHash = keccak256(bytes(_xrplProviderWallet));
-        operatorAddress = _operatorAddress;
-        operatorExecutionWindowSeconds = _operatorExecutionWindowSeconds;
-        personalAccountImplementation = _personalAccountImplementation;
+        _setExecutor(_executor);
+        _setExecutorFee(_executorFee);
+        _setPaymentProofValidityDurationSeconds(_paymentProofValidityDurationSeconds);
+        _setDefaultInstructionFee(_defaultInstructionFee);
+        string[] memory xrplProviderWalletList = new string[](1);
+        xrplProviderWalletList[0] = _xrplProviderWallet;
+        _addXrplProviderWallets(xrplProviderWalletList);
+        _setPersonalAccountImplementation(_personalAccountImplementation);
         seedPersonalAccountImplementation = _personalAccountImplementation;
-        emit ExecutorSet(_executor);
-        emit ExecutorFeeSet(_executorFee);
-        emit PersonalAccountImplementationSet(_personalAccountImplementation);
-        emit OperatorExecutionWindowSecondsSet(_operatorExecutionWindowSeconds);
     }
 
     /**
@@ -142,7 +135,7 @@ contract MasterAccountController is
         // create or get existing Personal Account for the XRPL address
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
         // reserve collateral
-        uint256 lots = _getAmountOrLots(_paymentReference);
+        uint256 lots = _getValue(_paymentReference);
         address agentVault = _getAgentVaultAddress(_paymentReference);
         _collateralReservationId = personalAccount.reserveCollateral{value: msg.value}(
             lots,
@@ -173,9 +166,6 @@ contract MasterAccountController is
     )
         external
     {
-        // check operator-only window
-        _checkOperatorOnlyWindow(_proof.data.responseBody.blockTimestamp);
-
         bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
 
         // check instruction id
@@ -196,11 +186,11 @@ contract MasterAccountController is
         require(reservationInfo.status == CollateralReservationInfo.Status.SUCCESSFUL, MintingNotCompleted());
 
         // verify payment proof
-        _verifyPayment(_proof, _xrplAddress);
+        _verifyPayment(instructionId, _proof, _xrplAddress);
         // check that minter and amount match
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
         require(address(personalAccount) == reservationInfo.minter, InvalidMinter());
-        uint256 lots = _getAmountOrLots(paymentReference);
+        uint256 lots = _getValue(paymentReference);
         uint256 amount = _lotsToAmount(lots);
         // could revert if lot size changes between minting and deposit, but very unlikely
         // user should call deposit in that case
@@ -231,24 +221,163 @@ contract MasterAccountController is
     )
         external payable
     {
-        // check operator-only window
-        _checkOperatorOnlyWindow(_proof.data.responseBody.blockTimestamp);
-
+        bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
+        uint256 instructionId = _getInstructionId(paymentReference);
         // verify payment proof
-        _verifyPayment(_proof, _xrplAddress);
+        _verifyPayment(instructionId, _proof, _xrplAddress);
 
         // create or get existing Personal Account for the XRPL address
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
+
+        bytes32 transactionId = _proof.data.requestBody.transactionId;
         // mark transaction as used
-        usedPaymentHashes[_proof.data.requestBody.transactionId] = true;
+        usedPaymentHashes[transactionId] = true;
 
         // execute instruction
         _executeInstruction(
-            _proof.data.responseBody.standardPaymentReference,
+            instructionId,
+            paymentReference,
             personalAccount,
             _xrplAddress,
-            _proof.data.requestBody.transactionId
+            transactionId
         );
+    }
+
+    /**
+     * @notice Sets new executor address.
+     * @param _newExecutor New executor address.
+     * Can only be called by the governance.
+     */
+    function setExecutor(
+        address payable _newExecutor
+    )
+        external onlyGovernance
+    {
+        _setExecutor(_newExecutor);
+    }
+
+    /**
+     * @notice Sets new executor fee.
+     * @param _newExecutorFee New executor fee in wei.
+     * Can only be called by the governance.
+     */
+    function setExecutorFee(
+        uint256 _newExecutorFee
+    )
+        external onlyGovernance
+    {
+        _setExecutorFee(_newExecutorFee);
+    }
+
+    /**
+     * @notice Updates the payment proof validity duration.
+     * @param _newDurationSeconds New duration in seconds.
+     * Can only be called by the governance.
+     */
+    function setPaymentProofValidityDuration(
+        uint256 _newDurationSeconds
+    )
+        external onlyGovernance
+    {
+        _setPaymentProofValidityDurationSeconds(_newDurationSeconds);
+    }
+
+    /**
+     * @notice Sets new default instruction fee.
+     * @param _newDefaultInstructionFee New default instruction fee in underlying asset's smallest unit (e.g., drops for XRP).
+     * Can only be called by the governance.
+     */
+    function setDefaultInstructionFee(
+        uint256 _newDefaultInstructionFee
+    )
+        external onlyGovernance
+    {
+        _setDefaultInstructionFee(_newDefaultInstructionFee);
+    }
+
+    /**
+     * @notice Sets instruction-specific fees, overriding the default fee.
+     * @param _instructionIds The IDs of the instructions.
+     * @param _fees The fees for the instructions in underlying asset's smallest unit (e.g., drops for XRP).
+     * Can only be called by the governance.
+     */
+    function setInstructionFees(
+        uint256[] calldata _instructionIds,
+        uint256[] calldata _fees
+    )
+        external onlyGovernance
+    {
+        require(_instructionIds.length == _fees.length, LengthsMismatch());
+        for (uint256 i = 0; i < _instructionIds.length; i++) {
+            uint256 instructionId = _instructionIds[i];
+            uint256 fee = _fees[i];
+            instructionFees[instructionId] = fee + 1; // store 1-based to distinguish from default (0)
+            emit InstructionFeeSet(instructionId, fee);
+        }
+    }
+
+    /**
+     * @notice Removes instruction-specific fees, reverting to the default fee.
+     * @param _instructionIds The IDs of the instructions to remove fees for.
+     * Can only be called by the governance.
+     */
+    function removeInstructionFees(
+        uint256[] calldata _instructionIds
+    )
+        external onlyGovernance
+    {
+        for (uint256 i = 0; i < _instructionIds.length; i++) {
+            uint256 instructionId = _instructionIds[i];
+            delete instructionFees[instructionId];
+            emit InstructionFeeRemoved(instructionId);
+        }
+    }
+
+    /**
+     * @notice Adds new XRPL provider wallet addresses.
+     * @param _xrplProviderWallets The XRPL provider wallet addresses to add.
+     * Can only be called by the governance.
+     */
+    function addXrplProviderWallets(
+        string[] memory _xrplProviderWallets
+    )
+        external onlyGovernance
+    {
+        _addXrplProviderWallets(_xrplProviderWallets);
+    }
+
+    /**
+     * @notice Removes existing XRPL provider wallet addresses.
+     * @param _xrplProviderWallets The XRPL provider wallet addresses to remove.
+     * Can only be called by the governance.
+     */
+    function removeXrplProviderWallets(
+        string[] calldata _xrplProviderWallets
+    )
+        external onlyGovernance
+    {
+        for (uint256 i = 0; i < _xrplProviderWallets.length; i++) {
+            string calldata xrplProviderWallet = _xrplProviderWallets[i];
+            bytes32 walletHash = keccak256(bytes(xrplProviderWallet));
+            uint256 index = xrplProviderWalletHashes[walletHash]; // 1-based index
+            require(index != 0, InvalidXrplProviderWallet(xrplProviderWallet));
+            // remove from mapping
+            delete xrplProviderWalletHashes[walletHash];
+            uint256 length = xrplProviderWallets.length;
+            if (index == length) {
+                // removing the last element
+                xrplProviderWallets.pop();
+            } else {
+                string memory lastWallet = xrplProviderWallets[length - 1];
+                // move the last element to the removed position
+                xrplProviderWallets[index - 1] = lastWallet;
+                xrplProviderWallets.pop();
+                // update moved wallet's index in mapping
+                bytes32 movedWalletHash = keccak256(bytes(lastWallet));
+                xrplProviderWalletHashes[movedWalletHash] = index; // update to new 1-based index
+            }
+            emit XrplProviderWalletRemoved(xrplProviderWallet);
+        }
     }
 
     /**
@@ -267,51 +396,6 @@ contract MasterAccountController is
         );
         personalAccountImplementation = _newImplementation;
         emit PersonalAccountImplementationSet(_newImplementation);
-    }
-
-    /**
-     * @notice Updates the operator-only window (in seconds).
-     * @param _newWindowSeconds New execution window duration in seconds.
-     * Can only be called by the governance.
-     */
-    function setOperatorExecutionWindowSeconds(
-        uint256 _newWindowSeconds
-    )
-        external onlyGovernance
-    {
-        require(_newWindowSeconds > 0, InvalidOperatorExecutionWindowSeconds());
-        operatorExecutionWindowSeconds = _newWindowSeconds;
-        emit OperatorExecutionWindowSecondsSet(_newWindowSeconds);
-    }
-
-    /**
-     * @notice Sets new executor address.
-     * @param _newExecutor New executor address.
-     * Can only be called by the governance.
-     */
-    function setExecutor(
-        address payable _newExecutor
-    )
-        external onlyGovernance
-    {
-        require(_newExecutor != address(0), InvalidExecutor());
-        executor = _newExecutor;
-        emit ExecutorSet(_newExecutor);
-    }
-
-    /**
-     * @notice Sets new executor fee.
-     * @param _newExecutorFee New executor fee in wei.
-     * Can only be called by the governance.
-     */
-    function setExecutorFee(
-        uint256 _newExecutorFee
-    )
-        external onlyGovernance
-    {
-        require(_newExecutorFee > 0, InvalidExecutorFee());
-        executorFee = _newExecutorFee;
-        emit ExecutorFeeSet(_newExecutorFee);
     }
 
     /**
@@ -434,6 +518,28 @@ contract MasterAccountController is
     /**
      * @inheritdoc IMasterAccountController
      */
+    function getInstructionFee(
+        uint256 _instructionId
+    )
+        external view
+        returns (uint256)
+    {
+        return _getInstructionFee(_instructionId);
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
+    function getXrplProviderWallets()
+        external view
+        returns (string[] memory)
+    {
+        return xrplProviderWallets;
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
     function getAgentVaults()
         external view
         returns (uint256[] memory _agentVaultIds, address[] memory _agentVaultAddresses)
@@ -492,6 +598,7 @@ contract MasterAccountController is
 
     /////////////////////////////// INTERNAL FUNCTIONS ///////////////////////////////
     function _executeInstruction(
+        uint256 _instructionId,
         bytes32 _paymentReference,
         IIPersonalAccount _personalAccount,
         string memory _xrplOwner,
@@ -499,39 +606,35 @@ contract MasterAccountController is
     )
         internal
     {
-        // TODO _xrplOwner could maybe be removed from here. Probably not needed in events?
-        // byte 0
-        uint256 instructionId = _getInstructionId(_paymentReference);
-        if (instructionId == 1) { // redeem
-            uint256 lots = _getAmountOrLots(_paymentReference);
+        if (_instructionId == 1) { // redeem
+            uint256 lots = _getValue(_paymentReference);
             _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
-        } else if (instructionId == 11 || instructionId == 12) { // deposit or withdraw
-            uint256 amount = _getAmountOrLots(_paymentReference);
+        } else if (_instructionId == 11 || _instructionId == 12) { // deposit or withdraw
+            uint256 amount = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            if (instructionId == 11) { // deposit
+            if (_instructionId == 11) { // deposit
                 _personalAccount.deposit(amount, vault);
-            } else if (instructionId == 12) { // withdraw
+            } else if (_instructionId == 12) { // withdraw
                 _personalAccount.withdraw(amount, vault);
             }
-        } else if (instructionId == 13) { // claim withdraw
-            uint256 period = _getPeriod(_paymentReference);
+        } else if (_instructionId == 13) { // claim withdraw
+            uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             _personalAccount.claimWithdraw(period, vault);
-        } else if (instructionId == 14) { // claim withdraw and redeem
-            uint256 period = _getPeriod(_paymentReference);
+        } else if (_instructionId == 14) { // claim withdraw and redeem
+            uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            uint256 lots = _getAmountOrLots(_paymentReference);
-            _personalAccount.claimWithdraw(period, vault);
-            // TODO swap
+            uint256 amount = _personalAccount.claimWithdraw(period, vault);
+            uint256 lots = _amountToLots(amount);
             _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
         } else {
-            revert InvalidInstructionId(instructionId);
+            revert InvalidInstructionId(_instructionId);
         }
         // TODO are more granular events needed?
         emit InstructionExecuted(
             address(_personalAccount),
             _xrplOwner,
-            instructionId,
+            _instructionId,
             _paymentReference,
             _transactionId
         );
@@ -602,40 +705,106 @@ contract MasterAccountController is
         );
     }
 
-    function _verifyPayment(IPayment.Proof calldata _proof, string memory _xrplAddress) internal view {
-        // FDC verification
+    function _setExecutor(address payable _newExecutor) internal {
+        require(_newExecutor != address(0), InvalidExecutor());
+        executor = _newExecutor;
+        emit ExecutorSet(_newExecutor);
+    }
+
+    function _setExecutorFee(uint256 _newExecutorFee) internal {
+        require(_newExecutorFee > 0, InvalidExecutorFee());
+        executorFee = _newExecutorFee;
+        emit ExecutorFeeSet(_newExecutorFee);
+    }
+
+    function _setPaymentProofValidityDurationSeconds(uint256 _newDuration) internal {
+        require(_newDuration > 0, InvalidPaymentProofValidityDuration());
+        paymentProofValidityDurationSeconds = _newDuration;
+        emit PaymentProofValidityDurationSecondsSet(_newDuration);
+    }
+
+    function _setDefaultInstructionFee(uint256 _newDefaultInstructionFee) internal {
+        defaultInstructionFee = _newDefaultInstructionFee;
+        emit DefaultInstructionFeeSet(_newDefaultInstructionFee);
+    }
+
+    function _addXrplProviderWallets(
+        string[] memory _xrplProviderWallets
+    )
+        internal
+    {
+        for (uint256 i = 0; i < _xrplProviderWallets.length; i++) {
+            string memory xrplProviderWallet = _xrplProviderWallets[i];
+            require(bytes(xrplProviderWallet).length > 0, InvalidXrplProviderWallet(xrplProviderWallet));
+            bytes32 walletHash = keccak256(bytes(xrplProviderWallet));
+            require(xrplProviderWalletHashes[walletHash] == 0, XrplProviderWalletAlreadyExists(xrplProviderWallet));
+            xrplProviderWallets.push(xrplProviderWallet);
+            xrplProviderWalletHashes[walletHash] = xrplProviderWallets.length; // store 1-based index
+            emit XrplProviderWalletAdded(xrplProviderWallet);
+        }
+    }
+
+    function _setPersonalAccountImplementation(address _newImplementation) internal {
+        require(_newImplementation != address(0), InvalidPersonalAccountImplementation());
+        personalAccountImplementation = _newImplementation;
+        emit PersonalAccountImplementationSet(_newImplementation);
+    }
+
+    function _verifyPayment(
+        uint256 _instructionId,
+        IPayment.Proof calldata _proof,
+        string memory _xrplAddress
+    )
+        internal view
+    {
+        uint256 instructionFee = _getInstructionFee(_instructionId);
+        int256 receivedAmount = _proof.data.responseBody.receivedAmount;
+        require(
+            receivedAmount >= 0 && uint256(receivedAmount) >= instructionFee,
+            InvalidPaymentAmount(instructionFee)
+        );
         require(
             _proof.data.responseBody.status == 0,
             InvalidTransactionStatus()
         );
-
         require(
-            ContractRegistry.getFdcVerification().verifyPayment(_proof),
-            InvalidTransactionProof()
-        );
-        require(
-            _proof.data.responseBody.receivingAddressHash == xrplProviderWalletHash,
-            InvalidReceivingAddressHash()
+            block.timestamp <= paymentProofValidityDurationSeconds + _proof.data.responseBody.blockTimestamp,
+            PaymentProofExpired()
         );
         require(
             _proof.data.responseBody.sourceAddressHash == keccak256(bytes(_xrplAddress)),
             MismatchingSourceAndXrplAddr()
         );
         require(
+            xrplProviderWalletHashes[_proof.data.responseBody.receivingAddressHash] != 0,
+            InvalidReceivingAddressHash()
+        );
+        require(
             !usedPaymentHashes[_proof.data.requestBody.transactionId],
             TransactionAlreadyExecuted()
         );
-    }
-
-    function _checkOperatorOnlyWindow(uint256 _timestamp) internal view {
-        if (block.timestamp < _timestamp + operatorExecutionWindowSeconds) {
-            require(msg.sender == operatorAddress, OnlyOperator());
-        }
+        require(
+            ContractRegistry.getFdcVerification().verifyPayment(_proof),
+            InvalidTransactionProof()
+        );
     }
 
     function _lotsToAmount(uint256 _lots) internal view returns (uint256) {
         uint256 lotSize = ContractRegistry.getAssetManagerFXRP().lotSize();
         return _lots * lotSize;
+    }
+
+    function _amountToLots(uint256 _amount) internal view returns (uint256) {
+        uint256 lotSize = ContractRegistry.getAssetManagerFXRP().lotSize();
+        return _amount / lotSize; // there might be remainder
+    }
+
+    function _getInstructionFee(uint256 _instructionId) internal view returns (uint256) {
+        uint256 fee = instructionFees[_instructionId]; // 1-based to distinguish unset (0) from zero fee
+        if (fee > 0) {
+            return fee - 1;
+        }
+        return defaultInstructionFee;
     }
 
     function _getAgentVaultAddress(bytes32 _paymentReference) internal view returns (address _agentVault) {
@@ -657,15 +826,10 @@ contract MasterAccountController is
         return (uint256(_paymentReference) >> 248) & 0xFF;
     }
 
-    function _getAmountOrLots(bytes32 _paymentReference) internal pure returns (uint256 _amountOrLots) {
-        // bytes 2-17: amount/lots
-        _amountOrLots = (uint256(_paymentReference) >> 112) & ((uint256(1) << 128) - 1);
-        require(_amountOrLots > 0, AmountOrLotsZero());
-    }
-
-    function _getPeriod(bytes32 _paymentReference) internal pure returns (uint256) {
-        // bytes 22-24: period
-        return (uint256(_paymentReference) >> 56) & ((uint256(1) << 24) - 1);
+    function _getValue(bytes32 _paymentReference) internal pure returns (uint256 _value) {
+        // bytes 2-17: value
+        _value = (uint256(_paymentReference) >> 112) & ((uint256(1) << 128) - 1);
+        require(_value > 0, ValueZero());
     }
 
     /**

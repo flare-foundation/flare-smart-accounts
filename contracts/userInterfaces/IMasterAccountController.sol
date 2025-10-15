@@ -12,10 +12,15 @@ import {IPersonalAccount} from "./IPersonalAccount.sol";
 interface IMasterAccountController {
 
     event PersonalAccountImplementationSet(address newImplementation);
-    event OperatorExecutionWindowSecondsSet(uint256 newWindowSeconds);
     event PersonalAccountCreated(string xrplOwner, address personalAccount);
     event ExecutorSet(address executor);
     event ExecutorFeeSet(uint256 executorFee);
+    event PaymentProofValidityDurationSecondsSet(uint256 durationSeconds);
+    event DefaultInstructionFeeSet(uint256 defaultInstructionFee);
+    event InstructionFeeSet(uint256 indexed instructionId, uint256 instructionFee);
+    event InstructionFeeRemoved(uint256 indexed instructionId);
+    event XrplProviderWalletAdded(string xrplProviderWallet);
+    event XrplProviderWalletRemoved(string xrplProviderWallet);
     event VaultAdded(uint256 indexed vaultId, address indexed vaultAddress);
     event AgentVaultAdded(uint256 indexed agentVaultId, address indexed agentVaultAddress);
     event AgentVaultRemoved(uint256 indexed agentVaultId, address indexed agentVaultAddress);
@@ -37,16 +42,13 @@ interface IMasterAccountController {
 
     error InvalidExecutor();
     error InvalidExecutorFee();
-    error InvalidXrplProviderWallet();
-    error InvalidOperatorAddress();
-    error InvalidOperatorExecutionWindowSeconds();
     error InvalidPersonalAccountImplementation();
-    error OnlyOperator();
     error InvalidTransactionId();
     error InvalidTransactionProof();
     error InvalidReceivingAddressHash();
     error InvalidTransactionStatus();
     error MismatchingSourceAndXrplAddr();
+    error InvalidPaymentAmount(uint256 requiredAmount);
     error TransactionAlreadyExecuted();
     error InvalidInstructionId(uint256 instructionId);
     error LengthsMismatch();
@@ -55,12 +57,17 @@ interface IMasterAccountController {
     error AgentNotAvailable(address agentVault);
     error VaultIdAlreadyUsed(uint256 vaultId);
     error InvalidVault(uint256 vaultId);
-    error AmountOrLotsZero();
+    error ValueZero();
     error UnknownCollateralReservationId();
     error MintingNotCompleted();
     error InvalidAmount();
     error InvalidMinter();
+    error InvalidInstructionFee(uint256 instructionId);
     error PersonalAccountNotSuccessfullyDeployed(address personalAccountAddress);
+    error InvalidPaymentProofValidityDuration();
+    error PaymentProofExpired();
+    error InvalidXrplProviderWallet(string xrplProviderWallet);
+    error XrplProviderWalletAlreadyExists(string xrplProviderWallet);
 
     /**
      * @notice Reserve collateral for minting operation.
@@ -135,6 +142,25 @@ interface IMasterAccountController {
     )
         external view
         returns (address);
+
+    /**
+     * @notice Returns the instruction fee for a given instruction ID.
+     * @param _instructionId The ID of the instruction.
+     * @return The instruction fee in in underlying asset's smallest unit (e.g., drops for XRP).
+     */
+    function getInstructionFee(
+        uint256 _instructionId
+    )
+        external view
+        returns (uint256);
+
+    /**
+     * Returns the list of registered XRPL provider wallets.
+     * @return The list of registered XRPL provider wallets.
+     */
+    function getXrplProviderWallets()
+        external view
+        returns (string[] memory);
 
     /**
      * Returns the list of registered agent vault IDs and their corresponding addresses.

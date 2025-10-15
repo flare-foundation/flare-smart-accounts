@@ -12,9 +12,9 @@ contract MasterAccountControllerProxy is ERC1967Proxy {
         address _initialGovernance,
         address payable _executor,
         uint256 _executorFee,
+        uint256 _paymentProofValidityDurationSeconds,
+        uint256 _defaultInstructionFee,
         string memory _xrplProviderWallet,
-        address _operatorAddress,
-        uint256 _operatorExecutionWindowSeconds,
         address _personalAccountImplementation
     )
         ERC1967Proxy(
@@ -26,9 +26,9 @@ contract MasterAccountControllerProxy is ERC1967Proxy {
                     _initialGovernance,
                     _executor,
                     _executorFee,
+                    _paymentProofValidityDurationSeconds,
+                    _defaultInstructionFee,
                     _xrplProviderWallet,
-                    _operatorAddress,
-                    _operatorExecutionWindowSeconds,
                     _personalAccountImplementation
                 )
             )

@@ -66,8 +66,10 @@ contract PersonalAccount is
 
         // Check fees
         uint256 collateralReservationFee = assetManager.collateralReservationFee(_lots);
-        uint256 totalFee = collateralReservationFee + _executorFee;
-        require(msg.value >= totalFee, InsufficientFundsForCollateralReservation(collateralReservationFee));
+        require(
+            msg.value >= collateralReservationFee + _executorFee,
+            InsufficientFundsForCollateralReservation(collateralReservationFee, _executorFee)
+        );
 
         // Reserve collateral
         _collateralReservationId = assetManager.reserveCollateral{value: msg.value}(
@@ -93,11 +95,12 @@ contract PersonalAccount is
         uint256 _executorFee
     )
         external payable onlyController nonReentrant
+        returns (uint256 _amount)
     {
-        require(msg.value >= _executorFee, InsufficientFundsForRedeemExecutor());
+        require(msg.value >= _executorFee, InsufficientFundsForRedeem(_executorFee));
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-        assetManager.redeem{value: msg.value}(_lots, xrplOwner, _executor);
-        emit Redeemed(_lots, _executor, _executorFee);
+        _amount = assetManager.redeem{value: msg.value}(_lots, xrplOwner, _executor);
+        emit Redeemed(_lots, _amount, _executor, _executorFee);
     }
 
     /// @inheritdoc IIPersonalAccount
@@ -106,13 +109,14 @@ contract PersonalAccount is
         address _vault
     )
         external onlyController nonReentrant
+        returns (uint256 _shares)
     {
         address fxrp = IFirelightVault(_vault).asset();
         require(IERC20(fxrp).approve(_vault, _amount), ApprovalFailed());
         emit Approved(fxrp, _vault, _amount);
 
-        uint256 shares = IFirelightVault(_vault).deposit(_amount, address(this));
-        emit Deposited(_vault, _amount, shares);
+        _shares = IFirelightVault(_vault).deposit(_amount, address(this));
+        emit Deposited(_vault, _amount, _shares);
     }
 
     /// @inheritdoc IIPersonalAccount
@@ -121,9 +125,10 @@ contract PersonalAccount is
         address _vault
     )
         external onlyController nonReentrant
+        returns (uint256 _shares)
     {
-        uint256 shares = IFirelightVault(_vault).withdraw(_amount, address(this), address(this));
-        emit Withdrawn(_vault, _amount, shares);
+        _shares = IFirelightVault(_vault).withdraw(_amount, address(this), address(this));
+        emit Withdrawn(_vault, _amount, _shares);
     }
 
     /// @inheritdoc IIPersonalAccount
@@ -132,9 +137,10 @@ contract PersonalAccount is
         address _vault
     )
         external onlyController nonReentrant
+        returns (uint256 _amount)
     {
-        uint256 amount = IFirelightVault(_vault).claimWithdraw(_period);
-        emit WithdrawalClaimed(_vault, _period, amount);
+        _amount = IFirelightVault(_vault).claimWithdraw(_period);
+        emit WithdrawalClaimed(_vault, _period, _amount);
     }
 
     /// @inheritdoc IPersonalAccount

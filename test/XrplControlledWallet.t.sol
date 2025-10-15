@@ -40,10 +40,11 @@ contract XrplControlledWalletTest is Test {
     string private xrplProviderWallet;
     bytes32 private xrplProviderWalletHash;
     address private operator;
+    uint256 private paymentProofValidityDurationSeconds;
+    uint256 private defaultInstructionFee;
     address private personalAccountImplementation;
     string private xrplAddress1;
     string private xrplAddress2;
-    uint256 private operatorExecutionWindowSeconds;
     address private assetManagerFxrpMock;
     address private agent;
     AgentInfo.Info private agentInfo;
@@ -64,14 +65,13 @@ contract XrplControlledWalletTest is Test {
             "DV"
         );
         xrplProviderWallet = "rXrplProviderWallet";
-        xrplProviderWalletHash = keccak256(
-            abi.encodePacked(xrplProviderWallet)
-        );
+        xrplProviderWalletHash = keccak256(bytes(xrplProviderWallet));
         operator = makeAddr("operator");
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
         fdcVerificationMock = makeAddr("FDCVerificationMock");
         executorFee = 100;
-        operatorExecutionWindowSeconds = 3600;
+        paymentProofValidityDurationSeconds = 1 days;
+        defaultInstructionFee = 1000000; // 1 XRP
         assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
         agent = makeAddr("agent");
         agentInfo.status = AgentInfo.Status.NORMAL;
@@ -88,9 +88,9 @@ contract XrplControlledWalletTest is Test {
             governance,
             payable(executor),
             executorFee,
+            paymentProofValidityDurationSeconds,
+            defaultInstructionFee,
             xrplProviderWallet,
-            operator,
-            operatorExecutionWindowSeconds,
             personalAccountImplementation
         );
         masterAccountController = MasterAccountController(
@@ -123,10 +123,9 @@ contract XrplControlledWalletTest is Test {
     function test() public {
         IPayment.Proof memory proof;
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
-        proof.data.responseBody.sourceAddressHash = keccak256(
-            abi.encodePacked(xrplAddress1)
-        );
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
         proof.data.requestBody.transactionId = bytes32("tx1");
+        proof.data.responseBody.receivedAmount = 1000000;
         proof
             .data
             .responseBody
@@ -242,9 +241,7 @@ contract XrplControlledWalletTest is Test {
         // execute transaction for xrplAddress2; new personal account should be created with new implementation
         // and at the expected address
         proof.data.requestBody.transactionId = bytes32("tx4");
-        proof.data.responseBody.sourceAddressHash = keccak256(
-            abi.encodePacked(xrplAddress2)
-        );
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
         fxrp.mint(predictedAddress2, 12345);
         vm.prank(operator);
         masterAccountController.executeInstruction(proof, xrplAddress2);
