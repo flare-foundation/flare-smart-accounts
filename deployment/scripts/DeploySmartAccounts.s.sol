@@ -77,10 +77,13 @@ contract DeploySmartAccounts is Script {
         address expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
         uint256 codeSize;
         assembly { codeSize := extcodesize(expected) }
-        // require(codeSize == 0, "Contract already deployed at expected address");
-
-
-        seedPersonalAccountImpl = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+        if (codeSize == 0) {
+            console2.log("Deploying seed PersonalAccountBase via singleton factory");
+            seedPersonalAccountImpl = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+        } else {
+            console2.log("Seed PersonalAccountBase already deployed, skipping");
+            seedPersonalAccountImpl = expected;
+        }
 
         // deploy master account controller implementation
         masterAccountControllerImpl = new MasterAccountController();
@@ -120,6 +123,12 @@ contract DeploySmartAccounts is Script {
 
         vm.stopBroadcast();
         // Log deployment info for post-processing
+        console2.log(
+            string.concat(
+                "DEPLOYED: SeedPersonalAccountImplementation, ",
+                "PersonalAccountBase.sol: ",
+                vm.toString(seedPersonalAccountImpl)
+            );
         console2.log(
             string.concat(
                 "DEPLOYED: PersonalAccountImplementation, ",
