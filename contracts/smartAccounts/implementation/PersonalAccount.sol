@@ -5,48 +5,20 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
-import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
-import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
+import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IFirelightVault} from "../interface/IFirelightVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
+import {PersonalAccountBase} from "./PersonalAccountBase.sol";
 
-/// @title Personal Account contract
+/// @title PersonalAccount contract
 /// @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
 contract PersonalAccount is
     IIPersonalAccount,
-    UUPSUpgradeable,
+    PersonalAccountBase,
     ReentrancyGuard
 {
-    /// @notice MasterAccountController contract address
-    address public controllerAddress;
-    /// @notice XRPL address
-    string public xrplOwner;
-
-    modifier onlyController() {
-        require(msg.sender == controllerAddress, OnlyController());
-        _;
-    }
-
-    constructor() {}
-
-    /**
-     * Proxyable initialization method. Can be called only once, from the proxy constructor
-     */
-    function initialize(
-        string memory _xrplOwner,
-        address _controllerAddress
-    )
-        external
-    {
-        require(controllerAddress == address(0), AlreadyInitialized());
-        require(_controllerAddress != address(0), InvalidControllerAddress());
-        require(bytes(_xrplOwner).length > 0, InvalidXrplOwner());
-
-        xrplOwner = _xrplOwner;
-        controllerAddress = _controllerAddress;
-    }
 
     /// @inheritdoc IIPersonalAccount
     function reserveCollateral(
@@ -142,18 +114,4 @@ contract PersonalAccount is
         _amount = IFirelightVault(_vault).claimWithdraw(_period);
         emit WithdrawalClaimed(_vault, _period, _amount);
     }
-
-    /// @inheritdoc IPersonalAccount
-    function implementation()
-        external view
-        returns (address)
-    {
-        return ERC1967Utils.getImplementation();
-    }
-
-    /*
-     * @inheritdoc UUPSUpgradeable
-     * @dev Only the controller can call upgrade functions.
-     */
-    function _authorizeUpgrade(address _newImplementation) internal override onlyController {}
 }

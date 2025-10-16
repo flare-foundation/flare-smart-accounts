@@ -3,22 +3,35 @@ pragma solidity ^0.8.27;
 // solhint-disable no-console
 
 import {Script, console2} from "forge-std/Script.sol";
-import {PersonalAccount} from "../../contracts/xrpcw/implementation/PersonalAccount.sol";
-import {MasterAccountController} from "../../contracts/xrpcw/implementation/MasterAccountController.sol";
-import {MasterAccountControllerProxy} from "../../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
+import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {PersonalAccountBase} from "../../contracts/smartAccounts/implementation/PersonalAccountBase.sol";
+import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
+import {MasterAccountControllerProxy} from "../../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
+import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
+import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
 
 // solhint-disable-next-line max-line-length
-// forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
+// forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
 
-contract DeployXRPLControlledWallet is Script {
+contract DeploySmartAccounts is Script {
+    address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+
     PersonalAccount private personalAccountImpl;
     address private personalAccountImplAddress;
+    address private seedPersonalAccountImpl;
     MasterAccountControllerProxy private masterAccountControllerProxy;
     MasterAccountController private masterAccountControllerImpl;
     address private masterAccountControllerAddress;
     MasterAccountController private masterAccountController;
+
+    struct MasterAccountControllerParams {
+        address depositVault;
+        address executor;
+        uint256 executorFee;
+        string xrplProviderWallet;
+    }
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -38,18 +51,35 @@ contract DeployXRPLControlledWallet is Script {
         configFile = string.concat(configFile, network, ".json");
         console2.log(string.concat("NETWORK: ", network));
 
+        MasterAccountControllerParams memory params;
         string memory config = vm.readFile(configFile);
-        address depositVault = vm.parseJsonAddress(config, ".depositVault");
-        address executor = vm.parseJsonAddress(config, ".executor");
-        uint256 executorFee = vm.parseJsonUint(config, ".executorFee");
-        uint256 paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
-        uint256 defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
-        string memory xrplProviderWallet = vm.parseJsonString(config, ".xrplProviderWallet");
+        params.depositVault = vm.parseJsonAddress(config, ".depositVault");
+        params.executor = vm.parseJsonAddress(config, ".executor");
+        params.executorFee = vm.parseJsonUint(config, ".executorFee");
+        params.xrplProviderWallet = vm.parseJsonString(
+            config,
+            ".xrplProviderWallet"
+        );
 
         vm.startBroadcast();
         // deploy personal account implementation
         personalAccountImpl = new PersonalAccount();
         personalAccountImplAddress = address(personalAccountImpl);
+
+        // deploy seed personal account implementation via EIP-2470 singleton factory using CREATE2
+        bytes memory bytecode = abi.encodePacked(
+            type(PersonalAccountBase).creationCode
+        );
+        // needs to be the same on all networks
+        bytes32 salt = keccak256(abi.encodePacked("PersonalAccountBaseSeed"));
+
+        address expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
+        uint256 codeSize;
+        assembly { codeSize := extcodesize(expected) }
+        // require(codeSize == 0, "Contract already deployed at expected address");
+
+
+        seedPersonalAccountImpl = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
 
         // deploy master account controller implementation
         masterAccountControllerImpl = new MasterAccountController();
@@ -57,12 +87,11 @@ contract DeployXRPLControlledWallet is Script {
             address(masterAccountControllerImpl),
             IGovernanceSettings(governanceSettings),
             governance,
-            payable(executor),
-            executorFee,
-            paymentProofValidityDurationSeconds,
-            defaultInstructionFee,
-            xrplProviderWallet,
-            personalAccountImplAddress
+            payable(params.executor),
+            params.executorFee,
+            params.xrplProviderWallet,
+            personalAccountImplAddress,
+            seedPersonalAccountImpl
         );
         masterAccountController = MasterAccountController(
             address(masterAccountControllerProxy)
@@ -80,7 +109,7 @@ contract DeployXRPLControlledWallet is Script {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
         vaultIds[0] = 0;
-        vaultAddresses[0] = depositVault;
+        vaultAddresses[0] = params.depositVault;
         masterAccountController.addVaults(vaultIds, vaultAddresses);
 
         // switch to production mode

@@ -8,15 +8,16 @@ import {
     MasterAccountController,
     IGovernanceSettings,
     IPayment
-} from "../contracts/xrpcw/implementation/MasterAccountController.sol";
+} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
-import {MasterAccountControllerProxy} from "../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
-import {PersonalAccount} from "../contracts/xrpcw/implementation/PersonalAccount.sol";
-import {PersonalAccountProxy} from "../contracts/xrpcw/proxy/PersonalAccountProxy.sol";
+import {MasterAccountControllerProxy} from "../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
+import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {PersonalAccountBase} from "../contracts/smartAccounts/implementation/PersonalAccountBase.sol";
+import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
 // import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
@@ -36,7 +37,6 @@ contract MasterAccountControllerTest is Test {
     MintableERC20 private fxrp;
     string private xrplProviderWallet;
     bytes32 private xrplProviderWalletHash;
-    address private operator;
     uint256 private paymentProofValidityDurationSeconds;
     uint256 private defaultInstructionFee;
     address private personalAccountImplementation;
@@ -60,7 +60,6 @@ contract MasterAccountControllerTest is Test {
         xrplProviderWalletHash = keccak256(
             abi.encodePacked(xrplProviderWallet)
         );
-        operator = makeAddr("operator");
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
         fdcVerificationMock = makeAddr("FDCVerificationMock");
         executorFee = 100;
@@ -73,6 +72,8 @@ contract MasterAccountControllerTest is Test {
         // deploy the personal account implementation
         personalAccountImpl = new PersonalAccount();
         personalAccountImplementation = address(personalAccountImpl);
+        // deploy seed personal account implementation
+        address seedPersonalAccountImpl = address(new PersonalAccountBase());
 
         // deploy the controlled wallet
         masterAccountControllerImpl = new MasterAccountController();
@@ -85,7 +86,8 @@ contract MasterAccountControllerTest is Test {
             paymentProofValidityDurationSeconds,
             defaultInstructionFee,
             xrplProviderWallet,
-            personalAccountImplementation
+            personalAccountImplementation,
+            seedPersonalAccountImpl
         );
         masterAccountController = MasterAccountController(
             address(masterAccountControllerProxy)

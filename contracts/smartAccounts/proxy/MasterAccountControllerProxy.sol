@@ -15,7 +15,8 @@ contract MasterAccountControllerProxy is ERC1967Proxy {
         uint256 _paymentProofValidityDurationSeconds,
         uint256 _defaultInstructionFee,
         string memory _xrplProviderWallet,
-        address _personalAccountImplementation
+        address _personalAccountImplementation,
+        address _seedPersonalAccountImplementation
     )
         ERC1967Proxy(
             _implementationAddress,
@@ -29,7 +30,8 @@ contract MasterAccountControllerProxy is ERC1967Proxy {
                     _paymentProofValidityDurationSeconds,
                     _defaultInstructionFee,
                     _xrplProviderWallet,
-                    _personalAccountImplementation
+                    _personalAccountImplementation,
+                    _seedPersonalAccountImplementation
                 )
             )
         )

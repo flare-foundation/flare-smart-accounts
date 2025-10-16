@@ -100,7 +100,8 @@ contract MasterAccountController is
         uint256 _paymentProofValidityDurationSeconds,
         uint256 _defaultInstructionFee,
         string memory _xrplProviderWallet,
-        address _personalAccountImplementation
+        address _personalAccountImplementation,
+        address _seedPersonalAccountImplementation
     )
         external
     {
@@ -113,7 +114,7 @@ contract MasterAccountController is
         xrplProviderWalletList[0] = _xrplProviderWallet;
         _addXrplProviderWallets(xrplProviderWalletList);
         _setPersonalAccountImplementation(_personalAccountImplementation);
-        seedPersonalAccountImplementation = _personalAccountImplementation;
+        seedPersonalAccountImplementation = _seedPersonalAccountImplementation;
     }
 
     /**
@@ -682,9 +683,7 @@ contract MasterAccountController is
         PersonalAccount(personalAccountProxyAddress).initialize(_xrplOwner, address(this));
 
         // immediately upgrade to current implementation
-        if (personalAccountImplementation != seedPersonalAccountImplementation) {
-            UUPSUpgradeable(personalAccountProxyAddress).upgradeToAndCall(personalAccountImplementation, bytes(""));
-        }
+        UUPSUpgradeable(personalAccountProxyAddress).upgradeToAndCall(personalAccountImplementation, bytes(""));
 
         personalAccounts[_xrplOwner] = _personalAccount;
         emit PersonalAccountCreated(_xrplOwner, personalAccountProxyAddress);

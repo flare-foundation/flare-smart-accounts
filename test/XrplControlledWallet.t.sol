@@ -6,18 +6,20 @@ import {
     MasterAccountController,
     IGovernanceSettings,
     IPayment
-} from "../contracts/xrpcw/implementation/MasterAccountController.sol";
+} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
-import {MasterAccountControllerProxy} from "../contracts/xrpcw/proxy/MasterAccountControllerProxy.sol";
-import {PersonalAccount} from "../contracts/xrpcw/implementation/PersonalAccount.sol";
+import {MasterAccountControllerProxy} from "../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
+import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
-import {PersonalAccountProxy} from "../contracts/xrpcw/proxy/PersonalAccountProxy.sol";
+import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
 import {MockSingletonFactory} from "../contracts/mock/MockSingletonFactory.sol";
+import {PersonalAccountBase} from "../contracts/smartAccounts/implementation/PersonalAccountBase.sol";
+import {IISingletonFactory} from "../contracts/smartAccounts/interface/IISingletonFactory.sol";
 
 // solhint-disable-next-line max-states-count
 contract XrplControlledWalletTest is Test {
@@ -39,7 +41,6 @@ contract XrplControlledWalletTest is Test {
     MintableERC20 private fxrp;
     string private xrplProviderWallet;
     bytes32 private xrplProviderWalletHash;
-    address private operator;
     uint256 private paymentProofValidityDurationSeconds;
     uint256 private defaultInstructionFee;
     address private personalAccountImplementation;
@@ -66,7 +67,6 @@ contract XrplControlledWalletTest is Test {
         );
         xrplProviderWallet = "rXrplProviderWallet";
         xrplProviderWalletHash = keccak256(bytes(xrplProviderWallet));
-        operator = makeAddr("operator");
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
         fdcVerificationMock = makeAddr("FDCVerificationMock");
         executorFee = 100;
@@ -79,6 +79,13 @@ contract XrplControlledWalletTest is Test {
         // deploy the personal account implementation
         personalAccountImpl = new PersonalAccount();
         personalAccountImplementation = address(personalAccountImpl);
+        // deploy seed personal account implementation
+        bytes memory bytecode = abi.encodePacked(
+            type(PersonalAccountBase).creationCode
+        );
+        // needs to be the same on all networks
+        bytes32 salt = keccak256(abi.encodePacked("tempSalt"));
+        address seedPersonalAccountImpl = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
 
         // deploy the controlled wallet
         masterAccountControllerImpl = new MasterAccountController();
@@ -91,7 +98,8 @@ contract XrplControlledWalletTest is Test {
             paymentProofValidityDurationSeconds,
             defaultInstructionFee,
             xrplProviderWallet,
-            personalAccountImplementation
+            personalAccountImplementation,
+            seedPersonalAccountImpl
         );
         masterAccountController = MasterAccountController(
             address(masterAccountControllerProxy)
@@ -139,7 +147,6 @@ contract XrplControlledWalletTest is Test {
             address(masterAccountController.getPersonalAccount(xrplAddress1)),
             address(PersonalAccount(payable(address(0))))
         );
-        vm.prank(operator);
         vm.expectEmit();
         emit IPersonalAccount.Approved(
             address(fxrp),
@@ -200,7 +207,6 @@ contract XrplControlledWalletTest is Test {
         // create new transaction; personal account should not be upgraded
         proof.data.requestBody.transactionId = bytes32("tx2");
         fxrp.mint(predictedAddress1, 12345);
-        vm.prank(operator);
         masterAccountController.executeInstruction(proof, xrplAddress1);
         assertEq(
             personalAccount1.implementation(),
@@ -222,7 +228,6 @@ contract XrplControlledWalletTest is Test {
         // create new transaction; personal account should be upgraded
         proof.data.requestBody.transactionId = bytes32("tx3");
         fxrp.mint(predictedAddress1, 12345);
-        vm.prank(operator);
         masterAccountController.executeInstruction(proof, xrplAddress1);
         assertEq(
             address(masterAccountController.getPersonalAccount(xrplAddress1)),
@@ -243,7 +248,6 @@ contract XrplControlledWalletTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx4");
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
         fxrp.mint(predictedAddress2, 12345);
-        vm.prank(operator);
         masterAccountController.executeInstruction(proof, xrplAddress2);
         personalAccount2 = masterAccountController.getPersonalAccount(
             xrplAddress2
