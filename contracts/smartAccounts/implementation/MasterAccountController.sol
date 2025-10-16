@@ -30,7 +30,7 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 // bytes 18-19: uint16 -> agent vault address id
 // bytes 20-31: future use
 
-// Vaults (Firelight, ...)
+// Firelight vaults
 // bytes 00: uint8 -> instruction id
     // 10: collateral reservation and deposit
     // 11: deposit
@@ -39,6 +39,19 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
     // 14: claim withdraw and redeem
 // bytes 01: uint8 -> wallet identifier
 // bytes 02-17: uint128 -> value (amount, lots, period,...)
+// bytes 18-19: uint16 -> agent vault address id
+// bytes 20-21: uint16 -> deposit/withdraw vault address id
+// bytes 22-31: future use
+
+// Upshift vaults
+// bytes 00: uint8 -> instruction id
+    // 20: collateral reservation and deposit
+    // 21: deposit
+    // 22: requestRedeem
+    // 23: claim
+    // 24: claim and redeem
+// bytes 01: uint8 -> wallet identifier
+// bytes 02-17: uint128 -> value (amount, shares, lots, date(yyyymmdd),...)
 // bytes 18-19: uint16 -> agent vault address id
 // bytes 20-21: uint16 -> deposit/withdraw vault address id
 // bytes 22-31: future use
@@ -130,17 +143,20 @@ contract MasterAccountController is
     {
         // check instruction id
         uint256 instructionId = _getInstructionId(_paymentReference);
-        require(instructionId == 0 || instructionId == 10, InvalidInstructionId(instructionId));
+        require(
+            instructionId == 0 || instructionId == 10 || instructionId == 20,
+            InvalidInstructionId(instructionId)
+        );
         // check transaction id
         require(_transactionId != bytes32(0), InvalidTransactionId());
         // create or get existing Personal Account for the XRPL address
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
         // reserve collateral
-        uint256 lots = _getValue(_paymentReference);
         address agentVault = _getAgentVaultAddress(_paymentReference);
+        uint256 lots = _getValue(_paymentReference);
         _collateralReservationId = personalAccount.reserveCollateral{value: msg.value}(
-            lots,
             agentVault,
+            lots,
             executor,
             executorFee
         );
@@ -151,8 +167,8 @@ contract MasterAccountController is
             address(personalAccount),
             _xrplAddress,
             _collateralReservationId,
-            lots,
             agentVault,
+            lots,
             _transactionId
         );
     }
@@ -171,7 +187,10 @@ contract MasterAccountController is
 
         // check instruction id
         uint256 instructionId = _getInstructionId(paymentReference);
-        require(instructionId == 10, InvalidInstructionId(instructionId));
+        require(
+            instructionId == 10 || instructionId == 20,
+            InvalidInstructionId(instructionId)
+        );
 
         // check that crtId and txId match
         bytes32 transactionId = _proof.data.requestBody.transactionId;
@@ -201,7 +220,7 @@ contract MasterAccountController is
 
         // execute deposit
         address vault = _getVaultAddress(paymentReference);
-        personalAccount.deposit(amount, vault);
+        personalAccount.deposit(vault, amount);
 
         // emit event
         emit InstructionExecuted(
@@ -610,22 +629,36 @@ contract MasterAccountController is
         if (_instructionId == 1) { // redeem
             uint256 lots = _getValue(_paymentReference);
             _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
-        } else if (_instructionId == 11 || _instructionId == 12) { // deposit or withdraw
+        } else if (_instructionId == 11 || _instructionId == 21) { // deposit
             uint256 amount = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            if (_instructionId == 11) { // deposit
-                _personalAccount.deposit(amount, vault);
-            } else if (_instructionId == 12) { // withdraw
-                _personalAccount.withdraw(amount, vault);
-            }
+            _personalAccount.deposit(vault, amount);
+        } else if (_instructionId == 12) { // withdraw
+            address vault = _getVaultAddress(_paymentReference);
+            uint256 amount = _getValue(_paymentReference);
+            _personalAccount.withdraw(vault, amount);
         } else if (_instructionId == 13) { // claim withdraw
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            _personalAccount.claimWithdraw(period, vault);
+            _personalAccount.claimWithdraw(vault, period);
         } else if (_instructionId == 14) { // claim withdraw and redeem
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            uint256 amount = _personalAccount.claimWithdraw(period, vault);
+            uint256 amount = _personalAccount.claimWithdraw(vault, period);
+            uint256 lots = _amountToLots(amount);
+            _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+        } else if (_instructionId == 22) { // requestRedeem
+            uint256 shares = _getValue(_paymentReference);
+            address vault = _getVaultAddress(_paymentReference);
+            _personalAccount.requestRedeem(vault, shares);
+        } else if (_instructionId == 23) { // claim
+            (uint256 year, uint256 month, uint256 day) = _getDate(_paymentReference);
+            address vault = _getVaultAddress(_paymentReference);
+            _personalAccount.claim(vault, year, month, day);
+        } else if (_instructionId == 24) { // claim and redeem
+            (uint256 year, uint256 month, uint256 day) = _getDate(_paymentReference);
+            address vault = _getVaultAddress(_paymentReference);
+            (,uint256 amount) = _personalAccount.claim(vault, year, month, day);
             uint256 lots = _amountToLots(amount);
             _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
         } else {
@@ -829,6 +862,14 @@ contract MasterAccountController is
         // bytes 2-17: value
         _value = (uint256(_paymentReference) >> 112) & ((uint256(1) << 128) - 1);
         require(_value > 0, ValueZero());
+    }
+
+    function _getDate(bytes32 _paymentReference) internal pure returns (uint256 _year, uint256 _month, uint256 _day) {
+        // bytes 2-17: value (date in yyyymmdd format)
+        uint256 date = _getValue(_paymentReference);
+        _year = (date / 10000) % 10000;
+        _month = (date / 100) % 100;
+        _day = date % 100;
     }
 
     /**

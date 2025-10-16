@@ -11,15 +11,15 @@ interface IIPersonalAccount is IPersonalAccount {
 
     /**
      * @notice Reserve collateral for minting operation.
-     * @param _lots Number of lots to mint.
      * @param _agentVault Agent vault address.
+     * @param _lots Number of lots to mint.
      * @param _executor Executor address.
      * @param _executorFee Executor fee to be paid.
      * @return _collateralReservationId The ID of the collateral reservation.
      */
     function reserveCollateral(
-        uint256 _lots,
         address _agentVault,
+        uint256 _lots,
         address payable _executor,
         uint256 _executorFee
     )
@@ -43,40 +43,72 @@ interface IIPersonalAccount is IPersonalAccount {
 
     /**
      * @notice Deposit assets into the vault.
-     * @param _amount Amount to deposit.
      * @param _vault Vault address.
+     * @param _assets The amount of assets to deposit.
      * @return _shares The received shares.
      */
     function deposit(
-        uint256 _amount,
-        address _vault
+        address _vault,
+        uint256 _assets
     )
         external
         returns (uint256 _shares);
 
     /**
      * @notice Withdraw assets from the vault.
-     * @param _amount Amount to withdraw.
      * @param _vault Vault address.
+     * @param _assets The amount of assets to withdraw.
      * @return _shares The withdrawn shares.
      */
     function withdraw(
-        uint256 _amount,
-        address _vault
+        address _vault,
+        uint256 _assets
     )
         external
         returns (uint256 _shares);
 
     /**
      * @notice Claim withdrawal assets from the vault.
-     * @param _period Period to claim.
      * @param _vault Vault address.
-     * @return _amount The amount claimed.
+     * @param _period Period to claim.
+     * @return _assets The amount of assets claimed.
      */
     function claimWithdraw(
-        uint256 _period,
-        address _vault
+        address _vault,
+        uint256 _period
     )
         external
-        returns (uint256 _amount);
+        returns (uint256 _assets);
+
+    /**
+     * @notice Request redemption of shares from the vault.
+     * @param _vault Vault address.
+     * @param _shares Number of shares to redeem.
+     * @return _assets The amount of assets to be redeemed.
+     * @return _claimableEpoch The epoch when the assets can be claimed.
+     */
+    function requestRedeem(
+        address _vault,
+        uint256 _shares
+    )
+        external
+        returns (uint256 _assets, uint256 _claimableEpoch);
+
+    /**
+     * @notice Claim requested redeemed shares for a specific date from the vault.
+     * @param _vault Vault address.
+     * @param _year Year of the claim date.
+     * @param _month Month of the claim date.
+     * @param _day Day of the claim date.
+     * @return _shares The number of shares claimed.
+     * @return _assets The amount of assets claimed.
+     */
+    function claim(
+        address _vault,
+        uint256 _year,
+        uint256 _month,
+        uint256 _day
+    )
+        external
+        returns (uint256 _shares, uint256 _assets);
 }

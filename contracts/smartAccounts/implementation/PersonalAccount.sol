@@ -8,7 +8,7 @@ import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
 import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
-import {IFirelightVault} from "../interface/IFirelightVault.sol";
+import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 import {PersonalAccountBase} from "./PersonalAccountBase.sol";
 
@@ -22,8 +22,8 @@ contract PersonalAccount is
 
     /// @inheritdoc IIPersonalAccount
     function reserveCollateral(
-        uint256 _lots,
         address _agentVault,
+        uint256 _lots,
         address payable _executor,
         uint256 _executorFee
     )
@@ -52,8 +52,8 @@ contract PersonalAccount is
         );
         assert(_collateralReservationId > 0);
         emit CollateralReserved(
-            _lots,
             _agentVault,
+            _lots,
             _executor,
             _executorFee,
             _collateralReservationId
@@ -77,41 +77,67 @@ contract PersonalAccount is
 
     /// @inheritdoc IIPersonalAccount
     function deposit(
-        uint256 _amount,
-        address _vault
+        address _vault,
+        uint256 _assets
     )
         external onlyController nonReentrant
         returns (uint256 _shares)
     {
-        address fxrp = IFirelightVault(_vault).asset();
-        require(IERC20(fxrp).approve(_vault, _amount), ApprovalFailed());
-        emit Approved(fxrp, _vault, _amount);
+        address fxrp = IIVault(_vault).asset();
+        require(IERC20(fxrp).approve(_vault, _assets), ApprovalFailed());
+        emit Approved(fxrp, _vault, _assets);
 
-        _shares = IFirelightVault(_vault).deposit(_amount, address(this));
-        emit Deposited(_vault, _amount, _shares);
+        _shares = IIVault(_vault).deposit(_assets, address(this));
+        emit Deposited(_vault, _assets, _shares);
     }
 
     /// @inheritdoc IIPersonalAccount
     function withdraw(
-        uint256 _amount,
-        address _vault
+        address _vault,
+        uint256 _assets
     )
         external onlyController nonReentrant
         returns (uint256 _shares)
     {
-        _shares = IFirelightVault(_vault).withdraw(_amount, address(this), address(this));
-        emit Withdrawn(_vault, _amount, _shares);
+        _shares = IIVault(_vault).withdraw(_assets, address(this), address(this));
+        emit Withdrawn(_vault, _assets, _shares);
     }
 
     /// @inheritdoc IIPersonalAccount
     function claimWithdraw(
-        uint256 _period,
-        address _vault
+        address _vault,
+        uint256 _period
     )
         external onlyController nonReentrant
-        returns (uint256 _amount)
+        returns (uint256 _assets)
     {
-        _amount = IFirelightVault(_vault).claimWithdraw(_period);
-        emit WithdrawalClaimed(_vault, _period, _amount);
+        _assets = IIVault(_vault).claimWithdraw(_period);
+        emit WithdrawalClaimed(_vault, _period, _assets);
+    }
+
+    /// @inheritdoc IIPersonalAccount
+    function requestRedeem(
+        address _vault,
+        uint256 _shares
+    )
+        external
+        returns (uint256 _assets, uint256 _claimableEpoch)
+    {
+        (_assets, _claimableEpoch) = IIVault(_vault).requestRedeem(_shares, address(this), address(this));
+        emit RedeemRequested(_vault, _shares, _assets, _claimableEpoch);
+    }
+
+    /// @inheritdoc IIPersonalAccount
+    function claim(
+        address _vault,
+        uint256 _year,
+        uint256 _month,
+        uint256 _day
+    )
+        external
+        returns (uint256 _shares, uint256 _assets)
+    {
+        (_shares, _assets) = IIVault(_vault).claim(_year, _month, _day, address(this));
+        emit Claimed(_vault, _year, _month, _day, _shares, _assets);
     }
 }

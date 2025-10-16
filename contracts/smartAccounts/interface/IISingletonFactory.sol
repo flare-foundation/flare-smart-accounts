@@ -10,6 +10,6 @@ interface IISingletonFactory {
         bytes memory _initCode,
         bytes32 _salt
     )
-        external payable
+        external
         returns (address _deployedAddress);
 }

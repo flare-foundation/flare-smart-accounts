@@ -7,8 +7,8 @@ pragma solidity >=0.8.4 <0.9;
  */
 interface IPersonalAccount {
     event CollateralReserved(
-        uint256 lots,
         address agentVault,
+        uint256 lots,
         address executor,
         uint256 executorFee,
         uint256 collateralReservationId
@@ -18,6 +18,8 @@ interface IPersonalAccount {
     event Deposited(address vault, uint256 amount, uint256 shares);
     event Withdrawn(address vault, uint256 amount, uint256 shares);
     event WithdrawalClaimed(address vault, uint256 period, uint256 amount);
+    event RedeemRequested(address vault, uint256 shares, uint256 amount, uint256 claimableEpoch);
+    event Claimed(address vault, uint256 year, uint256 month, uint256 day, uint256 shares, uint256 amount);
 
     error InsufficientFundsForCollateralReservation(uint256 collateralReservationFee, uint256 executorFee);
     error InsufficientFundsForRedeem(uint256 executorFee);
