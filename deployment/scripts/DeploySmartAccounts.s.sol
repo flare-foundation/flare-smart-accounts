@@ -30,6 +30,8 @@ contract DeploySmartAccounts is Script {
         address depositVault;
         address executor;
         uint256 executorFee;
+        uint256 paymentProofValidityDurationSeconds;
+        uint256 defaultInstructionFee;
         string xrplProviderWallet;
     }
 
@@ -56,10 +58,9 @@ contract DeploySmartAccounts is Script {
         params.depositVault = vm.parseJsonAddress(config, ".depositVault");
         params.executor = vm.parseJsonAddress(config, ".executor");
         params.executorFee = vm.parseJsonUint(config, ".executorFee");
-        params.xrplProviderWallet = vm.parseJsonString(
-            config,
-            ".xrplProviderWallet"
-        );
+        params.paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
+        params.defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
+        params.xrplProviderWallet = vm.parseJsonString(config, ".xrplProviderWallet");
 
         vm.startBroadcast();
         // deploy personal account implementation
@@ -89,6 +90,8 @@ contract DeploySmartAccounts is Script {
             governance,
             payable(params.executor),
             params.executorFee,
+            params.paymentProofValidityDurationSeconds,
+            params.defaultInstructionFee,
             params.xrplProviderWallet,
             personalAccountImplAddress,
             seedPersonalAccountImpl
