@@ -167,6 +167,7 @@ contract MasterAccountController is
             address(personalAccount),
             _xrplAddress,
             _collateralReservationId,
+            _getWalletId(_paymentReference),
             agentVault,
             lots,
             _transactionId
@@ -304,15 +305,15 @@ contract MasterAccountController is
 
     /**
      * @notice Sets new default instruction fee.
-     * @param _newDefaultInstructionFee New default instruction fee in underlying asset's smallest unit (e.g., drops for XRP).
+     * @param _fee New default instruction fee in underlying asset's smallest unit (e.g., drops for XRP).
      * Can only be called by the governance.
      */
     function setDefaultInstructionFee(
-        uint256 _newDefaultInstructionFee
+        uint256 _fee
     )
         external onlyGovernance
     {
-        _setDefaultInstructionFee(_newDefaultInstructionFee);
+        _setDefaultInstructionFee(_fee);
     }
 
     /**
@@ -856,6 +857,11 @@ contract MasterAccountController is
     function _getInstructionId(bytes32 _paymentReference) internal pure returns (uint256) {
         // byte 0: instruction id
         return (uint256(_paymentReference) >> 248) & 0xFF;
+    }
+
+    function _getWalletId(bytes32 _paymentReference) internal pure returns (uint256) {
+        // byte 1: wallet identifier
+        return (uint256(_paymentReference) >> 240) & 0xFF;
     }
 
     function _getValue(bytes32 _paymentReference) internal pure returns (uint256 _value) {

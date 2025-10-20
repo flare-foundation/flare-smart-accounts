@@ -28,6 +28,7 @@ interface IMasterAccountController {
         address indexed personalAccount,
         string indexed xrplOwner,
         uint256 indexed collateralReservationId,
+        uint256 walletId,
         address agentVault,
         uint256 lots,
         bytes32 transactionId
