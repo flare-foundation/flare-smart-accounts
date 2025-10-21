@@ -10,11 +10,12 @@ import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings
 import {IFdcVerification} from "flare-periphery/src/flare/IFdcVerification.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
 import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IBeacon} from "@openzeppelin-contracts/proxy/beacon/IBeacon.sol";
+import {MasterAccountControllerBase} from "./MasterAccountControllerBase.sol";
 import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
 import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
 import {PersonalAccount} from "../implementation/PersonalAccount.sol";
 import {GovernedBase} from "../../governance/implementation/GovernedBase.sol";
-import {GovernedProxyImplementation} from "../../governance/implementation/GovernedProxyImplementation.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
 import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
@@ -62,8 +63,8 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
  */
 contract MasterAccountController is
     IMasterAccountController,
-    UUPSUpgradeable,
-    GovernedProxyImplementation
+    IBeacon,
+    MasterAccountControllerBase
 {
     /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
     address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -74,6 +75,8 @@ contract MasterAccountController is
     uint256 public executorFee;
     /// @notice XRPL provider wallet addresses
     string[] private xrplProviderWallets;
+    /// @notice Indicates whether the contract has been initialized
+    bool private initialized;
     /// @notice XRPL provider wallet hashes
     mapping(bytes32 => uint256 index) private xrplProviderWalletHashes; // 1-based index
     /// @notice Default fee for instruction execution in underlying asset's smallest unit (e.g., drops for XRP)
@@ -82,10 +85,8 @@ contract MasterAccountController is
     mapping(uint256 instructionId => uint256 fee) private instructionFees;
     /// @notice Duration (in seconds) for which the payment proof is valid
     uint256 public paymentProofValidityDurationSeconds;
-    /// @notice PersonalAccount implementation address
+    /// @notice PersonalAccount implementation used by BeaconProxy PA instances via IBeacon
     address public personalAccountImplementation;
-    /// @notice Seed PersonalAccount implementation address (for create2 deployment)
-    address public seedPersonalAccountImplementation;
     /// Mapping from XRPL address to Personal Account
     mapping(string xrplAddress => IIPersonalAccount) private personalAccounts;
     /// @notice Indicates if payment instruction has already been executed.
@@ -99,26 +100,22 @@ contract MasterAccountController is
     mapping(uint256 vaultId => address vaultAddress) public vaults;
     uint256[] private vaultIds;
 
-    constructor() GovernedProxyImplementation() {}
-
     /**
      * Proxyable initialization method. Can be called only once, from the proxy constructor
      * (single call is assured by GovernedBase.initialise).
      */
     function initialize(
-        IGovernanceSettings _governanceSettings,
-        address _initialGovernance,
         address payable _executor,
         uint256 _executorFee,
         uint256 _paymentProofValidityDurationSeconds,
         uint256 _defaultInstructionFee,
         string memory _xrplProviderWallet,
-        address _personalAccountImplementation,
-        address _seedPersonalAccountImplementation
+        address _personalAccountImplementation
     )
-        external
+        external onlyOwner
     {
-        GovernedBase.initialise(_governanceSettings, _initialGovernance);
+        require(!initialized, AlreadyInitialized());
+        initialized = true;
         _setExecutor(_executor);
         _setExecutorFee(_executorFee);
         _setPaymentProofValidityDurationSeconds(_paymentProofValidityDurationSeconds);
@@ -126,8 +123,8 @@ contract MasterAccountController is
         string[] memory xrplProviderWalletList = new string[](1);
         xrplProviderWalletList[0] = _xrplProviderWallet;
         _addXrplProviderWallets(xrplProviderWalletList);
+        // set the PA implementation that this controller (as beacon) will return
         _setPersonalAccountImplementation(_personalAccountImplementation);
-        seedPersonalAccountImplementation = _seedPersonalAccountImplementation;
     }
 
     /**
@@ -272,7 +269,7 @@ contract MasterAccountController is
     function setExecutor(
         address payable _newExecutor
     )
-        external onlyGovernance
+        external onlyOwner
     {
         _setExecutor(_newExecutor);
     }
@@ -285,7 +282,7 @@ contract MasterAccountController is
     function setExecutorFee(
         uint256 _newExecutorFee
     )
-        external onlyGovernance
+        external onlyOwner
     {
         _setExecutorFee(_newExecutorFee);
     }
@@ -298,7 +295,7 @@ contract MasterAccountController is
     function setPaymentProofValidityDuration(
         uint256 _newDurationSeconds
     )
-        external onlyGovernance
+        external onlyOwner
     {
         _setPaymentProofValidityDurationSeconds(_newDurationSeconds);
     }
@@ -311,7 +308,7 @@ contract MasterAccountController is
     function setDefaultInstructionFee(
         uint256 _fee
     )
-        external onlyGovernance
+        external onlyOwner
     {
         _setDefaultInstructionFee(_fee);
     }
@@ -326,7 +323,7 @@ contract MasterAccountController is
         uint256[] calldata _instructionIds,
         uint256[] calldata _fees
     )
-        external onlyGovernance
+        external onlyOwner
     {
         require(_instructionIds.length == _fees.length, LengthsMismatch());
         for (uint256 i = 0; i < _instructionIds.length; i++) {
@@ -345,7 +342,7 @@ contract MasterAccountController is
     function removeInstructionFees(
         uint256[] calldata _instructionIds
     )
-        external onlyGovernance
+        external onlyOwner
     {
         for (uint256 i = 0; i < _instructionIds.length; i++) {
             uint256 instructionId = _instructionIds[i];
@@ -362,7 +359,7 @@ contract MasterAccountController is
     function addXrplProviderWallets(
         string[] memory _xrplProviderWallets
     )
-        external onlyGovernance
+        external onlyOwner
     {
         _addXrplProviderWallets(_xrplProviderWallets);
     }
@@ -375,7 +372,7 @@ contract MasterAccountController is
     function removeXrplProviderWallets(
         string[] calldata _xrplProviderWallets
     )
-        external onlyGovernance
+        external onlyOwner
     {
         for (uint256 i = 0; i < _xrplProviderWallets.length; i++) {
             string calldata xrplProviderWallet = _xrplProviderWallets[i];
@@ -403,20 +400,15 @@ contract MasterAccountController is
 
     /**
      * @notice Sets new PersonalAccount implementation address.
-     * @param _newImplementation New implementation address.
+     * @param _newImplementation New PersonalAccount implementation address.
      * Can only be called by the governance.
      */
     function setPersonalAccountImplementation(
         address _newImplementation
     )
-        external onlyGovernance
+        external onlyOwner
     {
-        require(
-            _newImplementation != address(0),
-            InvalidPersonalAccountImplementation()
-        );
-        personalAccountImplementation = _newImplementation;
-        emit PersonalAccountImplementationSet(_newImplementation);
+        _setPersonalAccountImplementation(_newImplementation);
     }
 
     /**
@@ -429,7 +421,7 @@ contract MasterAccountController is
         uint256[] calldata _agentVaultIds,
         address[] calldata _agentVaultAddresses
     )
-        external onlyGovernance
+        external onlyOwner
     {
         require(_agentVaultIds.length == _agentVaultAddresses.length, LengthsMismatch());
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
@@ -454,7 +446,7 @@ contract MasterAccountController is
     function removeAgentVaults(
         uint256[] calldata _agentVaultIds
     )
-        external onlyGovernance
+        external onlyOwner
     {
         for (uint256 i = 0; i < _agentVaultIds.length; i++) {
             uint256 agentVaultId = _agentVaultIds[i];
@@ -484,7 +476,7 @@ contract MasterAccountController is
         uint256[] calldata _vaultIds,
         address[] calldata _vaultAddresses
     )
-        external onlyGovernance
+        external onlyOwner
     {
         require(_vaultIds.length == _vaultAddresses.length, LengthsMismatch());
         for (uint256 i = 0; i < _vaultIds.length; i++) {
@@ -519,9 +511,8 @@ contract MasterAccountController is
         external view
         returns (address)
     {
-        bytes32 salt = _generateSalt(_xrplOwner);
-        bytes memory bytecode = _generateBytecode();
-        return Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
+        bytes memory bytecode = _generateBytecode(_xrplOwner);
+        return Create2.computeAddress(bytes32(0), keccak256(bytecode), SINGLETON_FACTORY);
     }
 
     /**
@@ -591,11 +582,17 @@ contract MasterAccountController is
      * Returns current implementation address.
      * @return Current implementation address.
      */
-    function implementation()
-        external view
-        returns (address)
-    {
+    // expose current controller implementation address under a distinct name to avoid
+    // collision with IBeacon.implementation()
+    function controllerImplementation() external view returns (address) {
         return ERC1967Utils.getImplementation();
+    }
+
+    /**
+     * @inheritdoc IBeacon
+     */
+    function implementation() external view override returns (address) {
+        return personalAccountImplementation;
     }
 
     /**
@@ -606,14 +603,14 @@ contract MasterAccountController is
         address _newImplementation,
         bytes memory _data
     )
-        public payable override onlyGovernance onlyProxy
+        public payable override onlyOwner onlyProxy
     {
         super.upgradeToAndCall(_newImplementation, _data);
     }
 
     /**
      * Unused. Present just to satisfy UUPSUpgradeable requirement.
-     * The real check is in onlyGovernance modifier on upgradeToAndCall.
+     * The real check is in onlyOwner modifier on upgradeToAndCall.
      */
     function _authorizeUpgrade(address _newImplementation) internal override {}
 
@@ -685,12 +682,6 @@ contract MasterAccountController is
         if (address(_personalAccount) == address(0)) {
             // create new Personal Account
             _personalAccount = _createPersonalAccount(_xrplOwner);
-        } else {
-            // check for implementation upgrade
-            address personalAccountImpl = _personalAccount.implementation();
-            if (personalAccountImpl != personalAccountImplementation) {
-                UUPSUpgradeable(address(_personalAccount)).upgradeToAndCall(personalAccountImplementation, bytes(""));
-            }
         }
     }
 
@@ -700,42 +691,27 @@ contract MasterAccountController is
         internal
         returns (IIPersonalAccount _personalAccount)
     {
-        bytes32 salt = _generateSalt(_xrplOwner);
-        bytes memory bytecode = _generateBytecode();
-        // deploy via EIP-2470 singleton factory using CREATE2
-        address personalAccountProxyAddress = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+        bytes memory bytecode = _generateBytecode(_xrplOwner);
+        // check if already deployed
+        address personalAccountProxyAddress =
+            Create2.computeAddress(bytes32(0), keccak256(bytecode), SINGLETON_FACTORY);
+        uint256 codeSize;
+        // solhint-disable-next-line no-inline-assembly
+        assembly { codeSize := extcodesize(personalAccountProxyAddress) }
+        if (codeSize == 0) {
+            // deploy via EIP-2470 singleton factory using CREATE2
+            IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, bytes32(0));
+        }
 
         _personalAccount = IIPersonalAccount(payable(personalAccountProxyAddress));
 
         // ensure the proxy address is a contract before calling initialize
-        uint256 codeSize;
         // solhint-disable-next-line no-inline-assembly
         assembly { codeSize := extcodesize(personalAccountProxyAddress) }
         require(codeSize > 0, PersonalAccountNotSuccessfullyDeployed(personalAccountProxyAddress));
 
-        // initialize immediately after deployment
-        PersonalAccount(personalAccountProxyAddress).initialize(_xrplOwner, address(this));
-
-        // immediately upgrade to current implementation
-        UUPSUpgradeable(personalAccountProxyAddress).upgradeToAndCall(personalAccountImplementation, bytes(""));
-
         personalAccounts[_xrplOwner] = _personalAccount;
         emit PersonalAccountCreated(_xrplOwner, personalAccountProxyAddress);
-    }
-
-    /**
-     * @notice Generates the bytecode for deploying a PersonalAccountProxy contract.
-     * @return The bytecode to be used for CREATE2 deployment.
-     */
-    function _generateBytecode() internal view returns (bytes memory) {
-        // deploy proxy with seed implementation only (no init data) for chain-agnostic init code
-        // note: xrpl owner and controller address are set post-deploy via initialize
-        return abi.encodePacked(
-            type(PersonalAccountProxy).creationCode,
-            abi.encode(
-                seedPersonalAccountImplementation
-            )
-        );
     }
 
     function _setExecutor(address payable _newExecutor) internal {
@@ -781,6 +757,19 @@ contract MasterAccountController is
         require(_newImplementation != address(0), InvalidPersonalAccountImplementation());
         personalAccountImplementation = _newImplementation;
         emit PersonalAccountImplementationSet(_newImplementation);
+    }
+
+    /**
+     * @notice Generates the bytecode for deploying a PersonalAccountProxy contract.
+     * @return The bytecode to be used for CREATE2 deployment.
+     */
+    function _generateBytecode(string memory _xrplOwner) internal view returns (bytes memory) {
+        // Use the controller proxy address as the beacon so the controller acts as IBeacon for PAs.
+        // address(this) resolves to the proxy address when called via delegatecall.
+        return abi.encodePacked(
+            type(PersonalAccountProxy).creationCode,
+            abi.encode(address(this), _xrplOwner, address(this))
+        );
     }
 
     function _verifyPayment(

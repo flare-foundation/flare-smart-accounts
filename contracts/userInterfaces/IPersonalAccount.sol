@@ -13,15 +13,51 @@ interface IPersonalAccount {
         uint256 executorFee,
         uint256 collateralReservationId
     );
-    event Redeemed(uint256 lots, uint256 amount, address executor, uint256 executorFee);
-    event Approved(address fxrp, address vault, uint256 amount);
-    event Deposited(address vault, uint256 amount, uint256 shares);
-    event Withdrawn(address vault, uint256 amount, uint256 shares);
-    event WithdrawalClaimed(address vault, uint256 period, uint256 amount);
-    event RedeemRequested(address vault, uint256 shares, uint256 amount, uint256 claimableEpoch);
-    event Claimed(address vault, uint256 year, uint256 month, uint256 day, uint256 shares, uint256 amount);
+    event Redeemed(
+        uint256 lots,
+        uint256 amount,
+        address executor,
+        uint256 executorFee
+    );
+    event Approved(
+        address fxrp,
+        address vault,
+        uint256 amount
+    );
+    event Deposited(
+        address vault,
+        uint256 amount,
+        uint256 shares
+    );
+    event Withdrawn(
+        address vault,
+        uint256 amount,
+        uint256 shares
+    );
+    event WithdrawalClaimed(
+        address vault,
+        uint256 period,
+        uint256 amount
+    );
+    event RedeemRequested(
+        address vault,
+        uint256 shares,
+        uint256 amount,
+        uint256 claimableEpoch
+    );
+    event Claimed(
+        address vault,
+        uint256 year,
+        uint256 month,
+        uint256 day,
+        uint256 shares,
+        uint256 amount
+    );
 
-    error InsufficientFundsForCollateralReservation(uint256 collateralReservationFee, uint256 executorFee);
+    error InsufficientFundsForCollateralReservation(
+        uint256 collateralReservationFee,
+        uint256 executorFee
+    );
     error InsufficientFundsForRedeem(uint256 executorFee);
     error OnlyController();
     error AlreadyInitialized();

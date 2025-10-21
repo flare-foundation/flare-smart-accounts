@@ -10,20 +10,31 @@ import {IPersonalAccount} from "./IPersonalAccount.sol";
  which manages personal accounts and executes XRPL instructions.
  */
 interface IMasterAccountController {
-
     event PersonalAccountImplementationSet(address newImplementation);
     event PersonalAccountCreated(string xrplOwner, address personalAccount);
     event ExecutorSet(address executor);
     event ExecutorFeeSet(uint256 executorFee);
     event PaymentProofValidityDurationSecondsSet(uint256 durationSeconds);
     event DefaultInstructionFeeSet(uint256 defaultInstructionFee);
-    event InstructionFeeSet(uint256 indexed instructionId, uint256 instructionFee);
+    event InstructionFeeSet(
+        uint256 indexed instructionId,
+        uint256 instructionFee
+    );
     event InstructionFeeRemoved(uint256 indexed instructionId);
     event XrplProviderWalletAdded(string xrplProviderWallet);
     event XrplProviderWalletRemoved(string xrplProviderWallet);
-    event VaultAdded(uint256 indexed vaultId, address indexed vaultAddress);
-    event AgentVaultAdded(uint256 indexed agentVaultId, address indexed agentVaultAddress);
-    event AgentVaultRemoved(uint256 indexed agentVaultId, address indexed agentVaultAddress);
+    event VaultAdded(
+        uint256 indexed vaultId,
+        address indexed vaultAddress
+    );
+    event AgentVaultAdded(
+        uint256 indexed agentVaultId,
+        address indexed agentVaultAddress
+    );
+    event AgentVaultRemoved(
+        uint256 indexed agentVaultId,
+        address indexed agentVaultAddress
+    );
     event CollateralReserved(
         address indexed personalAccount,
         string indexed xrplOwner,
@@ -131,7 +142,6 @@ interface IMasterAccountController {
     )
         external view
         returns (IPersonalAccount);
-
 
     /**
      * @notice Computes the address of a PersonalAccount for a given XRPL owner.

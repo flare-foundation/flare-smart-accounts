@@ -6,19 +6,50 @@ import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
-import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IBeacon} from "@openzeppelin-contracts/proxy/beacon/IBeacon.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
-import {PersonalAccountBase} from "./PersonalAccountBase.sol";
 
 /// @title PersonalAccount contract
 /// @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
-contract PersonalAccount is
-    IIPersonalAccount,
-    PersonalAccountBase,
-    ReentrancyGuard
-{
+contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
+
+    address private constant EMPTY_ADDRESS =
+        0x0000000000000000000000000000000000001111;
+
+    /// @notice MasterAccountController contract address
+    address public controllerAddress;
+    /// @notice XRPL address
+    string public xrplOwner;
+
+    address public x;
+
+    modifier onlyController() {
+        require(msg.sender == controllerAddress, OnlyController());
+        _;
+    }
+
+    constructor() {
+        // ensure the implementation contract itself cannot be initialized/used
+        controllerAddress = EMPTY_ADDRESS;
+    }
+
+    /**
+     * Proxyable initialization method. Can be called only once, from the proxy constructor
+     * @dev initialize is callable once by anyone (proxy constructor in practice)
+     */
+    function initialize(
+        string memory _xrplOwner,
+        address _controllerAddress
+    ) external {
+        require(controllerAddress == address(0), AlreadyInitialized());
+        require(_controllerAddress != address(0), InvalidControllerAddress());
+        require(bytes(_xrplOwner).length > 0, InvalidXrplOwner());
+
+        xrplOwner = _xrplOwner;
+        controllerAddress = _controllerAddress;
+    }
 
     /// @inheritdoc IIPersonalAccount
     function reserveCollateral(
@@ -27,7 +58,8 @@ contract PersonalAccount is
         address payable _executor,
         uint256 _executorFee
     )
-        external payable onlyController nonReentrant
+        external payable
+        onlyController nonReentrant
         returns (uint256 _collateralReservationId)
     {
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
@@ -66,12 +98,17 @@ contract PersonalAccount is
         address payable _executor,
         uint256 _executorFee
     )
-        external payable onlyController nonReentrant
+        external payable
+        onlyController nonReentrant
         returns (uint256 _amount)
     {
-        require(msg.value >= _executorFee, InsufficientFundsForRedeem(_executorFee));
+        require( msg.value >= _executorFee, InsufficientFundsForRedeem(_executorFee));
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-        _amount = assetManager.redeem{value: msg.value}(_lots, xrplOwner, _executor);
+        _amount = assetManager.redeem{value: msg.value}(
+            _lots,
+            xrplOwner,
+            _executor
+        );
         emit Redeemed(_lots, _amount, _executor, _executorFee);
     }
 
@@ -80,7 +117,8 @@ contract PersonalAccount is
         address _vault,
         uint256 _assets
     )
-        external onlyController nonReentrant
+        external
+        onlyController nonReentrant
         returns (uint256 _shares)
     {
         address fxrp = IIVault(_vault).asset();
@@ -96,10 +134,15 @@ contract PersonalAccount is
         address _vault,
         uint256 _assets
     )
-        external onlyController nonReentrant
+        external
+        onlyController nonReentrant
         returns (uint256 _shares)
     {
-        _shares = IIVault(_vault).withdraw(_assets, address(this), address(this));
+        _shares = IIVault(_vault).withdraw(
+            _assets,
+            address(this),
+            address(this)
+        );
         emit Withdrawn(_vault, _assets, _shares);
     }
 
@@ -108,7 +151,8 @@ contract PersonalAccount is
         address _vault,
         uint256 _period
     )
-        external onlyController nonReentrant
+        external
+        onlyController nonReentrant
         returns (uint256 _assets)
     {
         _assets = IIVault(_vault).claimWithdraw(_period);
@@ -121,9 +165,14 @@ contract PersonalAccount is
         uint256 _shares
     )
         external
+        onlyController nonReentrant
         returns (uint256 _assets, uint256 _claimableEpoch)
     {
-        (_assets, _claimableEpoch) = IIVault(_vault).requestRedeem(_shares, address(this), address(this));
+        (_assets, _claimableEpoch) = IIVault(_vault).requestRedeem(
+            _shares,
+            address(this),
+            address(this)
+        );
         emit RedeemRequested(_vault, _shares, _assets, _claimableEpoch);
     }
 
@@ -135,9 +184,21 @@ contract PersonalAccount is
         uint256 _day
     )
         external
+        onlyController nonReentrant
         returns (uint256 _shares, uint256 _assets)
     {
-        (_shares, _assets) = IIVault(_vault).claim(_year, _month, _day, address(this));
+        (_shares, _assets) = IIVault(_vault).claim(
+            _year,
+            _month,
+            _day,
+            address(this)
+        );
         emit Claimed(_vault, _year, _month, _day, _shares, _assets);
+    }
+
+    /// @inheritdoc IPersonalAccount
+    function implementation() external view returns (address) {
+        // controller is the beacon
+        return IBeacon(controllerAddress).implementation();
     }
 }
