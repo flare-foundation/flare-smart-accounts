@@ -7,11 +7,14 @@ import {IPersonalAccount} from "./IPersonalAccount.sol";
 /**
  * @title IMasterAccountController
  * @notice Interface for the MasterAccountController contract,
- which manages personal accounts and executes XRPL instructions.
+ * which manages personal accounts and executes XRPL instructions.
  */
 interface IMasterAccountController {
     event PersonalAccountImplementationSet(address newImplementation);
-    event PersonalAccountCreated(string xrplOwner, address personalAccount);
+    event PersonalAccountCreated(
+        string xrplOwner,
+        address personalAccount
+    );
     event ExecutorSet(address executor);
     event ExecutorFeeSet(uint256 executorFee);
     event PaymentProofValidityDurationSecondsSet(uint256 durationSeconds);

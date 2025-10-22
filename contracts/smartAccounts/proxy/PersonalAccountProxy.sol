@@ -3,15 +3,17 @@ pragma solidity ^0.8.27;
 
 import {BeaconProxy} from "@openzeppelin-contracts/proxy/beacon/BeaconProxy.sol";
 
-/// @title PersonalAccountProxy contract
-/// controller address is beacon address
+/**
+ * @title PersonalAccountProxy contract
+ * @dev controller address is beacon address
+ */
 contract PersonalAccountProxy is BeaconProxy {
-    bytes4 constant private INITIALIZE_SELECTOR = bytes4(keccak256("initialize(string,address)"));
+    bytes4 constant private INITIALIZE_SELECTOR = bytes4(keccak256("initialize(address,string)"));
 
-    constructor(address _beacon, string memory _xrplOwner, address _controller)
+    constructor(address _controller, string memory _xrplOwner)
         BeaconProxy(
-            _beacon,
-            abi.encodeWithSelector(INITIALIZE_SELECTOR, _xrplOwner, _controller)
+            _controller,
+            abi.encodeWithSelector(INITIALIZE_SELECTOR, _controller, _xrplOwner)
         )
     {}
 }

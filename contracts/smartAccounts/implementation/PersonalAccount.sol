@@ -11,19 +11,18 @@ import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 
-/// @title PersonalAccount contract
-/// @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
+/**
+ * @title PersonalAccount contract
+ * @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
+ */
 contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
 
-    address private constant EMPTY_ADDRESS =
-        0x0000000000000000000000000000000000001111;
+    address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
 
     /// @notice MasterAccountController contract address
     address public controllerAddress;
     /// @notice XRPL address
     string public xrplOwner;
-
-    address public x;
 
     modifier onlyController() {
         require(msg.sender == controllerAddress, OnlyController());
@@ -37,18 +36,20 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
 
     /**
      * Proxyable initialization method. Can be called only once, from the proxy constructor
+     * @param _controllerAddress MasterAccountController contract address
+     * @param _xrplOwner XRPL address owner
      * @dev initialize is callable once by anyone (proxy constructor in practice)
      */
     function initialize(
-        string memory _xrplOwner,
-        address _controllerAddress
+        address _controllerAddress,
+        string memory _xrplOwner
     ) external {
         require(controllerAddress == address(0), AlreadyInitialized());
         require(_controllerAddress != address(0), InvalidControllerAddress());
         require(bytes(_xrplOwner).length > 0, InvalidXrplOwner());
 
-        xrplOwner = _xrplOwner;
         controllerAddress = _controllerAddress;
+        xrplOwner = _xrplOwner;
     }
 
     /// @inheritdoc IIPersonalAccount

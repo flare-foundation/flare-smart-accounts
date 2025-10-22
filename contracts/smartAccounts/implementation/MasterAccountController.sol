@@ -6,16 +6,11 @@ import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
-import {IFdcVerification} from "flare-periphery/src/flare/IFdcVerification.sol";
-import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
 import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IBeacon} from "@openzeppelin-contracts/proxy/beacon/IBeacon.sol";
-import {MasterAccountControllerBase} from "./MasterAccountControllerBase.sol";
 import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
+import {MasterAccountControllerBase} from "./MasterAccountControllerBase.sol";
 import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
-import {PersonalAccount} from "../implementation/PersonalAccount.sol";
-import {GovernedBase} from "../../governance/implementation/GovernedBase.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
 import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
@@ -61,11 +56,8 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
  * @title MasterAccountController contract
  * @notice The contract controlling personal accounts (XRPL master controller)
  */
-contract MasterAccountController is
-    IMasterAccountController,
-    IBeacon,
-    MasterAccountControllerBase
-{
+contract MasterAccountController is MasterAccountControllerBase, IMasterAccountController, IBeacon {
+
     /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
     address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
 
@@ -75,8 +67,6 @@ contract MasterAccountController is
     uint256 public executorFee;
     /// @notice XRPL provider wallet addresses
     string[] private xrplProviderWallets;
-    /// @notice Indicates whether the contract has been initialized
-    bool private initialized;
     /// @notice XRPL provider wallet hashes
     mapping(bytes32 => uint256 index) private xrplProviderWalletHashes; // 1-based index
     /// @notice Default fee for instruction execution in underlying asset's smallest unit (e.g., drops for XRP)
@@ -101,8 +91,13 @@ contract MasterAccountController is
     uint256[] private vaultIds;
 
     /**
-     * Proxyable initialization method. Can be called only once, from the proxy constructor
-     * (single call is assured by GovernedBase.initialise).
+     * @notice Initializer function for upgrading from MasterAccountControllerBase.
+     * @param _executor The FAssets executor (mint and redeem).
+     * @param _executorFee The executor fee (in wei).
+     * @param _paymentProofValidityDurationSeconds The duration (in seconds) for which the payment proof is valid.
+     * @param _defaultInstructionFee The default instruction fee in underlying asset's smallest unit (e.g., drops for XRP).
+     * @param _xrplProviderWallet The XRPL provider wallet address.
+     * @param _personalAccountImplementation The PersonalAccount implementation address.
      */
     function initialize(
         address payable _executor,
@@ -112,10 +107,8 @@ contract MasterAccountController is
         string memory _xrplProviderWallet,
         address _personalAccountImplementation
     )
-        external onlyOwner
+        external onlyOwner reinitializer(2)
     {
-        require(!initialized, AlreadyInitialized());
-        initialized = true;
         _setExecutor(_executor);
         _setExecutorFee(_executorFee);
         _setPaymentProofValidityDurationSeconds(_paymentProofValidityDurationSeconds);
@@ -577,7 +570,6 @@ contract MasterAccountController is
         }
     }
 
-    /////////////////////////////// UUPS UPGRADABLE ///////////////////////////////
     /**
      * Returns current implementation address.
      * @return Current implementation address.
@@ -594,25 +586,6 @@ contract MasterAccountController is
     function implementation() external view override returns (address) {
         return personalAccountImplementation;
     }
-
-    /**
-     * @inheritdoc UUPSUpgradeable
-     * @dev Only governance can call this method.
-     */
-    function upgradeToAndCall(
-        address _newImplementation,
-        bytes memory _data
-    )
-        public payable override onlyOwner onlyProxy
-    {
-        super.upgradeToAndCall(_newImplementation, _data);
-    }
-
-    /**
-     * Unused. Present just to satisfy UUPSUpgradeable requirement.
-     * The real check is in onlyOwner modifier on upgradeToAndCall.
-     */
-    function _authorizeUpgrade(address _newImplementation) internal override {}
 
     /////////////////////////////// INTERNAL FUNCTIONS ///////////////////////////////
     function _executeInstruction(
@@ -768,7 +741,7 @@ contract MasterAccountController is
         // address(this) resolves to the proxy address when called via delegatecall.
         return abi.encodePacked(
             type(PersonalAccountProxy).creationCode,
-            abi.encode(address(this), _xrplOwner, address(this))
+            abi.encode(address(this), _xrplOwner)
         );
     }
 

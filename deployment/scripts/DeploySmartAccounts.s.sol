@@ -8,7 +8,6 @@ import {MasterAccountControllerBase} from "../../contracts/smartAccounts/impleme
 import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {MasterAccountControllerProxy} from "../../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
-import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
 import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
@@ -177,6 +176,5 @@ contract DeploySmartAccounts is Script {
         } else {
             console2.log("MasterAccountControllerProxy already deployed, skipping");
         }
-
     }
 }

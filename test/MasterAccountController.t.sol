@@ -6,7 +6,6 @@ pragma solidity ^0.8.27;
 import {Test, console2} from "forge-std/Test.sol";
 import {
     MasterAccountController,
-    IGovernanceSettings,
     IPayment
 } from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
