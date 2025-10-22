@@ -30,8 +30,7 @@ contract XrplControlledWalletTest is Test {
     IPersonalAccount private personalAccount1;
     IPersonalAccount private personalAccount2;
 
-    address private constant SINGLETON_FACTORY =
-        0xce0042B868300000d44A59004Da54A005ffdcf9f;
+    address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
     MockSingletonFactory private mockFactory;
 
     address private governance;
@@ -154,19 +153,13 @@ contract XrplControlledWalletTest is Test {
     function test() public {
         IPayment.Proof memory proof;
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
-        proof.data.responseBody.sourceAddressHash = keccak256(
-            bytes(xrplAddress1)
-        );
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
         proof.data.requestBody.transactionId = bytes32("tx1");
         proof.data.responseBody.receivedAmount = 1000000;
-        proof
-            .data
-            .responseBody
-            .standardPaymentReference = _encodePaymentReferenceDeposit(12345);
+        proof.data.responseBody.standardPaymentReference = _encodePaymentReferenceDeposit(12345);
         _mockVerifyPayment(true);
 
-        address predictedAddress1 = masterAccountController
-            .computePersonalAccountAddress(xrplAddress1);
+        address predictedAddress1 = masterAccountController.computePersonalAccountAddress(xrplAddress1);
         fxrp.mint(predictedAddress1, 12345);
 
         assertEq(
@@ -186,9 +179,7 @@ contract XrplControlledWalletTest is Test {
             address(masterAccountController.getPersonalAccount(xrplAddress1)),
             address(PersonalAccount(payable(address(0))))
         );
-        personalAccount1 = masterAccountController.getPersonalAccount(
-            xrplAddress1
-        );
+        personalAccount1 = masterAccountController.getPersonalAccount(xrplAddress1);
         // check that the personal account was created at the expected address
         assertEq(
             address(masterAccountController.getPersonalAccount(xrplAddress1)),
@@ -240,14 +231,11 @@ contract XrplControlledWalletTest is Test {
         );
 
         // compute address of personal account for xrplAddress2 before implementation change
-        address predictedAddress2 = masterAccountController
-            .computePersonalAccountAddress(xrplAddress2);
+        address predictedAddress2 = masterAccountController.computePersonalAccountAddress(xrplAddress2);
 
         // update PersonalAccount implementation on MasterAccountController
         vm.prank(governance);
-        masterAccountController.setPersonalAccountImplementation(
-            address(newPersonalAccountImpl)
-        );
+        masterAccountController.setPersonalAccountImplementation(address(newPersonalAccountImpl));
         // assertEq(
         //     masterAccountController.personalAccountImplementation(),
         //     address(newPersonalAccountImpl)
@@ -273,14 +261,10 @@ contract XrplControlledWalletTest is Test {
         // execute transaction for xrplAddress2; new personal account should be created with new implementation
         // and at the expected address
         proof.data.requestBody.transactionId = bytes32("tx4");
-        proof.data.responseBody.sourceAddressHash = keccak256(
-            bytes(xrplAddress2)
-        );
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
         fxrp.mint(predictedAddress2, 12345);
         masterAccountController.executeInstruction(proof, xrplAddress2);
-        personalAccount2 = masterAccountController.getPersonalAccount(
-            xrplAddress2
-        );
+        personalAccount2 = masterAccountController.getPersonalAccount(xrplAddress2);
         // check that the personal account was created at the expected address
         assertEq(
             address(masterAccountController.getPersonalAccount(xrplAddress2)),
@@ -291,7 +275,10 @@ contract XrplControlledWalletTest is Test {
             personalAccount2.implementation(),
             address(newPersonalAccountImpl)
         );
-        assertEq(personalAccount2.xrplOwner(), xrplAddress2);
+        assertEq(
+            personalAccount2.xrplOwner(),
+            xrplAddress2
+        );
         assertEq(
             personalAccount2.controllerAddress(),
             address(masterAccountController)
@@ -301,7 +288,9 @@ contract XrplControlledWalletTest is Test {
     function _mockGetAgentInfo(
         address agentAddress,
         AgentInfo.Info memory info
-    ) private {
+    )
+        private
+    {
         vm.mockCall(
             assetManagerFxrpMock,
             abi.encodeWithSelector(
@@ -315,7 +304,9 @@ contract XrplControlledWalletTest is Test {
     function _mockGetContractAddressByHash(
         string memory name,
         address addr
-    ) private {
+    )
+        private
+    {
         vm.mockCall(
             contractRegistryMock,
             abi.encodeWithSelector(
@@ -336,7 +327,10 @@ contract XrplControlledWalletTest is Test {
 
     function _encodePaymentReferenceDeposit(
         uint128 amount
-    ) private pure returns (bytes32) {
+    )
+        private pure
+        returns (bytes32)
+    {
         // Place instructionId in the highest 8 bits, skip wallet identifier and put amount in the next 128 bits
         return bytes32((uint256(11) << 248) | (uint256(amount) << 112));
     }

@@ -58,7 +58,9 @@ interface IPersonalAccount {
         uint256 collateralReservationFee,
         uint256 executorFee
     );
-    error InsufficientFundsForRedeem(uint256 executorFee);
+    error InsufficientFundsForRedeem(
+        uint256 executorFee
+    );
     error OnlyController();
     error AlreadyInitialized();
     error InvalidControllerAddress();
