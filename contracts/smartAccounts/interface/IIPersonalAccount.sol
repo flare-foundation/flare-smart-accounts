@@ -111,4 +111,19 @@ interface IIPersonalAccount is IPersonalAccount {
     )
         external
         returns (uint256 _shares, uint256 _assets);
+
+    /**
+     * @notice Execute a swap on Uniswap V3.
+     * @param _uniswapV3Router The address of the Uniswap V3 router.
+     * @param _tokenIn The address of the input token.
+     * @param _tokenOut The address of the output token.
+     * @param _poolFeeTierPPM The fee tier of the pool to use for the swap (in PPM).
+     */
+    function executeSwap(
+        address _uniswapV3Router,
+        address _tokenIn,
+        address _tokenOut,
+        uint24 _poolFeeTierPPM
+    )
+        external;
 }

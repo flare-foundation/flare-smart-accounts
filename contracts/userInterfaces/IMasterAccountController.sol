@@ -2,7 +2,6 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IPersonalAccount} from "./IPersonalAccount.sol";
 
 /**
  * @title IMasterAccountController
@@ -95,16 +94,6 @@ interface IMasterAccountController {
     );
 
     /**
-     * @notice Emitted when a vault is added.
-     * @param vaultId The vault ID.
-     * @param vaultAddress The vault address.
-     */
-    event VaultAdded(
-        uint256 indexed vaultId,
-        address indexed vaultAddress
-    );
-
-    /**
      * @notice Emitted when an agent vault is added.
      * @param agentVaultId The agent vault ID.
      * @param agentVaultAddress The agent vault address.
@@ -122,6 +111,28 @@ interface IMasterAccountController {
     event AgentVaultRemoved(
         uint256 indexed agentVaultId,
         address indexed agentVaultAddress
+    );
+
+    /**
+     * @notice Emitted when a vault is added.
+     * @param vaultId The vault ID.
+     * @param vaultAddress The vault address.
+     */
+    event VaultAdded(
+        uint256 indexed vaultId,
+        address indexed vaultAddress
+    );
+
+    /**
+     * @notice Emitted when swap parameters are set.
+     * @param uniswapV3Router The Uniswap V3 router address.
+     * @param poolFeeTierPPM The pool fee tier in PPM.
+     * @param usdt0 The USDT token address.
+     */
+    event SwapParamsSet(
+        address uniswapV3Router,
+        uint24 poolFeeTierPPM,
+        address usdt0
     );
 
     /**
@@ -159,6 +170,21 @@ interface IMasterAccountController {
         bytes32 paymentReference,
         bytes32 transactionId
     );
+
+    /**
+     * @notice Reverts if the Uniswap V3 router address is invalid.
+     */
+    error InvalidUniswapV3Router();
+
+    /**
+     * @notice Reverts if the pool fee tier in PPM is invalid (allowed values: 100, 500, 3000, 10000).
+     */
+    error InvalidPoolFeeTierPPM();
+
+    /**
+     * @notice Reverts if the USDT0 token address is invalid.
+     */
+    error InvalidUsdt0();
 
     /**
      * @notice Reverts if the executor address is invalid.
@@ -316,6 +342,7 @@ interface IMasterAccountController {
      * @notice Reverts if the payment proof has expired.
      */
     error PaymentProofExpired();
+    error NoXrplProviderWallets();
 
     /**
      * @notice Reverts if the XRPL provider wallet is invalid.
@@ -374,33 +401,12 @@ interface IMasterAccountController {
         external payable;
 
     /**
-     * @notice Create or update PersonalAccount for a given XRPL owner.
-     * @param _xrplOwner The XRPL address of the owner.
-     * @return The PersonalAccount contract associated with the XRPL owner.
-     */
-    function createOrUpdatePersonalAccount(
-        string calldata _xrplOwner
-    )
-        external
-        returns (IPersonalAccount);
-
-    /**
      * @notice Get the PersonalAccount contract for a given XRPL owner.
      * @param _xrplOwner The XRPL address of the owner.
-     * @return The PersonalAccount contract associated with the XRPL owner or address(0) if none exists.
+     * @return The PersonalAccount contract address associated with the XRPL owner
+     * or the computed address if not yet deployed.
      */
     function getPersonalAccount(
-        string calldata _xrplOwner
-    )
-        external view
-        returns (IPersonalAccount);
-
-    /**
-     * @notice Computes the address of a PersonalAccount for a given XRPL owner.
-     * @param _xrplOwner The XRPL address.
-     * @return The predicted address of the PersonalAccount.
-     */
-    function computePersonalAccountAddress(
         string calldata _xrplOwner
     )
         external view

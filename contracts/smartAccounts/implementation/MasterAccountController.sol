@@ -6,9 +6,9 @@ import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {ERC1967Utils} from "@openzeppelin-contracts/proxy/ERC1967/ERC1967Utils.sol";
-import {IBeacon} from "@openzeppelin-contracts/proxy/beacon/IBeacon.sol";
-import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
+import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
+import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {MasterAccountControllerBase} from "./MasterAccountControllerBase.sol";
 import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
@@ -65,16 +65,16 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     address payable public executor;
     /// @notice Executor fee for reserveCollateral (in wei)
     uint256 public executorFee;
+    /// @notice Duration (in seconds) for which the payment proof is valid
+    uint256 public paymentProofValidityDurationSeconds;
+    /// @notice Default fee for instruction execution in underlying asset's smallest unit (drops for XRP)
+    uint256 public defaultInstructionFee;
+    /// @notice Override for default instruction fee (1-based to distinguish from default (0))
+    mapping(uint256 instructionId => uint256 fee) private instructionFees;
     /// @notice XRPL provider wallet addresses
     string[] private xrplProviderWallets;
     /// @notice XRPL provider wallet hashes
     mapping(bytes32 => uint256 index) private xrplProviderWalletHashes; // 1-based index
-    /// @notice Default fee for instruction execution in underlying asset's smallest unit (e.g., drops for XRP)
-    uint256 public defaultInstructionFee;
-    /// @notice Override for default instruction fee (1-based to distinguish from default (0))
-    mapping(uint256 instructionId => uint256 fee) private instructionFees;
-    /// @notice Duration (in seconds) for which the payment proof is valid
-    uint256 public paymentProofValidityDurationSeconds;
     /// @notice PersonalAccount implementation used by BeaconProxy PA instances via IBeacon
     address public personalAccountImplementation;
     /// Mapping from XRPL address to Personal Account
@@ -90,14 +90,21 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     mapping(uint256 vaultId => address vaultAddress) public vaults;
     uint256[] private vaultIds;
 
+    // swap parameters - if not set, swapping is disabled
+    /// @notice Uniswap V3 router address
+    address public uniswapV3Router;
+    /// @notice Uniswap V3 pool fee tier in PPM (supported values: 100, 500, 3000, 10000)
+    uint24 public poolFeeTierPPM;
+    /// @notice Agent vault collateral token address (USD?0, USDX, ...)
+    address public usdt0;
+
     /**
      * @notice Initializer function for upgrading from MasterAccountControllerBase.
      * @param _executor The FAssets executor (mint and redeem).
      * @param _executorFee The executor fee (in wei).
      * @param _paymentProofValidityDurationSeconds The duration (in seconds) for which the payment proof is valid.
-     * @param _defaultInstructionFee The default instruction fee in underlying asset's smallest unit
-     (e.g., drops for XRP).
-     * @param _xrplProviderWallet The XRPL provider wallet address.
+     * @param _defaultInstructionFee The default instruction fee in underlying asset's smallest unit (drops for XRP).
+     * @param _xrplProviderWallets The XRPL provider wallet addresses.
      * @param _personalAccountImplementation The PersonalAccount implementation address.
      */
     function initialize(
@@ -105,7 +112,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         uint256 _executorFee,
         uint256 _paymentProofValidityDurationSeconds,
         uint256 _defaultInstructionFee,
-        string calldata _xrplProviderWallet,
+        string[] calldata _xrplProviderWallets,
         address _personalAccountImplementation
     )
         external onlyOwner reinitializer(2)
@@ -114,9 +121,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         _setExecutorFee(_executorFee);
         _setPaymentProofValidityDurationSeconds(_paymentProofValidityDurationSeconds);
         _setDefaultInstructionFee(_defaultInstructionFee);
-        string[] memory xrplProviderWalletList = new string[](1);
-        xrplProviderWalletList[0] = _xrplProviderWallet;
-        _addXrplProviderWallets(xrplProviderWalletList);
+        _addXrplProviderWallets(_xrplProviderWallets);
         // set the PA implementation that this controller (as beacon) will return
         _setPersonalAccountImplementation(_personalAccountImplementation);
     }
@@ -255,10 +260,38 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         );
     }
 
+    function swapWNatForUsdt0(
+        string calldata _xrplAddress
+    )
+        external
+    {
+        IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
+        personalAccount.executeSwap(
+            uniswapV3Router,
+            address(ContractRegistry.getWNat()),
+            usdt0,
+            poolFeeTierPPM
+        );
+    }
+
+    function swapUsdt0ForFAsset(
+        string calldata _xrplAddress
+    )
+        external
+    {
+        IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
+        personalAccount.executeSwap(
+            uniswapV3Router,
+            usdt0,
+            address(ContractRegistry.getAssetManagerFXRP().fAsset()),
+            poolFeeTierPPM
+        );
+    }
+
     /**
      * @notice Sets new executor address.
      * @param _newExecutor New executor address.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function setExecutor(
         address payable _newExecutor
@@ -271,7 +304,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /**
      * @notice Sets new executor fee.
      * @param _newExecutorFee New executor fee in wei.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function setExecutorFee(
         uint256 _newExecutorFee
@@ -284,7 +317,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /**
      * @notice Updates the payment proof validity duration.
      * @param _newDurationSeconds New duration in seconds.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function setPaymentProofValidityDuration(
         uint256 _newDurationSeconds
@@ -296,22 +329,22 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
     /**
      * @notice Sets new default instruction fee.
-     * @param _fee New default instruction fee in underlying asset's smallest unit (e.g., drops for XRP).
-     * Can only be called by the governance.
+     * @param _defaultInstructionFee New default instruction fee in underlying asset's smallest unit (drops for XRP).
+     * Can only be called by the owner.
      */
     function setDefaultInstructionFee(
-        uint256 _fee
+        uint256 _defaultInstructionFee
     )
         external onlyOwner
     {
-        _setDefaultInstructionFee(_fee);
+        _setDefaultInstructionFee(_defaultInstructionFee);
     }
 
     /**
      * @notice Sets instruction-specific fees, overriding the default fee.
      * @param _instructionIds The IDs of the instructions.
-     * @param _fees The fees for the instructions in underlying asset's smallest unit (e.g., drops for XRP).
-     * Can only be called by the governance.
+     * @param _fees The fees for the instructions in underlying asset's smallest unit (drops for XRP).
+     * Can only be called by the owner.
      */
     function setInstructionFees(
         uint256[] calldata _instructionIds,
@@ -331,7 +364,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /**
      * @notice Removes instruction-specific fees, reverting to the default fee.
      * @param _instructionIds The IDs of the instructions to remove fees for.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function removeInstructionFees(
         uint256[] calldata _instructionIds
@@ -348,7 +381,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /**
      * @notice Adds new XRPL provider wallet addresses.
      * @param _xrplProviderWallets The XRPL provider wallet addresses to add.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function addXrplProviderWallets(
         string[] calldata _xrplProviderWallets
@@ -361,7 +394,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /**
      * @notice Removes existing XRPL provider wallet addresses.
      * @param _xrplProviderWallets The XRPL provider wallet addresses to remove.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function removeXrplProviderWallets(
         string[] calldata _xrplProviderWallets
@@ -395,7 +428,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /**
      * @notice Sets new PersonalAccount implementation address.
      * @param _newImplementation New PersonalAccount implementation address.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function setPersonalAccountImplementation(
         address _newImplementation
@@ -409,7 +442,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
      * @notice Adds new agent vault addresses with the given IDs.
      * @param _agentVaultIds The IDs of the agent vaults.
      * @param _agentVaultAddresses The addresses of the agent vaults.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function addAgentVaults(
         uint256[] calldata _agentVaultIds,
@@ -435,7 +468,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /**
      * @notice Removes existing agent vault addresses by their IDs.
      * @param _agentVaultIds The IDs of the agent vaults to remove.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function removeAgentVaults(
         uint256[] calldata _agentVaultIds
@@ -464,7 +497,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
      * @notice Adds new vault addresses with the given IDs.
      * @param _vaultIds The IDs of the vaults.
      * @param _vaultAddresses The addresses of the vaults.
-     * Can only be called by the governance.
+     * Can only be called by the owner.
      */
     function addVaults(
         uint256[] calldata _vaultIds,
@@ -485,40 +518,46 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     }
 
     /**
-     * @inheritdoc IMasterAccountController
+     * @notice Sets swap parameters.
+     * @param _uniswapV3Router The Uniswap V3 router address.
+     * @param _poolFeeTierPPM The pool fee tier (in PPM - supported values: 100, 500, 3000, 10000).
+     * @param _usdt0 USD?0 token address.
+     * Can only be called by the owner.
      */
-    function createOrUpdatePersonalAccount(
-        string calldata xrplOwner
+    function setSwapParams(
+        address _uniswapV3Router,
+        uint24 _poolFeeTierPPM,
+        address _usdt0
     )
-        external
-        returns (IPersonalAccount)
+        external onlyOwner
     {
-        return _getOrCreatePersonalAccount(xrplOwner);
-    }
-
-    /**
-     * @inheritdoc IMasterAccountController
-     */
-    function computePersonalAccountAddress(
-        string calldata _xrplOwner
-    )
-        external view
-        returns (address)
-    {
-        bytes memory bytecode = _generateBytecode(_xrplOwner);
-        return Create2.computeAddress(bytes32(0), keccak256(bytecode), SINGLETON_FACTORY);
+        require(_uniswapV3Router != address(0), InvalidUniswapV3Router());
+        require(
+            _poolFeeTierPPM == 100 || _poolFeeTierPPM == 500 || _poolFeeTierPPM == 3000 || _poolFeeTierPPM == 10000,
+            InvalidPoolFeeTierPPM()
+        );
+        require(_usdt0 != address(0), InvalidUsdt0());
+        uniswapV3Router = _uniswapV3Router;
+        poolFeeTierPPM = _poolFeeTierPPM;
+        usdt0 = _usdt0;
+        emit SwapParamsSet(_uniswapV3Router, _poolFeeTierPPM, _usdt0);
     }
 
     /**
      * @inheritdoc IMasterAccountController
      */
     function getPersonalAccount(
-        string calldata xrplOwner
+        string calldata _xrplOwner
     )
         external view
-        returns (IPersonalAccount)
+        returns (address _personalAccount)
     {
-        return personalAccounts[xrplOwner];
+        _personalAccount = address(personalAccounts[_xrplOwner]);
+        if (_personalAccount == address(0)) {
+            // compute the address
+            bytes memory bytecode = _generateBytecode(_xrplOwner);
+            _personalAccount = Create2.computeAddress(bytes32(0), keccak256(bytecode), SINGLETON_FACTORY);
+        }
     }
 
     /**
@@ -669,9 +708,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         // check if already deployed
         address personalAccountProxyAddress =
             Create2.computeAddress(bytes32(0), keccak256(bytecode), SINGLETON_FACTORY);
-        uint256 codeSize;
-        // solhint-disable-next-line no-inline-assembly
-        assembly { codeSize := extcodesize(personalAccountProxyAddress) }
+        uint256 codeSize = personalAccountProxyAddress.code.length;
         if (codeSize == 0) {
             // deploy via EIP-2470 singleton factory using CREATE2
             IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, bytes32(0));
@@ -680,42 +717,42 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         _personalAccount = IIPersonalAccount(payable(personalAccountProxyAddress));
 
         // ensure the proxy address is a contract before calling initialize
-        // solhint-disable-next-line no-inline-assembly
-        assembly { codeSize := extcodesize(personalAccountProxyAddress) }
+        codeSize = personalAccountProxyAddress.code.length;
         require(codeSize > 0, PersonalAccountNotSuccessfullyDeployed(personalAccountProxyAddress));
 
         personalAccounts[_xrplOwner] = _personalAccount;
         emit PersonalAccountCreated(_xrplOwner, personalAccountProxyAddress);
     }
 
-    function _setExecutor(address payable _newExecutor) internal {
-        require(_newExecutor != address(0), InvalidExecutor());
-        executor = _newExecutor;
-        emit ExecutorSet(_newExecutor);
+    function _setExecutor(address payable _executor) internal {
+        require(_executor != address(0), InvalidExecutor());
+        executor = _executor;
+        emit ExecutorSet(_executor);
     }
 
-    function _setExecutorFee(uint256 _newExecutorFee) internal {
-        require(_newExecutorFee > 0, InvalidExecutorFee());
-        executorFee = _newExecutorFee;
-        emit ExecutorFeeSet(_newExecutorFee);
+    function _setExecutorFee(uint256 _executorFee) internal {
+        require(_executorFee > 0, InvalidExecutorFee());
+        executorFee = _executorFee;
+        emit ExecutorFeeSet(_executorFee);
     }
 
-    function _setPaymentProofValidityDurationSeconds(uint256 _newDuration) internal {
-        require(_newDuration > 0, InvalidPaymentProofValidityDuration());
-        paymentProofValidityDurationSeconds = _newDuration;
-        emit PaymentProofValidityDurationSecondsSet(_newDuration);
+    function _setPaymentProofValidityDurationSeconds(uint256 _paymentProofValidityDurationSeconds) internal {
+        require(_paymentProofValidityDurationSeconds > 0, InvalidPaymentProofValidityDuration());
+        paymentProofValidityDurationSeconds = _paymentProofValidityDurationSeconds;
+        emit PaymentProofValidityDurationSecondsSet(_paymentProofValidityDurationSeconds);
     }
 
-    function _setDefaultInstructionFee(uint256 _newDefaultInstructionFee) internal {
-        defaultInstructionFee = _newDefaultInstructionFee;
-        emit DefaultInstructionFeeSet(_newDefaultInstructionFee);
+    function _setDefaultInstructionFee(uint256 _defaultInstructionFee) internal {
+        defaultInstructionFee = _defaultInstructionFee;
+        emit DefaultInstructionFeeSet(_defaultInstructionFee);
     }
 
     function _addXrplProviderWallets(
-        string[] memory _xrplProviderWallets
+        string[] calldata _xrplProviderWallets
     )
         internal
     {
+        require(_xrplProviderWallets.length > 0, NoXrplProviderWallets());
         for (uint256 i = 0; i < _xrplProviderWallets.length; i++) {
             string memory xrplProviderWallet = _xrplProviderWallets[i];
             require(bytes(xrplProviderWallet).length > 0, InvalidXrplProviderWallet(xrplProviderWallet));

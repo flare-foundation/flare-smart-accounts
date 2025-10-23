@@ -10,7 +10,7 @@ import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerificati
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
-import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {MasterAccountControllerProxy} from "../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
@@ -43,6 +43,9 @@ contract XrplControlledWalletTest is Test {
     bytes32 private xrplProviderWalletHash;
     uint256 private paymentProofValidityDurationSeconds;
     uint256 private defaultInstructionFee;
+    address private uniswapV3Router;
+    uint24 private poolFeeTierPPM;
+    address private usdt0;
     address private personalAccountImplementation;
     string private xrplAddress1;
     string private xrplAddress2;
@@ -73,6 +76,9 @@ contract XrplControlledWalletTest is Test {
         executorFee = 100;
         paymentProofValidityDurationSeconds = 1 days;
         defaultInstructionFee = 1000000; // 1 XRP
+        uniswapV3Router = makeAddr("UniswapV3Router");
+        poolFeeTierPPM = 500; // 0.05%
+        usdt0 = makeAddr("USDT0");
         assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
         agent = makeAddr("agent");
         agentInfo.status = AgentInfo.Status.NORMAL;
@@ -109,6 +115,9 @@ contract XrplControlledWalletTest is Test {
         );
         masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
 
+        string[] memory xrplProviderWallets = new string[](1);
+        xrplProviderWallets[0] = xrplProviderWallet;
+
         // initialize controller
         vm.prank(initialOwner);
         masterAccountController.initialize(
@@ -116,8 +125,16 @@ contract XrplControlledWalletTest is Test {
             executorFee,
             paymentProofValidityDurationSeconds,
             defaultInstructionFee,
-            xrplProviderWallet,
+            xrplProviderWallets,
             personalAccountImplementation
+        );
+
+        // set swap parameters
+        vm.prank(initialOwner);
+        masterAccountController.setSwapParams(
+            uniswapV3Router,
+            poolFeeTierPPM,
+            usdt0
         );
 
         // transfer ownership to governance
@@ -159,13 +176,13 @@ contract XrplControlledWalletTest is Test {
         proof.data.responseBody.standardPaymentReference = _encodePaymentReferenceDeposit(12345);
         _mockVerifyPayment(true);
 
-        address predictedAddress1 = masterAccountController.computePersonalAccountAddress(xrplAddress1);
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(
+            predictedAddress1.code.length,
+            0
+        );
         fxrp.mint(predictedAddress1, 12345);
 
-        assertEq(
-            address(masterAccountController.getPersonalAccount(xrplAddress1)),
-            address(PersonalAccount(payable(address(0))))
-        );
         vm.expectEmit();
         emit IPersonalAccount.Approved(
             address(fxrp),
@@ -174,22 +191,24 @@ contract XrplControlledWalletTest is Test {
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
-        // PersonalAccount should be created
-        assertNotEq(
-            address(masterAccountController.getPersonalAccount(xrplAddress1)),
-            address(PersonalAccount(payable(address(0))))
-        );
-        personalAccount1 = masterAccountController.getPersonalAccount(xrplAddress1);
         // check that the personal account was created at the expected address
+        assertNotEq(
+            predictedAddress1.code.length,
+            0
+        );
         assertEq(
-            address(masterAccountController.getPersonalAccount(xrplAddress1)),
+            masterAccountController.getPersonalAccount(xrplAddress1),
             predictedAddress1
         );
+        personalAccount1 = IPersonalAccount(predictedAddress1);
         assertEq(
             personalAccount1.implementation(),
             address(personalAccountImpl)
         );
-        assertEq(personalAccount1.xrplOwner(), xrplAddress1);
+        assertEq(
+            personalAccount1.xrplOwner(),
+            xrplAddress1
+        );
         assertEq(
             personalAccount1.controllerAddress(),
             address(masterAccountController)
@@ -211,7 +230,7 @@ contract XrplControlledWalletTest is Test {
             address(newMasterAccountControllerImpl)
         );
         assertEq(
-            address(masterAccountController.getPersonalAccount(xrplAddress1)),
+            masterAccountController.getPersonalAccount(xrplAddress1),
             address(personalAccount1)
         );
         assertEq(
@@ -221,38 +240,33 @@ contract XrplControlledWalletTest is Test {
 
         // deploy a new PersonalAccount implementation
         PersonalAccount newPersonalAccountImpl = new PersonalAccount();
-        // create new transaction; personal account should not be upgraded
-        proof.data.requestBody.transactionId = bytes32("tx2");
-        fxrp.mint(predictedAddress1, 12345);
-        masterAccountController.executeInstruction(proof, xrplAddress1);
-        assertEq(
-            personalAccount1.implementation(),
-            address(personalAccountImpl)
-        );
 
         // compute address of personal account for xrplAddress2 before implementation change
-        address predictedAddress2 = masterAccountController.computePersonalAccountAddress(xrplAddress2);
+        address predictedAddress2 = masterAccountController.getPersonalAccount(xrplAddress2);
 
         // update PersonalAccount implementation on MasterAccountController
         vm.prank(governance);
         masterAccountController.setPersonalAccountImplementation(address(newPersonalAccountImpl));
-        // assertEq(
-        //     masterAccountController.personalAccountImplementation(),
-        //     address(newPersonalAccountImpl)
-        // );
-        // create new transaction; personal account should be upgraded
-        proof.data.requestBody.transactionId = bytes32("tx3");
-        fxrp.mint(predictedAddress1, 12345);
-        masterAccountController.executeInstruction(proof, xrplAddress1);
         assertEq(
-            address(masterAccountController.getPersonalAccount(xrplAddress1)),
+            masterAccountController.personalAccountImplementation(),
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            masterAccountController.implementation(), // beacon implementation
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            masterAccountController.getPersonalAccount(xrplAddress1),
             address(personalAccount1)
         );
         assertEq(
             personalAccount1.implementation(),
             address(newPersonalAccountImpl)
         );
-        assertEq(personalAccount1.xrplOwner(), xrplAddress1);
+        assertEq(
+            personalAccount1.xrplOwner(),
+            xrplAddress1
+        );
         assertEq(
             personalAccount1.controllerAddress(),
             address(masterAccountController)
@@ -260,15 +274,23 @@ contract XrplControlledWalletTest is Test {
 
         // execute transaction for xrplAddress2; new personal account should be created with new implementation
         // and at the expected address
-        proof.data.requestBody.transactionId = bytes32("tx4");
+        assertEq(
+            predictedAddress2.code.length,
+            0
+        );
+        proof.data.requestBody.transactionId = bytes32("tx2");
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
         fxrp.mint(predictedAddress2, 12345);
         masterAccountController.executeInstruction(proof, xrplAddress2);
-        personalAccount2 = masterAccountController.getPersonalAccount(xrplAddress2);
+        personalAccount2 = IPersonalAccount(masterAccountController.getPersonalAccount(xrplAddress2));
         // check that the personal account was created at the expected address
         assertEq(
-            address(masterAccountController.getPersonalAccount(xrplAddress2)),
+            address(personalAccount2),
             predictedAddress2
+        );
+        assertNotEq(
+            predictedAddress2.code.length,
+            0
         );
         // check implementation of the new personal account
         assertEq(

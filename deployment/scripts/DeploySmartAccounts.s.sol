@@ -4,13 +4,14 @@ pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
-import {MasterAccountControllerBase} from "../../contracts/smartAccounts/implementation/MasterAccountControllerBase.sol";
+import {MasterAccountControllerBase}
+    from "../../contracts/smartAccounts/implementation/MasterAccountControllerBase.sol";
 import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {MasterAccountControllerProxy} from "../../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {Create2} from "@openzeppelin-contracts/utils/Create2.sol";
-import {UUPSUpgradeable} from "@openzeppelin-contracts/proxy/utils/UUPSUpgradeable.sol";
+import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 
 // solhint-disable-next-line max-line-length
 // forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
@@ -24,7 +25,10 @@ contract DeploySmartAccounts is Script {
         uint256 executorFee;
         uint256 paymentProofValidityDurationSeconds;
         uint256 defaultInstructionFee;
-        string xrplProviderWallet;
+        string[] xrplProviderWallets;
+        address uniswapV3Router;
+        uint24 poolFeeTierPPM;
+        address usdt0;
     }
 
     address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -64,7 +68,10 @@ contract DeploySmartAccounts is Script {
         params.executorFee = vm.parseJsonUint(config, ".executorFee");
         params.paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
         params.defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
-        params.xrplProviderWallet = vm.parseJsonString(config, ".xrplProviderWallet");
+        params.xrplProviderWallets = vm.parseJsonStringArray(config, ".xrplProviderWallets");
+        params.uniswapV3Router = vm.parseJsonAddress(config, ".uniswapV3Router");
+        params.poolFeeTierPPM = uint24(vm.parseJsonUint(config, ".poolFeeTierPPM"));
+        params.usdt0 = vm.parseJsonAddress(config, ".usdt0");
 
         vm.startBroadcast();
 
@@ -75,9 +82,7 @@ contract DeploySmartAccounts is Script {
         );
         bytes32 salt = bytes32(0);
         address expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
-        uint256 codeSize;
-        // solhint-disable-next-line no-inline-assembly
-        assembly { codeSize := extcodesize(expected) }
+        uint256 codeSize = expected.code.length;
         if (codeSize == 0) {
             console2.log("Deploying seed MasterAccountControllerBase via singleton factory");
             seedMasterAccountControllerBase = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
@@ -96,8 +101,7 @@ contract DeploySmartAccounts is Script {
             )
         );
         expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
-        // solhint-disable-next-line no-inline-assembly
-        assembly { codeSize := extcodesize(expected) }
+        codeSize = expected.code.length;
         if (codeSize == 0) {
             console2.log("Deploying MasterAccountControllerProxy via singleton factory");
             masterAccountControllerProxyAddr = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
@@ -124,6 +128,18 @@ contract DeploySmartAccounts is Script {
                 )
             );
             masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
+
+            // set swap parameters
+            if (params.uniswapV3Router != address(0)) {
+                console2.log("Setting swap parameters");
+                masterAccountController.setSwapParams(
+                    params.uniswapV3Router,
+                    params.poolFeeTierPPM,
+                    params.usdt0
+                );
+            } else {
+                console2.log("Swap parameters not set, swapping is disabled");
+            }
 
             // add agent vaults
             (address[] memory agentVaultAddresses, ) =

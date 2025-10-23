@@ -5,5 +5,8 @@
   "executorFee": 100,
   "paymentProofValidityDurationSeconds": 86400,
   "defaultInstructionFee": 1000,
-  "xrplProviderWallet": "rBNkSvAFebTRYB5ksRXbNtJAPa6NeVPbRj"
+  "xrplProviderWallets": ["rBNkSvAFebTRYB5ksRXbNtJAPa6NeVPbRj"],
+  "uniswapV3Router": "0x0000000000000000000000000000000000000000",
+  "poolFeeTierPPM": 500,
+  "usdt0": "0x21709E63fC7F264F329e0826Ea82197694B82775"
 }

@@ -20,6 +20,8 @@ fs_permissions = [
 forge-std = "1.10.0"
 flare-periphery = "0.1.38"
 "@openzeppelin-contracts-upgradeable" = "5.2.0"
+"@uniswap-v3-core" = "1.0.1"
+"@uniswap-v3-periphery" = "1.4.4"
 
 
 [soldeer]

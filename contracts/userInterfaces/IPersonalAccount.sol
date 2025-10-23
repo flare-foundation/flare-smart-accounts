@@ -117,6 +117,20 @@ interface IPersonalAccount {
     );
 
     /**
+     * @notice Emitted when a token swap is executed.
+     * @param tokenIn The input token address.
+     * @param tokenOut The output token address.
+     * @param amountIn The amount of input tokens.
+     * @param amountOut The amount of output tokens received.
+     */
+    event SwapExecuted(
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 amountOut
+    );
+
+    /**
      * @notice Reverts if the sent value is insufficient for collateral reservation.
      * @param collateralReservationFee The required collateral reservation fee.
      * @param executorFee The required executor fee.

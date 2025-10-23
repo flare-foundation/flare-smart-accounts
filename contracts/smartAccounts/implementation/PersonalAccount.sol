@@ -4,12 +4,13 @@ pragma solidity ^0.8.27;
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
-import {IERC20} from "@openzeppelin-contracts/token/ERC20/IERC20.sol";
-import {ReentrancyGuard} from "@openzeppelin-contracts/utils/ReentrancyGuard.sol";
-import {IBeacon} from "@openzeppelin-contracts/proxy/beacon/IBeacon.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
+import {UniswapV3} from "../library/UniswapV3.sol";
 
 /**
  * @title PersonalAccount contract
@@ -195,6 +196,25 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
             address(this)
         );
         emit Claimed(_vault, _year, _month, _day, _shares, _assets);
+    }
+
+    /// @inheritdoc IIPersonalAccount
+    function executeSwap(
+        address _swapRouter,
+        address _tokenIn,
+        address _tokenOut,
+        uint24 _fee
+    )
+        external
+        onlyController nonReentrant
+    {
+        (uint256 amountIn, uint256 amountOut) = UniswapV3.executeSwap(
+            _swapRouter,
+            _tokenIn,
+            _tokenOut,
+            _fee
+        );
+        emit SwapExecuted(_tokenIn, _tokenOut, amountIn, amountOut);
     }
 
     /// @inheritdoc IPersonalAccount
