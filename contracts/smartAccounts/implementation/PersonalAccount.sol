@@ -42,7 +42,7 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
      */
     function initialize(
         address _controllerAddress,
-        string memory _xrplOwner
+        string calldata _xrplOwner
     ) external {
         require(controllerAddress == address(0), AlreadyInitialized());
         require(_controllerAddress != address(0), InvalidControllerAddress());

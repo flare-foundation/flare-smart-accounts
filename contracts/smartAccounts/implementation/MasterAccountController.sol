@@ -95,7 +95,8 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
      * @param _executor The FAssets executor (mint and redeem).
      * @param _executorFee The executor fee (in wei).
      * @param _paymentProofValidityDurationSeconds The duration (in seconds) for which the payment proof is valid.
-     * @param _defaultInstructionFee The default instruction fee in underlying asset's smallest unit (e.g., drops for XRP).
+     * @param _defaultInstructionFee The default instruction fee in underlying asset's smallest unit
+     (e.g., drops for XRP).
      * @param _xrplProviderWallet The XRPL provider wallet address.
      * @param _personalAccountImplementation The PersonalAccount implementation address.
      */
@@ -104,7 +105,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         uint256 _executorFee,
         uint256 _paymentProofValidityDurationSeconds,
         uint256 _defaultInstructionFee,
-        string memory _xrplProviderWallet,
+        string calldata _xrplProviderWallet,
         address _personalAccountImplementation
     )
         external onlyOwner reinitializer(2)
@@ -350,7 +351,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
      * Can only be called by the governance.
      */
     function addXrplProviderWallets(
-        string[] memory _xrplProviderWallets
+        string[] calldata _xrplProviderWallets
     )
         external onlyOwner
     {
