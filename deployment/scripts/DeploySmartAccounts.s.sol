@@ -19,8 +19,9 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeab
 contract DeploySmartAccounts is Script {
 
     struct MasterAccountControllerParams {
+        address initialOwner;
         address governance;
-        address depositVault;
+        address[] vaults;
         address executor;
         uint256 executorFee;
         uint256 paymentProofValidityDurationSeconds;
@@ -43,18 +44,18 @@ contract DeploySmartAccounts is Script {
     MasterAccountController private masterAccountController;
     address private seedMasterAccountControllerBase;
     address private masterAccountControllerProxyAddr;
-    address private initialOwner;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
-        initialOwner = deployer;
 
         string memory configFile = "deployment/chain-config/";
         string memory network;
         uint256 chainId = block.chainid;
 
-        if (chainId == 114) {
+        if (chainId == 14) {
+            network = "flare";
+        } else if (chainId == 114) {
             network = "coston2";
         } else {
             configFile = "scdev";
@@ -64,8 +65,9 @@ contract DeploySmartAccounts is Script {
 
         MasterAccountControllerParams memory params;
         string memory config = vm.readFile(configFile);
+        params.initialOwner = vm.parseJsonAddress(config, ".initialOwner");
         params.governance = vm.parseJsonAddress(config, ".governance");
-        params.depositVault = vm.parseJsonAddress(config, ".depositVault");
+        params.vaults = vm.parseJsonAddressArray(config, ".vaults");
         params.executor = vm.parseJsonAddress(config, ".executor");
         params.executorFee = vm.parseJsonUint(config, ".executorFee");
         params.paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
@@ -77,9 +79,14 @@ contract DeploySmartAccounts is Script {
         params.usdt0FXrpPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".usdt0FXrpPoolFeeTierPPM"));
         params.maxSlippagePPM = uint24(vm.parseJsonUint(config, ".maxSlippagePPM"));
 
+        // if initial owner not set in config, use deployer address - for testing purposes
+        if (params.initialOwner == address(0)) {
+            params.initialOwner = deployer;
+        }
+
         vm.startBroadcast();
 
-        // deploy controller base seed via EIP-2470 singleton factory using CREATE2ž
+        // deploy controller base seed via EIP-2470 singleton factory using CREATE2
         // same on all networks
         bytes memory bytecode = abi.encodePacked(
             type(MasterAccountControllerBase).creationCode
@@ -90,6 +97,10 @@ contract DeploySmartAccounts is Script {
         if (codeSize == 0) {
             console2.log("Deploying seed MasterAccountControllerBase via singleton factory");
             seedMasterAccountControllerBase = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+            require(
+                expected == seedMasterAccountControllerBase && expected.code.length > 0,
+                "Seed MasterAccountControllerBase deployment failed"
+            );
         } else {
             console2.log("Seed MasterAccountControllerBase already deployed, skipping");
             seedMasterAccountControllerBase = expected;
@@ -101,7 +112,7 @@ contract DeploySmartAccounts is Script {
             type(MasterAccountControllerProxy).creationCode,
             abi.encode(
                 seedMasterAccountControllerBase,
-                initialOwner
+                params.initialOwner
             )
         );
         expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
@@ -109,94 +120,121 @@ contract DeploySmartAccounts is Script {
         if (codeSize == 0) {
             console2.log("Deploying MasterAccountControllerProxy via singleton factory");
             masterAccountControllerProxyAddr = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
-
-            // deploy personal account implementation
-            personalAccountImpl = new PersonalAccount();
-            personalAccountImplAddress = address(personalAccountImpl);
-
-            // deploy real controller implementation
-            masterAccountControllerImpl = new MasterAccountController();
-
-            // upgrade controller proxy to real implementation and initialize in one call
-            // can be called only by initial owner set in proxy constructor (initialOwner)
-            UUPSUpgradeable(masterAccountControllerProxyAddr).upgradeToAndCall(
-                address(masterAccountControllerImpl),
-                abi.encodeWithSelector(
-                    MasterAccountController.initialize.selector,
-                    payable(params.executor),
-                    params.executorFee,
-                    params.paymentProofValidityDurationSeconds,
-                    params.defaultInstructionFee,
-                    params.xrplProviderWallet,
-                    personalAccountImplAddress
-                )
-            );
-            masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
-
-            // set swap parameters
-            if (params.uniswapV3Router != address(0)) {
-                console2.log("Setting swap parameters");
-                masterAccountController.setSwapParams(
-                    params.uniswapV3Router,
-                    params.usdt0,
-                    params.wNatUsdt0PoolFeeTierPPM,
-                    params.usdt0FXrpPoolFeeTierPPM,
-                    params.maxSlippagePPM
-                );
-            } else {
-                console2.log("Swap parameters not set, swapping is disabled");
-            }
-
-            // add agent vaults
-            (address[] memory agentVaultAddresses, ) =
-                ContractRegistry.getAssetManagerFXRP().getAvailableAgentsList(0, 10);
-            uint256[] memory agentVaultIds = new uint256[](agentVaultAddresses.length);
-            for (uint256 i = 0; i < agentVaultAddresses.length; i++) {
-                agentVaultIds[i] = i;
-            }
-            masterAccountController.addAgentVaults(agentVaultIds, agentVaultAddresses);
-            // add vault
-            uint256[] memory vaultIds = new uint256[](1);
-            address[] memory vaultAddresses = new address[](1);
-            vaultIds[0] = 0;
-            vaultAddresses[0] = params.depositVault;
-            masterAccountController.addVaults(vaultIds, vaultAddresses);
-
-            // transfer ownership to governance
-            masterAccountController.transferOwnership(params.governance);
-
-            vm.stopBroadcast();
-            // Log deployment info for post-processing
-            console2.log(
-                string.concat(
-                    "DEPLOYED: SeedMasterAccountControllerImplementation, ",
-                    "MasterAccountControllerBase.sol: ",
-                    vm.toString(seedMasterAccountControllerBase)
-                )
-            );
-            console2.log(
-                string.concat(
-                    "DEPLOYED: PersonalAccountImplementation, ",
-                    "PersonalAccount.sol: ",
-                    vm.toString(personalAccountImplAddress)
-                )
-            );
-            console2.log(
-                string.concat(
-                    "DEPLOYED: MasterAccountController, ",
-                    "MasterAccountControllerProxy.sol:  ",
-                    vm.toString(address(masterAccountController))
-                )
-            );
-            console2.log(
-                string.concat(
-                    "DEPLOYED: MasterAccountControllerImplementation, ",
-                    "MasterAccountController.sol: ",
-                    vm.toString(address(masterAccountControllerImpl))
-                )
+            require(
+                expected == masterAccountControllerProxyAddr && expected.code.length > 0,
+                "MasterAccountControllerProxy deployment failed"
             );
         } else {
             console2.log("MasterAccountControllerProxy already deployed, skipping");
+            masterAccountControllerProxyAddr = expected;
         }
+
+        // (re)deploy personal account implementation
+        personalAccountImpl = new PersonalAccount();
+        personalAccountImplAddress = address(personalAccountImpl);
+
+        // (re)deploy real controller implementation
+        masterAccountControllerImpl = new MasterAccountController();
+
+        // Log deployment info for post-processing
+        console2.log(
+            string.concat(
+                "DEPLOYED: SeedMasterAccountControllerImplementation, ",
+                "MasterAccountControllerBase.sol: ",
+                vm.toString(seedMasterAccountControllerBase)
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: MasterAccountController, ",
+                "MasterAccountControllerProxy.sol:  ",
+                vm.toString(masterAccountControllerProxyAddr)
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: MasterAccountControllerImplementation, ",
+                "MasterAccountController.sol: ",
+                vm.toString(address(masterAccountControllerImpl))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: PersonalAccountImplementation, ",
+                "PersonalAccount.sol: ",
+                vm.toString(personalAccountImplAddress)
+            )
+        );
+
+        masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
+        if (deployer != masterAccountController.owner()) {
+            console2.log("Deployer is not owner, skipping upgrades");
+            vm.stopBroadcast();
+            return;
+        }
+
+        if (seedMasterAccountControllerBase != masterAccountController.controllerImplementation()) {
+            // deployer is owner, perform upgrades (initialization was already done)
+            console2.log("Upgrading MasterAccountController and PersonalAccount implementations");
+            masterAccountController.setPersonalAccountImplementation(personalAccountImplAddress);
+            masterAccountController.upgradeToAndCall(address(masterAccountControllerImpl), bytes(""));
+            vm.stopBroadcast();
+            return;
+        }
+
+        // deployer is owner, perform upgrade and initialization
+        console2.log("Upgrading MasterAccountController implementation and initializing");
+        // upgrade controller proxy to real implementation and initialize in one call
+        masterAccountController.upgradeToAndCall(
+            address(masterAccountControllerImpl),
+            abi.encodeWithSelector(
+                MasterAccountController.initialize.selector,
+                payable(params.executor),
+                params.executorFee,
+                params.paymentProofValidityDurationSeconds,
+                params.defaultInstructionFee,
+                params.xrplProviderWallet,
+                personalAccountImplAddress
+            )
+        );
+
+        // set swap parameters
+        if (params.uniswapV3Router != address(0)) {
+            console2.log("Setting swap parameters");
+            masterAccountController.setSwapParams(
+                params.uniswapV3Router,
+                params.usdt0,
+                params.wNatUsdt0PoolFeeTierPPM,
+                params.usdt0FXrpPoolFeeTierPPM,
+                params.maxSlippagePPM
+            );
+        } else {
+            console2.log("Swap parameters not set, swap is disabled");
+        }
+
+        console2.log("Adding agent vaults");
+        // get available agent vaults and add them
+        (address[] memory agentVaultAddresses, ) =
+            ContractRegistry.getAssetManagerFXRP().getAvailableAgentsList(0, 10);
+        uint256[] memory agentVaultIds = new uint256[](agentVaultAddresses.length);
+        for (uint256 i = 0; i < agentVaultAddresses.length; i++) {
+            agentVaultIds[i] = i + 1; // agent vault IDs are 1-based
+        }
+        masterAccountController.addAgentVaults(agentVaultIds, agentVaultAddresses);
+
+        console2.log("Adding vaults");
+        uint256[] memory vaultIds = new uint256[](params.vaults.length);
+        for (uint256 i = 0; i < params.vaults.length; i++) {
+            vaultIds[i] = i + 1; // vault IDs are 1-based
+        }
+        masterAccountController.addVaults(vaultIds, params.vaults);
+
+        if (params.governance == address(0)) {
+            console2.log("Governance address is zero, skipping ownership transfer");
+        } else {
+            console2.log("Transferring ownership to governance");
+            masterAccountController.transferOwnership(params.governance);
+        }
+        vm.stopBroadcast();
     }
 }

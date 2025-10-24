@@ -1,6 +1,7 @@
 {
-  "governance": "0xC83Ec6a4aFf2099942836860A28C7e248Fabc32C",
-  "depositVault": "0x374d7b99C1B78434Cd5552ff97bEcc42c271a41e",
+  "initialOwner": "0x0000000000000000000000000000000000000000",
+  "governance": "0x0000000000000000000000000000000000000000",
+  "vaults": ["0x374d7b99C1B78434Cd5552ff97bEcc42c271a41e"],
   "executor": "0x63E3447d7d80E2be3D6Ee09Bafc161001993dD45",
   "executorFee": 100,
   "paymentProofValidityDurationSeconds": 86400,

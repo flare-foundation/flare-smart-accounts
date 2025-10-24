@@ -27,7 +27,7 @@ contracts.forEach((contract: any) => {
   // remove .sol from contractFile for the contract name
   const contractName = contractFile.replace(".sol", "");
   // find the full path of the contract file
-  const matches = glob.sync(`contracts/xrpcw/**/${contractFile}`);
+  const matches = glob.sync(`contracts/smartAccounts/**/${contractFile}`);
   console.log(matches);
   if (matches.length === 0) {
     throw new Error(`Contract file not found: ${contractFile}`);
