@@ -44,8 +44,10 @@ contract XrplControlledWalletTest is Test {
     uint256 private paymentProofValidityDurationSeconds;
     uint256 private defaultInstructionFee;
     address private uniswapV3Router;
-    uint24 private poolFeeTierPPM;
     address private usdt0;
+    uint24 private wNatUsdt0PoolFeeTierPPM;
+    uint24 private usdt0FXrpPoolFeeTierPPM;
+    uint24 private maxSlippagePPM;
     address private personalAccountImplementation;
     string private xrplAddress1;
     string private xrplAddress2;
@@ -77,8 +79,10 @@ contract XrplControlledWalletTest is Test {
         paymentProofValidityDurationSeconds = 1 days;
         defaultInstructionFee = 1000000; // 1 XRP
         uniswapV3Router = makeAddr("UniswapV3Router");
-        poolFeeTierPPM = 500; // 0.05%
+        wNatUsdt0PoolFeeTierPPM = 3000; // 0.3%
         usdt0 = makeAddr("USDT0");
+        usdt0FXrpPoolFeeTierPPM = 500; // 0.05%
+        maxSlippagePPM = 20000; // 2%
         assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
         agent = makeAddr("agent");
         agentInfo.status = AgentInfo.Status.NORMAL;
@@ -133,8 +137,10 @@ contract XrplControlledWalletTest is Test {
         vm.prank(initialOwner);
         masterAccountController.setSwapParams(
             uniswapV3Router,
-            poolFeeTierPPM,
-            usdt0
+            usdt0,
+            wNatUsdt0PoolFeeTierPPM,
+            usdt0FXrpPoolFeeTierPPM,
+            maxSlippagePPM
         );
 
         // transfer ownership to governance

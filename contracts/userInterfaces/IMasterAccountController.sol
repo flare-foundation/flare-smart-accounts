@@ -126,13 +126,17 @@ interface IMasterAccountController {
     /**
      * @notice Emitted when swap parameters are set.
      * @param uniswapV3Router The Uniswap V3 router address.
-     * @param poolFeeTierPPM The pool fee tier in PPM.
-     * @param usdt0 The USDT token address.
+     * @param usdt0 USDT0 token address.
+     * @param wNatUsdt0PoolFeeTierPPM The WNAT/USDT0 pool fee tier (in PPM - supported values: 100, 500, 3000, 10000).
+     * @param usdt0FXrpPoolFeeTierPPM The USDT0/FXRP pool fee tier (in PPM - supported values: 100, 500, 3000, 10000).
+     * @param maxSlippagePPM The maximum slippage allowed for swaps (in PPM).
      */
     event SwapParamsSet(
         address uniswapV3Router,
-        uint24 poolFeeTierPPM,
-        address usdt0
+        address usdt0,
+        uint24 wNatUsdt0PoolFeeTierPPM,
+        uint24 usdt0FXrpPoolFeeTierPPM,
+        uint24 maxSlippagePPM
     );
 
     /**
@@ -140,6 +144,7 @@ interface IMasterAccountController {
      * @param personalAccount The personal account address.
      * @param xrplOwner The XRPL owner address.
      * @param collateralReservationId The collateral reservation ID.
+     * @param paymentReference The payment reference.
      * @param walletId The wallet ID.
      * @param agentVault The agent vault address.
      * @param lots The number of lots reserved.
@@ -149,6 +154,7 @@ interface IMasterAccountController {
         address indexed personalAccount,
         string indexed xrplOwner,
         uint256 indexed collateralReservationId,
+        bytes32 paymentReference,
         uint256 walletId,
         address agentVault,
         uint256 lots,
@@ -448,4 +454,22 @@ interface IMasterAccountController {
     function getVaults()
         external view
         returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses);
+
+    /**
+     * Returns the swap parameters.
+     * @return _uniswapV3Router The Uniswap V3 router address.
+     * @return _usdt0 USDT0 token address.
+     * @return _wNatUsdt0PoolFeeTierPPM The WNAT/USDT0 pool fee tier (in PPM).
+     * @return _usdt0FXrpPoolFeeTierPPM The USDT0/FXRP pool fee tier (in PPM).
+     * @return _maxSlippagePPM The maximum slippage allowed for swaps (in PPM).
+     */
+    function getSwapParams()
+        external view
+        returns (
+            address _uniswapV3Router,
+            address _usdt0,
+            uint24 _wNatUsdt0PoolFeeTierPPM,
+            uint24 _usdt0FXrpPoolFeeTierPPM,
+            uint24 _maxSlippagePPM
+        );
 }

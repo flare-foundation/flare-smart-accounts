@@ -200,19 +200,25 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
 
     /// @inheritdoc IIPersonalAccount
     function executeSwap(
-        address _swapRouter,
+        address _uniswapV3Router,
         address _tokenIn,
+        bytes21 _tokenInFeedId,
         address _tokenOut,
-        uint24 _fee
+        bytes21 _tokenOutFeedId,
+        uint24 _poolFeeTierPPM,
+        uint24 _maxSlippagePPM
     )
         external
         onlyController nonReentrant
     {
         (uint256 amountIn, uint256 amountOut) = UniswapV3.executeSwap(
-            _swapRouter,
+            _uniswapV3Router,
             _tokenIn,
+            _tokenInFeedId,
             _tokenOut,
-            _fee
+            _tokenOutFeedId,
+            _poolFeeTierPPM,
+            _maxSlippagePPM
         );
         emit SwapExecuted(_tokenIn, _tokenOut, amountIn, amountOut);
     }

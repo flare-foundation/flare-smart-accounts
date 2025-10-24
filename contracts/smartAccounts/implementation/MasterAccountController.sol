@@ -61,6 +61,11 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
     address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
 
+    /// @notice Feed IDs for price oracles
+    bytes21 private constant FLR_USD_FEED_ID = 0x01464c522f55534400000000000000000000000000;
+    bytes21 private constant USDT_USD_FEED_ID = 0x01555344542f555344000000000000000000000000;
+    bytes21 private constant XRP_USD_FEED_ID = 0x015852502f55534400000000000000000000000000;
+
     /// @notice The minting executor.
     address payable public executor;
     /// @notice Executor fee for reserveCollateral (in wei)
@@ -92,11 +97,15 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
     // swap parameters - if not set, swapping is disabled
     /// @notice Uniswap V3 router address
-    address public uniswapV3Router;
-    /// @notice Uniswap V3 pool fee tier in PPM (supported values: 100, 500, 3000, 10000)
-    uint24 public poolFeeTierPPM;
-    /// @notice Agent vault collateral token address (USD?0, USDX, ...)
-    address public usdt0;
+    address private uniswapV3Router;
+    /// @notice USDT0 token address
+    address private usdt0;
+    /// @notice Uniswap V3 pool fee tier (WNAT/USDT0) in PPM (supported values: 100, 500, 3000, 10000)
+    uint24 private wNatUsdt0PoolFeeTierPPM;
+    /// @notice Uniswap V3 pool fee tier (USDT0/FXRP) in PPM (supported values: 100, 500, 3000, 10000)
+    uint24 private usdt0FXrpPoolFeeTierPPM;
+    /// @notice Maximum slippage allowed for swaps (in PPM)
+    uint24 private maxSlippagePPM;
 
     /**
      * @notice Initializer function for upgrading from MasterAccountControllerBase.
@@ -158,11 +167,13 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         );
         // set mapping from collateral reservation id to transaction id
         collateralReservationIdToTransactionId[_collateralReservationId] = _transactionId;
+
         // emit event
         emit CollateralReserved(
             address(personalAccount),
             _xrplAddress,
             _collateralReservationId,
+            _paymentReference,
             _getWalletId(_paymentReference),
             agentVault,
             lots,
@@ -201,9 +212,9 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         CollateralReservationInfo.Data memory reservationInfo =
             ContractRegistry.getAssetManagerFXRP().collateralReservationInfo(_collateralReservationId);
         require(reservationInfo.status == CollateralReservationInfo.Status.SUCCESSFUL, MintingNotCompleted());
-
+        // no check of instruction fee here, as fee includes collateral reservation fee and has to be checked off-chain
         // verify payment proof
-        _verifyPayment(instructionId, _proof, _xrplAddress);
+        _verifyPayment(_proof, _xrplAddress);
         // check that minter and amount match
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
         require(address(personalAccount) == reservationInfo.minter, InvalidMinter());
@@ -240,8 +251,15 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     {
         bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
         uint256 instructionId = _getInstructionId(paymentReference);
+        // check instruction fee payment
+        uint256 instructionFee = _getInstructionFee(instructionId);
+        int256 receivedAmount = _proof.data.responseBody.receivedAmount;
+        require(
+            receivedAmount >= 0 && uint256(receivedAmount) >= instructionFee,
+            InvalidPaymentAmount(instructionFee)
+        );
         // verify payment proof
-        _verifyPayment(instructionId, _proof, _xrplAddress);
+        _verifyPayment(_proof, _xrplAddress);
 
         // create or get existing Personal Account for the XRPL address
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
@@ -269,8 +287,11 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         personalAccount.executeSwap(
             uniswapV3Router,
             address(ContractRegistry.getWNat()),
+            FLR_USD_FEED_ID,
             usdt0,
-            poolFeeTierPPM
+            USDT_USD_FEED_ID,
+            wNatUsdt0PoolFeeTierPPM,
+            maxSlippagePPM
         );
     }
 
@@ -283,8 +304,11 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         personalAccount.executeSwap(
             uniswapV3Router,
             usdt0,
+            USDT_USD_FEED_ID,
             address(ContractRegistry.getAssetManagerFXRP().fAsset()),
-            poolFeeTierPPM
+            XRP_USD_FEED_ID,
+            usdt0FXrpPoolFeeTierPPM,
+            maxSlippagePPM
         );
     }
 
@@ -520,27 +544,39 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /**
      * @notice Sets swap parameters.
      * @param _uniswapV3Router The Uniswap V3 router address.
-     * @param _poolFeeTierPPM The pool fee tier (in PPM - supported values: 100, 500, 3000, 10000).
-     * @param _usdt0 USD?0 token address.
+     * @param _usdt0 USDT0 token address.
+     * @param _wNatUsdt0PoolFeeTierPPM The WNAT/USDT0 pool fee tier (in PPM - supported values: 100, 500, 3000, 10000).
+     * @param _usdt0FXrpPoolFeeTierPPM The USDT0/FXRP pool fee tier (in PPM - supported values: 100, 500, 3000, 10000).
+     * @param _maxSlippagePPM The maximum slippage allowed for swaps (in PPM).
      * Can only be called by the owner.
      */
     function setSwapParams(
         address _uniswapV3Router,
-        uint24 _poolFeeTierPPM,
-        address _usdt0
+        address _usdt0,
+        uint24 _wNatUsdt0PoolFeeTierPPM,
+        uint24 _usdt0FXrpPoolFeeTierPPM,
+        uint24 _maxSlippagePPM
     )
         external onlyOwner
     {
         require(_uniswapV3Router != address(0), InvalidUniswapV3Router());
         require(
-            _poolFeeTierPPM == 100 || _poolFeeTierPPM == 500 || _poolFeeTierPPM == 3000 || _poolFeeTierPPM == 10000,
+            _isPoolFeeTierPPMValid(_wNatUsdt0PoolFeeTierPPM) && _isPoolFeeTierPPMValid(_usdt0FXrpPoolFeeTierPPM),
             InvalidPoolFeeTierPPM()
         );
         require(_usdt0 != address(0), InvalidUsdt0());
         uniswapV3Router = _uniswapV3Router;
-        poolFeeTierPPM = _poolFeeTierPPM;
         usdt0 = _usdt0;
-        emit SwapParamsSet(_uniswapV3Router, _poolFeeTierPPM, _usdt0);
+        wNatUsdt0PoolFeeTierPPM = _wNatUsdt0PoolFeeTierPPM;
+        usdt0FXrpPoolFeeTierPPM = _usdt0FXrpPoolFeeTierPPM;
+        maxSlippagePPM = _maxSlippagePPM;
+        emit SwapParamsSet(
+            _uniswapV3Router,
+            _usdt0,
+            _wNatUsdt0PoolFeeTierPPM,
+            _usdt0FXrpPoolFeeTierPPM,
+            _maxSlippagePPM
+        );
     }
 
     /**
@@ -611,6 +647,26 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     }
 
     /**
+     * @inheritdoc IMasterAccountController
+     */
+    function getSwapParams()
+        external view
+        returns (
+            address _uniswapV3Router,
+            address _usdt0,
+            uint24 _wNatUsdt0PoolFeeTierPPM,
+            uint24 _usdt0FXrpPoolFeeTierPPM,
+            uint24 _maxSlippagePPM
+        )
+    {
+        _uniswapV3Router = uniswapV3Router;
+        _usdt0 = usdt0;
+        _wNatUsdt0PoolFeeTierPPM = wNatUsdt0PoolFeeTierPPM;
+        _usdt0FXrpPoolFeeTierPPM = usdt0FXrpPoolFeeTierPPM;
+        _maxSlippagePPM = maxSlippagePPM;
+    }
+
+    /**
      * Returns current implementation address.
      * @return Current implementation address.
      */
@@ -675,7 +731,6 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         } else {
             revert InvalidInstructionId(_instructionId);
         }
-        // TODO are more granular events needed?
         emit InstructionExecuted(
             address(_personalAccount),
             _xrplOwner,
@@ -784,18 +839,11 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     }
 
     function _verifyPayment(
-        uint256 _instructionId,
         IPayment.Proof calldata _proof,
         string memory _xrplAddress
     )
         internal view
     {
-        uint256 instructionFee = _getInstructionFee(_instructionId);
-        int256 receivedAmount = _proof.data.responseBody.receivedAmount;
-        require(
-            receivedAmount >= 0 && uint256(receivedAmount) >= instructionFee,
-            InvalidPaymentAmount(instructionFee)
-        );
         require(
             _proof.data.responseBody.status == 0,
             InvalidTransactionStatus()
@@ -878,12 +926,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         _day = date % 100;
     }
 
-    /**
-     * @notice Generates a deterministic salt for CREATE2 deployment based on XRPL address.
-     * @param _xrplOwner The XRPL address.
-     * @return The salt to be used for CREATE2 deployment.
-     */
-    function _generateSalt(string memory _xrplOwner) internal pure returns (bytes32) {
-        return keccak256(bytes(_xrplOwner));
+    function _isPoolFeeTierPPMValid(uint24 _poolFeeTierPPM) internal pure returns (bool) {
+        return _poolFeeTierPPM == 100 || _poolFeeTierPPM == 500 || _poolFeeTierPPM == 3000 || _poolFeeTierPPM == 10000;
     }
 }

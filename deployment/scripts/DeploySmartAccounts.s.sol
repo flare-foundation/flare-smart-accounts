@@ -27,8 +27,10 @@ contract DeploySmartAccounts is Script {
         uint256 defaultInstructionFee;
         string[] xrplProviderWallets;
         address uniswapV3Router;
-        uint24 poolFeeTierPPM;
         address usdt0;
+        uint24 wNatUsdt0PoolFeeTierPPM;
+        uint24 usdt0FXrpPoolFeeTierPPM;
+        uint24 maxSlippagePPM;
     }
 
     address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -70,8 +72,10 @@ contract DeploySmartAccounts is Script {
         params.defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
         params.xrplProviderWallets = vm.parseJsonStringArray(config, ".xrplProviderWallets");
         params.uniswapV3Router = vm.parseJsonAddress(config, ".uniswapV3Router");
-        params.poolFeeTierPPM = uint24(vm.parseJsonUint(config, ".poolFeeTierPPM"));
         params.usdt0 = vm.parseJsonAddress(config, ".usdt0");
+        params.wNatUsdt0PoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".wNatUsdt0PoolFeeTierPPM"));
+        params.usdt0FXrpPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".usdt0FXrpPoolFeeTierPPM"));
+        params.maxSlippagePPM = uint24(vm.parseJsonUint(config, ".maxSlippagePPM"));
 
         vm.startBroadcast();
 
@@ -134,8 +138,10 @@ contract DeploySmartAccounts is Script {
                 console2.log("Setting swap parameters");
                 masterAccountController.setSwapParams(
                     params.uniswapV3Router,
-                    params.poolFeeTierPPM,
-                    params.usdt0
+                    params.usdt0,
+                    params.wNatUsdt0PoolFeeTierPPM,
+                    params.usdt0FXrpPoolFeeTierPPM,
+                    params.maxSlippagePPM
                 );
             } else {
                 console2.log("Swap parameters not set, swapping is disabled");

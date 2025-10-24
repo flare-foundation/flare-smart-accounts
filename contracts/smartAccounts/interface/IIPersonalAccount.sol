@@ -116,14 +116,20 @@ interface IIPersonalAccount is IPersonalAccount {
      * @notice Execute a swap on Uniswap V3.
      * @param _uniswapV3Router The address of the Uniswap V3 router.
      * @param _tokenIn The address of the input token.
+     * @param _tokenInFeedId The feed ID of the input token.
      * @param _tokenOut The address of the output token.
+     * @param _tokenOutFeedId The feed ID of the output token.
      * @param _poolFeeTierPPM The fee tier of the pool to use for the swap (in PPM).
+     * @param _maxSlippagePPM The maximum slippage allowed for the swap (in PPM).
      */
     function executeSwap(
         address _uniswapV3Router,
         address _tokenIn,
+        bytes21 _tokenInFeedId,
         address _tokenOut,
-        uint24 _poolFeeTierPPM
+        bytes21 _tokenOutFeedId,
+        uint24 _poolFeeTierPPM,
+        uint24 _maxSlippagePPM
     )
         external;
 }

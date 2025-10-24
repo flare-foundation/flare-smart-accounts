@@ -3,10 +3,9 @@ pragma solidity ^0.8.27;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { IUniswapV3Factory } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Factory.sol";
-import { IUniswapV3Pool } from "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
-import { IPeripheryImmutableState } from "@uniswap/v3-periphery/contracts/interfaces/IPeripheryImmutableState.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import { ContractRegistry } from "flare-periphery/src/flare/ContractRegistry.sol";
 
 
 /**
@@ -16,9 +15,15 @@ import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRou
 library UniswapV3 {
     using SafeERC20 for IERC20;
 
+    /**
+     * @notice Reverts if the swap is disabled - no Uniswap V3 router provided.
+     */
     error SwapDisabled();
-    error PoolDoesNotExist();
-    error InsufficientLiquidity();
+
+    /**
+     * @notice Reverts if the amount of input tokens is zero.
+     */
+    error AmountInZero();
 
     /**
      * @notice Executes a swap on Uniswap V3.
@@ -32,26 +37,30 @@ library UniswapV3 {
     function executeSwap(
         address _uniswapV3Router,
         address _tokenIn,
+        bytes21 _tokenInFeedId,
         address _tokenOut,
-        uint24 _poolFeeTierPPM
+        bytes21 _tokenOutFeedId,
+        uint24 _poolFeeTierPPM,
+        uint24 _maxSlippagePPM
     )
         internal
         returns (uint256 _amountIn, uint256 _amountOut)
     {
-        // Get Uniswap V3 Factory
+        // Ensure swap router is provided
         require(_uniswapV3Router != address(0), SwapDisabled());
-        IUniswapV3Factory factory = IUniswapV3Factory(IPeripheryImmutableState(_uniswapV3Router).factory());
-
-        // Check if pool exists
-        address poolAddress = factory.getPool(_tokenIn, _tokenOut, _poolFeeTierPPM);
-        require(poolAddress != address(0), PoolDoesNotExist());
-
-        // Check if pool has liquidity
-        IUniswapV3Pool pool = IUniswapV3Pool(poolAddress);
-        require(pool.liquidity() > 0, InsufficientLiquidity());
-
-        // Swap everything we have
+        // Check input token balance
         _amountIn = IERC20(_tokenIn).balanceOf(address(this));
+        require(_amountIn > 0, AmountInZero());
+
+        // Fetch price feeds
+        bytes21[] memory feedIds = new bytes21[](2);
+        feedIds[0] = _tokenInFeedId;
+        feedIds[1] = _tokenOutFeedId;
+        (uint256[] memory valuesInWei, ) = ContractRegistry.getFtsoV2().getFeedsByIdInWei(feedIds);
+
+        // Calculate minimum amount out based on max slippage
+        uint256 expectedAmountOut = Math.mulDiv(_amountIn, valuesInWei[0], valuesInWei[1]);
+        uint256 minAmountOut = Math.mulDiv(expectedAmountOut, 1e6 - _maxSlippagePPM, 1e6);
 
         // Approve router to spend tokens using SafeERC20
         IERC20(_tokenIn).safeIncreaseAllowance(_uniswapV3Router, _amountIn);
@@ -64,7 +73,7 @@ library UniswapV3 {
             recipient: address(this),
             deadline: block.timestamp,
             amountIn: _amountIn,
-            amountOutMinimum: 0, // TODO : Add slippage protection using price oracles
+            amountOutMinimum: minAmountOut,
             sqrtPriceLimitX96: 0
         });
 
