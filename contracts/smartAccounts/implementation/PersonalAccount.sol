@@ -104,7 +104,7 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
         onlyController nonReentrant
         returns (uint256 _amount)
     {
-        require( msg.value >= _executorFee, InsufficientFundsForRedeem(_executorFee));
+        require(msg.value >= _executorFee, InsufficientFundsForRedeem(_executorFee));
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
         _amount = assetManager.redeem{value: msg.value}(
             _lots,

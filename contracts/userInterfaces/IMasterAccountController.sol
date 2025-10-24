@@ -19,12 +19,12 @@ interface IMasterAccountController {
 
     /**
      * @notice Emitted when a new PersonalAccount is created.
-     * @param xrplOwner The XRPL owner address.
      * @param personalAccount The deployed PersonalAccount contract address.
+     * @param xrplOwner The XRPL owner address.
      */
     event PersonalAccountCreated(
-        string xrplOwner,
-        address personalAccount
+        address indexed personalAccount,
+        string xrplOwner
     );
 
     /**
@@ -142,39 +142,37 @@ interface IMasterAccountController {
     /**
      * @notice Emitted when collateral is reserved for minting.
      * @param personalAccount The personal account address.
+     * @param transactionId The transaction ID.
+     * @param paymentReference The payment reference.
      * @param xrplOwner The XRPL owner address.
      * @param collateralReservationId The collateral reservation ID.
-     * @param paymentReference The payment reference.
-     * @param walletId The wallet ID.
      * @param agentVault The agent vault address.
      * @param lots The number of lots reserved.
-     * @param transactionId The transaction ID.
      */
     event CollateralReserved(
         address indexed personalAccount,
-        string indexed xrplOwner,
-        uint256 indexed collateralReservationId,
-        bytes32 paymentReference,
-        uint256 walletId,
+        bytes32 indexed transactionId,
+        bytes32 indexed paymentReference,
+        string xrplOwner,
+        uint256 collateralReservationId,
         address agentVault,
-        uint256 lots,
-        bytes32 transactionId
+        uint256 lots
     );
 
     /**
      * @notice Emitted when an instruction is executed.
      * @param personalAccount The personal account address.
+     * @param transactionId The transaction ID.
+     * @param paymentReference The payment reference.
      * @param xrplOwner The XRPL owner address.
      * @param instructionId The instruction ID.
-     * @param paymentReference The payment reference.
-     * @param transactionId The transaction ID.
      */
     event InstructionExecuted(
         address indexed personalAccount,
-        string indexed xrplOwner,
-        uint256 indexed instructionId,
-        bytes32 paymentReference,
-        bytes32 transactionId
+        bytes32 indexed transactionId,
+        bytes32 indexed paymentReference,
+        string xrplOwner,
+        uint256 instructionId
     );
 
     /**
@@ -454,6 +452,15 @@ interface IMasterAccountController {
     function getVaults()
         external view
         returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses);
+
+    /**
+     * Returns the executor address and fee.
+     * @return _executor The executor address.
+     * @return _executorFee The executor fee (in wei).
+     */
+    function getExecutorInfo()
+        external view
+        returns (address payable _executor, uint256 _executorFee);
 
     /**
      * Returns the swap parameters.

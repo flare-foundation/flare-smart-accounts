@@ -67,9 +67,9 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     bytes21 private constant XRP_USD_FEED_ID = 0x015852502f55534400000000000000000000000000;
 
     /// @notice The minting executor.
-    address payable public executor;
+    address payable private executor;
     /// @notice Executor fee for reserveCollateral (in wei)
-    uint256 public executorFee;
+    uint256 private executorFee;
     /// @notice Duration (in seconds) for which the payment proof is valid
     uint256 public paymentProofValidityDurationSeconds;
     /// @notice Default fee for instruction execution in underlying asset's smallest unit (drops for XRP)
@@ -171,13 +171,12 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         // emit event
         emit CollateralReserved(
             address(personalAccount),
+            _transactionId,
+            _paymentReference,
             _xrplAddress,
             _collateralReservationId,
-            _paymentReference,
-            _getWalletId(_paymentReference),
             agentVault,
-            lots,
-            _transactionId
+            lots
         );
     }
 
@@ -233,10 +232,10 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         // emit event
         emit InstructionExecuted(
             address(personalAccount),
-            _xrplAddress,
-            instructionId,
             paymentReference,
-            transactionId
+            transactionId,
+            _xrplAddress,
+            instructionId
         );
     }
 
@@ -667,6 +666,17 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     }
 
     /**
+     * @inheritdoc IMasterAccountController
+     */
+    function getExecutorInfo()
+        external view
+        returns (address payable _executor, uint256 _executorFee)
+    {
+        _executor = executor;
+        _executorFee = executorFee;
+    }
+
+    /**
      * Returns current implementation address.
      * @return Current implementation address.
      */
@@ -733,10 +743,10 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         }
         emit InstructionExecuted(
             address(_personalAccount),
-            _xrplOwner,
-            _instructionId,
+            _transactionId,
             _paymentReference,
-            _transactionId
+            _xrplOwner,
+            _instructionId
         );
     }
 
@@ -776,7 +786,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         require(codeSize > 0, PersonalAccountNotSuccessfullyDeployed(personalAccountProxyAddress));
 
         personalAccounts[_xrplOwner] = _personalAccount;
-        emit PersonalAccountCreated(_xrplOwner, personalAccountProxyAddress);
+        emit PersonalAccountCreated(personalAccountProxyAddress, _xrplOwner);
     }
 
     function _setExecutor(address payable _executor) internal {

@@ -55,7 +55,7 @@ interface IPersonalAccount {
      * @param shares The number of shares received.
      */
     event Deposited(
-        address vault,
+        address indexed vault,
         uint256 amount,
         uint256 shares
     );
@@ -67,7 +67,7 @@ interface IPersonalAccount {
      * @param shares The number of shares burned.
      */
     event Withdrawn(
-        address vault,
+        address indexed vault,
         uint256 amount,
         uint256 shares
     );
@@ -79,7 +79,7 @@ interface IPersonalAccount {
      * @param amount The amount claimed.
      */
     event WithdrawalClaimed(
-        address vault,
+        address indexed vault,
         uint256 period,
         uint256 amount
     );
@@ -92,7 +92,7 @@ interface IPersonalAccount {
      * @param claimableEpoch The epoch when the claim becomes available.
      */
     event RedeemRequested(
-        address vault,
+        address indexed vault,
         uint256 shares,
         uint256 amount,
         uint256 claimableEpoch
@@ -108,7 +108,7 @@ interface IPersonalAccount {
      * @param amount The amount claimed.
      */
     event Claimed(
-        address vault,
+        address indexed vault,
         uint256 year,
         uint256 month,
         uint256 day,
