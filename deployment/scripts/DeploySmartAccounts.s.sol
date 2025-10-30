@@ -193,7 +193,7 @@ contract DeploySmartAccounts is Script {
                 params.executorFee,
                 params.paymentProofValidityDurationSeconds,
                 params.defaultInstructionFee,
-                params.xrplProviderWallet,
+                params.xrplProviderWallets,
                 personalAccountImplAddress
             )
         );

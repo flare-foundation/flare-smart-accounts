@@ -6,7 +6,6 @@ import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {MasterAccountControllerBase} from "./MasterAccountControllerBase.sol";
@@ -176,7 +175,9 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
             _xrplAddress,
             _collateralReservationId,
             agentVault,
-            lots
+            lots,
+            executor,
+            executorFee
         );
     }
 
@@ -227,7 +228,14 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
         // execute deposit
         address vault = _getVaultAddress(paymentReference);
-        personalAccount.deposit(vault, amount);
+        uint256 shares = personalAccount.deposit(vault, amount);
+
+        emit Deposited(
+            address(personalAccount),
+            vault,
+            amount,
+            shares
+        );
 
         // emit event
         emit InstructionExecuted(
@@ -283,14 +291,22 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         external
     {
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
-        personalAccount.executeSwap(
+        address tokenIn = address(ContractRegistry.getWNat());
+        (uint256 amountIn, uint256 amountOut) = personalAccount.executeSwap(
             uniswapV3Router,
-            address(ContractRegistry.getWNat()),
+            tokenIn,
             FLR_USD_FEED_ID,
             usdt0,
             USDT_USD_FEED_ID,
             wNatUsdt0PoolFeeTierPPM,
             maxSlippagePPM
+        );
+        emit SwapExecuted(
+            address(personalAccount),
+            tokenIn,
+            usdt0,
+            amountIn,
+            amountOut
         );
     }
 
@@ -300,14 +316,22 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         external
     {
         IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
-        personalAccount.executeSwap(
+        address tokenOut = address(ContractRegistry.getAssetManagerFXRP().fAsset());
+        (uint256 amountIn, uint256 amountOut) = personalAccount.executeSwap(
             uniswapV3Router,
             usdt0,
             USDT_USD_FEED_ID,
-            address(ContractRegistry.getAssetManagerFXRP().fAsset()),
+            tokenOut,
             XRP_USD_FEED_ID,
             usdt0FXrpPoolFeeTierPPM,
             maxSlippagePPM
+        );
+        emit SwapExecuted(
+            address(personalAccount),
+            usdt0,
+            tokenOut,
+            amountIn,
+            amountOut
         );
     }
 
@@ -677,16 +701,6 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     }
 
     /**
-     * Returns current implementation address.
-     * @return Current implementation address.
-     */
-    // expose current controller implementation address under a distinct name to avoid
-    // collision with IBeacon.implementation()
-    function controllerImplementation() external view returns (address) {
-        return ERC1967Utils.getImplementation();
-    }
-
-    /**
      * @inheritdoc IBeacon
      */
     function implementation() external view override returns (address) {
@@ -705,39 +719,109 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     {
         if (_instructionId == 1) { // redeem
             uint256 lots = _getValue(_paymentReference);
-            _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+            uint256 amount = _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+            emit Redeemed(
+                address(_personalAccount),
+                lots,
+                amount,
+                executor,
+                executorFee
+            );
         } else if (_instructionId == 11 || _instructionId == 21) { // deposit
             uint256 amount = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            _personalAccount.deposit(vault, amount);
+            uint256 shares = _personalAccount.deposit(vault, amount);
+            emit Deposited(
+                address(_personalAccount),
+                vault,
+                amount,
+                shares
+            );
         } else if (_instructionId == 12) { // withdraw
             address vault = _getVaultAddress(_paymentReference);
             uint256 amount = _getValue(_paymentReference);
-            _personalAccount.withdraw(vault, amount);
+            uint256 shares = _personalAccount.withdraw(vault, amount);
+            emit Withdrawn(
+                address(_personalAccount),
+                vault,
+                amount,
+                shares
+            );
         } else if (_instructionId == 13) { // claim withdraw
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            _personalAccount.claimWithdraw(vault, period);
+            uint256 amount = _personalAccount.claimWithdraw(vault, period);
+            emit WithdrawalClaimed(
+                address(_personalAccount),
+                vault,
+                period,
+                amount
+            );
         } else if (_instructionId == 14) { // claim withdraw and redeem
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             uint256 amount = _personalAccount.claimWithdraw(vault, period);
+            emit WithdrawalClaimed(
+                address(_personalAccount),
+                vault,
+                period,
+                amount
+            );
             uint256 lots = _amountToLots(amount);
-            _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+            amount = _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+            emit Redeemed(
+                address(_personalAccount),
+                lots,
+                amount,
+                executor,
+                executorFee
+            );
         } else if (_instructionId == 22) { // requestRedeem
             uint256 shares = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            _personalAccount.requestRedeem(vault, shares);
+            (uint256 assets, uint256 claimableEpoch) = _personalAccount.requestRedeem(vault, shares);
+            emit RedeemRequested(
+                address(_personalAccount),
+                vault,
+                shares,
+                assets,
+                claimableEpoch
+            );
         } else if (_instructionId == 23) { // claim
             (uint256 year, uint256 month, uint256 day) = _getDate(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            _personalAccount.claim(vault, year, month, day);
+            (uint256 shares, uint256 assets) = _personalAccount.claim(vault, year, month, day);
+            emit Claimed(
+                address(_personalAccount),
+                vault,
+                year,
+                month,
+                day,
+                shares,
+                assets
+            );
         } else if (_instructionId == 24) { // claim and redeem
             (uint256 year, uint256 month, uint256 day) = _getDate(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            (,uint256 amount) = _personalAccount.claim(vault, year, month, day);
+            (uint256 shares, uint256 amount) = _personalAccount.claim(vault, year, month, day);
+            emit Claimed(
+                address(_personalAccount),
+                vault,
+                year,
+                month,
+                day,
+                shares,
+                amount
+            );
             uint256 lots = _amountToLots(amount);
-            _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+            amount = _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
+            emit Redeemed(
+                address(_personalAccount),
+                lots,
+                amount,
+                executor,
+                executorFee
+            );
         } else {
             revert InvalidInstructionId(_instructionId);
         }

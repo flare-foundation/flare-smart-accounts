@@ -148,6 +148,8 @@ interface IMasterAccountController {
      * @param collateralReservationId The collateral reservation ID.
      * @param agentVault The agent vault address.
      * @param lots The number of lots reserved.
+     * @param executor The executor address.
+     * @param executorFee The fee paid to the executor.
      */
     event CollateralReserved(
         address indexed personalAccount,
@@ -156,7 +158,9 @@ interface IMasterAccountController {
         string xrplOwner,
         uint256 collateralReservationId,
         address agentVault,
-        uint256 lots
+        uint256 lots,
+        address executor,
+        uint256 executorFee
     );
 
     /**
@@ -173,6 +177,130 @@ interface IMasterAccountController {
         bytes32 indexed paymentReference,
         string xrplOwner,
         uint256 instructionId
+    );
+
+    /**
+     * @notice Emitted when a redeem operation is performed.
+     * @param personalAccount The personal account address.
+     * @param lots The number of lots redeemed.
+     * @param amount The amount redeemed.
+     * @param executor The executor address.
+     * @param executorFee The fee paid to the executor.
+     */
+    event Redeemed(
+        address indexed personalAccount,
+        uint256 lots,
+        uint256 amount,
+        address executor,
+        uint256 executorFee
+    );
+
+    /**
+     * @notice Emitted when a token approval is made for a vault.
+     * @param personalAccount The personal account address.
+     * @param fxrp The FXRP token address.
+     * @param vault The vault address.
+     * @param amount The approved amount.
+     */
+    event Approved(
+        address indexed personalAccount,
+        address fxrp,
+        address vault,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when a deposit is made to a vault.
+     * @param personalAccount The personal account address.
+     * @param vault The vault address.
+     * @param amount The amount deposited.
+     * @param shares The number of shares received.
+     */
+    event Deposited(
+        address indexed personalAccount,
+        address indexed vault,
+        uint256 amount,
+        uint256 shares
+    );
+
+    /**
+     * @notice Emitted when a withdrawal is made from a vault.
+     * @param personalAccount The personal account address.
+     * @param vault The vault address.
+     * @param amount The amount withdrawn.
+     * @param shares The number of shares burned.
+     */
+    event Withdrawn(
+        address indexed personalAccount,
+        address indexed vault,
+        uint256 amount,
+        uint256 shares
+    );
+
+    /**
+     * @notice Emitted when a withdrawal claim is made.
+     * @param personalAccount The personal account address.
+     * @param vault The vault address.
+     * @param period The period for which the claim is made.
+     * @param amount The amount claimed.
+     */
+    event WithdrawalClaimed(
+        address indexed personalAccount,
+        address indexed vault,
+        uint256 period,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when a redeem request is made.
+     * @param personalAccount The personal account address.
+     * @param vault The vault address.
+     * @param shares The number of shares to redeem.
+     * @param amount The amount to redeem.
+     * @param claimableEpoch The epoch when the claim becomes available.
+     */
+    event RedeemRequested(
+        address indexed personalAccount,
+        address indexed vault,
+        uint256 shares,
+        uint256 amount,
+        uint256 claimableEpoch
+    );
+
+    /**
+     * @notice Emitted when a claim is made for a specific date.
+     * @param personalAccount The personal account address.
+     * @param vault The vault address.
+     * @param year The year of the claim.
+     * @param month The month of the claim.
+     * @param day The day of the claim.
+     * @param shares The number of shares claimed.
+     * @param amount The amount claimed.
+     */
+    event Claimed(
+        address indexed personalAccount,
+        address indexed vault,
+        uint256 year,
+        uint256 month,
+        uint256 day,
+        uint256 shares,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when a token swap is executed.
+     * @param personalAccount The personal account address.
+     * @param tokenIn The input token address.
+     * @param tokenOut The output token address.
+     * @param amountIn The amount of input tokens.
+     * @param amountOut The amount of output tokens received.
+     */
+    event SwapExecuted(
+        address indexed personalAccount,
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 amountOut
     );
 
     /**
@@ -346,6 +474,10 @@ interface IMasterAccountController {
      * @notice Reverts if the payment proof has expired.
      */
     error PaymentProofExpired();
+
+    /**
+     * @notice Reverts if there are no XRPL provider wallets.
+     */
     error NoXrplProviderWallets();
 
     /**

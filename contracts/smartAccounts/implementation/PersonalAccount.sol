@@ -210,8 +210,9 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
     )
         external
         onlyController nonReentrant
+        returns (uint256 amountIn, uint256 amountOut)
     {
-        (uint256 amountIn, uint256 amountOut) = UniswapV3.executeSwap(
+        (amountIn, amountOut) = UniswapV3.executeSwap(
             _uniswapV3Router,
             _tokenIn,
             _tokenInFeedId,

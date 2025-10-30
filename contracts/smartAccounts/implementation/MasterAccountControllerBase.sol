@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 /**
  * @title MasterAccountControllerBase contract
@@ -20,6 +20,15 @@ contract MasterAccountControllerBase is UUPSUpgradeable, OwnableUpgradeable {
     /// @notice One-time initializer for setting the initial owner via proxy constructor call.
     function initializeOwner(address _initialOwner) external initializer {
         __Ownable_init(_initialOwner);
+    }
+
+    /**
+     * @return Current implementation address.
+     */
+    // expose current controller implementation address under a distinct name to avoid
+    // collision with IBeacon.implementation()
+    function controllerImplementation() external view returns (address) {
+        return ERC1967Utils.getImplementation();
     }
 
     /// @inheritdoc UUPSUpgradeable

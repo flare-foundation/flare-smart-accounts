@@ -16,6 +16,7 @@
   "scripts": {
     "format": "prettier --write .",
     "---------TEST---SCRIPTS": "",
+    "coverage": "forge coverage --report lcov && node scripts/forge-lcov-prune.js && genhtml lcov.info.pruned --branch-coverage --output-dir coverage",
     "---------DEPLOY---SCRIPTS": "",
     "deploy_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast' | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts",
     "deploy_mock_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWalletDevMock.s.sol:DeployXRPLControlledWalletDevMock --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast' | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts mock",

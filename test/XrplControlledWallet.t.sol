@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import {Test,console2} from "forge-std/Test.sol";
 import {MasterAccountController} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {MasterAccountControllerBase} from "../contracts/smartAccounts/implementation/MasterAccountControllerBase.sol";
+import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
@@ -173,7 +174,7 @@ contract XrplControlledWalletTest is Test {
         xrplAddress2 = "xrplAddress2";
     }
 
-    function test() public {
+    function testUpgrades() public {
         IPayment.Proof memory proof;
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
@@ -313,6 +314,136 @@ contract XrplControlledWalletTest is Test {
         );
     }
 
+    //// reserveCollateral tests
+    function testReserveCollateralRevertInvalidInstructionId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(99, 0, 1000, 0);
+        bytes32 transactionId = bytes32("tx1");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidInstructionId.selector,
+                99
+            )
+        );
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
+    function testReserveCollateralRevertInvalidTransactionId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 0);
+        bytes32 transactionId = bytes32(0);
+        vm.expectRevert(IMasterAccountController.InvalidTransactionId.selector);
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
+    function testReserveCollateralRevertInvalidAgentVault() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 1); // agent vault 1 does not exist
+        bytes32 transactionId = bytes32("tx1");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidAgentVault.selector,
+                1
+            )
+        );
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
+    function testReserveCollateralRevertValueZero() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 0, 0); // value 0
+        bytes32 transactionId = bytes32("tx1");
+        vm.expectRevert(IMasterAccountController.ValueZero.selector);
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
+    function testReserveCollateral() public {
+        uint16 lots = 2;
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, lots, 0);
+        bytes32 transactionId = bytes32("tx1");
+
+        _mockCollateralReservationFee(lots, 123);
+        _mockReserveCollateral(22);
+
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(predictedAddress1.code.length, 0);
+
+        vm.expectEmit();
+        emit IMasterAccountController.CollateralReserved(
+            predictedAddress1,
+            transactionId,
+            paymentReference,
+            xrplAddress1,
+            22,
+            masterAccountController.agentVaults(0),
+            lots,
+            executor,
+            executorFee
+        );
+        uint256 collateralReservationId = masterAccountController.reserveCollateral{value: 123 + executorFee}(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+        assertEq(collateralReservationId, 22);
+
+        // check that the personal account was created at the expected address
+        assertNotEq(
+            predictedAddress1.code.length,
+            0
+        );
+        assertEq(
+            masterAccountController.getPersonalAccount(xrplAddress1),
+            predictedAddress1
+        );
+
+        assertEq(
+            masterAccountController.collateralReservationIdToTransactionId(collateralReservationId),
+            transactionId
+        );
+    }
+
+    function testExecuteDepositAfterMintingRevertInvalidInstructionId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(99, 0, 1000, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidInstructionId.selector,
+                99
+            )
+        );
+        masterAccountController.executeDepositAfterMinting(0, proof, xrplAddress1);
+    }
+
+    function testExecuteDepositAfterMintingRevertUnknownCollateralReservationId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 1000, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.UnknownCollateralReservationId.selector,
+                0
+            )
+        );
+        masterAccountController.executeDepositAfterMinting(0, proof, xrplAddress1);
+    }
+
+    //// helper functions
     function _mockGetAgentInfo(
         address agentAddress,
         AgentInfo.Info memory info
@@ -353,6 +484,27 @@ contract XrplControlledWalletTest is Test {
         );
     }
 
+    function _mockReserveCollateral(uint256 _reservationId) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.reserveCollateral.selector
+            ),
+            abi.encode(_reservationId)
+        );
+    }
+
+    function _mockCollateralReservationFee(uint256 _lots, uint256 _fee) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.collateralReservationFee.selector,
+                _lots
+            ),
+            abi.encode(_fee)
+        );
+    }
+
     function _encodePaymentReferenceDeposit(
         uint128 amount
     )
@@ -361,5 +513,54 @@ contract XrplControlledWalletTest is Test {
     {
         // Place instructionId in the highest 8 bits, skip wallet identifier and put amount in the next 128 bits
         return bytes32((uint256(11) << 248) | (uint256(amount) << 112));
+    }
+
+    // FXRP payment reference (32 bytes)
+    function _encodeFxrpPaymentReference(
+        uint8 _instructionId,
+        uint8 _walletId,
+        uint128 _value,
+        uint16 _agentVaultId
+    ) private pure returns (bytes32) {
+        return
+            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(_walletId)) << 240) |
+            (bytes32(uint256(_value)) << 112) |
+            (bytes32(uint256(_agentVaultId)) << 96);
+        // bytes 20-31 are zero (future use)
+    }
+
+    // Firelight vaults payment reference (32 bytes)
+    function _encodeFirelightPaymentReference(
+        uint8 _instructionId,
+        uint8 _walletId,
+        uint128 _value,
+        uint16 _agentVaultId,
+        uint16 _vaultId
+    ) private pure returns (bytes32) {
+        return
+            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(_walletId)) << 240) |
+            (bytes32(uint256(_value)) << 112) |
+            (bytes32(uint256(_agentVaultId)) << 96) |
+            (bytes32(uint256(_vaultId)) << 80);
+        // bytes 22-31 are zero (future use)
+    }
+
+    // Upshift vaults payment reference (32 bytes)
+    function _encodeUpshiftPaymentReference(
+        uint8 _instructionId,
+        uint8 _walletId,
+        uint128 _value,
+        uint16 _agentVaultId,
+        uint16 _vaultId
+    ) private pure returns (bytes32) {
+        return
+            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(_walletId)) << 240) |
+            (bytes32(uint256(_value)) << 112) |
+            (bytes32(uint256(_agentVaultId)) << 96) |
+            (bytes32(uint256(_vaultId)) << 80);
+        // bytes 22-31 are zero (future use)
     }
 }

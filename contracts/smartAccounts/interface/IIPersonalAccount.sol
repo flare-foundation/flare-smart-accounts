@@ -121,6 +121,8 @@ interface IIPersonalAccount is IPersonalAccount {
      * @param _tokenOutFeedId The feed ID of the output token.
      * @param _poolFeeTierPPM The fee tier of the pool to use for the swap (in PPM).
      * @param _maxSlippagePPM The maximum slippage allowed for the swap (in PPM).
+     * @return amountIn The amount of input tokens used for the swap.
+     * @return amountOut The amount of output tokens received from the swap.
      */
     function executeSwap(
         address _uniswapV3Router,
@@ -131,5 +133,6 @@ interface IIPersonalAccount is IPersonalAccount {
         uint24 _poolFeeTierPPM,
         uint24 _maxSlippagePPM
     )
-        external;
+        external
+        returns (uint256 amountIn, uint256 amountOut);
 }
