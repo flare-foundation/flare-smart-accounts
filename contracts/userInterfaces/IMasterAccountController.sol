@@ -180,19 +180,31 @@ interface IMasterAccountController {
     );
 
     /**
-     * @notice Emitted when a redeem operation is performed.
+     * @notice Emitted when a FXRP redeem operation is performed.
      * @param personalAccount The personal account address.
      * @param lots The number of lots redeemed.
      * @param amount The amount redeemed.
      * @param executor The executor address.
      * @param executorFee The fee paid to the executor.
      */
-    event Redeemed(
+    event FXrpRedeemed(
         address indexed personalAccount,
         uint256 lots,
         uint256 amount,
         address executor,
         uint256 executorFee
+    );
+
+    /**
+     * @notice Emitted when a transfer of FXRP is made.
+     * @param personalAccount The personal account address.
+     * @param to The recipient address.
+     * @param amount The amount of FXRP transferred.
+     */
+    event FXrpTransferred(
+        address indexed personalAccount,
+        address to,
+        uint256 amount
     );
 
     /**
@@ -224,13 +236,13 @@ interface IMasterAccountController {
     );
 
     /**
-     * @notice Emitted when a withdrawal is made from a vault.
+     * @notice Emitted when a redeem is made from a vault.
      * @param personalAccount The personal account address.
      * @param vault The vault address.
-     * @param amount The amount withdrawn.
+     * @param amount The amount redeemed.
      * @param shares The number of shares burned.
      */
-    event Withdrawn(
+    event Redeemed(
         address indexed personalAccount,
         address indexed vault,
         uint256 amount,

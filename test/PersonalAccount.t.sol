@@ -156,16 +156,16 @@ contract PersonalAccountTest is Test {
         assertEq(returnedReservationId, reservationId);
     }
 
-    function testRedeemRevertOnlyController() public {
+    function testRedeemFXrpRevertOnlyController() public {
         vm.expectRevert(IPersonalAccount.OnlyController.selector);
-        personalAccount.redeem(
+        personalAccount.redeemFXrp(
             1,
             payable(executor),
             1
         );
     }
 
-    function testRedeemRevertInsufficientFunds() public {
+    function testRedeemFXrpRevertInsufficientFunds() public {
         uint256 lots = 2;
         uint256 executorFee = 10;
         vm.prank(controller);
@@ -175,27 +175,27 @@ contract PersonalAccountTest is Test {
                 executorFee
             )
         );
-        personalAccount.redeem{value: executorFee - 1}(
+        personalAccount.redeemFXrp{value: executorFee - 1}(
             lots,
             payable(executor),
             executorFee
         );
     }
 
-    function testRedeem() public {
+    function testRedeemFXrp() public {
         uint256 lots = 2;
         uint256 executorFee = 10;
         uint256 amount = 1000;
         _mockRedeem(amount);
         vm.prank(controller);
         vm.expectEmit();
-        emit IPersonalAccount.Redeemed(
+        emit IPersonalAccount.FXrpRedeemed(
             lots,
             amount,
             executor,
             executorFee
         );
-        uint256 returnedAmount = personalAccount.redeem{value: executorFee}(
+        uint256 returnedAmount = personalAccount.redeemFXrp{value: executorFee}(
             lots,
             payable(executor),
             executorFee
@@ -256,15 +256,15 @@ contract PersonalAccountTest is Test {
         assertEq(returnedShares, shares);
     }
 
-    function testWithdrawRevertOnlyController() public {
+    function testRedeemRevertOnlyController() public {
         vm.expectRevert(IPersonalAccount.OnlyController.selector);
-        personalAccount.withdraw(
+        personalAccount.redeem(
             depositVault,
             100
         );
     }
 
-    function testWithdraw() public {
+    function testRedeem() public {
         uint256 assets = 500;
         uint256 shares = 501;
 
@@ -278,12 +278,12 @@ contract PersonalAccountTest is Test {
 
         vm.prank(controller);
         vm.expectEmit();
-        emit IPersonalAccount.Withdrawn(
+        emit IPersonalAccount.Redeemed(
             depositVault,
             assets,
             shares
         );
-        uint256 returnedAssets = personalAccount.withdraw(
+        uint256 returnedAssets = personalAccount.redeem(
             depositVault,
             shares
         );

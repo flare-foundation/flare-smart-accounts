@@ -97,7 +97,7 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
     }
 
     /// @inheritdoc IIPersonalAccount
-    function transfer(
+    function transferFXrp(
         address _to,
         uint256 _amount
     )
@@ -106,11 +106,11 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
     {
         IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
         fxrp.safeTransfer(_to, _amount);
-        emit Transferred(_to, _amount);
+        emit FXrpTransferred(_to, _amount);
     }
 
     /// @inheritdoc IIPersonalAccount
-    function redeem(
+    function redeemFXrp(
         uint256 _lots,
         address payable _executor,
         uint256 _executorFee
@@ -126,7 +126,7 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
             xrplOwner,
             _executor
         );
-        emit Redeemed(_lots, _amount, _executor, _executorFee);
+        emit FXrpRedeemed(_lots, _amount, _executor, _executorFee);
     }
 
     /// @inheritdoc IIPersonalAccount
@@ -147,7 +147,7 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
     }
 
     /// @inheritdoc IIPersonalAccount
-    function withdraw(
+    function redeem(
         address _vault,
         uint256 _shares
     )
@@ -160,7 +160,7 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
             address(this),
             address(this)
         );
-        emit Withdrawn(_vault, _assets, _shares);
+        emit Redeemed(_vault, _assets, _shares);
     }
 
     /// @inheritdoc IIPersonalAccount

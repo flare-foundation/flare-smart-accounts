@@ -723,8 +723,8 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     {
         if (_instructionId == 1) { // redeem FXRP
             uint256 lots = _getValue(_paymentReference);
-            uint256 amount = _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
-            emit Redeemed(
+            uint256 amount = _personalAccount.redeemFXrp{value: msg.value}(lots, executor, executorFee);
+            emit FXrpRedeemed(
                 address(_personalAccount),
                 lots,
                 amount,
@@ -734,7 +734,12 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         } else if (_instructionId == 2) { // transfer FXRP
             uint256 amount = _getValue(_paymentReference);
             address recipient = _getAddress(_paymentReference);
-            _personalAccount.transfer(recipient, amount);
+            _personalAccount.transferFXrp(recipient, amount);
+            emit FXrpTransferred(
+                address(_personalAccount),
+                recipient,
+                amount
+            );
         } else if (_instructionId == 11 || _instructionId == 21) { // deposit
             uint256 amount = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
@@ -748,8 +753,8 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         } else if (_instructionId == 12) { // redeem
             address vault = _getVaultAddress(_paymentReference);
             uint256 amount = _getValue(_paymentReference);
-            uint256 shares = _personalAccount.withdraw(vault, amount);
-            emit Withdrawn(
+            uint256 shares = _personalAccount.redeem(vault, amount);
+            emit Redeemed(
                 address(_personalAccount),
                 vault,
                 amount,
@@ -776,8 +781,8 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 amount
             );
             uint256 lots = _amountToLots(amount);
-            amount = _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
-            emit Redeemed(
+            amount = _personalAccount.redeemFXrp{value: msg.value}(lots, executor, executorFee);
+            emit FXrpRedeemed(
                 address(_personalAccount),
                 lots,
                 amount,
@@ -822,8 +827,8 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 amount
             );
             uint256 lots = _amountToLots(amount);
-            amount = _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
-            emit Redeemed(
+            amount = _personalAccount.redeemFXrp{value: msg.value}(lots, executor, executorFee);
+            emit FXrpRedeemed(
                 address(_personalAccount),
                 lots,
                 amount,

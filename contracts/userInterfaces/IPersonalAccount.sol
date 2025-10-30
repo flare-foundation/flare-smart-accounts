@@ -27,19 +27,19 @@ interface IPersonalAccount {
      * @param to The recipient address.
      * @param amount The amount of FXRP transferred.
      */
-    event Transferred(
+    event FXrpTransferred(
         address to,
         uint256 amount
     );
 
     /**
-     * @notice Emitted when a redeem operation is performed.
+     * @notice Emitted when a FXRP redeem operation is performed.
      * @param lots The number of lots redeemed.
      * @param amount The amount redeemed.
      * @param executor The executor address.
      * @param executorFee The fee paid to the executor.
      */
-    event Redeemed(
+    event FXrpRedeemed(
         uint256 lots,
         uint256 amount,
         address executor,
@@ -71,12 +71,12 @@ interface IPersonalAccount {
     );
 
     /**
-     * @notice Emitted when a withdrawal is made from a vault.
+     * @notice Emitted when a redeem is made from a vault.
      * @param vault The vault address.
-     * @param amount The amount withdrawn.
+     * @param amount The amount redeemed.
      * @param shares The number of shares burned.
      */
-    event Withdrawn(
+    event Redeemed(
         address indexed vault,
         uint256 amount,
         uint256 shares

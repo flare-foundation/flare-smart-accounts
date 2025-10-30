@@ -31,7 +31,7 @@ interface IIPersonalAccount is IPersonalAccount {
      * @param _to Recipient address.
      * @param _amount Amount of FXRP to transfer.
      */
-    function transfer(
+    function transferFXrp(
         address _to,
         uint256 _amount
     )
@@ -44,7 +44,7 @@ interface IIPersonalAccount is IPersonalAccount {
      * @param _executorFee Executor fee to be paid.
      * @return _amount The actual amount of FXRP redeemed.
      */
-    function redeem(
+    function redeemFXrp(
         uint256 _lots,
         address payable _executor,
         uint256 _executorFee
@@ -71,7 +71,7 @@ interface IIPersonalAccount is IPersonalAccount {
      * @param _shares The amount of shares to redeem.
      * @return _assets The amount of assets redeemed.
      */
-    function withdraw(
+    function redeem(
         address _vault,
         uint256 _shares
     )
