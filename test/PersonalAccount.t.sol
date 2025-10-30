@@ -271,9 +271,9 @@ contract PersonalAccountTest is Test {
         vm.mockCall(
             depositVault,
             abi.encodeWithSelector(
-                IIVault.withdraw.selector
+                IIVault.redeem.selector
             ),
-            abi.encode(shares)
+            abi.encode(assets)
         );
 
         vm.prank(controller);
@@ -283,11 +283,11 @@ contract PersonalAccountTest is Test {
             assets,
             shares
         );
-        uint256 returnedShares = personalAccount.withdraw(
+        uint256 returnedAssets = personalAccount.withdraw(
             depositVault,
-            assets
+            shares
         );
-        assertEq(returnedShares, shares);
+        assertEq(returnedAssets, assets);
     }
 
     function testClaimWithdrawRevertOnlyController() public {
@@ -577,9 +577,9 @@ contract PersonalAccountTest is Test {
 
     function _mockAsset() private {
         vm.mockCall(
-            depositVault,
+            assetManagerMock,
             abi.encodeWithSelector(
-                IIVault.asset.selector
+                IAssetManager.fAsset.selector
             ),
             abi.encode(fxrp)
         );

@@ -23,6 +23,16 @@ interface IPersonalAccount {
     );
 
     /**
+     * @notice Emitted when a transfer of FXRP is made.
+     * @param to The recipient address.
+     * @param amount The amount of FXRP transferred.
+     */
+    event Transferred(
+        address to,
+        uint256 amount
+    );
+
+    /**
      * @notice Emitted when a redeem operation is performed.
      * @param lots The number of lots redeemed.
      * @param amount The amount redeemed.

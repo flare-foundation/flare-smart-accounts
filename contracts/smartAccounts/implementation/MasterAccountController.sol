@@ -20,23 +20,27 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 // bytes 00: uint8 -> instruction id
     // 00: collateral reservation
     // 01: redeem
+    // 02: transfer
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-17: uint128 -> value (lots)
-// bytes 18-19: uint16 -> agent vault address id
-// bytes 20-31: future use
+// bytes 02-11: uint80 -> value (value, lots)
+// collateral reservation:
+// bytes 12-13: uint16 -> agent vault address id (collateral reservation)
+// bytes 14-31: future use
+// transfer:
+// bytes 12-31: address (20 bytes) -> recipient address
 
 // Firelight vaults
 // bytes 00: uint8 -> instruction id
     // 10: collateral reservation and deposit
     // 11: deposit
-    // 12: withdraw
+    // 12: redeem
     // 13: claim withdraw
-    // 14: claim withdraw and redeem
+    // 14: claim withdraw and redeem FXRP
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-17: uint128 -> value (amount, lots, period,...)
-// bytes 18-19: uint16 -> agent vault address id
-// bytes 20-21: uint16 -> deposit/withdraw vault address id
-// bytes 22-31: future use
+// bytes 02-11: uint80 -> value (amount, shares, lots, period,...)
+// bytes 12-13: uint16 -> agent vault address id
+// bytes 14-15: uint16 -> deposit/withdraw vault address id
+// bytes 16-31: future use
 
 // Upshift vaults
 // bytes 00: uint8 -> instruction id
@@ -44,12 +48,12 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
     // 21: deposit
     // 22: requestRedeem
     // 23: claim
-    // 24: claim and redeem
+    // 24: claim and redeem FXRP
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-17: uint128 -> value (amount, shares, lots, date(yyyymmdd),...)
-// bytes 18-19: uint16 -> agent vault address id
-// bytes 20-21: uint16 -> deposit/withdraw vault address id
-// bytes 22-31: future use
+// bytes 02-11: uint80 -> value (amount, shares, lots, date(yyyymmdd),...)
+// bytes 12-13: uint16 -> agent vault address id
+// bytes 14-15: uint16 -> deposit/withdraw vault address id
+// bytes 16-31: future use
 
 /**
  * @title MasterAccountController contract
@@ -717,7 +721,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     )
         internal
     {
-        if (_instructionId == 1) { // redeem
+        if (_instructionId == 1) { // redeem FXRP
             uint256 lots = _getValue(_paymentReference);
             uint256 amount = _personalAccount.redeem{value: msg.value}(lots, executor, executorFee);
             emit Redeemed(
@@ -727,6 +731,10 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 executor,
                 executorFee
             );
+        } else if (_instructionId == 2) { // transfer FXRP
+            uint256 amount = _getValue(_paymentReference);
+            address recipient = _getAddress(_paymentReference);
+            _personalAccount.transfer(recipient, amount);
         } else if (_instructionId == 11 || _instructionId == 21) { // deposit
             uint256 amount = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
@@ -737,7 +745,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 amount,
                 shares
             );
-        } else if (_instructionId == 12) { // withdraw
+        } else if (_instructionId == 12) { // redeem
             address vault = _getVaultAddress(_paymentReference);
             uint256 amount = _getValue(_paymentReference);
             uint256 shares = _personalAccount.withdraw(vault, amount);
@@ -757,7 +765,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 period,
                 amount
             );
-        } else if (_instructionId == 14) { // claim withdraw and redeem
+        } else if (_instructionId == 14) { // claim withdraw and redeem FXRP
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             uint256 amount = _personalAccount.claimWithdraw(vault, period);
@@ -800,7 +808,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 shares,
                 assets
             );
-        } else if (_instructionId == 24) { // claim and redeem
+        } else if (_instructionId == 24) { // claim and redeem FXRP
             (uint256 year, uint256 month, uint256 day) = _getDate(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             (uint256 shares, uint256 amount) = _personalAccount.claim(vault, year, month, day);
@@ -983,15 +991,15 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     }
 
     function _getAgentVaultAddress(bytes32 _paymentReference) internal view returns (address _agentVault) {
-        // bytes 18-19: agent vault address id
-        uint256 agentVaultId = (uint256(_paymentReference) >> 96) & ((uint256(1) << 16) - 1);
+        // bytes 12-13: agent vault address id
+        uint256 agentVaultId = (uint256(_paymentReference) >> 144) & ((uint256(1) << 16) - 1);
         _agentVault = agentVaults[agentVaultId];
         require(_agentVault != address(0), InvalidAgentVault(agentVaultId));
     }
 
     function _getVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
-        // bytes 20-21: vault address id
-        uint256 vaultId = (uint256(_paymentReference) >> 80) & ((uint256(1) << 16) - 1);
+        // bytes 14-15: vault address id
+        uint256 vaultId = (uint256(_paymentReference) >> 128) & ((uint256(1) << 16) - 1);
         _vault = vaults[vaultId];
         require(address(_vault) != address(0), InvalidVault(vaultId));
     }
@@ -1007,17 +1015,23 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     }
 
     function _getValue(bytes32 _paymentReference) internal pure returns (uint256 _value) {
-        // bytes 2-17: value
-        _value = (uint256(_paymentReference) >> 112) & ((uint256(1) << 128) - 1);
+        // bytes 2-11: uint80
+        _value = (uint256(_paymentReference) >> 160) & ((uint256(1) << 80) - 1);
         require(_value > 0, ValueZero());
     }
 
     function _getDate(bytes32 _paymentReference) internal pure returns (uint256 _year, uint256 _month, uint256 _day) {
-        // bytes 2-17: value (date in yyyymmdd format)
+        // bytes 2-11: value (date in yyyymmdd format)
         uint256 date = _getValue(_paymentReference);
         _year = (date / 10000) % 10000;
         _month = (date / 100) % 100;
         _day = date % 100;
+    }
+
+    function _getAddress(bytes32 _paymentReference) internal pure returns (address _address) {
+        // bytes 12-31: address (20 bytes)
+        _address = address(uint160(uint256(_paymentReference) & ((uint256(1) << 160) - 1)));
+        require(_address != address(0), AddressZero());
     }
 
     function _isPoolFeeTierPPMValid(uint24 _poolFeeTierPPM) internal pure returns (bool) {

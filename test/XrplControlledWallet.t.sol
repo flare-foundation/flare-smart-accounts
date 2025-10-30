@@ -151,6 +151,7 @@ contract XrplControlledWalletTest is Test {
         _mockGetContractAddressByHash("FdcVerification", fdcVerificationMock);
         _mockGetContractAddressByHash("AssetManagerFXRP", assetManagerFxrpMock);
         _mockGetAgentInfo(agent, agentInfo);
+        _mockGetFAsset();
 
         // add agent vault
         uint256[] memory agentVaultIds = new uint256[](1);
@@ -460,6 +461,18 @@ contract XrplControlledWalletTest is Test {
         );
     }
 
+    function _mockGetFAsset()
+        private
+    {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.fAsset.selector
+            ),
+            abi.encode(fxrp)
+        );
+    }
+
     function _mockGetContractAddressByHash(
         string memory name,
         address addr
@@ -511,8 +524,8 @@ contract XrplControlledWalletTest is Test {
         private pure
         returns (bytes32)
     {
-        // Place instructionId in the highest 8 bits, skip wallet identifier and put amount in the next 128 bits
-        return bytes32((uint256(11) << 248) | (uint256(amount) << 112));
+        // Place instructionId in the highest 8 bits, skip wallet identifier and put amount in the next 80 bits
+        return bytes32((uint256(11) << 248) | (uint256(amount) << 160));
     }
 
     // FXRP payment reference (32 bytes)
@@ -525,9 +538,9 @@ contract XrplControlledWalletTest is Test {
         return
             (bytes32(uint256(_instructionId)) << 248) |
             (bytes32(uint256(_walletId)) << 240) |
-            (bytes32(uint256(_value)) << 112) |
-            (bytes32(uint256(_agentVaultId)) << 96);
-        // bytes 20-31 are zero (future use)
+            (bytes32(uint256(_value)) << 160) |
+            (bytes32(uint256(_agentVaultId)) << 144);
+        // bytes 14-31 are zero (future use)
     }
 
     // Firelight vaults payment reference (32 bytes)
@@ -541,10 +554,10 @@ contract XrplControlledWalletTest is Test {
         return
             (bytes32(uint256(_instructionId)) << 248) |
             (bytes32(uint256(_walletId)) << 240) |
-            (bytes32(uint256(_value)) << 112) |
-            (bytes32(uint256(_agentVaultId)) << 96) |
-            (bytes32(uint256(_vaultId)) << 80);
-        // bytes 22-31 are zero (future use)
+            (bytes32(uint256(_value)) << 160) |
+            (bytes32(uint256(_agentVaultId)) << 144) |
+            (bytes32(uint256(_vaultId)) << 128);
+        // bytes 16-31 are zero (future use)
     }
 
     // Upshift vaults payment reference (32 bytes)
@@ -558,9 +571,9 @@ contract XrplControlledWalletTest is Test {
         return
             (bytes32(uint256(_instructionId)) << 248) |
             (bytes32(uint256(_walletId)) << 240) |
-            (bytes32(uint256(_value)) << 112) |
-            (bytes32(uint256(_agentVaultId)) << 96) |
-            (bytes32(uint256(_vaultId)) << 80);
-        // bytes 22-31 are zero (future use)
+            (bytes32(uint256(_value)) << 160) |
+            (bytes32(uint256(_agentVaultId)) << 144) |
+            (bytes32(uint256(_vaultId)) << 128);
+        // bytes 16-31 are zero (future use)
     }
 }

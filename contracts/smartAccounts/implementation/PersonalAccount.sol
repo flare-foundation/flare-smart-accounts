@@ -11,12 +11,14 @@ import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 import {UniswapV3} from "../library/UniswapV3.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title PersonalAccount contract
  * @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
  */
 contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
+    using SafeERC20 for IERC20;
 
     address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
 
@@ -95,6 +97,19 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
     }
 
     /// @inheritdoc IIPersonalAccount
+    function transfer(
+        address _to,
+        uint256 _amount
+    )
+        external
+        onlyController nonReentrant
+    {
+        IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
+        fxrp.safeTransfer(_to, _amount);
+        emit Transferred(_to, _amount);
+    }
+
+    /// @inheritdoc IIPersonalAccount
     function redeem(
         uint256 _lots,
         address payable _executor,
@@ -123,9 +138,9 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
         onlyController nonReentrant
         returns (uint256 _shares)
     {
-        address fxrp = IIVault(_vault).asset();
-        require(IERC20(fxrp).approve(_vault, _assets), ApprovalFailed());
-        emit Approved(fxrp, _vault, _assets);
+        IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
+        require(fxrp.approve(_vault, _assets), ApprovalFailed());
+        emit Approved(address(fxrp), _vault, _assets);
 
         _shares = IIVault(_vault).deposit(_assets, address(this));
         emit Deposited(_vault, _assets, _shares);
@@ -134,14 +149,14 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
     /// @inheritdoc IIPersonalAccount
     function withdraw(
         address _vault,
-        uint256 _assets
+        uint256 _shares
     )
         external
         onlyController nonReentrant
-        returns (uint256 _shares)
+        returns (uint256 _assets)
     {
-        _shares = IIVault(_vault).withdraw(
-            _assets,
+        _assets = IIVault(_vault).redeem(
+            _shares,
             address(this),
             address(this)
         );

@@ -430,6 +430,11 @@ interface IMasterAccountController {
     error ValueZero();
 
     /**
+     * @notice Reverts if the address is zero.
+     */
+    error AddressZero();
+
+    /**
      * @notice Reverts if the collateral reservation ID is unknown.
      */
     error UnknownCollateralReservationId();

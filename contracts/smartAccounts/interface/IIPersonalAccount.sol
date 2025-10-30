@@ -27,6 +27,17 @@ interface IIPersonalAccount is IPersonalAccount {
         returns (uint256 _collateralReservationId);
 
     /**
+     * @notice Transfer FXRP to another address.
+     * @param _to Recipient address.
+     * @param _amount Amount of FXRP to transfer.
+     */
+    function transfer(
+        address _to,
+        uint256 _amount
+    )
+        external;
+
+    /**
      * @notice Redeem FXRP and receive XRP.
      * @param _lots Number of lots to redeem.
      * @param _executor Executor address.
@@ -55,17 +66,17 @@ interface IIPersonalAccount is IPersonalAccount {
         returns (uint256 _shares);
 
     /**
-     * @notice Withdraw assets from the vault.
+     * @notice Redeem shares from the vault.
      * @param _vault Vault address.
-     * @param _assets The amount of assets to withdraw.
-     * @return _shares The withdrawn shares.
+     * @param _shares The amount of shares to redeem.
+     * @return _assets The amount of assets redeemed.
      */
     function withdraw(
         address _vault,
-        uint256 _assets
+        uint256 _shares
     )
         external
-        returns (uint256 _shares);
+        returns (uint256 _assets);
 
     /**
      * @notice Claim withdrawal assets from the vault.

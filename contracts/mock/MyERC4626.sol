@@ -27,53 +27,91 @@ contract MyERC4626 is ERC4626 {
         uint256 period
     );
 
+    event CompleteWithdraw(
+        address indexed owner,
+        uint256 assets,
+        uint256 year,
+        uint256 month,
+        uint256 day
+    );
+
     /// @notice constructor
-    /// @param baseAsset base asset address - FXRP
+    /// @param baseAsset_ base asset address - FXRP
     /// @param name_ base asset name
     /// @param symbol_ base asset symbol
     constructor(
-        IERC20 baseAsset,
+        IERC20 baseAsset_,
         string memory name_,
         string memory symbol_
-    ) ERC20(name_, symbol_) ERC4626(baseAsset) {}
+    )
+        ERC20(name_, symbol_)
+        ERC4626(baseAsset_)
+    {}
 
-    function withdraw(
-        uint256 assets,
-        address receiver,
-        address owner
-    ) public override returns (uint256) {
-        uint256 maxAssets = maxWithdraw(owner);
-        if (assets > maxAssets) {
-            revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
+    function requestRedeem(
+        uint256 _shares,
+        address _receiver,
+        address _owner
+    )
+        public
+        returns (uint256 _assets, uint256 _claimableEpoch)
+    {
+        uint256 maxShares = maxRedeem(_owner);
+        if (_shares > maxShares) {
+            revert ERC4626ExceededMaxRedeem(_owner, _shares, maxShares);
         }
 
-        uint256 shares = previewWithdraw(assets);
-        _withdraw(_msgSender(), receiver, owner, assets, shares);
-
-        return shares;
+        _assets = previewRedeem(_shares);
+        _withdraw(_msgSender(), _receiver, _owner, _assets, _shares);
+        _claimableEpoch = 1; // for testing purposes
     }
 
-    function claimWithdraw(uint256 _period) public returns (uint256 assets) {
-        assets = pendingWithdrawAssets[msg.sender];
-        require(assets > 0, "No pending withdraw");
-        pendingWithdrawAssets[msg.sender] = 0;
-        SafeERC20.safeTransfer(IERC20(asset()), msg.sender, assets);
-        emit CompleteWithdraw(msg.sender, assets, _period);
+    function claimWithdraw(uint256 _period) public returns (uint256 _assets) {
+        (, _assets) = _completeWithdraw(msg.sender);
+        emit CompleteWithdraw(msg.sender, _assets, _period);
+    }
+
+    function claim(
+        uint256 _year,
+        uint256 _month,
+        uint256 _day,
+        address _receiverAddr
+    )
+        external
+        returns (uint256 _shares, uint256 _assets)
+    {
+        (_shares, _assets) = _completeWithdraw(_receiverAddr);
+        emit CompleteWithdraw(_receiverAddr, _assets, _year, _month, _day);
     }
 
     function _withdraw(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
-    ) internal override {
-        if (caller != owner) {
-            _spendAllowance(owner, caller, shares);
+        address _caller,
+        address _receiver,
+        address _owner,
+        uint256 _assets,
+        uint256 _shares
+    )
+        internal override
+    {
+        if (_caller != _owner) {
+            _spendAllowance(_owner, _caller, _shares);
         }
-        _burn(owner, shares);
-        pendingWithdrawAssets[owner] += assets;
+        _burn(_owner, _shares);
+        pendingWithdrawAssets[_receiver] += _assets;
 
-        emit WithdrawRequest(caller, receiver, owner, 1, assets, shares);
+        emit WithdrawRequest(_caller, _receiver, _owner, 1, _assets, _shares);
+    }
+
+    function _completeWithdraw(
+        address _receiverAddr
+    )
+        internal
+        returns (uint256 _shares, uint256 _assets)
+    {
+        _assets = pendingWithdrawAssets[_receiverAddr];
+        require(_assets > 0, "No pending withdraw");
+        _shares = convertToShares(_assets);
+        pendingWithdrawAssets[_receiverAddr] = 0;
+        SafeERC20.safeTransfer(IERC20(asset()), _receiverAddr, _assets);
     }
 }

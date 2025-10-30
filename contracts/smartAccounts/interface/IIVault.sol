@@ -13,13 +13,13 @@ interface IIVault {
         returns (uint256 _shares);
 
     // Firelight
-    function withdraw(
-        uint256 _assets,
+    function redeem(
+        uint256 _shares,
         address _receiver,
         address _owner
     )
         external
-        returns (uint256 _shares);
+        returns (uint256 _assets);
 
     // Firelight
     function claimWithdraw(
@@ -47,6 +47,4 @@ interface IIVault {
         external
         returns (uint256 _shares, uint256 _assets);
 
-    // Firelight and Upshift
-    function asset() external view returns (address);
 }
