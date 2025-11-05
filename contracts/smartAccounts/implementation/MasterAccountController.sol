@@ -307,26 +307,10 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         require(vaultInfo.vaultAddress != address(0), InvalidVaultId(_vaultId));
         if (vaultInfo.vaultType == 1) {
             // Firelight vault
-            uint256 amount = personalAccount.claimWithdraw(vaultInfo.vaultAddress, _epoch);
-            emit WithdrawalClaimed(
-                address(personalAccount),
-                vaultInfo.vaultAddress,
-                _epoch,
-                amount
-            );
+            _claimWithdrawal(personalAccount, vaultInfo.vaultAddress, _epoch);
         } else if (vaultInfo.vaultType == 2) {
             // Upshift vault
-            (uint256 year, uint256 month, uint256 day) = _getDate(_epoch);
-            (uint256 shares, uint256 amount) = personalAccount.claim(vaultInfo.vaultAddress, year, month, day);
-            emit Claimed(
-                address(personalAccount),
-                vaultInfo.vaultAddress,
-                year,
-                month,
-                day,
-                shares,
-                amount
-            );
+            _claim(personalAccount, vaultInfo.vaultAddress, _epoch);
         } else {
             revert InvalidVaultType(vaultInfo.vaultType);
         }
@@ -816,23 +800,11 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         } else if (_instructionId == 13) { // claim withdraw
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            uint256 amount = _personalAccount.claimWithdraw(vault, period);
-            emit WithdrawalClaimed(
-                address(_personalAccount),
-                vault,
-                period,
-                amount
-            );
+            _claimWithdrawal(_personalAccount, vault, period);
         } else if (_instructionId == 14) { // claim withdraw and redeem FXRP
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            uint256 amount = _personalAccount.claimWithdraw(vault, period);
-            emit WithdrawalClaimed(
-                address(_personalAccount),
-                vault,
-                period,
-                amount
-            );
+            uint256 amount = _claimWithdrawal(_personalAccount, vault, period);
             uint256 lots = _amountToLots(amount);
             _redeemFXrp(_personalAccount, lots);
         } else if (_instructionId == 22) { // requestRedeem
@@ -847,31 +819,13 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 claimableEpoch
             );
         } else if (_instructionId == 23) { // claim
-            (uint256 year, uint256 month, uint256 day) = _getDate(_getValue(_paymentReference));
+            uint256 date = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            (uint256 shares, uint256 assets) = _personalAccount.claim(vault, year, month, day);
-            emit Claimed(
-                address(_personalAccount),
-                vault,
-                year,
-                month,
-                day,
-                shares,
-                assets
-            );
+            _claim(_personalAccount, vault, date);
         } else if (_instructionId == 24) { // claim and redeem FXRP
-            (uint256 year, uint256 month, uint256 day) = _getDate(_getValue(_paymentReference));
+            uint256 date = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            (uint256 shares, uint256 amount) = _personalAccount.claim(vault, year, month, day);
-            emit Claimed(
-                address(_personalAccount),
-                vault,
-                year,
-                month,
-                day,
-                shares,
-                amount
-            );
+            uint256 amount = _claim(_personalAccount, vault, date);
             uint256 lots = _amountToLots(amount);
             _redeemFXrp(_personalAccount, lots);
         } else {
@@ -1077,5 +1031,44 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
             executor,
             executorFee
         );
+    }
+
+    function _claimWithdrawal(
+        IIPersonalAccount _personalAccount,
+        address _vault,
+        uint256 _period
+    )
+        internal
+        returns (uint256 _amount)
+    {
+        _amount = _personalAccount.claimWithdraw(_vault, _period);
+        emit WithdrawalClaimed(
+            address(_personalAccount),
+            _vault,
+            _period,
+            _amount
+        );
+    }
+
+    function _claim(
+        IIPersonalAccount _personalAccount,
+        address _vault,
+        uint256 _date
+    )
+        internal
+        returns (uint256)
+    {
+        (uint256 year, uint256 month, uint256 day) = _getDate(_date);
+        (uint256 shares, uint256 amount) = _personalAccount.claim(_vault, year, month, day);
+        emit Claimed(
+            address(_personalAccount),
+            _vault,
+            year,
+            month,
+            day,
+            shares,
+            amount
+        );
+        return amount;
     }
 }

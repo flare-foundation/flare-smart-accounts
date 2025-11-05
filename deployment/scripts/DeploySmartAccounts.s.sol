@@ -22,6 +22,7 @@ contract DeploySmartAccounts is Script {
         address initialOwner;
         address governance;
         address[] vaults;
+        uint256[] vaultTypes;
         address executor;
         uint256 executorFee;
         uint256 paymentProofValidityDurationSeconds;
@@ -68,6 +69,7 @@ contract DeploySmartAccounts is Script {
         params.initialOwner = vm.parseJsonAddress(config, ".initialOwner");
         params.governance = vm.parseJsonAddress(config, ".governance");
         params.vaults = vm.parseJsonAddressArray(config, ".vaults");
+        params.vaultTypes = vm.parseJsonUintArray(config, ".vaultTypes");
         params.executor = vm.parseJsonAddress(config, ".executor");
         params.executorFee = vm.parseJsonUint(config, ".executorFee");
         params.paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
@@ -225,11 +227,14 @@ contract DeploySmartAccounts is Script {
         masterAccountController.addAgentVaults(agentVaultIds, agentVaultAddresses);
 
         console2.log("Adding vaults");
+        assert(params.vaults.length == params.vaultTypes.length);
         uint256[] memory vaultIds = new uint256[](params.vaults.length);
+        uint8[] memory vaultTypes = new uint8[](params.vaultTypes.length);
         for (uint256 i = 0; i < params.vaults.length; i++) {
             vaultIds[i] = i + 1; // vault IDs are 1-based
+            vaultTypes[i] = uint8(params.vaultTypes[i]);
         }
-        masterAccountController.addVaults(vaultIds, params.vaults);
+        masterAccountController.addVaults(vaultIds, params.vaults, vaultTypes);
 
         if (params.governance == address(0)) {
             console2.log("Governance address is zero, skipping ownership transfer");
