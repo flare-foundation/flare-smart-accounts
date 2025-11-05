@@ -22,6 +22,7 @@ import {MockSingletonFactory, MockSingletonFactoryNoDeploy} from "../contracts/m
 import {IISingletonFactory} from "../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {DateUtils} from "../contracts/mock/DateUtils.sol";
 
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test {
@@ -1034,7 +1035,9 @@ contract MasterAccountControllerTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx2");
         _mockVerifyPayment(true);
 
-        uint256 claimableEpoch = 1; // epoch length is 1 day
+        (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + depositVault.lagDuration());
+        uint256 claimableEpoch = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0);
+        uint256 period = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0) / 1 days;
         vm.expectEmit();
         emit IMasterAccountController.RedeemRequested(
             personalAccountAddr,
@@ -1058,7 +1061,7 @@ contract MasterAccountControllerTest is Test {
             23 // 123 - 100 redeemed
         );
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
+            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
             100
         );
     }

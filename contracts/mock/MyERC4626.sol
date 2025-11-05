@@ -93,7 +93,7 @@ contract MyERC4626 is ERC4626 {
         (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
 
         // The withdrawal will be processed at the following epoch
-        _claimableEpoch = _getPeriodFromDate(year, month, day);
+        _claimableEpoch = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0);
 
         if (lagDuration == 0) {
             _claimableEpoch = block.timestamp;

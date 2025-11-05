@@ -12,7 +12,7 @@ import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {FtsoV2Interface} from "flare-periphery/src/flare/FtsoV2Interface.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
-import {MockBeacon} from "./mock/MockBeacon.sol";
+import {MockBeacon} from "../contracts/mock/MockBeacon.sol";
 
 contract PersonalAccountTest is Test {
     PersonalAccount private personalAccountImpl;
