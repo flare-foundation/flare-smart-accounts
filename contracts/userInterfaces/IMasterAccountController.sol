@@ -117,10 +117,12 @@ interface IMasterAccountController {
      * @notice Emitted when a vault is added.
      * @param vaultId The vault ID.
      * @param vaultAddress The vault address.
+     * @param vaultType The vault type (e.g., 1 = Firelight, 2 = Upshift).
      */
     event VaultAdded(
         uint256 indexed vaultId,
-        address indexed vaultAddress
+        address indexed vaultAddress,
+        uint8 indexed vaultType
     );
 
     /**
@@ -429,11 +431,19 @@ interface IMasterAccountController {
     );
 
     /**
-     * @notice Reverts if the vault is invalid.
+     * @notice Reverts if the vault ID is invalid.
      * @param vaultId The vault ID.
      */
-    error InvalidVault(
+    error InvalidVaultId(
         uint256 vaultId
+    );
+
+    /**
+     * @notice Reverts if the vault type is invalid.
+     * @param vaultType The vault type.
+     */
+    error InvalidVaultType(
+        uint8 vaultType
     );
 
     /**
@@ -554,6 +564,19 @@ interface IMasterAccountController {
         external payable;
 
     /**
+     * @notice Execute withdrawal from a vault for a given XRPL address.
+     * @param _xrplAddress The XRPL address requesting the withdrawal.
+     * @param _vaultId The ID of the vault from which to withdraw.
+     * @param _epoch The epoch representing the withdrawal period or date.
+     */
+    function executeWithdrawal(
+        string calldata _xrplAddress,
+        uint256 _vaultId,
+        uint256 _epoch
+    )
+        external;
+
+    /**
      * @notice Get the PersonalAccount contract for a given XRPL owner.
      * @param _xrplOwner The XRPL address of the owner.
      * @return The PersonalAccount contract address associated with the XRPL owner
@@ -594,13 +617,14 @@ interface IMasterAccountController {
         returns (uint256[] memory _agentVaultIds, address[] memory _agentVaultAddresses);
 
     /**
-     * Returns the list of registered vault IDs and their corresponding addresses.
+     * Returns the list of registered vault IDs, their corresponding addresses and types.
      * @return _vaultIds The list of registered vault IDs.
-     * @return _vaultAddresses The list of registered vault addresses.
+     * @return _vaultAddresses The list of vault addresses corresponding to the vault IDs.
+     * @return _vaultTypes The list of vault types corresponding to the vault IDs.
      */
     function getVaults()
         external view
-        returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses);
+        returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses, uint8[] memory _vaultTypes);
 
     /**
      * Returns the executor address and fee.

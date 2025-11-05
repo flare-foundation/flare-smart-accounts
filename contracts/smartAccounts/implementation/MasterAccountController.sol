@@ -34,10 +34,8 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
     // 10: collateral reservation and deposit
     // 11: deposit
     // 12: redeem
-    // 13: claim withdraw
-    // 14: claim withdraw and redeem FXRP
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-11: uint80 -> value (amount, shares, lots, period,...)
+// bytes 02-11: uint80 -> value (amount, shares, lots,...)
 // bytes 12-13: uint16 -> agent vault address id
 // bytes 14-15: uint16 -> deposit/withdraw vault address id
 // bytes 16-31: future use
@@ -47,10 +45,8 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
     // 20: collateral reservation and deposit
     // 21: deposit
     // 22: requestRedeem
-    // 23: claim
-    // 24: claim and redeem FXRP
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-11: uint80 -> value (amount, shares, lots, date(yyyymmdd),...)
+// bytes 02-11: uint80 -> value (amount, shares, lots,...)
 // bytes 12-13: uint16 -> agent vault address id
 // bytes 14-15: uint16 -> deposit/withdraw vault address id
 // bytes 16-31: future use
@@ -60,6 +56,13 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
  * @notice The contract controlling personal accounts (XRPL master controller)
  */
 contract MasterAccountController is MasterAccountControllerBase, IMasterAccountController, IBeacon {
+    /// @notice Struct containing vault information
+    struct VaultInfo {
+        /// @notice Vault address
+        address vaultAddress;
+        /// @notice Vault type (1 = Firelight, 2 = Upshift, ...)
+        uint8 vaultType;
+    }
 
     /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
     address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -94,8 +97,8 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     /// @notice Mapping from agent vault ID to agent vault address
     mapping(uint256 agentVaultId => address agentVaultAddress) public agentVaults;
     uint256[] private agentVaultIds;
-    /// @notice Mapping from vault ID to vault address
-    mapping(uint256 vaultId => address vaultAddress) public vaults;
+    /// @notice Mapping from vault ID to vault information
+    mapping(uint256 vaultId => VaultInfo vaultInfo) public vaults;
     uint256[] private vaultIds;
 
     // swap parameters - if not set, swapping is disabled
@@ -283,6 +286,46 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
             _xrplAddress,
             transactionId
         );
+    }
+
+    /**
+     * @inheritdoc IMasterAccountController
+     */
+    function executeWithdrawal(
+        string calldata _xrplAddress,
+        uint256 _vaultId,
+        uint256 _epoch
+    )
+        external
+    {
+        IIPersonalAccount personalAccount = _getOrCreatePersonalAccount(_xrplAddress);
+        VaultInfo memory vaultInfo = vaults[_vaultId];
+        require(vaultInfo.vaultAddress != address(0), InvalidVaultId(_vaultId));
+        if (vaultInfo.vaultType == 1) {
+            // Firelight vault
+            uint256 amount = personalAccount.claimWithdraw(vaultInfo.vaultAddress, _epoch);
+            emit WithdrawalClaimed(
+                address(personalAccount),
+                vaultInfo.vaultAddress,
+                _epoch,
+                amount
+            );
+        } else if (vaultInfo.vaultType == 2) {
+            // Upshift vault
+            (uint256 year, uint256 month, uint256 day) = _getDate(_epoch);
+            (uint256 shares, uint256 amount) = personalAccount.claim(vaultInfo.vaultAddress, year, month, day);
+            emit Claimed(
+                address(personalAccount),
+                vaultInfo.vaultAddress,
+                year,
+                month,
+                day,
+                shares,
+                amount
+            );
+        } else {
+            revert InvalidVaultType(vaultInfo.vaultType);
+        }
     }
 
     function swapWNatForUsdt0(
@@ -556,19 +599,25 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
      */
     function addVaults(
         uint256[] calldata _vaultIds,
-        address[] calldata _vaultAddresses
+        address[] calldata _vaultAddresses,
+        uint8[] calldata _vaultTypes
     )
         external onlyOwner
     {
         require(_vaultIds.length == _vaultAddresses.length, LengthsMismatch());
+        require(_vaultIds.length == _vaultTypes.length, LengthsMismatch());
         for (uint256 i = 0; i < _vaultIds.length; i++) {
             uint256 vaultId = _vaultIds[i];
             address vaultAddress = _vaultAddresses[i];
-            require(vaults[vaultId] == address(0), VaultIdAlreadyUsed(vaultId));
-            require(vaultAddress != address(0), InvalidVault(vaultId));
-            vaults[vaultId] = vaultAddress;
+            uint8 vaultType = _vaultTypes[i];
+            VaultInfo storage vaultInfo = vaults[vaultId];
+            require(vaultInfo.vaultAddress == address(0), VaultIdAlreadyUsed(vaultId));
+            require(vaultAddress != address(0), InvalidVaultId(vaultId));
+            require(vaultType == 1 || vaultType == 2, InvalidVaultType(vaultType));
+            vaultInfo.vaultAddress = vaultAddress;
+            vaultInfo.vaultType = vaultType;
             vaultIds.push(vaultId);
-            emit VaultAdded(vaultId, vaultAddress);
+            emit VaultAdded(vaultId, vaultAddress, vaultType);
         }
     }
 
@@ -668,12 +717,15 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
      */
     function getVaults()
         external view
-        returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses)
+        returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses, uint8[] memory _vaultTypes)
     {
         _vaultIds = vaultIds;
         _vaultAddresses = new address[](_vaultIds.length);
+        _vaultTypes = new uint8[](_vaultIds.length);
         for (uint256 i = 0; i < _vaultIds.length; i++) {
-            _vaultAddresses[i] = vaults[_vaultIds[i]];
+            VaultInfo memory vaultInfo = vaults[_vaultIds[i]];
+            _vaultAddresses[i] = vaultInfo.vaultAddress;
+            _vaultTypes[i] = vaultInfo.vaultType;
         }
     }
 
@@ -727,7 +779,14 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     {
         if (_instructionId == 1) { // redeem FXRP
             uint256 lots = _getValue(_paymentReference);
-            _redeemFXrp(_personalAccount, lots);
+            uint256 amount = _personalAccount.redeemFXrp{value: msg.value}(lots, executor, executorFee);
+            emit FXrpRedeemed(
+                address(_personalAccount),
+                lots,
+                amount,
+                executor,
+                executorFee
+            );
         } else if (_instructionId == 2) { // transfer FXRP
             uint256 amount = _getValue(_paymentReference);
             address recipient = _getAddress(_paymentReference);
@@ -757,28 +816,6 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 amount,
                 shares
             );
-        } else if (_instructionId == 13) { // claim withdraw
-            uint256 period = _getValue(_paymentReference);
-            address vault = _getVaultAddress(_paymentReference);
-            uint256 amount = _personalAccount.claimWithdraw(vault, period);
-            emit WithdrawalClaimed(
-                address(_personalAccount),
-                vault,
-                period,
-                amount
-            );
-        } else if (_instructionId == 14) { // claim withdraw and redeem FXRP
-            uint256 period = _getValue(_paymentReference);
-            address vault = _getVaultAddress(_paymentReference);
-            uint256 amount = _personalAccount.claimWithdraw(vault, period);
-            emit WithdrawalClaimed(
-                address(_personalAccount),
-                vault,
-                period,
-                amount
-            );
-            uint256 lots = _amountToLots(amount);
-            _redeemFXrp(_personalAccount, lots);
         } else if (_instructionId == 22) { // requestRedeem
             uint256 shares = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
@@ -790,34 +827,6 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 assets,
                 claimableEpoch
             );
-        } else if (_instructionId == 23) { // claim
-            (uint256 year, uint256 month, uint256 day) = _getDate(_paymentReference);
-            address vault = _getVaultAddress(_paymentReference);
-            (uint256 shares, uint256 assets) = _personalAccount.claim(vault, year, month, day);
-            emit Claimed(
-                address(_personalAccount),
-                vault,
-                year,
-                month,
-                day,
-                shares,
-                assets
-            );
-        } else if (_instructionId == 24) { // claim and redeem FXRP
-            (uint256 year, uint256 month, uint256 day) = _getDate(_paymentReference);
-            address vault = _getVaultAddress(_paymentReference);
-            (uint256 shares, uint256 amount) = _personalAccount.claim(vault, year, month, day);
-            emit Claimed(
-                address(_personalAccount),
-                vault,
-                year,
-                month,
-                day,
-                shares,
-                amount
-            );
-            uint256 lots = _amountToLots(amount);
-            _redeemFXrp(_personalAccount, lots);
         } else {
             revert InvalidInstructionId(_instructionId);
         }
@@ -971,8 +980,8 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     function _getVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
         // bytes 14-15: vault address id
         uint256 vaultId = (uint256(_paymentReference) >> 128) & ((uint256(1) << 16) - 1);
-        _vault = vaults[vaultId];
-        require(address(_vault) != address(0), InvalidVault(vaultId));
+        _vault = vaults[vaultId].vaultAddress;
+        require(address(_vault) != address(0), InvalidVaultId(vaultId));
     }
 
     function _getInstructionId(bytes32 _paymentReference) internal pure returns (uint256) {
@@ -991,12 +1000,10 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         require(_value > 0, ValueZero());
     }
 
-    function _getDate(bytes32 _paymentReference) internal pure returns (uint256 _year, uint256 _month, uint256 _day) {
-        // bytes 2-11: value (date in yyyymmdd format)
-        uint256 date = _getValue(_paymentReference);
-        _year = (date / 10000) % 10000;
-        _month = (date / 100) % 100;
-        _day = date % 100;
+    function _getDate(uint256 _value) internal pure returns (uint256 _year, uint256 _month, uint256 _day) {
+        _year = (_value / 10000) % 10000;
+        _month = (_value / 100) % 100;
+        _day = _value % 100;
     }
 
     function _getAddress(bytes32 _paymentReference) internal pure returns (address _address) {
@@ -1007,21 +1014,5 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
     function _isPoolFeeTierPPMValid(uint24 _poolFeeTierPPM) internal pure returns (bool) {
         return _poolFeeTierPPM == 100 || _poolFeeTierPPM == 500 || _poolFeeTierPPM == 3000 || _poolFeeTierPPM == 10000;
-    }
-
-    function _redeemFXrp(
-        IIPersonalAccount _personalAccount,
-        uint256 _lots
-    )
-        internal
-    {
-        uint256 amount = _personalAccount.redeemFXrp{value: msg.value}(_lots, executor, executorFee);
-        emit FXrpRedeemed(
-            address(_personalAccount),
-            _lots,
-            amount,
-            executor,
-            executorFee
-        );
     }
 }

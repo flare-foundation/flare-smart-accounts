@@ -173,10 +173,12 @@ contract MasterAccountControllerTest is Test {
         // add vault
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](1);
         vaultIds[0] = 0;
         vaultAddresses[0] = address(depositVault);
+        vaultTypes[0] = 1;
         vm.prank(governance);
-        masterAccountController.addVaults(vaultIds, vaultAddresses);
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
 
         xrplAddress1 = "xrplAddress1";
         xrplAddress2 = "xrplAddress2";
@@ -1727,19 +1729,23 @@ contract MasterAccountControllerTest is Test {
     function testAddVaults() public {
         uint256[] memory vaultIds = new uint256[](2);
         address[] memory vaultAddresses = new address[](2);
+        uint8[] memory vaultTypes = new uint8[](2);
         vaultIds[0] = 1;
         vaultIds[1] = 2;
         vaultAddresses[0] = makeAddr("vault1");
         vaultAddresses[1] = makeAddr("vault2");
+        vaultTypes[0] = 1;
+        vaultTypes[1] = 2;
 
         vm.expectEmit();
-        emit IMasterAccountController.VaultAdded(1, vaultAddresses[0]);
+        emit IMasterAccountController.VaultAdded(vaultIds[0], vaultAddresses[0], vaultTypes[0]);
         vm.expectEmit();
-        emit IMasterAccountController.VaultAdded(2, vaultAddresses[1]);
+        emit IMasterAccountController.VaultAdded(vaultIds[1], vaultAddresses[1], vaultTypes[1]);
         vm.prank(governance);
-        masterAccountController.addVaults(vaultIds, vaultAddresses);
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
 
-        (uint256[] memory returnedIds, address[] memory addrs) = masterAccountController.getVaults();
+        (uint256[] memory returnedIds, address[] memory addrs, uint8[] memory types) =
+            masterAccountController.getVaults();
         assertEq(returnedIds.length, 3);
         assertEq(returnedIds[0], 0);
         assertEq(returnedIds[1], 1);
@@ -1747,13 +1753,18 @@ contract MasterAccountControllerTest is Test {
         assertEq(addrs[0], address(depositVault));
         assertEq(addrs[1], vaultAddresses[0]);
         assertEq(addrs[2], vaultAddresses[1]);
+        assertEq(types[0], 1);
+        assertEq(types[1], vaultTypes[0]);
+        assertEq(types[2], vaultTypes[1]);
     }
 
     function testAddVaultsRevertOnlyOwner() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](1);
         vaultIds[0] = 1;
         vaultAddresses[0] = makeAddr("vault1");
+        vaultTypes[0] = 1;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1761,42 +1772,80 @@ contract MasterAccountControllerTest is Test {
                 address(this)
             )
         );
-        masterAccountController.addVaults(vaultIds, vaultAddresses);
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
-    function testAddVaultsRevertInvalidVault() public {
+    function testAddVaultsRevertInvalidVaultId() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](1);
         vaultIds[0] = 1;
         vaultAddresses[0] = address(0); // invalid
+        vaultTypes[0] = 1;
 
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidVault.selector,
+                IMasterAccountController.InvalidVaultId.selector,
                 1
             )
         );
-        masterAccountController.addVaults(vaultIds, vaultAddresses);
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
+    }
+
+    function testAddVaultsRevertInvalidVaultType() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](1);
+        vaultIds[0] = 1;
+        vaultAddresses[0] = makeAddr("vault1");
+        vaultTypes[0] = 0; // invalid
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidVaultType.selector,
+                1
+            )
+        );
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
     function testAddVaultsRevertLengthsMismatch() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](2);
+        uint8[] memory vaultTypes = new uint8[](1);
         vaultIds[0] = 1;
         vaultAddresses[0] = makeAddr("vault1");
         vaultAddresses[1] = makeAddr("vault2");
+        vaultTypes[0] = 1;
 
         vm.prank(governance);
         vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
-        masterAccountController.addVaults(vaultIds, vaultAddresses);
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
+    }
+
+    function testAddVaultsRevertLengthsMismatch2() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](2);
+        vaultIds[0] = 1;
+        vaultAddresses[0] = makeAddr("vault1");
+        vaultTypes[0] = 1;
+        vaultTypes[1] = 2;
+
+        vm.prank(governance);
+        vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
     function testAddVaultsRevertVaultIdAlreadyUsed() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](1);
         vaultIds[0] = 0; // already used
         vaultAddresses[0] = makeAddr("vault1");
+        vaultTypes[0] = 1;
 
         vm.prank(governance);
         vm.expectRevert(
@@ -1805,7 +1854,7 @@ contract MasterAccountControllerTest is Test {
                 0
             )
         );
-        masterAccountController.addVaults(vaultIds, vaultAddresses);
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
     function testSetPersonalAccountImplementation(address _newImplementation) public {
@@ -1961,7 +2010,7 @@ contract MasterAccountControllerTest is Test {
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
-    function testGetVaultAddressRevertInvalidVault() public {
+    function testGetVaultAddressRevertInvalidVaultId() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
@@ -1978,7 +2027,7 @@ contract MasterAccountControllerTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidVault.selector,
+                IMasterAccountController.InvalidVaultId.selector,
                 1
             )
         );
