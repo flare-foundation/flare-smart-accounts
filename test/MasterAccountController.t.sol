@@ -1805,7 +1805,7 @@ contract MasterAccountControllerTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IMasterAccountController.InvalidVaultType.selector,
-                1
+                0
             )
         );
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
