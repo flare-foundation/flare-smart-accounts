@@ -52,6 +52,11 @@ contract MyERC4626 is ERC4626 {
         bool wasBlacklisted
     );
 
+    error NoPendingWithdrawAssets();
+    error NoPendingWithdrawShares();
+    error InvalidPeriod();
+    error TooEarly();
+
     /// @notice constructor
     /// @param baseAsset_ base asset address - FXRP
     /// @param name_ base asset name
@@ -64,17 +69,16 @@ contract MyERC4626 is ERC4626 {
         ERC20(name_, symbol_)
         ERC4626(baseAsset_)
     {
+        lagDuration = 1 days;
     }
 
     /// firelight vault - using redeem + claimWithdraw
     function claimWithdraw(uint256 _period) public returns (uint256 _assets) {
-        if (lagDuration > 0) {
-            (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
-            require(
-                _getPeriodFromDate(year, month, day) > _period,
-                "Too early"
-            );
-        }
+        (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp);
+        require(
+            _period < _getPeriodFromDate(year, month, day), // cannot claim for current or future periods
+            InvalidPeriod()
+        );
         (, _assets, ) = _completeWithdraw(msg.sender, _period);
         emit CompleteWithdraw(msg.sender, _assets, _period);
     }
@@ -114,7 +118,7 @@ contract MyERC4626 is ERC4626 {
             // Make sure withdrawals are processed at the expected epoch only.
             require(
                 block.timestamp >= DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0),
-                "Too early"
+                TooEarly()
             );
         }
         uint256 period = _getPeriodFromDate(_year, _month, _day);
@@ -162,9 +166,9 @@ contract MyERC4626 is ERC4626 {
         returns (uint256 _shares, uint256 _assets, uint256 _requestTs)
     {
         _assets = pendingWithdrawAssets[_receiverAddr][_period];
-        require(_assets > 0, "No pending withdraw");
+        require(_assets > 0, NoPendingWithdrawAssets());
         _shares = pendingWithdrawShares[_receiverAddr][_period];
-        require(_shares > 0, "No pending withdraw shares");
+        require(_shares > 0, NoPendingWithdrawShares());
         _requestTs = requestTimestamps[_receiverAddr][_period];
         delete pendingWithdrawAssets[_receiverAddr][_period];
         delete pendingWithdrawShares[_receiverAddr][_period];

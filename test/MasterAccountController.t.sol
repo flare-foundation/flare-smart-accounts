@@ -872,6 +872,9 @@ contract MasterAccountControllerTest is Test {
             0
         );
 
+        // move to the claimable period (to period 3)
+        vm.warp(block.timestamp + 2 days);
+
         bytes32 paymentReference = _encodeFirelightPaymentReference(13, 0, period, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -882,9 +885,6 @@ contract MasterAccountControllerTest is Test {
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.requestBody.transactionId = bytes32("tx3");
         _mockVerifyPayment(true);
-
-        // move to the end of the period (to period 2)
-        vm.warp(block.timestamp + 1 days);
 
         vm.expectEmit();
         emit IMasterAccountController.WithdrawalClaimed(
@@ -926,6 +926,9 @@ contract MasterAccountControllerTest is Test {
             0
         );
 
+        // move to the claimable period (to period 3)
+        vm.warp(block.timestamp + 2 days);
+
         bytes32 paymentReference = _encodeFirelightPaymentReference(14, 0, period, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -938,9 +941,6 @@ contract MasterAccountControllerTest is Test {
         _mockVerifyPayment(true);
         _mockLotSize(100);
         _mockRedeem(100);
-
-        // move to the end of the period (to period 2)
-        vm.warp(block.timestamp + 1 days);
 
         vm.expectEmit();
         emit IMasterAccountController.WithdrawalClaimed(
@@ -985,6 +985,9 @@ contract MasterAccountControllerTest is Test {
             0
         );
 
+        // move to the claimable period (to period 3)
+        vm.warp(block.timestamp + 2 days);
+
         uint16 period = 1;
         bytes32 paymentReference = _encodeFirelightPaymentReference(14, 0, period, 0, 0);
         IPayment.Proof memory proof;
@@ -997,9 +1000,6 @@ contract MasterAccountControllerTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx3");
         _mockVerifyPayment(true);
         _mockLotSize(101);
-
-        // move to the end of the period (to period 2)
-        vm.warp(block.timestamp + 1 days);
 
         bytes4 errorSelector = bytes4(keccak256("RedeemZeroLots()"));
         vm.mockCallRevert(
