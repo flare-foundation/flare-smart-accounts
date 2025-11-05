@@ -193,7 +193,6 @@ contract DeploySmartAccounts is Script {
                 params.executorFee,
                 params.paymentProofValidityDurationSeconds,
                 params.defaultInstructionFee,
-                params.xrplProviderWallets,
                 personalAccountImplAddress
             )
         );
@@ -211,6 +210,9 @@ contract DeploySmartAccounts is Script {
         } else {
             console2.log("Swap parameters not set, swap is disabled");
         }
+
+        console2.log("Adding XRPL provider wallets");
+        masterAccountController.addXrplProviderWallets(params.xrplProviderWallets);
 
         console2.log("Adding agent vaults");
         // get available agent vaults and add them

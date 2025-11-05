@@ -116,7 +116,6 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
      * @param _executorFee The executor fee (in wei).
      * @param _paymentProofValidityDurationSeconds The duration (in seconds) for which the payment proof is valid.
      * @param _defaultInstructionFee The default instruction fee in underlying asset's smallest unit (drops for XRP).
-     * @param _xrplProviderWallets The XRPL provider wallet addresses.
      * @param _personalAccountImplementation The PersonalAccount implementation address.
      */
     function initialize(
@@ -124,7 +123,6 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         uint256 _executorFee,
         uint256 _paymentProofValidityDurationSeconds,
         uint256 _defaultInstructionFee,
-        string[] calldata _xrplProviderWallets,
         address _personalAccountImplementation
     )
         external onlyOwner reinitializer(2)
@@ -133,7 +131,6 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         _setExecutorFee(_executorFee);
         _setPaymentProofValidityDurationSeconds(_paymentProofValidityDurationSeconds);
         _setDefaultInstructionFee(_defaultInstructionFee);
-        _addXrplProviderWallets(_xrplProviderWallets);
         // set the PA implementation that this controller (as beacon) will return
         _setPersonalAccountImplementation(_personalAccountImplementation);
     }
@@ -234,14 +231,13 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         address vault = _getVaultAddress(paymentReference);
         uint256 shares = personalAccount.deposit(vault, amount);
 
+        // emit events
         emit Deposited(
             address(personalAccount),
             vault,
             amount,
             shares
         );
-
-        // emit event
         emit InstructionExecuted(
             address(personalAccount),
             paymentReference,
@@ -439,7 +435,15 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     )
         external onlyOwner
     {
-        _addXrplProviderWallets(_xrplProviderWallets);
+        for (uint256 i = 0; i < _xrplProviderWallets.length; i++) {
+            string memory xrplProviderWallet = _xrplProviderWallets[i];
+            require(bytes(xrplProviderWallet).length > 0, InvalidXrplProviderWallet(xrplProviderWallet));
+            bytes32 walletHash = keccak256(bytes(xrplProviderWallet));
+            require(xrplProviderWalletHashes[walletHash] == 0, XrplProviderWalletAlreadyExists(xrplProviderWallet));
+            xrplProviderWallets.push(xrplProviderWallet);
+            xrplProviderWalletHashes[walletHash] = xrplProviderWallets.length; // store 1-based index
+            emit XrplProviderWalletAdded(xrplProviderWallet);
+        }
     }
 
     /**
@@ -723,14 +727,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     {
         if (_instructionId == 1) { // redeem FXRP
             uint256 lots = _getValue(_paymentReference);
-            uint256 amount = _personalAccount.redeemFXrp{value: msg.value}(lots, executor, executorFee);
-            emit FXrpRedeemed(
-                address(_personalAccount),
-                lots,
-                amount,
-                executor,
-                executorFee
-            );
+            _redeemFXrp(_personalAccount, lots);
         } else if (_instructionId == 2) { // transfer FXRP
             uint256 amount = _getValue(_paymentReference);
             address recipient = _getAddress(_paymentReference);
@@ -781,14 +778,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 amount
             );
             uint256 lots = _amountToLots(amount);
-            amount = _personalAccount.redeemFXrp{value: msg.value}(lots, executor, executorFee);
-            emit FXrpRedeemed(
-                address(_personalAccount),
-                lots,
-                amount,
-                executor,
-                executorFee
-            );
+            _redeemFXrp(_personalAccount, lots);
         } else if (_instructionId == 22) { // requestRedeem
             uint256 shares = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
@@ -827,14 +817,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 amount
             );
             uint256 lots = _amountToLots(amount);
-            amount = _personalAccount.redeemFXrp{value: msg.value}(lots, executor, executorFee);
-            emit FXrpRedeemed(
-                address(_personalAccount),
-                lots,
-                amount,
-                executor,
-                executorFee
-            );
+            _redeemFXrp(_personalAccount, lots);
         } else {
             revert InvalidInstructionId(_instructionId);
         }
@@ -907,23 +890,6 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     function _setDefaultInstructionFee(uint256 _defaultInstructionFee) internal {
         defaultInstructionFee = _defaultInstructionFee;
         emit DefaultInstructionFeeSet(_defaultInstructionFee);
-    }
-
-    function _addXrplProviderWallets(
-        string[] calldata _xrplProviderWallets
-    )
-        internal
-    {
-        require(_xrplProviderWallets.length > 0, NoXrplProviderWallets());
-        for (uint256 i = 0; i < _xrplProviderWallets.length; i++) {
-            string memory xrplProviderWallet = _xrplProviderWallets[i];
-            require(bytes(xrplProviderWallet).length > 0, InvalidXrplProviderWallet(xrplProviderWallet));
-            bytes32 walletHash = keccak256(bytes(xrplProviderWallet));
-            require(xrplProviderWalletHashes[walletHash] == 0, XrplProviderWalletAlreadyExists(xrplProviderWallet));
-            xrplProviderWallets.push(xrplProviderWallet);
-            xrplProviderWalletHashes[walletHash] = xrplProviderWallets.length; // store 1-based index
-            emit XrplProviderWalletAdded(xrplProviderWallet);
-        }
     }
 
     function _setPersonalAccountImplementation(address _newImplementation) internal {
@@ -1041,5 +1007,21 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
     function _isPoolFeeTierPPMValid(uint24 _poolFeeTierPPM) internal pure returns (bool) {
         return _poolFeeTierPPM == 100 || _poolFeeTierPPM == 500 || _poolFeeTierPPM == 3000 || _poolFeeTierPPM == 10000;
+    }
+
+    function _redeemFXrp(
+        IIPersonalAccount _personalAccount,
+        uint256 _lots
+    )
+        internal
+    {
+        uint256 amount = _personalAccount.redeemFXrp{value: msg.value}(_lots, executor, executorFee);
+        emit FXrpRedeemed(
+            address(_personalAccount),
+            _lots,
+            amount,
+            executor,
+            executorFee
+        );
     }
 }

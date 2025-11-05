@@ -1,151 +1,2164 @@
 // SPDX-License-Identifier: UNLICENSED
-// solhint-disable one-contract-per-file
-// solhint-disable no-console
 pragma solidity ^0.8.27;
 
-import {Test, console2} from "forge-std/Test.sol";
-import {
-    MasterAccountController,
-    IPayment
-} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
+import {Test,console2} from "forge-std/Test.sol";
+import {MasterAccountController} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
+import {MasterAccountControllerBase} from "../contracts/smartAccounts/implementation/MasterAccountControllerBase.sol";
+import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
+import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
+import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
-import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {MasterAccountControllerProxy} from "../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
+import {MockSingletonFactory, MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactory.sol";
+import {IISingletonFactory} from "../contracts/smartAccounts/interface/IISingletonFactory.sol";
+import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test {
-    // MasterAccountController private masterAccountController;
-    // MasterAccountController private masterAccountControllerImpl;
-    // MasterAccountControllerProxy private masterAccountControllerProxy;
-    // PersonalAccount private personalAccountImpl;
-    // PersonalAccountProxy private personalAccountProxy;
+    MasterAccountController private masterAccountController;
+    MasterAccountController private masterAccountControllerImpl;
+    MasterAccountControllerProxy private masterAccountControllerProxy;
+    PersonalAccount private personalAccountImpl;
+    PersonalAccountProxy private personalAccountProxy;
+    IPersonalAccount private personalAccount1;
+    IPersonalAccount private personalAccount2;
 
-    // address private governance;
-    // address private executor;
-    // uint256 private executorFee;
-    // MyERC4626 private depositVault;
-    // MintableERC20 private fxrp;
-    // string private xrplProviderWallet;
-    // bytes32 private xrplProviderWalletHash;
-    // uint256 private paymentProofValidityDurationSeconds;
-    // uint256 private defaultInstructionFee;
-    // address private personalAccountImplementation;
-    // string private xrplAddress1;
-    // address private contractRegistryMock;
-    // address private fdcVerificationMock;
-    // address private assetManagerFxrpMock;
-    // address private agent;
-    // AgentInfo.Info private agentInfo;
+    address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+    MockSingletonFactory private mockFactory;
 
-    // function setUp() public {
-    //     governance = makeAddr("governance");
-    //     executor = makeAddr("executor");
-    //     fxrp = new MintableERC20("F-XRP", "fXRP");
-    //     depositVault = new MyERC4626(
-    //         IERC20(address(fxrp)),
-    //         "Deposit Vault",
-    //         "DV"
-    //     );
-    //     xrplProviderWallet = "rXrplProviderWallet";
-    //     xrplProviderWalletHash = keccak256(
-    //         abi.encodePacked(xrplProviderWallet)
-    //     );
-    //     contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
-    //     fdcVerificationMock = makeAddr("FDCVerificationMock");
-    //     executorFee = 100;
-    //     paymentProofValidityDurationSeconds = 1 days;
-    //     defaultInstructionFee = 1000000; // 1 XRP
-    //     assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
-    //     agent = makeAddr("agent");
-    //     agentInfo.status = AgentInfo.Status.NORMAL;
+    address private governance;
+    address private initialOwner;
+    address private executor;
+    uint256 private executorFee;
+    MyERC4626 private depositVault;
+    MintableERC20 private fxrp;
+    string private xrplProviderWallet;
+    bytes32 private xrplProviderWalletHash;
+    uint256 private paymentProofValidityDurationSeconds;
+    uint256 private defaultInstructionFee;
+    address private uniswapV3Router;
+    address private usdt0;
+    uint24 private wNatUsdt0PoolFeeTierPPM;
+    uint24 private usdt0FXrpPoolFeeTierPPM;
+    uint24 private maxSlippagePPM;
+    address private personalAccountImplementation;
+    string private xrplAddress1;
+    string private xrplAddress2;
+    address private assetManagerFxrpMock;
+    address private agent;
+    AgentInfo.Info private agentInfo;
 
-    //     // deploy the personal account implementation
-    //     personalAccountImpl = new PersonalAccount();
-    //     personalAccountImplementation = address(personalAccountImpl);
+    address private contractRegistryMock;
+    address private fdcVerificationMock;
+    address private wNatMock;
 
-    //     // deploy the controlled wallet
-    //     masterAccountControllerImpl = new MasterAccountController();
-    //     masterAccountControllerProxy = new MasterAccountControllerProxy(
-    //         address(masterAccountControllerImpl),
-    //         IGovernanceSettings(makeAddr("governanceSettings")),
-    //         governance,
-    //         payable(executor),
-    //         executorFee,
-    //         paymentProofValidityDurationSeconds,
-    //         defaultInstructionFee,
-    //         xrplProviderWallet,
-    //         personalAccountImplementation,
-    //         address(0)
-    //     );
-    //     masterAccountController = MasterAccountController(
-    //         address(masterAccountControllerProxy)
-    //     );
+    function setUp() public {
+        mockFactory = new MockSingletonFactory();
+        vm.etch(SINGLETON_FACTORY, address(mockFactory).code);
 
-    //     _mockGetContractAddressByHash("FdcVerification", fdcVerificationMock);
-    //     _mockGetContractAddressByHash("AssetManagerFXRP", assetManagerFxrpMock);
-    //     _mockGetAgentInfo(agent, agentInfo);
+        governance = makeAddr("governance");
+        initialOwner = makeAddr("initialOwner");
+        executor = makeAddr("executor");
+        fxrp = new MintableERC20("F-XRPL", "fXRP");
+        depositVault = new MyERC4626(
+            IERC20(address(fxrp)),
+            "Deposit Vault",
+            "DV"
+        );
+        depositVault.setLagDuration(1 days);
+        xrplProviderWallet = "rXrplProviderWallet";
+        xrplProviderWalletHash = keccak256(bytes(xrplProviderWallet));
+        contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
+        fdcVerificationMock = makeAddr("FDCVerificationMock");
+        wNatMock = makeAddr("W-NAT");
+        executorFee = 100;
+        paymentProofValidityDurationSeconds = 1 days;
+        defaultInstructionFee = 1000000; // 1 XRP
+        uniswapV3Router = makeAddr("UniswapV3Router");
+        wNatUsdt0PoolFeeTierPPM = 3000; // 0.3%
+        usdt0 = makeAddr("USDT0");
+        usdt0FXrpPoolFeeTierPPM = 500; // 0.05%
+        maxSlippagePPM = 20000; // 2%
+        assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
+        agent = makeAddr("agent");
+        agentInfo.status = AgentInfo.Status.NORMAL;
 
-    //     // add agent vault
-    //     uint256[] memory agentVaultIds = new uint256[](1);
-    //     address[] memory agentVaultAddresses = new address[](1);
-    //     agentVaultIds[0] = 0;
-    //     agentVaultAddresses[0] = agent;
-    //     vm.prank(governance);
-    //     masterAccountController.addAgentVaults(
-    //         agentVaultIds,
-    //         agentVaultAddresses
-    //     );
-    //     // add vault
-    //     uint256[] memory vaultIds = new uint256[](1);
-    //     address[] memory vaultAddresses = new address[](1);
-    //     vaultIds[0] = 0;
-    //     vaultAddresses[0] = address(depositVault);
-    //     vm.prank(governance);
-    //     masterAccountController.addVaults(vaultIds, vaultAddresses);
+        // deploy the personal account implementation
+        personalAccountImpl = new PersonalAccount();
+        personalAccountImplementation = address(personalAccountImpl);
 
-    //     xrplAddress1 = "xrplAddress1";
+        // deploy controller base seed using create2
+        // same on all chains
+        bytes memory bytecode = abi.encodePacked(
+            type(MasterAccountControllerBase).creationCode
+        );
+        address seedControllerBase = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
+
+        // deploy controller proxy
+        // same on all chains
+        bytecode = abi.encodePacked(
+            type(MasterAccountControllerProxy).creationCode,
+            abi.encode(
+                seedControllerBase,
+                initialOwner
+            )
+        );
+        address masterAccountControllerProxyAddr = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
+
+        // deploy real controller implementation
+        masterAccountControllerImpl = new MasterAccountController();
+
+        // upgrade controller proxy to real implementation
+        vm.prank(initialOwner);
+        UUPSUpgradeable(masterAccountControllerProxyAddr).upgradeToAndCall(
+            address(masterAccountControllerImpl), bytes("")
+        );
+        masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
+
+        // initialize controller
+        vm.prank(initialOwner);
+        masterAccountController.initialize(
+            payable(executor),
+            executorFee,
+            paymentProofValidityDurationSeconds,
+            defaultInstructionFee,
+            personalAccountImplementation
+        );
+
+        // set swap parameters
+        vm.prank(initialOwner);
+        masterAccountController.setSwapParams(
+            uniswapV3Router,
+            usdt0,
+            wNatUsdt0PoolFeeTierPPM,
+            usdt0FXrpPoolFeeTierPPM,
+            maxSlippagePPM
+        );
+
+        // transfer ownership to governance
+        vm.prank(initialOwner);
+        masterAccountController.transferOwnership(governance);
+
+        _mockGetContractAddressByHash("FdcVerification", fdcVerificationMock);
+        _mockGetContractAddressByHash("AssetManagerFXRP", assetManagerFxrpMock);
+        _mockGetAgentInfo(agent, agentInfo);
+        _mockGetFAsset();
+
+        // add xrpl provider wallets
+        string[] memory xrplProviderWallets = new string[](1);
+        xrplProviderWallets[0] = xrplProviderWallet;
+        vm.prank(governance);
+        masterAccountController.addXrplProviderWallets(xrplProviderWallets);
+
+        // add agent vault
+        uint256[] memory agentVaultIds = new uint256[](1);
+        address[] memory agentVaultAddresses = new address[](1);
+        agentVaultIds[0] = 0;
+        agentVaultAddresses[0] = agent;
+        vm.prank(governance);
+        masterAccountController.addAgentVaults(
+            agentVaultIds,
+            agentVaultAddresses
+        );
+        // add vault
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        vaultIds[0] = 0;
+        vaultAddresses[0] = address(depositVault);
+        vm.prank(governance);
+        masterAccountController.addVaults(vaultIds, vaultAddresses);
+
+        xrplAddress1 = "xrplAddress1";
+        xrplAddress2 = "xrplAddress2";
+    }
+
+    function testUpgrades() public {
+        IPayment.Proof memory proof;
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        proof.data.responseBody.receivedAmount = 1000000;
+        proof.data.responseBody.standardPaymentReference = _encodePaymentReferenceDeposit(12345);
+        _mockVerifyPayment(true);
+
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(
+            predictedAddress1.code.length,
+            0
+        );
+        fxrp.mint(predictedAddress1, 12345);
+
+        vm.expectEmit();
+        emit IPersonalAccount.Approved(
+            address(fxrp),
+            address(depositVault),
+            12345
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        // check that the personal account was created at the expected address
+        assertNotEq(
+            predictedAddress1.code.length,
+            0
+        );
+        assertEq(
+            masterAccountController.getPersonalAccount(xrplAddress1),
+            predictedAddress1
+        );
+        personalAccount1 = IPersonalAccount(predictedAddress1);
+        assertEq(
+            personalAccount1.implementation(),
+            address(personalAccountImpl)
+        );
+        assertEq(
+            personalAccount1.xrplOwner(),
+            xrplAddress1
+        );
+        assertEq(
+            personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
+
+        // change implementation of MasterAccountController
+        assertEq(
+            masterAccountController.controllerImplementation(),
+            address(masterAccountControllerImpl)
+        );
+        MasterAccountController newMasterAccountControllerImpl = new MasterAccountController();
+        vm.prank(governance);
+        masterAccountController.upgradeToAndCall(
+            address(newMasterAccountControllerImpl),
+            bytes("")
+        );
+        assertEq(
+            masterAccountController.controllerImplementation(),
+            address(newMasterAccountControllerImpl)
+        );
+        assertEq(
+            masterAccountController.getPersonalAccount(xrplAddress1),
+            address(personalAccount1)
+        );
+        assertEq(
+            personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
+
+        // deploy a new PersonalAccount implementation
+        PersonalAccount newPersonalAccountImpl = new PersonalAccount();
+
+        // compute address of personal account for xrplAddress2 before implementation change
+        address predictedAddress2 = masterAccountController.getPersonalAccount(xrplAddress2);
+
+        // update PersonalAccount implementation on MasterAccountController
+        vm.prank(governance);
+        masterAccountController.setPersonalAccountImplementation(address(newPersonalAccountImpl));
+        assertEq(
+            masterAccountController.personalAccountImplementation(),
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            masterAccountController.implementation(), // beacon implementation
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            masterAccountController.getPersonalAccount(xrplAddress1),
+            address(personalAccount1)
+        );
+        assertEq(
+            personalAccount1.implementation(),
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            personalAccount1.xrplOwner(),
+            xrplAddress1
+        );
+        assertEq(
+            personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
+
+        // execute transaction for xrplAddress2; new personal account should be created with new implementation
+        // and at the expected address
+        assertEq(
+            predictedAddress2.code.length,
+            0
+        );
+        proof.data.requestBody.transactionId = bytes32("tx2");
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
+        fxrp.mint(predictedAddress2, 12345);
+        masterAccountController.executeInstruction(proof, xrplAddress2);
+        personalAccount2 = IPersonalAccount(masterAccountController.getPersonalAccount(xrplAddress2));
+        // check that the personal account was created at the expected address
+        assertEq(
+            address(personalAccount2),
+            predictedAddress2
+        );
+        assertNotEq(
+            predictedAddress2.code.length,
+            0
+        );
+        // check implementation of the new personal account
+        assertEq(
+            personalAccount2.implementation(),
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            personalAccount2.xrplOwner(),
+            xrplAddress2
+        );
+        assertEq(
+            personalAccount2.controllerAddress(),
+            address(masterAccountController)
+        );
+    }
+
+    //// reserveCollateral tests
+    function testReserveCollateralRevertInvalidInstructionId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(99, 0, 1000, 0);
+        bytes32 transactionId = bytes32("tx1");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidInstructionId.selector,
+                99
+            )
+        );
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
+    function testReserveCollateralRevertInvalidTransactionId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 0);
+        bytes32 transactionId = bytes32(0);
+        vm.expectRevert(IMasterAccountController.InvalidTransactionId.selector);
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
+    function testReserveCollateralRevertInvalidAgentVault() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 1); // agent vault 1 does not exist
+        bytes32 transactionId = bytes32("tx1");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidAgentVault.selector,
+                1
+            )
+        );
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
+    function testReserveCollateralRevertValueZero() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 0, 0); // value 0
+        bytes32 transactionId = bytes32("tx1");
+        vm.expectRevert(IMasterAccountController.ValueZero.selector);
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
+    function testReserveCollateral() public {
+        uint16 lots = 2;
+        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, lots, 0);
+        bytes32 transactionId = bytes32("tx1");
+
+        _mockCollateralReservationFee(lots, 123);
+        _mockReserveCollateral(22);
+
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(predictedAddress1.code.length, 0);
+
+        vm.expectEmit();
+        emit IMasterAccountController.CollateralReserved(
+            predictedAddress1,
+            transactionId,
+            paymentReference,
+            xrplAddress1,
+            22,
+            masterAccountController.agentVaults(0),
+            lots,
+            executor,
+            executorFee
+        );
+        uint256 collateralReservationId = masterAccountController.reserveCollateral{value: 123 + executorFee}(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+        assertEq(collateralReservationId, 22);
+
+        // check that the personal account was created at the expected address
+        assertNotEq(
+            predictedAddress1.code.length,
+            0
+        );
+        assertEq(
+            masterAccountController.getPersonalAccount(xrplAddress1),
+            predictedAddress1
+        );
+
+        assertEq(
+            masterAccountController.collateralReservationIdToTransactionId(collateralReservationId),
+            transactionId
+        );
+    }
+
+    function testExecuteDepositAfterMintingRevertInvalidInstructionId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(99, 0, 1000, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidInstructionId.selector,
+                99
+            )
+        );
+        masterAccountController.executeDepositAfterMinting(0, proof, xrplAddress1);
+    }
+
+    function testExecuteDepositAfterMintingRevertUnknownCollateralReservationId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 1000, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.UnknownCollateralReservationId.selector,
+                0
+            )
+        );
+        masterAccountController.executeDepositAfterMinting(1, proof, xrplAddress1);
+    }
+
+    function testExecuteDepositAfterMintingRevertMintingNotCompleted() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 2, 0);
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        _mockCollateralReservationInfo(CollateralReservationInfo.Status.ACTIVE, predictedAddress1, 0);
+        bytes32 transactionId = bytes32("tx1");
+        testReserveCollateral();
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.requestBody.transactionId = transactionId;
+
+        vm.expectRevert(IMasterAccountController.MintingNotCompleted.selector);
+        masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
+    }
+
+    function testExecuteDepositAfterMintingRevertInvalidMinter() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 2, 0);
+        _mockCollateralReservationInfo(CollateralReservationInfo.Status.SUCCESSFUL, makeAddr("wrongMinter"), 0);
+        bytes32 transactionId = bytes32("tx1");
+        testReserveCollateral();
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.requestBody.transactionId = transactionId;
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = transactionId;
+        _mockVerifyPayment(true);
+        vm.expectRevert(IMasterAccountController.InvalidMinter.selector);
+        masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
+    }
+
+    function testExecuteDepositAfterMintingRevertInvalidAmount() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 2, 0);
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        _mockCollateralReservationInfo(CollateralReservationInfo.Status.SUCCESSFUL, predictedAddress1, 0);
+        bytes32 transactionId = bytes32("tx1");
+        testReserveCollateral();
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.requestBody.transactionId = transactionId;
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = transactionId;
+        _mockVerifyPayment(true);
+        _mockLotSize(100);
+        vm.expectRevert(IMasterAccountController.InvalidAmount.selector);
+        masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
+    }
+
+    function testExecuteDepositAfterMinting() public {
+        uint16 lots = 2;
+        uint256 lotSize = 100;
+        uint8 instructionId = 10;
+        bytes32 paymentReference = _encodeFxrpPaymentReference(instructionId, 0, lots, 0);
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        _mockCollateralReservationInfo(
+            CollateralReservationInfo.Status.SUCCESSFUL,
+            predictedAddress1,
+            lots * lotSize
+        );
+        bytes32 transactionId = bytes32("tx1");
+        testReserveCollateral();
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = transactionId;
+        _mockVerifyPayment(true);
+        _mockLotSize(lotSize);
+
+        // mint what will be deposited
+        fxrp.mint(predictedAddress1, lots * lotSize);
+
+        vm.expectEmit();
+        emit IMasterAccountController.Deposited(
+            predictedAddress1,
+            address(depositVault),
+            lots * lotSize,
+            lots * lotSize // assuming 1:1 initial share:asset for simplicity
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            predictedAddress1,
+            paymentReference,
+            transactionId,
+            xrplAddress1,
+            instructionId
+        );
+        masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionRevertInvalidPaymentAmount() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = -1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidPaymentAmount.selector,
+                defaultInstructionFee
+            )
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee) - 1;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidPaymentAmount.selector,
+                defaultInstructionFee
+            )
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionRevertInvalidTransactionStatus() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 1;
+
+        vm.expectRevert(IMasterAccountController.InvalidTransactionStatus.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionRevertPaymentProofExpired() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = 1234;
+        vm.warp(1234 + paymentProofValidityDurationSeconds + 1);
+
+        vm.expectRevert(IMasterAccountController.PaymentProofExpired.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionRevertMismatchingSourceAndXrplAddr() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes("differentXrplAddress"));
+
+        vm.expectRevert(IMasterAccountController.MismatchingSourceAndXrplAddr.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionInvalidReceivingAddressHash() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = keccak256(bytes("invalidReceivingAddress"));
+
+        vm.expectRevert(IMasterAccountController.InvalidReceivingAddressHash.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionRevertTransactionAlreadyExecuted() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(11, 0, 2, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        _mockVerifyPayment(true);
+        // mint some fXRP to the personal account to cover the deposit
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(predictedAddress1, 2 * defaultInstructionFee);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        vm.expectRevert(IMasterAccountController.TransactionAlreadyExecuted.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionRevertInvalidTransactionProof() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(11, 0, 2, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        _mockVerifyPayment(false);
+
+        vm.expectRevert(IMasterAccountController.InvalidTransactionProof.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionDeposit() public {
+        // mint some fXRP to the personal account to cover the deposit
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(personalAccountAddr, 123);
+        assertEq(fxrp.balanceOf(personalAccountAddr), 123);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(11, 0, 123, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+
+        vm.expectEmit();
+        emit IMasterAccountController.Deposited(
+            personalAccountAddr,
+            address(depositVault),
+            123,
+            123 // assuming 1:1 initial share:asset
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            11
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+        // check that fxrp were deposited into the deposit vault
+        assertEq(
+            depositVault.balanceOf(personalAccountAddr),
+            123
+        );
+        assertEq(
+            fxrp.balanceOf(address(depositVault)),
+            123
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+    }
+
+    function testExecuteInstructionTransfer() public {
+        // mint some fXRP to the personal account
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(personalAccountAddr, 123);
+        address recipient = makeAddr("recipient");
+        bytes32 paymentReference = _encodeFxrpTransferPaymentReference(2, 0, 123, recipient);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            123
+        );
+        assertEq(
+            fxrp.balanceOf(recipient),
+            0
+        );
+
+        vm.expectEmit();
+        emit IMasterAccountController.FXrpTransferred(
+            personalAccountAddr,
+            recipient,
+            123
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            2
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+        assertEq(
+            fxrp.balanceOf(recipient),
+            123
+        );
+    }
+
+    function testExecuteInstructionTransferRevertAddressZero() public {
+        // mint some fXRP to the personal account
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(personalAccountAddr, 123);
+        bytes32 paymentReference = _encodeFxrpTransferPaymentReference(2, 0, 123, address(0));
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+
+        vm.expectRevert(IMasterAccountController.AddressZero.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionRedeemFxrp() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(1, 0, 3, 0);
+        uint256 lotSize = 100;
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+        _mockRedeem(3 * lotSize);
+
+        vm.expectEmit();
+        emit IMasterAccountController.FXrpRedeemed(
+            personalAccountAddr,
+            3,
+            3 * lotSize,
+            executor,
+            executorFee
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            1
+        );
+        masterAccountController.executeInstruction{value: executorFee} (proof, xrplAddress1);
+
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+    }
+
+    function testExecuteInstructionRedeem() public {
+        // deposit 123 fXRP to the personal account
+        testExecuteInstructionDeposit();
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(
+            depositVault.balanceOf(personalAccountAddr),
+            123
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+        bytes32 paymentReference = _encodeFirelightPaymentReference(12, 0, 100, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx2");
+        _mockVerifyPayment(true);
+
+        vm.expectEmit();
+        emit IMasterAccountController.Redeemed(
+            personalAccountAddr,
+            address(depositVault),
+            100,
+            100 // assuming 1:1 share:asset for simplicity
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            12
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        assertEq(
+            depositVault.balanceOf(personalAccountAddr),
+            23 // 123 - 100 redeemed
+        );
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, 1),
+            100
+        );
+    }
+
+    function testExecuteInstructionClaimWithdraw() public {
+        uint16 period = 1;
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        testExecuteInstructionRedeem();
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            100
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+
+        bytes32 paymentReference = _encodeFirelightPaymentReference(13, 0, period, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx3");
+        _mockVerifyPayment(true);
+
+        vm.expectEmit();
+        emit IMasterAccountController.WithdrawalClaimed(
+            personalAccountAddr,
+            address(depositVault),
+            period,
+            100
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            13
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            0
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            100
+        );
+    }
+
+    function testExecuteInstructionClaimWithdrawAndRedeem() public {
+        uint16 period = 1;
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        testExecuteInstructionRedeem();
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            100
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+
+        bytes32 paymentReference = _encodeFirelightPaymentReference(14, 0, period, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx3");
+        _mockVerifyPayment(true);
+        _mockLotSize(100);
+        _mockRedeem(100);
+
+        vm.expectEmit();
+        emit IMasterAccountController.WithdrawalClaimed(
+            personalAccountAddr,
+            address(depositVault),
+            period,
+            100
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.FXrpRedeemed(
+            personalAccountAddr,
+            1,
+            100,
+            executor,
+            executorFee
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            14
+        );
+        masterAccountController.executeInstruction{value: defaultInstructionFee}(proof, xrplAddress1);
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            0
+        );
+    }
+
+    function testExecuteInstructionClaimWithdrawAndRedeemRevert() public {
+        // if amount < 1 lot, it will revert on FAssets side
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        testExecuteInstructionRedeem();
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, 1),
+            100
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+
+        uint16 period = 1;
+        bytes32 paymentReference = _encodeFirelightPaymentReference(14, 0, period, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx3");
+        _mockVerifyPayment(true);
+        _mockLotSize(101);
+        bytes4 errorSelector = bytes4(keccak256("RedeemZeroLots()"));
+        vm.mockCallRevert(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(IAssetManager.redeem.selector),
+            abi.encodePacked(errorSelector)
+        );
+
+        vm.expectRevert(errorSelector);
+        masterAccountController.executeInstruction{value: defaultInstructionFee}(proof, xrplAddress1);
+    }
+
+    function testExecuteInstructionRequestRedeem() public {
+        // deposit 123 fXRP to the personal account
+        testExecuteInstructionDeposit();
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(
+            depositVault.balanceOf(personalAccountAddr),
+            123
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(22, 0, 100, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx2");
+        _mockVerifyPayment(true);
+
+        vm.expectEmit();
+        emit IMasterAccountController.RedeemRequested(
+            personalAccountAddr,
+            address(depositVault),
+            100,
+            100,
+            1 // for test purposes
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            22
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        assertEq(
+            depositVault.balanceOf(personalAccountAddr),
+            23 // 123 - 100 redeemed
+        );
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            100
+        );
+    }
+
+    function testExecuteInstructionClaim() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        testExecuteInstructionRedeem();
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            100
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(23, 0, 20250913, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx3");
+        _mockVerifyPayment(true);
+
+        vm.expectEmit();
+        emit IMasterAccountController.Claimed(
+            personalAccountAddr,
+            address(depositVault),
+            2025,
+            9,
+            13,
+            100,
+            100
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            13
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            0
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            100
+        );
+    }
+
+    function testExecuteInstructionClaimAndRedeem() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        testExecuteInstructionRedeem();
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            100
+        );
+
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(24, 0, 20250913, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx3");
+        _mockVerifyPayment(true);
+        _mockLotSize(100);
+        _mockRedeem(100);
+
+        // vm.expectEmit();
+        emit IMasterAccountController.Claimed(
+            personalAccountAddr,
+            address(depositVault),
+            2025,
+            9,
+            13,
+            100,
+            100
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.FXrpRedeemed(
+            personalAccountAddr,
+            1,
+            100,
+            executor,
+            executorFee
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            24
+        );
+        masterAccountController.executeInstruction{value: defaultInstructionFee}(proof, xrplAddress1);
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            0
+        );
+    }
+
+    function testExecuteInstructionRevertInvalidId() public {
+         bytes32 paymentReference = _encodeUpshiftPaymentReference(255, 0, 20250913, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx3");
+        _mockVerifyPayment(true);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidInstructionId.selector,
+                255
+            )
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testSetExecutor(address _executor) public {
+        (address returnedExecutor,) = masterAccountController.getExecutorInfo();
+        assertEq(returnedExecutor, executor);
+        vm.assume(_executor != address(0));
+        vm.prank(governance);
+        masterAccountController.setExecutor(payable(_executor));
+        (address newExecutor,) = masterAccountController.getExecutorInfo();
+        assertEq(newExecutor, _executor);
+    }
+
+    function testSetExecutorRevertOnlyOwner() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.setExecutor(payable(makeAddr("newExecutor")));
+    }
+
+    function testSetExecutorRevertAddressZero() public {
+        vm.expectRevert(IMasterAccountController.InvalidExecutor.selector);
+        vm.prank(governance);
+        masterAccountController.setExecutor(payable(address(0)));
+    }
+
+    function testSetExecutorFee(uint256 _fee) public {
+        vm.assume(_fee > 0);
+        (, uint256 returnedFee) = masterAccountController.getExecutorInfo();
+        assertEq(returnedFee, executorFee);
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IMasterAccountController.ExecutorFeeSet(_fee);
+        masterAccountController.setExecutorFee(_fee);
+        (, uint256 newFee) = masterAccountController.getExecutorInfo();
+        assertEq(newFee, _fee);
+    }
+
+    function testSetExecutorFeeRevertOnlyOwner() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.setExecutorFee(5000);
+    }
+
+    function testSetExecutorFeeRevertInvalidFee() public {
+        vm.expectRevert(IMasterAccountController.InvalidExecutorFee.selector);
+        vm.prank(governance);
+        masterAccountController.setExecutorFee(0);
+    }
+
+    function testSetPaymentProofValidityDuration(uint256 _duration) public {
+        assertEq(
+            masterAccountController.paymentProofValidityDurationSeconds(),
+            paymentProofValidityDurationSeconds
+        );
+        vm.prank(governance);
+        vm.assume(_duration > 0);
+        vm.expectEmit();
+        emit IMasterAccountController.PaymentProofValidityDurationSecondsSet(_duration);
+        masterAccountController.setPaymentProofValidityDuration(_duration);
+        assertEq(
+            masterAccountController.paymentProofValidityDurationSeconds(),
+            _duration
+        );
+    }
+
+    function testSetPaymentProofValidityDurationRevertOnlyOwner() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.setPaymentProofValidityDuration(1000);
+    }
+
+    function testSetPaymentProofValidityDurationRevertInvalidDuration() public {
+        vm.expectRevert(IMasterAccountController.InvalidPaymentProofValidityDuration.selector);
+        vm.prank(governance);
+        masterAccountController.setPaymentProofValidityDuration(0);
+    }
+
+    function testSetDefaultInstructionFee(uint128 _fee) public {
+        assertEq(
+            masterAccountController.defaultInstructionFee(),
+            defaultInstructionFee
+        );
+        vm.prank(governance);
+        vm.assume(_fee > 0);
+        vm.expectEmit();
+        emit IMasterAccountController.DefaultInstructionFeeSet(_fee);
+        masterAccountController.setDefaultInstructionFee(_fee);
+        assertEq(
+            masterAccountController.defaultInstructionFee(),
+            _fee
+        );
+    }
+
+    function testSetDefaultInstructionFeeRevertOnlyOwner(uint128 _fee) public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.setDefaultInstructionFee(_fee);
+    }
+
+    function testSetInstructorFees() public {
+        assertEq(
+            masterAccountController.getInstructionFee(11),
+            defaultInstructionFee
+        );
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(personalAccountAddr, 123);
+        assertEq(fxrp.balanceOf(personalAccountAddr), 123);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(11, 0, 10, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee); // default fee
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            113
+        );
+
+        // change fees
+        uint256[] memory instructionIds = new uint256[](2);
+        instructionIds[0] = 11;
+        instructionIds[1] = 12;
+        uint256[] memory newFees = new uint256[](2);
+        uint256 newFee = 2 * 1e6; // 2 FXRP
+        newFees[0] = newFee;
+        newFees[1] = 2 * newFee;
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionFeeSet(instructionIds[0], newFees[0]);
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionFeeSet(instructionIds[1], newFees[1]);
+        masterAccountController.setInstructionFees(instructionIds, newFees);
+        assertEq(
+            masterAccountController.getInstructionFee(11),
+            2 * 1e6
+        );
+
+        // send tx with old fee - should revert
+        proof.data.requestBody.transactionId = bytes32("tx2");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidPaymentAmount.selector,
+                newFee
+            )
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        // send tx with new fee - should pass
+        proof.data.requestBody.transactionId = bytes32("tx3");
+        proof.data.responseBody.receivedAmount = int256(newFee);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+        assertEq(fxrp.balanceOf(personalAccountAddr), 103);
+    }
+
+    function testSetInstructionFeesRevertOnlyOwner() public {
+        uint256[] memory instructionIds = new uint256[](1);
+        instructionIds[0] = 11;
+        uint256[] memory newFees = new uint256[](1);
+        newFees[0] = 2 * 1e6;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.setInstructionFees(instructionIds, newFees);
+    }
+
+    function testSetInstructionFeesRevertLengthsMismatch() public {
+        uint256[] memory instructionIds = new uint256[](2);
+        instructionIds[0] = 11;
+        instructionIds[1] = 12;
+        uint256[] memory newFees = new uint256[](1);
+        newFees[0] = 2 * 1e6;
+        vm.prank(governance);
+        vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
+        masterAccountController.setInstructionFees(instructionIds, newFees);
+    }
+
+    function testRemoveInstructionFees() public {
+        assertEq(
+            masterAccountController.getInstructionFee(11),
+            defaultInstructionFee
+        );
+        // set custom fee
+        uint256[] memory instructionIds = new uint256[](1);
+        instructionIds[0] = 11;
+        uint256[] memory newFees = new uint256[](1);
+        uint256 newFee = 2 * 1e6; // 2 FXRP
+        newFees[0] = newFee;
+        vm.prank(governance);
+        masterAccountController.setInstructionFees(instructionIds, newFees);
+        assertEq(
+            masterAccountController.getInstructionFee(11),
+            newFee
+        );
+
+        // remove custom fee
+        vm.prank(governance);
+        masterAccountController.removeInstructionFees(instructionIds);
+        assertEq(
+            masterAccountController.getInstructionFee(11),
+            defaultInstructionFee
+        );
+    }
+
+    function testRemoveInstructionFeesRevertOnlyOwner() public {
+        uint256[] memory instructionIds = new uint256[](1);
+        instructionIds[0] = 11;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.removeInstructionFees(instructionIds);
+    }
+
+    function testAddXrplProviderWallets() public {
+        string memory newWalet = "newXrplWallet";
+        assertEq(
+            masterAccountController.getXrplProviderWallets().length,
+            1
+        );
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(personalAccountAddr, 123);
+        // assertFalse(masterAccountController.isXrplProviderWallet(newWalet));
+        // make tx with new wallet as receiving address - should revert
+        bytes32 paymentReference = _encodeFirelightPaymentReference(11, 0, 123, 0, 0);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = keccak256(bytes(newWalet));
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+
+        vm.expectRevert(IMasterAccountController.InvalidReceivingAddressHash.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        // add new wallet
+        string[] memory newWallets = new string[](2);
+        newWallets[0] = newWalet;
+        newWallets[1] = "newWallet2";
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IMasterAccountController.XrplProviderWalletAdded(newWallets[0]);
+        vm.expectEmit();
+        emit IMasterAccountController.XrplProviderWalletAdded(newWallets[1]);
+        masterAccountController.addXrplProviderWallets(newWallets);
+        assertEq(
+            masterAccountController.getXrplProviderWallets().length,
+            3
+        );
+
+        // try the tx again - should pass now
+        proof.data.requestBody.transactionId = bytes32("tx2");
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testAddXrplProviderWalletsRevertOnlyOwner() public {
+        string[] memory newWallets = new string[](1);
+        newWallets[0] = "newXrplWallet";
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.addXrplProviderWallets(newWallets);
+    }
+
+    function testAddXrplProviderWalletsRevertInvalidXrplProviderWallet() public {
+        string[] memory newWallets = new string[](2);
+        newWallets[1] = ""; // invalid
+        newWallets[0] = "newWallet2";
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidXrplProviderWallet.selector,
+                newWallets[1]
+            )
+        );
+        masterAccountController.addXrplProviderWallets(newWallets);
+    }
+
+    function testAddXrplProviderWalletsRevertXrplProviderWalletAlreadyExists() public {
+        string[] memory newWallets = new string[](1);
+        newWallets[0] = xrplProviderWallet; // already exists
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.XrplProviderWalletAlreadyExists.selector,
+                newWallets[0]
+            )
+        );
+        masterAccountController.addXrplProviderWallets(newWallets);
+    }
+
+    function testRemoveXrplProviderWallets() public {
+        assertEq(
+            masterAccountController.getXrplProviderWallets().length,
+            1
+        );
+        // remove existing wallet
+        string[] memory walletsToRemove = new string[](1);
+        walletsToRemove[0] = xrplProviderWallet;
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IMasterAccountController.XrplProviderWalletRemoved(walletsToRemove[0]);
+        masterAccountController.removeXrplProviderWallets(walletsToRemove);
+        assertEq(
+            masterAccountController.getXrplProviderWallets().length,
+            0
+        );
+    }
+
+    // remove non-last wallet
+    function testRemoveXrplProviderWallets2() public {
+        testAddXrplProviderWallets();
+
+        // remove first wallet
+        string[] memory walletsToRemove = new string[](1);
+        walletsToRemove[0] = xrplProviderWallet;
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IMasterAccountController.XrplProviderWalletRemoved(walletsToRemove[0]);
+        masterAccountController.removeXrplProviderWallets(walletsToRemove);
+        assertEq(
+            masterAccountController.getXrplProviderWallets().length,
+            2
+        );
+    }
+
+    function testAddAgentVaults() public {
+        uint256[] memory ids = new uint256[](2);
+        address[] memory addresses = new address[](2);
+        ids[0] = 1;
+        addresses[0] = makeAddr("agentVault1");
+        ids[1] = 2;
+        addresses[1] = makeAddr("agentVault2");
+
+        agentInfo.status = AgentInfo.Status.NORMAL;
+        _mockGetAgentInfo(addresses[0], agentInfo);
+        _mockGetAgentInfo(addresses[1], agentInfo);
+
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IMasterAccountController.AgentVaultAdded(1, addresses[0]);
+        vm.expectEmit();
+        emit IMasterAccountController.AgentVaultAdded(2, addresses[1]);
+        masterAccountController.addAgentVaults(ids, addresses);
+
+        (uint256[] memory returnedIds, address[] memory addrs) = masterAccountController.getAgentVaults();
+        assertEq(returnedIds.length, 3);
+        assertEq(returnedIds[0], 0);
+        assertEq(returnedIds[1], 1);
+        assertEq(returnedIds[2], 2);
+        assertEq(addrs[0], agent);
+        assertEq(addrs[1], addresses[0]);
+        assertEq(addrs[2], addresses[1]);
+    }
+
+    function testAddAgentVaultsRevertOnlyOwner() public {
+        uint256[] memory ids = new uint256[](1);
+        address[] memory addresses = new address[](1);
+        ids[0] = 1;
+        addresses[0] = makeAddr("agentVault1");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.addAgentVaults(ids, addresses);
+    }
+
+    function testAddAgentVaultsRevertLengthsMismatch() public {
+        uint256[] memory ids = new uint256[](2);
+        address[] memory addresses = new address[](1);
+        ids[0] = 1;
+        ids[1] = 2;
+        addresses[0] = makeAddr("agentVault1");
+
+        vm.prank(governance);
+        vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
+        masterAccountController.addAgentVaults(ids, addresses);
+    }
+
+    function testAddAgentVaultsRevertZeroLength() public {
+        uint256[] memory ids = new uint256[](0);
+        address[] memory addresses = new address[](0);
+
+        vm.prank(governance);
+        // vm.expectRevert(IMasterAccountController.NoAgentVaults.selector);
+        masterAccountController.addAgentVaults(ids, addresses);
+    }
+
+    function testAddAgentVaultsRevertAgentVaultIdAlreadyUsed() public {
+        uint256[] memory ids = new uint256[](1);
+        address[] memory addresses = new address[](1);
+        ids[0] = 1;
+        addresses[0] = makeAddr("agentVault1");
+
+        agentInfo.status = AgentInfo.Status.NORMAL;
+        _mockGetAgentInfo(addresses[0], agentInfo);
+        vm.prank(governance);
+        masterAccountController.addAgentVaults(ids, addresses);
+
+        // try to add again
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.AgentVaultIdAlreadyUsed.selector,
+                1
+            )
+        );
+        masterAccountController.addAgentVaults(ids, addresses);
+    }
+
+    function testAddAgentVaultsRevertInvalidAgentVault() public {
+        uint256[] memory ids = new uint256[](2);
+        address[] memory addresses = new address[](2);
+        ids[1] = 1;
+        addresses[1] = address(0); // invalid
+        ids[0] = 2;
+        addresses[0] = makeAddr("agentVault2");
+
+        agentInfo.status = AgentInfo.Status.NORMAL;
+        _mockGetAgentInfo(addresses[0], agentInfo);
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidAgentVault.selector,
+                1
+            )
+        );
+        masterAccountController.addAgentVaults(ids, addresses);
+    }
+
+    function testAddAgentVaultsRevertAgentNotAvailable() public {
+        uint256[] memory ids = new uint256[](2);
+        address[] memory addresses = new address[](2);
+        ids[1] = 1;
+        addresses[1] = makeAddr("agentVault1");
+        ids[0] = 2;
+        addresses[0] = makeAddr("agentVault2");
+
+        agentInfo.status = AgentInfo.Status.LIQUIDATION;
+        _mockGetAgentInfo(addresses[1], agentInfo);
+        agentInfo.status = AgentInfo.Status.NORMAL;
+        _mockGetAgentInfo(addresses[0], agentInfo);
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.AgentNotAvailable.selector,
+                addresses[1]
+            )
+        );
+        masterAccountController.addAgentVaults(ids, addresses);
+    }
+
+    function testRemoveAgentVaults() public {
+        testAddAgentVaults();
+        (uint256[] memory returnedIds, address[] memory addrs) = masterAccountController.getAgentVaults();
+        assertEq(returnedIds.length, 3);
+
+        // remove first added agent vault
+        uint256[] memory idsToRemove = new uint256[](1);
+        idsToRemove[0] = 0;
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IMasterAccountController.AgentVaultRemoved(0, agent);
+        masterAccountController.removeAgentVaults(idsToRemove);
+
+        (returnedIds, addrs) = masterAccountController.getAgentVaults();
+        assertEq(returnedIds.length, 2);
+        assertEq(returnedIds[0], 2);
+        assertEq(returnedIds[1], 1);
+        assertEq(addrs[0], makeAddr("agentVault2"));
+        assertEq(addrs[1], makeAddr("agentVault1"));
+    }
+
+    function testRemoveAgentVaultsRevertOnlyOwner() public {
+        uint256[] memory idsToRemove = new uint256[](1);
+        idsToRemove[0] = 0;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.removeAgentVaults(idsToRemove);
+    }
+
+    function testRemoveAgentVaultsRevertInvalidAgentVault() public {
+        uint256[] memory idsToRemove = new uint256[](1);
+        idsToRemove[0] = 1;
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidAgentVault.selector,
+                1
+            )
+        );
+        masterAccountController.removeAgentVaults(idsToRemove);
+    }
+
+    function testAddVaults() public {
+        uint256[] memory vaultIds = new uint256[](2);
+        address[] memory vaultAddresses = new address[](2);
+        vaultIds[0] = 1;
+        vaultIds[1] = 2;
+        vaultAddresses[0] = makeAddr("vault1");
+        vaultAddresses[1] = makeAddr("vault2");
+
+        vm.expectEmit();
+        emit IMasterAccountController.VaultAdded(1, vaultAddresses[0]);
+        vm.expectEmit();
+        emit IMasterAccountController.VaultAdded(2, vaultAddresses[1]);
+        vm.prank(governance);
+        masterAccountController.addVaults(vaultIds, vaultAddresses);
+
+        (uint256[] memory returnedIds, address[] memory addrs) = masterAccountController.getVaults();
+        assertEq(returnedIds.length, 3);
+        assertEq(returnedIds[0], 0);
+        assertEq(returnedIds[1], 1);
+        assertEq(returnedIds[2], 2);
+        assertEq(addrs[0], address(depositVault));
+        assertEq(addrs[1], vaultAddresses[0]);
+        assertEq(addrs[2], vaultAddresses[1]);
+    }
+
+    function testAddVaultsRevertOnlyOwner() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        vaultIds[0] = 1;
+        vaultAddresses[0] = makeAddr("vault1");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.addVaults(vaultIds, vaultAddresses);
+    }
+
+    function testAddVaultsRevertInvalidVault() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        vaultIds[0] = 1;
+        vaultAddresses[0] = address(0); // invalid
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidVault.selector,
+                1
+            )
+        );
+        masterAccountController.addVaults(vaultIds, vaultAddresses);
+    }
+
+    function testAddVaultsRevertLengthsMismatch() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](2);
+        vaultIds[0] = 1;
+        vaultAddresses[0] = makeAddr("vault1");
+        vaultAddresses[1] = makeAddr("vault2");
+
+        vm.prank(governance);
+        vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
+        masterAccountController.addVaults(vaultIds, vaultAddresses);
+    }
+
+    function testAddVaultsRevertVaultIdAlreadyUsed() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        vaultIds[0] = 0; // already used
+        vaultAddresses[0] = makeAddr("vault1");
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.VaultIdAlreadyUsed.selector,
+                0
+            )
+        );
+        masterAccountController.addVaults(vaultIds, vaultAddresses);
+    }
+
+    function testSetPersonalAccountImplementation(address _newImplementation) public {
+        assertEq(masterAccountController.personalAccountImplementation(), personalAccountImplementation);
+        vm.prank(governance);
+        vm.assume(_newImplementation != address(0));
+        vm.expectEmit();
+        emit IMasterAccountController.PersonalAccountImplementationSet(_newImplementation);
+        masterAccountController.setPersonalAccountImplementation(_newImplementation);
+        assertEq(masterAccountController.personalAccountImplementation(), _newImplementation);
+    }
+
+    function testSetPersonalAccountImplementationRevertOnlyOwner() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.setPersonalAccountImplementation(makeAddr("newImplementation"));
+    }
+
+    function testSetPersonalAccountImplementationRevertInvalidPersonalAccountImplementation() public {
+        vm.expectRevert(IMasterAccountController.InvalidPersonalAccountImplementation.selector);
+        vm.prank(governance);
+        masterAccountController.setPersonalAccountImplementation(address(0));
+    }
+
+    function testSetSwapParams() public {
+        address router = makeAddr("router");
+        address newUsdt0 = makeAddr("newUsdt0");
+        uint24 wnatusdtFee = 500;
+        uint24 usdt0fxrpFee = 3000;
+        uint24 maxSlippageBps = 100;
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IMasterAccountController.SwapParamsSet(
+            router,
+            newUsdt0,
+            wnatusdtFee,
+            usdt0fxrpFee,
+            maxSlippageBps
+        );
+        masterAccountController.setSwapParams(
+            router,
+            newUsdt0,
+            wnatusdtFee,
+            usdt0fxrpFee,
+            maxSlippageBps
+        );
+        (
+            address returnedRouter,
+            address returnedUsdt0,
+            uint24 returnedWnatusdtFee,
+            uint24 returnedUsdt0fxrpFee,
+            uint24 returnedMaxSlippageBps
+        ) = masterAccountController.getSwapParams();
+        assertEq(returnedRouter, router);
+        assertEq(returnedUsdt0, newUsdt0);
+        assertEq(returnedWnatusdtFee, wnatusdtFee);
+        assertEq(returnedUsdt0fxrpFee, usdt0fxrpFee);
+        assertEq(returnedMaxSlippageBps, maxSlippageBps);
+    }
+
+    function testSetSwapParamsRevertOnlyOwner() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        masterAccountController.setSwapParams(
+            makeAddr("router"),
+            makeAddr("usdt0"),
+            500,
+            3000,
+            100
+        );
+    }
+
+    function testSwapParamsRevertInvalidUniswapV3Router() public {
+        vm.expectRevert(IMasterAccountController.InvalidUniswapV3Router.selector);
+        vm.prank(governance);
+        masterAccountController.setSwapParams(
+            address(0),
+            makeAddr("usdt0"),
+            500,
+            3000,
+            100
+        );
+    }
+
+    function testSwapParamsRevertInvalidPoolFeeTierPPM1() public {
+        vm.expectRevert(IMasterAccountController.InvalidPoolFeeTierPPM.selector);
+        vm.prank(governance);
+        masterAccountController.setSwapParams(
+            makeAddr("router"),
+            makeAddr("usdt0"),
+            200,
+            3000,
+            100
+        );
+    }
+
+    function testSwapParamsRevertInvalidPoolFeeTierPPM2() public {
+        vm.expectRevert(IMasterAccountController.InvalidPoolFeeTierPPM.selector);
+        vm.prank(governance);
+        masterAccountController.setSwapParams(
+            makeAddr("router"),
+            makeAddr("usdt0"),
+            500,
+            7000,
+            100
+        );
+    }
+
+    function testSwapParamsRevertInvalidUsdt0() public {
+        vm.expectRevert(IMasterAccountController.InvalidUsdt0.selector);
+        vm.prank(governance);
+        masterAccountController.setSwapParams(
+            makeAddr("router"),
+            address(0),
+            500,
+            3000,
+            100
+        );
+    }
+
+    function testCreatePersonalAccountRevertPersonalAccountNotSuccessfullyDeployed() public {
+        MockSingletonFactoryNoDeploy mockFactoryNoDeploy = new MockSingletonFactoryNoDeploy();
+        vm.etch(SINGLETON_FACTORY, address(mockFactoryNoDeploy).code);
+
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(personalAccountAddr, 123);
+        assertEq(fxrp.balanceOf(personalAccountAddr), 123);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(11, 0, 123, 0, 1);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.PersonalAccountNotSuccessfullyDeployed.selector,
+                personalAccountAddr
+            )
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testGetVaultAddressRevertInvalidVault() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(personalAccountAddr, 123);
+        assertEq(fxrp.balanceOf(personalAccountAddr), 123);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(11, 0, 123, 0, 1);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMasterAccountController.InvalidVault.selector,
+                1
+            )
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    // function testSwapWNatForUsdt0() public {
+    //     _mockGetContractAddressByHash("WNat", wNatMock);
+    //     masterAccountController.swapWNatForUsdt0(xrplAddress1);
     // }
 
-    // function _mockGetContractAddressByHash(
-    //     string memory name,
-    //     address addr
-    // ) private {
-    //     vm.mockCall(
-    //         contractRegistryMock,
-    //         abi.encodeWithSelector(
-    //             IFlareContractRegistry.getContractAddressByHash.selector,
-    //             keccak256(abi.encode(name))
-    //         ),
-    //         abi.encode(addr)
-    //     );
-    // }
+    //// helper functions ////
+    function _mockGetAgentInfo(
+        address agentAddress,
+        AgentInfo.Info memory info
+    )
+        private
+    {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.getAgentInfo.selector,
+                agentAddress
+            ),
+            abi.encode(info)
+        );
+    }
 
-    // function _mockVerifyPayment(bool _result) private {
-    //     vm.mockCall(
-    //         fdcVerificationMock,
-    //         abi.encodeWithSelector(IPaymentVerification.verifyPayment.selector),
-    //         abi.encode(_result)
-    //     );
-    // }
+    function _mockGetFAsset()
+        private
+    {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.fAsset.selector
+            ),
+            abi.encode(fxrp)
+        );
+    }
 
-    // function _mockGetAgentInfo(
-    //     address agentAddress,
-    //     AgentInfo.Info memory info
-    // ) private {
-    //     vm.mockCall(
-    //         assetManagerFxrpMock,
-    //         abi.encodeWithSelector(
-    //             IAssetManager.getAgentInfo.selector,
-    //             agentAddress
-    //         ),
-    //         abi.encode(info)
-    //     );
-    // }
+    function _mockGetContractAddressByHash(
+        string memory name,
+        address addr
+    )
+        private
+    {
+        vm.mockCall(
+            contractRegistryMock,
+            abi.encodeWithSelector(
+                IFlareContractRegistry.getContractAddressByHash.selector,
+                keccak256(abi.encode(name))
+            ),
+            abi.encode(addr)
+        );
+    }
+
+    function _mockVerifyPayment(bool _result) private {
+        vm.mockCall(
+            fdcVerificationMock,
+            abi.encodeWithSelector(IPaymentVerification.verifyPayment.selector),
+            abi.encode(_result)
+        );
+    }
+
+    function _mockReserveCollateral(uint256 _reservationId) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.reserveCollateral.selector
+            ),
+            abi.encode(_reservationId)
+        );
+    }
+
+    function _mockCollateralReservationFee(uint256 _lots, uint256 _fee) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.collateralReservationFee.selector,
+                _lots
+            ),
+            abi.encode(_fee)
+        );
+    }
+
+    function _mockCollateralReservationInfo(
+        CollateralReservationInfo.Status _status,
+        address _minter,
+        uint256 _valueUBA
+    )
+        private
+    {
+        CollateralReservationInfo.Data memory info;
+        info.status = _status;
+        info.minter = _minter;
+        info.valueUBA = _valueUBA;
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.collateralReservationInfo.selector
+            ),
+            abi.encode(info)
+        );
+    }
+
+    function _mockLotSize(uint256 _lotSize) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.lotSize.selector
+            ),
+            abi.encode(_lotSize)
+        );
+    }
+
+    function _mockRedeem(uint256 _amount) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(
+                IAssetManager.redeem.selector
+            ),
+            abi.encode(_amount)
+        );
+    }
+
+    function _encodePaymentReferenceDeposit(
+        uint128 amount
+    )
+        private pure
+        returns (bytes32)
+    {
+        // Place instructionId in the highest 8 bits, skip wallet identifier and put amount in the next 80 bits
+        return bytes32((uint256(11) << 248) | (uint256(amount) << 160));
+    }
+
+    // FXRP payment reference (32 bytes)
+    function _encodeFxrpPaymentReference(
+        uint8 _instructionId,
+        uint8 _walletId,
+        uint128 _value,
+        uint16 _agentVaultId
+    ) private pure returns (bytes32) {
+        return
+            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(_walletId)) << 240) |
+            (bytes32(uint256(_value)) << 160) |
+            (bytes32(uint256(_agentVaultId)) << 144);
+        // bytes 14-31 are zero (future use)
+    }
+
+    function _encodeFxrpTransferPaymentReference(
+        uint8 _instructionId,
+        uint8 _walletId,
+        uint128 _value,
+        address _recipient
+    ) private pure returns (bytes32) {
+        return
+            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(_walletId)) << 240) |
+            (bytes32(uint256(_value)) << 160) |
+            (bytes32(uint256(uint160(_recipient))));
+        // bytes 12-31: recipient address (20 bytes)
+    }
+
+    // Firelight vaults payment reference (32 bytes)
+    function _encodeFirelightPaymentReference(
+        uint8 _instructionId,
+        uint8 _walletId,
+        uint128 _value,
+        uint16 _agentVaultId,
+        uint16 _vaultId
+    ) private pure returns (bytes32) {
+        return
+            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(_walletId)) << 240) |
+            (bytes32(uint256(_value)) << 160) |
+            (bytes32(uint256(_agentVaultId)) << 144) |
+            (bytes32(uint256(_vaultId)) << 128);
+        // bytes 16-31 are zero (future use)
+    }
+
+    // Upshift vaults payment reference (32 bytes)
+    function _encodeUpshiftPaymentReference(
+        uint8 _instructionId,
+        uint8 _walletId,
+        uint128 _value,
+        uint16 _agentVaultId,
+        uint16 _vaultId
+    ) private pure returns (bytes32) {
+        return
+            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(_walletId)) << 240) |
+            (bytes32(uint256(_value)) << 160) |
+            (bytes32(uint256(_agentVaultId)) << 144) |
+            (bytes32(uint256(_vaultId)) << 128);
+        // bytes 16-31 are zero (future use)
+    }
 }

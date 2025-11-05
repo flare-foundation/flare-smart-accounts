@@ -14,9 +14,9 @@ contract MyERC4626 is ERC4626 {
     /// @notice The duration of the time-lock for withdrawals (in seconds).
     uint256 public lagDuration;
 
-    mapping(address receiverAddr => mapping(uint256 period => uint256 assets)) private pendingWithdrawAssets;
-    mapping(address receiverAddr => mapping(uint256 period => uint256 shares)) private pendingWithdrawShares;
-    mapping(address receiverAddr => mapping(uint256 period => uint256 timestamp)) private requestTimestamps;
+    mapping(address receiverAddr => mapping(uint256 period => uint256 assets)) public pendingWithdrawAssets;
+    mapping(address receiverAddr => mapping(uint256 period => uint256 shares)) public pendingWithdrawShares;
+    mapping(address receiverAddr => mapping(uint256 period => uint256 timestamp)) public requestTimestamps;
 
     event WithdrawRequest(
         address indexed sender,
@@ -56,7 +56,6 @@ contract MyERC4626 is ERC4626 {
     /// @param baseAsset_ base asset address - FXRP
     /// @param name_ base asset name
     /// @param symbol_ base asset symbol
-    /// @param lagDuration_ lag duration for withdrawals (in seconds)
     constructor(
         IERC20 baseAsset_,
         string memory name_,
@@ -84,7 +83,7 @@ contract MyERC4626 is ERC4626 {
     {
         _assets = redeem(_shares, _receiver, _owner);
         // The time slot (cluster) of the lagged withdrawal
-        (year, month, day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
+        (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
 
         // The withdrawal will be processed at the following epoch
         _claimableEpoch = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0);
@@ -107,11 +106,11 @@ contract MyERC4626 is ERC4626 {
         if (lagDuration > 0) {
             // Make sure withdrawals are processed at the expected epoch only.
             require(
-                block.timestamp >= DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0),
+                block.timestamp >= DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0),
                 "Too early"
             );
         }
-        uint256 period = _getPeriodFromDate(year, month, day);
+        uint256 period = _getPeriodFromDate(_year, _month, _day);
         uint256 requestTs;
         (_shares, _assets, requestTs) = _completeWithdraw(_receiverAddr, period);
         emit WithdrawalProcessed(_assets, block.timestamp, _receiverAddr, requestTs, false);
