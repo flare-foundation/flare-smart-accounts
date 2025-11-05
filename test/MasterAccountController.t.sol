@@ -880,6 +880,9 @@ contract MasterAccountControllerTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx3");
         _mockVerifyPayment(true);
 
+        // move to the end of the period (to period 2)
+        vm.warp(block.timestamp + 1 days);
+
         vm.expectEmit();
         emit IMasterAccountController.WithdrawalClaimed(
             personalAccountAddr,
@@ -932,6 +935,9 @@ contract MasterAccountControllerTest is Test {
         _mockVerifyPayment(true);
         _mockLotSize(100);
         _mockRedeem(100);
+
+        // move to the end of the period (to period 2)
+        vm.warp(block.timestamp + 1 days);
 
         vm.expectEmit();
         emit IMasterAccountController.WithdrawalClaimed(
@@ -988,6 +994,10 @@ contract MasterAccountControllerTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx3");
         _mockVerifyPayment(true);
         _mockLotSize(101);
+
+        // move to the end of the period (to period 2)
+        vm.warp(block.timestamp + 1 days);
+
         bytes4 errorSelector = bytes4(keccak256("RedeemZeroLots()"));
         vm.mockCallRevert(
             assetManagerFxrpMock,
@@ -1022,13 +1032,14 @@ contract MasterAccountControllerTest is Test {
         proof.data.requestBody.transactionId = bytes32("tx2");
         _mockVerifyPayment(true);
 
+        uint256 claimableEpoch = 1; // epoch length is 1 day
         vm.expectEmit();
         emit IMasterAccountController.RedeemRequested(
             personalAccountAddr,
             address(depositVault),
             100,
             100,
-            1 // for test purposes
+            claimableEpoch
         );
         vm.expectEmit();
         emit IMasterAccountController.InstructionExecuted(
@@ -1045,16 +1056,18 @@ contract MasterAccountControllerTest is Test {
             23 // 123 - 100 redeemed
         );
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             100
         );
     }
 
     function testExecuteInstructionClaim() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        testExecuteInstructionRedeem();
+        testExecuteInstructionRequestRedeem();
+        vm.warp(block.timestamp + 1 days); // move to next epoch
+        uint256 claimableEpoch = 1;
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             100
         );
         assertEq(
@@ -1062,7 +1075,7 @@ contract MasterAccountControllerTest is Test {
             0
         );
 
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(23, 0, 20250913, 0, 0);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(23, 0, 19700102, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -1077,9 +1090,9 @@ contract MasterAccountControllerTest is Test {
         emit IMasterAccountController.Claimed(
             personalAccountAddr,
             address(depositVault),
-            2025,
-            9,
-            13,
+            1970,
+            1,
+            2,
             100,
             100
         );
@@ -1089,12 +1102,12 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            13
+            23
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             0
         );
         assertEq(
@@ -1104,14 +1117,16 @@ contract MasterAccountControllerTest is Test {
     }
 
     function testExecuteInstructionClaimAndRedeem() public {
+        testExecuteInstructionRequestRedeem();
+        uint256 claimableEpoch = 1;
+        vm.warp(block.timestamp + 1 days); // move to next epoch
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        testExecuteInstructionRedeem();
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             100
         );
 
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(24, 0, 20250913, 0, 0);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(24, 0, 19700102, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -1128,9 +1143,9 @@ contract MasterAccountControllerTest is Test {
         emit IMasterAccountController.Claimed(
             personalAccountAddr,
             address(depositVault),
-            2025,
-            9,
-            13,
+            1970,
+            1,
+            2,
             100,
             100
         );
@@ -1152,7 +1167,7 @@ contract MasterAccountControllerTest is Test {
         );
         masterAccountController.executeInstruction{value: defaultInstructionFee}(proof, xrplAddress1);
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, 0),
+            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             0
         );
     }

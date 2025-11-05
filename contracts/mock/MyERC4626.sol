@@ -68,6 +68,13 @@ contract MyERC4626 is ERC4626 {
 
     /// firelight vault - using redeem + claimWithdraw
     function claimWithdraw(uint256 _period) public returns (uint256 _assets) {
+        if (lagDuration > 0) {
+            (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
+            require(
+                _getPeriodFromDate(year, month, day) > _period,
+                "Too early"
+            );
+        }
         (, _assets, ) = _completeWithdraw(msg.sender, _period);
         emit CompleteWithdraw(msg.sender, _assets, _period);
     }
@@ -86,7 +93,7 @@ contract MyERC4626 is ERC4626 {
         (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
 
         // The withdrawal will be processed at the following epoch
-        _claimableEpoch = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0);
+        _claimableEpoch = _getPeriodFromDate(year, month, day);
 
         if (lagDuration == 0) {
             _claimableEpoch = block.timestamp;
