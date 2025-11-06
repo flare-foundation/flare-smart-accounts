@@ -322,6 +322,13 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         } else {
             revert InvalidVaultType(vaultInfo.vaultType);
         }
+
+        emit WithdrawalExecuted(
+            address(personalAccount),
+            _xrplAddress,
+            vaultInfo.vaultAddress,
+            _epoch
+        );
     }
 
     function swapWNatForUsdt0(
@@ -342,6 +349,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         );
         emit SwapExecuted(
             address(personalAccount),
+            _xrplAddress,
             tokenIn,
             usdt0,
             amountIn,
@@ -367,6 +375,7 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         );
         emit SwapExecuted(
             address(personalAccount),
+            _xrplAddress,
             usdt0,
             tokenOut,
             amountIn,

@@ -304,6 +304,7 @@ interface IMasterAccountController {
     /**
      * @notice Emitted when a token swap is executed.
      * @param personalAccount The personal account address.
+     * @param xrplOwner The XRPL owner address.
      * @param tokenIn The input token address.
      * @param tokenOut The output token address.
      * @param amountIn The amount of input tokens.
@@ -311,10 +312,25 @@ interface IMasterAccountController {
      */
     event SwapExecuted(
         address indexed personalAccount,
+        string xrplOwner,
         address indexed tokenIn,
         address indexed tokenOut,
         uint256 amountIn,
         uint256 amountOut
+    );
+
+    /**
+     * @notice Emitted when a withdrawal is executed.
+     * @param personalAccount The personal account address.
+     * @param xrplOwner The XRPL owner address.
+     * @param vault The vault address.
+     * @param epoch The epoch representing the withdrawal period or date.
+     */
+    event WithdrawalExecuted(
+        address indexed personalAccount,
+        string xrplOwner,
+        address indexed vault,
+        uint256 epoch
     );
 
     /**
