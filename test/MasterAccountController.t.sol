@@ -171,13 +171,16 @@ contract MasterAccountControllerTest is Test {
             agentVaultIds,
             agentVaultAddresses
         );
-        // add vault
-        uint256[] memory vaultIds = new uint256[](1);
-        address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](1);
+        // add vaults
+        uint256[] memory vaultIds = new uint256[](2);
+        address[] memory vaultAddresses = new address[](2);
+        uint8[] memory vaultTypes = new uint8[](2);
         vaultIds[0] = 0;
+        vaultIds[1] = 3;
         vaultAddresses[0] = address(depositVault);
+        vaultAddresses[1] = address(depositVault);
         vaultTypes[0] = 1;
+        vaultTypes[1] = 2;
         vm.prank(governance);
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
 
@@ -191,7 +194,7 @@ contract MasterAccountControllerTest is Test {
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
         proof.data.requestBody.transactionId = bytes32("tx1");
         proof.data.responseBody.receivedAmount = 1000000;
-        proof.data.responseBody.standardPaymentReference = _encodePaymentReferenceDeposit(12345);
+        proof.data.responseBody.standardPaymentReference = _encodeFirelightPaymentReference(1, 0, 12345, 0, 0);
         _mockVerifyPayment(true);
 
         address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
@@ -326,13 +329,14 @@ contract MasterAccountControllerTest is Test {
     }
 
     //// reserveCollateral tests
-    function testReserveCollateralRevertInvalidInstructionId() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(99, 0, 1000, 0);
+    function testReserveCollateralRevertInvalidInstruction() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(9, 0, 1000, 0);
         bytes32 transactionId = bytes32("tx1");
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidInstructionId.selector,
-                99
+                IMasterAccountController.InvalidInstruction.selector,
+                0,
+                9
             )
         );
         masterAccountController.reserveCollateral(
@@ -382,7 +386,7 @@ contract MasterAccountControllerTest is Test {
 
     function testReserveCollateral() public {
         uint16 lots = 2;
-        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, lots, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, lots, 0);
         bytes32 transactionId = bytes32("tx1");
 
         _mockCollateralReservationFee(lots, 123);
@@ -426,22 +430,23 @@ contract MasterAccountControllerTest is Test {
         );
     }
 
-    function testExecuteDepositAfterMintingRevertInvalidInstructionId() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(99, 0, 1000, 0);
+    function testExecuteDepositAfterMintingRevertInvalidInstruction() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(9, 0, 1000, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidInstructionId.selector,
-                99
+                IMasterAccountController.InvalidInstruction.selector,
+                0,
+                9
             )
         );
         masterAccountController.executeDepositAfterMinting(0, proof, xrplAddress1);
     }
 
     function testExecuteDepositAfterMintingRevertUnknownCollateralReservationId() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 1000, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 1000, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
 
@@ -455,7 +460,7 @@ contract MasterAccountControllerTest is Test {
     }
 
     function testExecuteDepositAfterMintingRevertMintingNotCompleted() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 2, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 0, 0);
         address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
         _mockCollateralReservationInfo(CollateralReservationInfo.Status.ACTIVE, predictedAddress1, 0);
         bytes32 transactionId = bytes32("tx1");
@@ -469,7 +474,7 @@ contract MasterAccountControllerTest is Test {
     }
 
     function testExecuteDepositAfterMintingRevertInvalidMinter() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 2, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 0, 0);
         _mockCollateralReservationInfo(CollateralReservationInfo.Status.SUCCESSFUL, makeAddr("wrongMinter"), 0);
         bytes32 transactionId = bytes32("tx1");
         testReserveCollateral();
@@ -485,7 +490,7 @@ contract MasterAccountControllerTest is Test {
     }
 
     function testExecuteDepositAfterMintingRevertInvalidAmount() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(10, 0, 2, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 0, 0);
         address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
         _mockCollateralReservationInfo(CollateralReservationInfo.Status.SUCCESSFUL, predictedAddress1, 0);
         bytes32 transactionId = bytes32("tx1");
@@ -505,8 +510,7 @@ contract MasterAccountControllerTest is Test {
     function testExecuteDepositAfterMinting() public {
         uint16 lots = 2;
         uint256 lotSize = 100;
-        uint8 instructionId = 10;
-        bytes32 paymentReference = _encodeFxrpPaymentReference(instructionId, 0, lots, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, lots, 0, 0);
         address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
         _mockCollateralReservationInfo(
             CollateralReservationInfo.Status.SUCCESSFUL,
@@ -539,7 +543,7 @@ contract MasterAccountControllerTest is Test {
             paymentReference,
             transactionId,
             xrplAddress1,
-            instructionId
+            _getInstructionId(1, 0)
         );
         masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
     }
@@ -620,7 +624,7 @@ contract MasterAccountControllerTest is Test {
     }
 
     function testExecuteInstructionRevertTransactionAlreadyExecuted() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(11, 0, 2, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 2, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
@@ -639,7 +643,7 @@ contract MasterAccountControllerTest is Test {
     }
 
     function testExecuteInstructionRevertInvalidTransactionProof() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(11, 0, 2, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 2, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
@@ -658,7 +662,7 @@ contract MasterAccountControllerTest is Test {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeFxrpPaymentReference(11, 0, 123, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
@@ -682,7 +686,54 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            11
+            _getInstructionId(1, 1)
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+        // check that fxrp were deposited into the deposit vault
+        assertEq(
+            depositVault.balanceOf(personalAccountAddr),
+            123
+        );
+        assertEq(
+            fxrp.balanceOf(address(depositVault)),
+            123
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+    }
+
+    function testExecuteInstructionDeposit2() public {
+        // mint some fXRP to the personal account to cover the deposit
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(personalAccountAddr, 123);
+        assertEq(fxrp.balanceOf(personalAccountAddr), 123);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(1, 0, 123, 0, 3);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+
+        vm.expectEmit();
+        emit IMasterAccountController.Deposited(
+            personalAccountAddr,
+            address(depositVault),
+            123,
+            123 // assuming 1:1 initial share:asset
+        );
+        vm.expectEmit();
+        emit IMasterAccountController.InstructionExecuted(
+            personalAccountAddr,
+            proof.data.requestBody.transactionId,
+            paymentReference,
+            xrplAddress1,
+            _getInstructionId(2, 1)
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
         // check that fxrp were deposited into the deposit vault
@@ -705,7 +756,7 @@ contract MasterAccountControllerTest is Test {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         address recipient = makeAddr("recipient");
-        bytes32 paymentReference = _encodeFxrpTransferPaymentReference(2, 0, 123, recipient);
+        bytes32 paymentReference = _encodeFxrpTransferPaymentReference(0, 123, recipient);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -737,7 +788,7 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            2
+            _getInstructionId(0, 1)
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
@@ -755,7 +806,7 @@ contract MasterAccountControllerTest is Test {
         // mint some fXRP to the personal account
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
-        bytes32 paymentReference = _encodeFxrpTransferPaymentReference(2, 0, 123, address(0));
+        bytes32 paymentReference = _encodeFxrpTransferPaymentReference(0, 123, address(0));
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -771,7 +822,7 @@ contract MasterAccountControllerTest is Test {
     }
 
     function testExecuteInstructionRedeemFxrp() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(1, 0, 3, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(2, 0, 3, 0);
         uint256 lotSize = 100;
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         IPayment.Proof memory proof;
@@ -799,7 +850,7 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            1
+            _getInstructionId(0, 2)
         );
         masterAccountController.executeInstruction{value: executorFee} (proof, xrplAddress1);
 
@@ -821,7 +872,7 @@ contract MasterAccountControllerTest is Test {
             fxrp.balanceOf(personalAccountAddr),
             0
         );
-        bytes32 paymentReference = _encodeFirelightPaymentReference(12, 0, 100, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(2, 0, 100, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -845,7 +896,7 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            12
+            _getInstructionId(1, 2)
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
@@ -875,7 +926,7 @@ contract MasterAccountControllerTest is Test {
         // move to the claimable period (to period 3)
         vm.warp(block.timestamp + 2 days);
 
-        bytes32 paymentReference = _encodeFirelightPaymentReference(13, 0, period, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(3, 0, period, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -899,7 +950,7 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            13
+            _getInstructionId(1, 3)
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
@@ -929,7 +980,7 @@ contract MasterAccountControllerTest is Test {
         // move to the claimable period (to period 3)
         vm.warp(block.timestamp + 2 days);
 
-        bytes32 paymentReference = _encodeFirelightPaymentReference(14, 0, period, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(4, 0, period, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -963,7 +1014,7 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            14
+            _getInstructionId(1, 4)
         );
         masterAccountController.executeInstruction{value: defaultInstructionFee}(proof, xrplAddress1);
         assertEq(
@@ -989,7 +1040,7 @@ contract MasterAccountControllerTest is Test {
         vm.warp(block.timestamp + 2 days);
 
         uint16 period = 1;
-        bytes32 paymentReference = _encodeFirelightPaymentReference(14, 0, period, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(4, 0, period, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -1014,7 +1065,7 @@ contract MasterAccountControllerTest is Test {
 
     function testExecuteInstructionRequestRedeem() public {
         // deposit 123 fXRP to the personal account
-        testExecuteInstructionDeposit();
+        testExecuteInstructionDeposit2();
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         assertEq(
             depositVault.balanceOf(personalAccountAddr),
@@ -1024,7 +1075,7 @@ contract MasterAccountControllerTest is Test {
             fxrp.balanceOf(personalAccountAddr),
             0
         );
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(22, 0, 100, 0, 0);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(2, 0, 100, 0, 3);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -1052,7 +1103,7 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            22
+            _getInstructionId(2, 2)
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
@@ -1080,7 +1131,7 @@ contract MasterAccountControllerTest is Test {
             0
         );
 
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(23, 0, 19700102, 0, 0);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(3, 0, 19700102, 0, 3);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -1107,7 +1158,7 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            23
+            _getInstructionId(2, 3)
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
@@ -1131,7 +1182,7 @@ contract MasterAccountControllerTest is Test {
             100
         );
 
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(24, 0, 19700102, 0, 0);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(4, 0, 19700102, 0, 3);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -1168,7 +1219,7 @@ contract MasterAccountControllerTest is Test {
             proof.data.requestBody.transactionId,
             paymentReference,
             xrplAddress1,
-            24
+            _getInstructionId(2, 4)
         );
         masterAccountController.executeInstruction{value: defaultInstructionFee}(proof, xrplAddress1);
         assertEq(
@@ -1177,8 +1228,8 @@ contract MasterAccountControllerTest is Test {
         );
     }
 
-    function testExecuteInstructionRevertInvalidId() public {
-         bytes32 paymentReference = _encodeUpshiftPaymentReference(255, 0, 20250913, 0, 0);
+    function testExecuteInstructionRevertInvalidInstruction() public {
+         bytes32 paymentReference = _encodeUpshiftPaymentReference(9, 0, 20250913, 0, 3);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -1191,8 +1242,9 @@ contract MasterAccountControllerTest is Test {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidInstructionId.selector,
-                255
+                IMasterAccountController.InvalidInstruction.selector,
+                2,
+                9
             )
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
@@ -1312,13 +1364,13 @@ contract MasterAccountControllerTest is Test {
 
     function testSetInstructorFees() public {
         assertEq(
-            masterAccountController.getInstructionFee(11),
+            masterAccountController.getInstructionFee(_getInstructionId(1, 1)),
             defaultInstructionFee
         );
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeFxrpPaymentReference(11, 0, 10, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 10, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee); // default fee
@@ -1336,8 +1388,8 @@ contract MasterAccountControllerTest is Test {
 
         // change fees
         uint256[] memory instructionIds = new uint256[](2);
-        instructionIds[0] = 11;
-        instructionIds[1] = 12;
+        instructionIds[0] = _getInstructionId(1, 1);
+        instructionIds[1] = _getInstructionId(1, 2);
         uint256[] memory newFees = new uint256[](2);
         uint256 newFee = 2 * 1e6; // 2 FXRP
         newFees[0] = newFee;
@@ -1349,7 +1401,7 @@ contract MasterAccountControllerTest is Test {
         emit IMasterAccountController.InstructionFeeSet(instructionIds[1], newFees[1]);
         masterAccountController.setInstructionFees(instructionIds, newFees);
         assertEq(
-            masterAccountController.getInstructionFee(11),
+            masterAccountController.getInstructionFee(_getInstructionId(1, 1)),
             2 * 1e6
         );
 
@@ -1444,7 +1496,7 @@ contract MasterAccountControllerTest is Test {
         fxrp.mint(personalAccountAddr, 123);
         // assertFalse(masterAccountController.isXrplProviderWallet(newWalet));
         // make tx with new wallet as receiving address - should revert
-        bytes32 paymentReference = _encodeFirelightPaymentReference(11, 0, 123, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 0);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -1749,16 +1801,19 @@ contract MasterAccountControllerTest is Test {
 
         (uint256[] memory returnedIds, address[] memory addrs, uint8[] memory types) =
             masterAccountController.getVaults();
-        assertEq(returnedIds.length, 3);
+        assertEq(returnedIds.length, 4);
         assertEq(returnedIds[0], 0);
-        assertEq(returnedIds[1], 1);
-        assertEq(returnedIds[2], 2);
+        assertEq(returnedIds[1], 3);
+        assertEq(returnedIds[2], 1);
+        assertEq(returnedIds[3], 2);
         assertEq(addrs[0], address(depositVault));
-        assertEq(addrs[1], vaultAddresses[0]);
-        assertEq(addrs[2], vaultAddresses[1]);
+        assertEq(addrs[1], address(depositVault));
+        assertEq(addrs[2], vaultAddresses[0]);
+        assertEq(addrs[3], vaultAddresses[1]);
         assertEq(types[0], 1);
-        assertEq(types[1], vaultTypes[0]);
-        assertEq(types[2], vaultTypes[1]);
+        assertEq(types[1], 2);
+        assertEq(types[2], vaultTypes[0]);
+        assertEq(types[3], vaultTypes[1]);
     }
 
     function testAddVaultsRevertOnlyOwner() public {
@@ -1993,7 +2048,7 @@ contract MasterAccountControllerTest is Test {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeFirelightPaymentReference(11, 0, 123, 0, 1);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 1);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
@@ -2017,7 +2072,7 @@ contract MasterAccountControllerTest is Test {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeFirelightPaymentReference(11, 0, 123, 0, 1);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 1);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
@@ -2156,25 +2211,15 @@ contract MasterAccountControllerTest is Test {
         );
     }
 
-    function _encodePaymentReferenceDeposit(
-        uint128 amount
-    )
-        private pure
-        returns (bytes32)
-    {
-        // Place instructionId in the highest 8 bits, skip wallet identifier and put amount in the next 80 bits
-        return bytes32((uint256(11) << 248) | (uint256(amount) << 160));
-    }
-
     // FXRP payment reference (32 bytes)
     function _encodeFxrpPaymentReference(
-        uint8 _instructionId,
+        uint8 _instructionCommand,
         uint8 _walletId,
         uint128 _value,
         uint16 _agentVaultId
     ) private pure returns (bytes32) {
         return
-            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(_instructionCommand)) << 248) |
             (bytes32(uint256(_walletId)) << 240) |
             (bytes32(uint256(_value)) << 160) |
             (bytes32(uint256(_agentVaultId)) << 144);
@@ -2182,13 +2227,12 @@ contract MasterAccountControllerTest is Test {
     }
 
     function _encodeFxrpTransferPaymentReference(
-        uint8 _instructionId,
         uint8 _walletId,
         uint128 _value,
         address _recipient
     ) private pure returns (bytes32) {
         return
-            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(1)) << 248) |
             (bytes32(uint256(_walletId)) << 240) |
             (bytes32(uint256(_value)) << 160) |
             (bytes32(uint256(uint160(_recipient))));
@@ -2197,14 +2241,15 @@ contract MasterAccountControllerTest is Test {
 
     // Firelight vaults payment reference (32 bytes)
     function _encodeFirelightPaymentReference(
-        uint8 _instructionId,
+        uint8 _instructionCommand,
         uint8 _walletId,
         uint128 _value,
         uint16 _agentVaultId,
         uint16 _vaultId
     ) private pure returns (bytes32) {
         return
-            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(1)) << 252) |
+            (bytes32(uint256(_instructionCommand)) << 248) |
             (bytes32(uint256(_walletId)) << 240) |
             (bytes32(uint256(_value)) << 160) |
             (bytes32(uint256(_agentVaultId)) << 144) |
@@ -2214,18 +2259,26 @@ contract MasterAccountControllerTest is Test {
 
     // Upshift vaults payment reference (32 bytes)
     function _encodeUpshiftPaymentReference(
-        uint8 _instructionId,
+        uint8 _instructionCommand,
         uint8 _walletId,
         uint128 _value,
         uint16 _agentVaultId,
         uint16 _vaultId
     ) private pure returns (bytes32) {
         return
-            (bytes32(uint256(_instructionId)) << 248) |
+            (bytes32(uint256(2)) << 252) |
+            (bytes32(uint256(_instructionCommand)) << 248) |
             (bytes32(uint256(_walletId)) << 240) |
             (bytes32(uint256(_value)) << 160) |
             (bytes32(uint256(_agentVaultId)) << 144) |
             (bytes32(uint256(_vaultId)) << 128);
         // bytes 16-31 are zero (future use)
+    }
+
+    function _getInstructionId(
+        uint256 _instructionType,
+        uint256 _instructionCommand
+    ) private pure returns (uint256) {
+        return (_instructionType << 4) | _instructionCommand;
     }
 }

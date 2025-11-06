@@ -16,11 +16,12 @@ import {IMasterAccountController} from "../../userInterfaces/IMasterAccountContr
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 
 // payment reference format (32 bytes):
-// FXRP
-// bytes 00: uint8 -> instruction id
+// instruction id consists of instruction type (4 bits) and instruction command (4 bits)
+// FXRP (instruction type 0)
+// bytes 00: bytes1 (hex) -> instruction id
     // 00: collateral reservation
-    // 01: redeem
-    // 02: transfer
+    // 01: transfer
+    // 02: redeem
 // bytes 01: uint8 -> wallet identifier
 // bytes 02-11: uint80 -> value (value, lots)
 // collateral reservation:
@@ -29,8 +30,8 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 // transfer:
 // bytes 12-31: address (20 bytes) -> recipient address
 
-// Firelight vaults
-// bytes 00: uint8 -> instruction id
+// Firelight vaults (instruction type 1)
+// bytes 00: bytes1 (hex) -> instruction id
     // 10: collateral reservation and deposit
     // 11: deposit
     // 12: redeem
@@ -42,8 +43,8 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 // bytes 14-15: uint16 -> deposit/withdraw vault address id
 // bytes 16-31: future use
 
-// Upshift vaults
-// bytes 00: uint8 -> instruction id
+// Upshift vaults (instruction type 2)
+// bytes 00: bytes1 (hex) -> instruction id
     // 20: collateral reservation and deposit
     // 21: deposit
     // 22: requestRedeem
@@ -154,10 +155,11 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         returns (uint256 _collateralReservationId)
     {
         // check instruction id
-        uint256 instructionId = _getInstructionId(_paymentReference);
+        uint256 instructionType = _getInstructionType(_paymentReference);
+        uint256 instructionCommand = _getInstructionCommand(_paymentReference);
         require(
-            instructionId == 0 || instructionId == 10 || instructionId == 20,
-            InvalidInstructionId(instructionId)
+            instructionType <= 2 && instructionCommand == 0,
+            InvalidInstruction(instructionType, instructionCommand)
         );
         // check transaction id
         require(_transactionId != bytes32(0), InvalidTransactionId());
@@ -202,11 +204,13 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
 
         // check instruction id
-        uint256 instructionId = _getInstructionId(paymentReference);
+        uint256 instructionType = _getInstructionType(paymentReference);
+        uint256 instructionCommand = _getInstructionCommand(paymentReference);
         require(
-            instructionId == 10 || instructionId == 20,
-            InvalidInstructionId(instructionId)
+            0 < instructionType && instructionType <= 2 && instructionCommand == 0,
+            InvalidInstruction(instructionType, instructionCommand)
         );
+        uint256 instructionId = instructionType << 4 | instructionCommand;
 
         // check that crtId and txId match
         bytes32 transactionId = _proof.data.requestBody.transactionId;
@@ -236,15 +240,9 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
         // execute deposit
         address vault = _getVaultAddress(paymentReference);
-        uint256 shares = personalAccount.deposit(vault, amount);
+        _deposit(personalAccount, vault, amount);
 
-        // emit events
-        emit Deposited(
-            address(personalAccount),
-            vault,
-            amount,
-            shares
-        );
+        // emit event
         emit InstructionExecuted(
             address(personalAccount),
             paymentReference,
@@ -264,7 +262,9 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         external payable
     {
         bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
-        uint256 instructionId = _getInstructionId(paymentReference);
+        uint256 instructionType = _getInstructionType(paymentReference);
+        uint256 instructionCommand = _getInstructionCommand(paymentReference);
+        uint256 instructionId = instructionType << 4 | instructionCommand;
         // check instruction fee payment
         uint256 instructionFee = _getInstructionFee(instructionId);
         int256 receivedAmount = _proof.data.responseBody.receivedAmount;
@@ -284,11 +284,19 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
         // execute instruction
         _executeInstruction(
-            instructionId,
+            instructionType,
+            instructionCommand,
             paymentReference,
-            personalAccount,
+            personalAccount
+        );
+
+        // emit event
+        emit InstructionExecuted(
+            address(personalAccount),
+            transactionId,
+            paymentReference,
             _xrplAddress,
-            transactionId
+            instructionId
         );
     }
 
@@ -757,18 +765,14 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
     /////////////////////////////// INTERNAL FUNCTIONS ///////////////////////////////
     function _executeInstruction(
-        uint256 _instructionId,
+        uint256 _instructionType,
+        uint256 _instructionCommand,
         bytes32 _paymentReference,
-        IIPersonalAccount _personalAccount,
-        string memory _xrplOwner,
-        bytes32 _transactionId
-    )
+        IIPersonalAccount _personalAccount
+)
         internal
     {
-        if (_instructionId == 1) { // redeem FXRP
-            uint256 lots = _getValue(_paymentReference);
-            _redeemFXrp(_personalAccount, lots);
-        } else if (_instructionId == 2) { // transfer FXRP
+        if (_instructionType == 0 && _instructionCommand == 1) { // transfer FXRP
             uint256 amount = _getValue(_paymentReference);
             address recipient = _getAddress(_paymentReference);
             _personalAccount.transferFXrp(recipient, amount);
@@ -777,17 +781,14 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 recipient,
                 amount
             );
-        } else if (_instructionId == 11 || _instructionId == 21) { // deposit
+        } else if (_instructionType == 0 && _instructionCommand == 2) { // redeem FXRP
+            uint256 lots = _getValue(_paymentReference);
+            _redeemFXrp(_personalAccount, lots);
+        } else if ((_instructionType == 1 || _instructionType == 2) && _instructionCommand == 1) { // deposit
             uint256 amount = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
-            uint256 shares = _personalAccount.deposit(vault, amount);
-            emit Deposited(
-                address(_personalAccount),
-                vault,
-                amount,
-                shares
-            );
-        } else if (_instructionId == 12) { // redeem
+            _deposit(_personalAccount, vault, amount);
+        } else if (_instructionType == 1 && _instructionCommand == 2) { // redeem
             address vault = _getVaultAddress(_paymentReference);
             uint256 amount = _getValue(_paymentReference);
             uint256 shares = _personalAccount.redeem(vault, amount);
@@ -797,17 +798,17 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 amount,
                 shares
             );
-        } else if (_instructionId == 13) { // claim withdraw
+        } else if (_instructionType == 1 && _instructionCommand == 3) { // claim withdraw
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             _claimWithdrawal(_personalAccount, vault, period);
-        } else if (_instructionId == 14) { // claim withdraw and redeem FXRP
+        } else if (_instructionType == 1 && _instructionCommand == 4) { // claim withdraw and redeem FXRP
             uint256 period = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             uint256 amount = _claimWithdrawal(_personalAccount, vault, period);
             uint256 lots = _amountToLots(amount);
             _redeemFXrp(_personalAccount, lots);
-        } else if (_instructionId == 22) { // requestRedeem
+        } else if (_instructionType == 2 && _instructionCommand == 2) { // requestRedeem
             uint256 shares = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             (uint256 assets, uint256 claimableEpoch) = _personalAccount.requestRedeem(vault, shares);
@@ -818,26 +819,19 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
                 assets,
                 claimableEpoch
             );
-        } else if (_instructionId == 23) { // claim
+        } else if (_instructionType == 2 && _instructionCommand == 3) { // claim
             uint256 date = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             _claim(_personalAccount, vault, date);
-        } else if (_instructionId == 24) { // claim and redeem FXRP
+        } else if (_instructionType == 2 && _instructionCommand == 4) { // claim and redeem FXRP
             uint256 date = _getValue(_paymentReference);
             address vault = _getVaultAddress(_paymentReference);
             uint256 amount = _claim(_personalAccount, vault, date);
             uint256 lots = _amountToLots(amount);
             _redeemFXrp(_personalAccount, lots);
         } else {
-            revert InvalidInstructionId(_instructionId);
+            revert InvalidInstruction(_instructionType, _instructionCommand);
         }
-        emit InstructionExecuted(
-            address(_personalAccount),
-            _transactionId,
-            _paymentReference,
-            _xrplOwner,
-            _instructionId
-        );
     }
 
     function _getOrCreatePersonalAccount(
@@ -981,22 +975,30 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
     function _getVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
         // bytes 14-15: vault address id
         uint256 vaultId = (uint256(_paymentReference) >> 128) & ((uint256(1) << 16) - 1);
-        _vault = vaults[vaultId].vaultAddress;
-        require(address(_vault) != address(0), InvalidVaultId(vaultId));
+        VaultInfo memory vaultInfo = vaults[vaultId];
+        _vault = vaultInfo.vaultAddress;
+        uint256 instructionType = _getInstructionType(_paymentReference);
+        require(_vault != address(0), InvalidVaultId(vaultId));
+        require(instructionType == vaultInfo.vaultType, InvalidInstructionType(instructionType));
     }
 
-    function _getInstructionId(bytes32 _paymentReference) internal pure returns (uint256) {
-        // byte 0: instruction id
-        return (uint256(_paymentReference) >> 248) & 0xFF;
+    function _getInstructionType(bytes32 _paymentReference) internal pure returns (uint256) {
+        // byte 00 (first 4 bits): instruction type
+        return uint256(_paymentReference) >> 252;
+    }
+
+    function _getInstructionCommand(bytes32 _paymentReference) internal pure returns (uint256) {
+        // byte 00 (last 4 bits): instruction command
+        return (uint256(_paymentReference) >> 248) & 0x0F;
     }
 
     function _getWalletId(bytes32 _paymentReference) internal pure returns (uint256) {
-        // byte 1: wallet identifier
+        // byte 01: wallet identifier
         return (uint256(_paymentReference) >> 240) & 0xFF;
     }
 
     function _getValue(bytes32 _paymentReference) internal pure returns (uint256 _value) {
-        // bytes 2-11: uint80
+        // bytes 02-11: uint80
         _value = (uint256(_paymentReference) >> 160) & ((uint256(1) << 80) - 1);
         require(_value > 0, ValueZero());
     }
@@ -1030,6 +1032,22 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
             amount,
             executor,
             executorFee
+        );
+    }
+
+    function _deposit(
+        IIPersonalAccount _personalAccount,
+        address _vault,
+        uint256 _amount
+    )
+        internal
+    {
+        uint256 shares = _personalAccount.deposit(_vault, _amount);
+        emit Deposited(
+            address(_personalAccount),
+            _vault,
+            _amount,
+            shares
         );
     }
 

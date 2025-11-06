@@ -386,11 +386,21 @@ interface IMasterAccountController {
     error TransactionAlreadyExecuted();
 
     /**
-     * @notice Reverts if the instruction ID is invalid.
-     * @param instructionId The invalid instruction ID.
+     * @notice Reverts if the instruction is invalid.
+     * @param instructionType The invalid instruction type.
+     * @param instructionCommand The invalid instruction command.
      */
-    error InvalidInstructionId(
-        uint256 instructionId
+    error InvalidInstruction(
+        uint256 instructionType,
+        uint256 instructionCommand
+    );
+
+    /**
+     * @notice Reverts if the instruction type is invalid.
+     * @param instructionType The invalid instruction type.
+     */
+    error InvalidInstructionType(
+        uint256 instructionType
     );
 
     /**
