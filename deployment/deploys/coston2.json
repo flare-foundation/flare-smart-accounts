@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "name": "SeedMasterAccountControllerImplementation",
+    "contractName": "MasterAccountControllerBase.sol",
+    "address": "0x3838B77977827EA99BE1381fEb4ed37E9344E1AD"
+  },
+  {
+    "name": "MasterAccountController",
+    "contractName": "MasterAccountControllerProxy.sol",
+    "address": "0xE5BC94F9137Dd4C69BCeD5DE25560c8CB2F9141A"
+  },
+  {
+    "name": "MasterAccountControllerImplementation",
+    "contractName": "MasterAccountController.sol",
+    "address": "0x31470d10b9004078034529554F5860674A7cCd2B"
+  },
+  {
+    "name": "PersonalAccountImplementation",
+    "contractName": "PersonalAccount.sol",
+    "address": "0xD358d894121dD539d572A79a6b1825587bE88BbD"
+  }
+]
