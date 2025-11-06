@@ -1,8 +1,8 @@
 {
   "initialOwner": "0x0000000000000000000000000000000000000000",
   "governance": "0x0000000000000000000000000000000000000000",
-  "vaults": ["0x374d7b99C1B78434Cd5552ff97bEcc42c271a41e"],
-  "vaultTypes": [1],
+  "vaults": ["0xf9c57F8c9ae3A8EF12F91C298Ca24daf9c42d874", "0xbAF89d873d198FF78E72D2745B01cBA3c6e5BE6B"],
+  "vaultTypes": [1, 2],
   "executor": "0x715c79A879C2F367912BeA087af2C80f1807f896",
   "executorFee": 100,
   "paymentProofValidityDurationSeconds": 86400,
