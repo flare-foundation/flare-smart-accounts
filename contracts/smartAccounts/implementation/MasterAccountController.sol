@@ -325,8 +325,8 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
 
         emit WithdrawalExecuted(
             address(personalAccount),
-            _xrplAddress,
             vaultInfo.vaultAddress,
+            _xrplAddress,
             _epoch
         );
     }
@@ -349,9 +349,9 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         );
         emit SwapExecuted(
             address(personalAccount),
-            _xrplAddress,
             tokenIn,
             usdt0,
+            _xrplAddress,
             amountIn,
             amountOut
         );
@@ -375,9 +375,9 @@ contract MasterAccountController is MasterAccountControllerBase, IMasterAccountC
         );
         emit SwapExecuted(
             address(personalAccount),
-            _xrplAddress,
             usdt0,
             tokenOut,
+            _xrplAddress,
             amountIn,
             amountOut
         );
