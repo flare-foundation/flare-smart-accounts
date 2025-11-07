@@ -28,42 +28,13 @@
     "lint-forge": "yarn solhint \"test/**/*.sol\""
   },
   "dependencies": {
-    "@typescript-eslint/eslint-plugin": "^7.3.1",
-    "@typescript-eslint/parser": "^7.3.1",
-    "dotenv-cli": "^10.0.0",
-    "ethers": "^6.11.1",
-    "hardhat": "^2.22.18",
+    "web3": "^1.0.0",
     "solhint": "^6.0.1"
   },
   "devDependencies": {
     "@coverage.rocks/genhtml": "^1.16.0",
-    "@gnosis.pm/mock-contract": "^4.0.0",
-    "@nomicfoundation/hardhat-chai-matchers": "^2.0.6",
-    "@nomicfoundation/hardhat-ethers": "^3.0.5",
-    "@nomicfoundation/hardhat-network-helpers": "^1.0.10",
-    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "@nomicfoundation/hardhat-verify": "^2.0.6",
-    "@nomiclabs/hardhat-ethers": "^2.2.3",
-    "@nomiclabs/hardhat-truffle5": "^2.0.7",
-    "@nomiclabs/hardhat-web3": "^2.0.0",
-    "@typechain/ethers-v6": "^0.5.1",
-    "@typechain/hardhat": "^9.1.0",
-    "@typechain/truffle-v5": "^8.0.7",
-    "@typechain/web3-v1": "^6.0.7",
-    "@types/chai": "^4.3.13",
-    "@types/elliptic": "^6.4.18",
-    "@types/mocha": "^10.0.6",
-    "@types/node": "^20.11.29",
-    "elliptic": "^6.5.5",
-    "intercept-stdout": "0.1.2",
-    "pascal-case": "^3.1.2",
     "prettier": "^3.6.2",
     "prettier-plugin-solidity": "^2.1.0",
-    "solidity-coverage": "^0.8.11",
-    "sqlite3": "^5.1.7",
-    "ts-node": "^10.9.2",
-    "typechain": "^8.3.2",
-    "typeorm": "^0.3.20",
-    "typescript": "^5.4.2"
+    "solidity-coverage": "^0.8.11"
   }
 }
