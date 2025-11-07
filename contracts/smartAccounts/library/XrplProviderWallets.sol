@@ -4,7 +4,6 @@ pragma solidity ^0.8.27;
 import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
-import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
 
 
 library XrplProviderWallets {
@@ -32,16 +31,16 @@ library XrplProviderWallets {
             string memory xrplProviderWallet = _xrplProviderWallets[i];
             require(
                 bytes(xrplProviderWallet).length > 0,
-                IMasterAccountController.InvalidXrplProviderWallet(xrplProviderWallet)
+                InvalidXrplProviderWallet(xrplProviderWallet)
             );
             bytes32 hash = keccak256(bytes(xrplProviderWallet));
             require(
                 state.xrplProviderWalletHashes[hash] == 0,
-                IMasterAccountController.XrplProviderWalletAlreadyExists(xrplProviderWallet)
+                XrplProviderWalletAlreadyExists(xrplProviderWallet)
             );
             state.xrplProviderWallets.push(xrplProviderWallet);
             state.xrplProviderWalletHashes[hash] = state.xrplProviderWallets.length; // store 1-based index
-            emit IMasterAccountController.XrplProviderWalletAdded(xrplProviderWallet);
+            emit XrplProviderWalletAdded(xrplProviderWallet);
         }
     }
 
@@ -61,7 +60,7 @@ library XrplProviderWallets {
             string calldata xrplProviderWallet = _xrplProviderWallets[i];
             bytes32 walletHash = keccak256(bytes(xrplProviderWallet));
             uint256 index = state.xrplProviderWalletHashes[walletHash]; // 1-based index
-            require(index != 0, IMasterAccountController.InvalidXrplProviderWallet(xrplProviderWallet));
+            require(index != 0, InvalidXrplProviderWallet(xrplProviderWallet));
             // remove from mapping
             delete state.xrplProviderWalletHashes[walletHash];
             uint256 length = state.xrplProviderWallets.length;
@@ -77,12 +76,12 @@ library XrplProviderWallets {
                 bytes32 movedWalletHash = keccak256(bytes(lastWallet));
                 state.xrplProviderWalletHashes[movedWalletHash] = index; // update to new 1-based index
             }
-            emit IMasterAccountController.XrplProviderWalletRemoved(xrplProviderWallet);
+            emit XrplProviderWalletRemoved(xrplProviderWallet);
         }
     }
 
     /**
-     * @inheritdoc IMasterAccountController
+     * @inheritdoc IXrplProviderWalletsFacet
      */
     function getXrplProviderWallets()
         external view

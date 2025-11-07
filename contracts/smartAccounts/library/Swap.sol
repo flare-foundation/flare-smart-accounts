@@ -4,6 +4,7 @@
 pragma solidity ^0.8.27;
 
 library Swap {
+
     struct State {
         /// @notice Uniswap V3 router address
         address uniswapV3Router;

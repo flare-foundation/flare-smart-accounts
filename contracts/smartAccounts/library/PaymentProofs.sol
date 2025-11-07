@@ -6,7 +6,7 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {XrplProviderWallets} from "./XrplProviderWallets.sol";
-import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
+import {IPaymentProofsFacet} from "../../userInterfaces/facets/IPaymentProofsFacet.sol";
 
 
 library PaymentProofs {
@@ -16,27 +16,13 @@ library PaymentProofs {
         uint256 paymentProofValidityDurationSeconds;
     }
 
+    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.PaymentProofs.State");
+
     /**
-     * @notice Sets the payment proof validity duration.
-     * @param _paymentProofValidityDurationSeconds Duration in seconds.
-     * Can only be called by the owner.
+     * @notice Verifies the provided payment proof against the expected XRPL address.
+     * @param _proof The payment proof to verify.
+     * @param _xrplAddress The expected XRPL address associated with the payment.
      */
-    function setPaymentProofValidityDurationSeconds(
-        uint256 _paymentProofValidityDurationSeconds
-    )
-        internal
-    {
-        LibDiamond.enforceIsContractOwner();
-        require(
-            _paymentProofValidityDurationSeconds > 0,
-            IMasterAccountController.InvalidPaymentProofValidityDuration()
-        );
-        State storage state = getState();
-        state.paymentProofValidityDurationSeconds = _paymentProofValidityDurationSeconds;
-        emit IMasterAccountController.PaymentProofValidityDurationSecondsSet(_paymentProofValidityDurationSeconds);
-    }
-
-
     function verifyPayment(
         IPayment.Proof calldata _proof,
         string memory _xrplAddress
@@ -46,29 +32,26 @@ library PaymentProofs {
         State storage state = getState();
         require(
             _proof.data.responseBody.status == 0,
-            IMasterAccountController.InvalidTransactionStatus()
+            IPaymentProofsFacet.InvalidTransactionStatus()
         );
         require(
             block.timestamp <= state.paymentProofValidityDurationSeconds + _proof.data.responseBody.blockTimestamp,
-            IMasterAccountController.PaymentProofExpired()
+            IPaymentProofsFacet.PaymentProofExpired()
         );
         require(
             _proof.data.responseBody.sourceAddressHash == keccak256(bytes(_xrplAddress)),
-            IMasterAccountController.MismatchingSourceAndXrplAddr()
+            IPaymentProofsFacet.MismatchingSourceAndXrplAddr()
         );
         XrplProviderWallets.State storage xrplProviderWalletsState = XrplProviderWallets.getState();
         require(
             xrplProviderWalletsState.xrplProviderWalletHashes[_proof.data.responseBody.receivingAddressHash] != 0,
-            IMasterAccountController.InvalidReceivingAddressHash()
+            IPaymentProofsFacet.InvalidReceivingAddressHash()
         );
         require(
             ContractRegistry.getFdcVerification().verifyPayment(_proof),
-            IMasterAccountController.InvalidTransactionProof()
+            IPaymentProofsFacet.InvalidTransactionProof()
         );
     }
-
-
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.PaymentProofs.State");
 
     function getState()
         internal pure

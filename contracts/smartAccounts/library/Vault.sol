@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
-import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
+import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
 
 
 library Vault {
@@ -17,7 +17,7 @@ library Vault {
         internal
     {
         uint256 shares = _personalAccount.deposit(_vault, _amount);
-        emit IMasterAccountController.Deposited(
+        emit IInstructionsFacet.Deposited(
             address(_personalAccount),
             _vault,
             _amount,
@@ -33,7 +33,7 @@ library Vault {
         internal
     {
         uint256 amount = _personalAccount.redeem(_vault, _shares);
-        emit IMasterAccountController.Redeemed(
+        emit IInstructionsFacet.Redeemed(
             address(_personalAccount),
             _vault,
             _shares,
@@ -50,7 +50,7 @@ library Vault {
         returns (uint256 _amount)
     {
         _amount = _personalAccount.claimWithdraw(_vault, _period);
-        emit IMasterAccountController.WithdrawalClaimed(
+        emit IInstructionsFacet.WithdrawalClaimed(
             address(_personalAccount),
             _vault,
             _period,
@@ -66,7 +66,7 @@ library Vault {
         internal
     {
         (uint256 amount, uint256 claimableEpoch) = _personalAccount.requestRedeem(_vault, _shares);
-        emit IMasterAccountController.RedeemRequested(
+        emit IInstructionsFacet.RedeemRequested(
             address(_personalAccount),
             _vault,
             _shares,
@@ -85,7 +85,7 @@ library Vault {
     {
         (uint256 year, uint256 month, uint256 day) = _getDate(_date);
         (uint256 shares, uint256 amount) = _personalAccount.claim(_vault, year, month, day);
-        emit IMasterAccountController.Claimed(
+        emit IInstructionsFacet.Claimed(
             address(_personalAccount),
             _vault,
             year,

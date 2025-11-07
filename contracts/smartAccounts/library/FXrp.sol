@@ -4,17 +4,11 @@ pragma solidity ^0.8.27;
 import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
-import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
+import {Executors} from "./Executors.sol";
+import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
 
 
 library FXrp {
-
-    struct State {
-        /// @notice The mint and redeem executor.
-        address payable executor;
-        /// @notice Executor fee for minting and redeeming (in wei)
-        uint256 executorFee;
-    }
 
     function reserveCollateral(
         IIPersonalAccount _personalAccount,
@@ -27,16 +21,16 @@ library FXrp {
         internal
         returns (uint256 _collateralReservationId)
     {
-        State storage state = getState();
+        (address payable executor, uint256 executorFee) = Executors.getExecutorInfo();
         _collateralReservationId = _personalAccount.reserveCollateral{value: msg.value}(
             _agentVault,
             _lots,
-            state.executor,
-            state.executorFee
+            executor,
+            executorFee
         );
 
         // emit event
-        emit IMasterAccountController.CollateralReserved(
+        emit IInstructionsFacet.CollateralReserved(
             address(_personalAccount),
             _transactionId,
             _paymentReference,
@@ -44,8 +38,8 @@ library FXrp {
             _collateralReservationId,
             _agentVault,
             _lots,
-            state.executor,
-            state.executorFee
+            executor,
+            executorFee
         );
     }
 
@@ -57,7 +51,7 @@ library FXrp {
         internal
     {
         _personalAccount.transferFXrp(_recipient, _amount);
-        emit IMasterAccountController.FXrpTransferred(
+        emit IInstructionsFacet.FXrpTransferred(
             address(_personalAccount),
             _recipient,
             _amount
@@ -70,11 +64,9 @@ library FXrp {
     )
         internal
     {
-        State storage state = getState();
-        address payable executor = state.executor;
-        uint256 executorFee = state.executorFee;
+        (address payable executor, uint256 executorFee) = Executors.getExecutorInfo();
         uint256 amount = _personalAccount.redeemFXrp{value: msg.value}(_lots, executor, executorFee);
-        emit IMasterAccountController.FXrpRedeemed(
+        emit IInstructionsFacet.FXrpRedeemed(
             address(_personalAccount),
             _lots,
             amount,
@@ -83,70 +75,13 @@ library FXrp {
         );
     }
 
-    /**
-     * @notice Sets new executor address.
-     * @param _newExecutor New executor address.
-     * Can only be called by the owner.
-     */
-    function setExecutor(
-        address payable _newExecutor
-    )
-        external
-    {
-        LibDiamond.enforceIsContractOwner();
-        _setExecutor(_newExecutor);
+    function lotsToAmount(uint256 _lots) internal view returns (uint256) {
+        uint256 lotSize = ContractRegistry.getAssetManagerFXRP().lotSize();
+        return _lots * lotSize;
     }
 
-    /**
-     * @notice Sets new executor fee.
-     * @param _newExecutorFee New executor fee in wei.
-     * Can only be called by the owner.
-     */
-    function setExecutorFee(
-        uint256 _newExecutorFee
-    )
-        external
-    {
-        LibDiamond.enforceIsContractOwner();
-        _setExecutorFee(_newExecutorFee);
-    }
-
-    function _setExecutor(address payable _executor) internal {
-        require(_executor != address(0), IMasterAccountController.InvalidExecutor());
-        State storage state = getState();
-        state.executor = _executor;
-        emit IMasterAccountController.ExecutorSet(_executor);
-    }
-
-    function _setExecutorFee(uint256 _executorFee) internal {
-        require(_executorFee > 0, IMasterAccountController.InvalidExecutorFee());
-        State storage state = getState();
-        state.executorFee = _executorFee;
-        emit IMasterAccountController.ExecutorFeeSet(_executorFee);
-    }
-
-    /**
-     * @inheritdoc IMasterAccountController
-     */
-    function getExecutorInfo()
-        external view
-        returns (address payable _executor, uint256 _executorFee)
-    {
-        State storage state = getState();
-        _executor = state.executor;
-        _executorFee = state.executorFee;
-    }
-
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Vaults.State");
-
-    function getState()
-        internal pure
-        returns (State storage _state)
-    {
-        bytes32 position = STATE_POSITION;
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            _state.slot := position
-        }
+    function amountToLots(uint256 _amount) internal view returns (uint256) {
+        uint256 lotSize = ContractRegistry.getAssetManagerFXRP().lotSize();
+        return _amount / lotSize; // there might be a remainder
     }
 }
