@@ -80,7 +80,7 @@ library Vault {
         internal
         returns (uint256)
     {
-        (uint256 year, uint256 month, uint256 day) = _getDate(_date);
+        (uint256 year, uint256 month, uint256 day) = getDate(_date);
         (uint256 shares, uint256 amount) = _personalAccount.claim(_vault, year, month, day);
         emit IInstructionsFacet.Claimed(
             address(_personalAccount),
@@ -94,7 +94,7 @@ library Vault {
         return amount;
     }
 
-    function _getDate(
+    function getDate(
         uint256 _value
     )
         internal pure

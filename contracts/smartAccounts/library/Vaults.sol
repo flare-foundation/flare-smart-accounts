@@ -3,14 +3,9 @@ pragma solidity ^0.8.27;
 
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
+import {PaymentReferenceParser} from "./PaymentReferenceParser.sol";
 
 library Vaults {
-
-    struct State {
-        /// @notice Mapping from vault ID to vault information
-        mapping(uint256 vaultId => VaultInfo vaultInfo) vaults;
-        uint256[] vaultIds;
-    }
 
     /// @notice Struct containing vault information
     struct VaultInfo {
@@ -20,21 +15,26 @@ library Vaults {
         uint8 vaultType;
     }
 
+    struct State {
+        /// @notice Mapping from vault ID to vault information
+        mapping(uint256 vaultId => VaultInfo vaultInfo) vaults;
+        uint256[] vaultIds;
+    }
+
+    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Vaults.State");
+
     function getVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
-        // bytes 14-15: vault address id
-        uint256 vaultId = (uint256(_paymentReference) >> 128) & ((uint256(1) << 16) - 1);
+        uint256 vaultId = PaymentReferenceParser.getVaultId(_paymentReference);
         State storage state = getState();
         VaultInfo memory vaultInfo = state.vaults[vaultId];
         _vault = vaultInfo.vaultAddress;
-        uint256 instructionType = uint256(_paymentReference) >> 252;
+        uint256 instructionType = PaymentReferenceParser.getInstructionType(_paymentReference);
         require(_vault != address(0), IVaultsFacet.InvalidVaultId(vaultId));
         require(
             instructionType == vaultInfo.vaultType,
             IInstructionsFacet.InvalidInstructionType(instructionType)
         );
     }
-
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Vaults.State");
 
     function getState()
         internal pure
