@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+// solhint-disable max-line-length
 library DateUtils {
     // The number of seconds per day
     uint256 internal constant SECONDS_PER_DAY = 24 * 60 * 60;

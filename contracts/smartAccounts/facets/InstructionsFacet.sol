@@ -6,6 +6,8 @@ import {CollateralReservationInfo} from "flare-periphery/src/flare/data/Collater
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIInstructionsFacet} from "../interface/IIInstructionsFacet.sol";
+// import is needed for @inheritdoc
+// solhint-disable-next-line no-unused-import
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
@@ -24,9 +26,7 @@ import {PaymentReferenceParser} from "../library/PaymentReferenceParser.sol";
  */
 contract InstructionsFacet is IIInstructionsFacet {
 
-    /**
-     * @inheritdoc IInstructionsFacet
-     */
+    /// @inheritdoc IInstructionsFacet
     function reserveCollateral(
         string calldata _xrplAddress,
         bytes32 _paymentReference,
@@ -62,9 +62,7 @@ contract InstructionsFacet is IIInstructionsFacet {
         state.collateralReservationIdToTransactionId[_collateralReservationId] = _transactionId;
     }
 
-    /**
-     * @inheritdoc IInstructionsFacet
-     */
+    /// @inheritdoc IInstructionsFacet
     function executeDepositAfterMinting(
         uint256 _collateralReservationId,
         IPayment.Proof calldata _proof,
@@ -126,9 +124,7 @@ contract InstructionsFacet is IIInstructionsFacet {
         );
     }
 
-    /**
-     * @inheritdoc IInstructionsFacet
-     */
+    /// @inheritdoc IInstructionsFacet
     function executeInstruction(
         IPayment.Proof calldata _proof,
         string calldata _xrplAddress
@@ -177,9 +173,7 @@ contract InstructionsFacet is IIInstructionsFacet {
         );
     }
 
-    /**
-     * @inheritdoc IInstructionsFacet
-     */
+    /// @inheritdoc IInstructionsFacet
     function executeWithdrawal(
         string calldata _xrplAddress,
         uint256 _vaultId,

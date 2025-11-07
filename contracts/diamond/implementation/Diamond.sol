@@ -45,7 +45,7 @@ contract Diamond {
         }
         // get facet from function selector
         address facet = ds.facetAddressAndSelectorPosition[msg.sig].facetAddress;
-        if(facet == address(0)) {
+        if (facet == address(0)) {
             revert FunctionNotFound(msg.sig);
         }
         // Execute external function from facet using delegatecall and return any value.

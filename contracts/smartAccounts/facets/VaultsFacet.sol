@@ -3,6 +3,8 @@ pragma solidity ^0.8.27;
 
 import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {IIVaultsFacet} from "../interface/IIVaultsFacet.sol";
+// import is needed for @inheritdoc
+// solhint-disable-next-line no-unused-import
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {Vaults} from "../library/Vaults.sol";
 
@@ -39,9 +41,7 @@ contract VaultsFacet is IIVaultsFacet {
         }
     }
 
-    /**
-     * @inheritdoc IVaultsFacet
-     */
+    /// @inheritdoc IVaultsFacet
     function getVaults()
         external view
         returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses, uint8[] memory _vaultTypes)
