@@ -19,7 +19,7 @@ error FunctionNotFound(bytes4 _functionSelector);
 // this avoids stack too deep errors
 struct DiamondArgs {
     address owner;
-    address init;
+    address initAddress;
     bytes initCalldata;
 }
 
@@ -28,7 +28,7 @@ contract Diamond {
 
     constructor(IDiamondCut.FacetCut[] memory _diamondCut, DiamondArgs memory _args) payable {
         LibDiamond.setContractOwner(_args.owner);
-        LibDiamond.diamondCut(_diamondCut, _args.init, _args.initCalldata);
+        LibDiamond.diamondCut(_diamondCut, _args.initAddress, _args.initCalldata);
 
         // Code can be added here to perform actions and set state variables.
     }

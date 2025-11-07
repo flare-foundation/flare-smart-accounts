@@ -4,7 +4,6 @@ pragma solidity ^0.8.27;
 import {Diamond, DiamondArgs} from "../../diamond/implementation/Diamond.sol";
 import {IDiamondCut} from "../../diamond/interfaces/IDiamondCut.sol";
 
-
 /**
  * @title MasterAccountController contract
  * @notice The contract controlling personal accounts (XRPL master controller)

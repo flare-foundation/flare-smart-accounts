@@ -3,8 +3,8 @@ pragma solidity ^0.8.27;
 
 import {Test,console2} from "forge-std/Test.sol";
 import {MasterAccountController} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
-import {MasterAccountControllerBase} from "../contracts/smartAccounts/implementation/MasterAccountControllerBase.sol";
 import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
+import {IIMasterAccountController} from "../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
@@ -12,7 +12,6 @@ import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRe
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
-import {MasterAccountControllerProxy} from "../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
@@ -23,12 +22,13 @@ import {IISingletonFactory} from "../contracts/smartAccounts/interface/IISinglet
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {DateUtils} from "../contracts/mock/DateUtils.sol";
+import {IDiamond} from "../contracts/diamond/interfaces/IDiamond.sol";
+import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
+import {DiamondArgs} from "../contracts/diamond/implementation/Diamond.sol";
 
 // solhint-disable-next-line max-states-count
-contract MasterAccountControllerTest is Test {
-    MasterAccountController private masterAccountController;
-    MasterAccountController private masterAccountControllerImpl;
-    MasterAccountControllerProxy private masterAccountControllerProxy;
+contract MasterAccountControllerTest is Test, FacetsDeploy {
+    IIMasterAccountController private masterAccountController;
     PersonalAccount private personalAccountImpl;
     PersonalAccountProxy private personalAccountProxy;
     IPersonalAccount private personalAccount1;
@@ -98,33 +98,55 @@ contract MasterAccountControllerTest is Test {
         personalAccountImpl = new PersonalAccount();
         personalAccountImplementation = address(personalAccountImpl);
 
-        // deploy controller base seed using create2
-        // same on all chains
-        bytes memory bytecode = abi.encodePacked(
-            type(MasterAccountControllerBase).creationCode
-        );
-        address seedControllerBase = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
+        // // deploy controller base seed using create2
+        // // same on all chains
+        // bytes memory bytecode = abi.encodePacked(
+        //     type(MasterAccountControllerBase).creationCode
+        // );
+        // address seedControllerBase = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
 
-        // deploy controller proxy
-        // same on all chains
-        bytecode = abi.encodePacked(
-            type(MasterAccountControllerProxy).creationCode,
-            abi.encode(
-                seedControllerBase,
-                initialOwner
+        // // deploy controller proxy
+        // // same on all chains
+        // bytecode = abi.encodePacked(
+        //     type(MasterAccountControllerProxy).creationCode,
+        //     abi.encode(
+        //         seedControllerBase,
+        //         initialOwner
+        //     )
+        // );
+        // address masterAccountControllerProxyAddr = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
+
+        // // deploy real controller implementation
+        // masterAccountControllerImpl = new MasterAccountController();
+
+        // // upgrade controller proxy to real implementation
+        // vm.prank(initialOwner);
+        // UUPSUpgradeable(masterAccountControllerProxyAddr).upgradeToAndCall(
+        //     address(masterAccountControllerImpl), bytes("")
+        // );
+        // masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
+
+
+        // deploy facets
+        IDiamond.FacetCut[] memory baseCuts = deployBaseFacets();
+        DiamondArgs memory args = DiamondArgs({
+            owner: address(0),
+            initAddress: address(0),
+            initCalldata: ""
+        });
+        masterAccountController = IIMasterAccountController(address(
+            new MasterAccountController(
+                baseCuts,
+                args
             )
-        );
-        address masterAccountControllerProxyAddr = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
+        ));
 
-        // deploy real controller implementation
-        masterAccountControllerImpl = new MasterAccountController();
-
-        // upgrade controller proxy to real implementation
-        vm.prank(initialOwner);
-        UUPSUpgradeable(masterAccountControllerProxyAddr).upgradeToAndCall(
-            address(masterAccountControllerImpl), bytes("")
+        IDiamond.FacetCut[] memory smartAccountsCuts = deploySmartAccountFacets();
+        masterAccountController.diamondCut(
+            smartAccountsCuts,
+            address(0),
+            bytes("")
         );
-        masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
 
         // initialize controller
         vm.prank(initialOwner);
@@ -188,145 +210,145 @@ contract MasterAccountControllerTest is Test {
         xrplAddress2 = "xrplAddress2";
     }
 
-    function testUpgrades() public {
-        IPayment.Proof memory proof;
-        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
-        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
-        proof.data.requestBody.transactionId = bytes32("tx1");
-        proof.data.responseBody.receivedAmount = 1000000;
-        proof.data.responseBody.standardPaymentReference = _encodeFirelightPaymentReference(1, 0, 12345, 0, 0);
-        _mockVerifyPayment(true);
+    // function testUpgrades() public {
+    //     IPayment.Proof memory proof;
+    //     proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+    //     proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+    //     proof.data.requestBody.transactionId = bytes32("tx1");
+    //     proof.data.responseBody.receivedAmount = 1000000;
+    //     proof.data.responseBody.standardPaymentReference = _encodeFirelightPaymentReference(1, 0, 12345, 0, 0);
+    //     _mockVerifyPayment(true);
 
-        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
-        assertEq(
-            predictedAddress1.code.length,
-            0
-        );
-        fxrp.mint(predictedAddress1, 12345);
+    //     address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+    //     assertEq(
+    //         predictedAddress1.code.length,
+    //         0
+    //     );
+    //     fxrp.mint(predictedAddress1, 12345);
 
-        vm.expectEmit();
-        emit IPersonalAccount.Approved(
-            address(fxrp),
-            address(depositVault),
-            12345
-        );
-        masterAccountController.executeInstruction(proof, xrplAddress1);
+    //     vm.expectEmit();
+    //     emit IPersonalAccount.Approved(
+    //         address(fxrp),
+    //         address(depositVault),
+    //         12345
+    //     );
+    //     masterAccountController.executeInstruction(proof, xrplAddress1);
 
-        // check that the personal account was created at the expected address
-        assertNotEq(
-            predictedAddress1.code.length,
-            0
-        );
-        assertEq(
-            masterAccountController.getPersonalAccount(xrplAddress1),
-            predictedAddress1
-        );
-        personalAccount1 = IPersonalAccount(predictedAddress1);
-        assertEq(
-            personalAccount1.implementation(),
-            address(personalAccountImpl)
-        );
-        assertEq(
-            personalAccount1.xrplOwner(),
-            xrplAddress1
-        );
-        assertEq(
-            personalAccount1.controllerAddress(),
-            address(masterAccountController)
-        );
+    //     // check that the personal account was created at the expected address
+    //     assertNotEq(
+    //         predictedAddress1.code.length,
+    //         0
+    //     );
+    //     assertEq(
+    //         masterAccountController.getPersonalAccount(xrplAddress1),
+    //         predictedAddress1
+    //     );
+    //     personalAccount1 = IPersonalAccount(predictedAddress1);
+    //     assertEq(
+    //         personalAccount1.implementation(),
+    //         address(personalAccountImpl)
+    //     );
+    //     assertEq(
+    //         personalAccount1.xrplOwner(),
+    //         xrplAddress1
+    //     );
+    //     assertEq(
+    //         personalAccount1.controllerAddress(),
+    //         address(masterAccountController)
+    //     );
 
-        // change implementation of MasterAccountController
-        assertEq(
-            masterAccountController.controllerImplementation(),
-            address(masterAccountControllerImpl)
-        );
-        MasterAccountController newMasterAccountControllerImpl = new MasterAccountController();
-        vm.prank(governance);
-        masterAccountController.upgradeToAndCall(
-            address(newMasterAccountControllerImpl),
-            bytes("")
-        );
-        assertEq(
-            masterAccountController.controllerImplementation(),
-            address(newMasterAccountControllerImpl)
-        );
-        assertEq(
-            masterAccountController.getPersonalAccount(xrplAddress1),
-            address(personalAccount1)
-        );
-        assertEq(
-            personalAccount1.controllerAddress(),
-            address(masterAccountController)
-        );
+    //     // change implementation of MasterAccountController
+    //     assertEq(
+    //         masterAccountController.controllerImplementation(),
+    //         address(masterAccountControllerImpl)
+    //     );
+    //     MasterAccountController newMasterAccountControllerImpl = new MasterAccountController();
+    //     vm.prank(governance);
+    //     masterAccountController.upgradeToAndCall(
+    //         address(newMasterAccountControllerImpl),
+    //         bytes("")
+    //     );
+    //     assertEq(
+    //         masterAccountController.controllerImplementation(),
+    //         address(newMasterAccountControllerImpl)
+    //     );
+    //     assertEq(
+    //         masterAccountController.getPersonalAccount(xrplAddress1),
+    //         address(personalAccount1)
+    //     );
+    //     assertEq(
+    //         personalAccount1.controllerAddress(),
+    //         address(masterAccountController)
+    //     );
 
-        // deploy a new PersonalAccount implementation
-        PersonalAccount newPersonalAccountImpl = new PersonalAccount();
+    //     // deploy a new PersonalAccount implementation
+    //     PersonalAccount newPersonalAccountImpl = new PersonalAccount();
 
-        // compute address of personal account for xrplAddress2 before implementation change
-        address predictedAddress2 = masterAccountController.getPersonalAccount(xrplAddress2);
+    //     // compute address of personal account for xrplAddress2 before implementation change
+    //     address predictedAddress2 = masterAccountController.getPersonalAccount(xrplAddress2);
 
-        // update PersonalAccount implementation on MasterAccountController
-        vm.prank(governance);
-        masterAccountController.setPersonalAccountImplementation(address(newPersonalAccountImpl));
-        assertEq(
-            masterAccountController.personalAccountImplementation(),
-            address(newPersonalAccountImpl)
-        );
-        assertEq(
-            masterAccountController.implementation(), // beacon implementation
-            address(newPersonalAccountImpl)
-        );
-        assertEq(
-            masterAccountController.getPersonalAccount(xrplAddress1),
-            address(personalAccount1)
-        );
-        assertEq(
-            personalAccount1.implementation(),
-            address(newPersonalAccountImpl)
-        );
-        assertEq(
-            personalAccount1.xrplOwner(),
-            xrplAddress1
-        );
-        assertEq(
-            personalAccount1.controllerAddress(),
-            address(masterAccountController)
-        );
+    //     // update PersonalAccount implementation on MasterAccountController
+    //     vm.prank(governance);
+    //     masterAccountController.setPersonalAccountImplementation(address(newPersonalAccountImpl));
+    //     assertEq(
+    //         masterAccountController.personalAccountImplementation(),
+    //         address(newPersonalAccountImpl)
+    //     );
+    //     assertEq(
+    //         masterAccountController.implementation(), // beacon implementation
+    //         address(newPersonalAccountImpl)
+    //     );
+    //     assertEq(
+    //         masterAccountController.getPersonalAccount(xrplAddress1),
+    //         address(personalAccount1)
+    //     );
+    //     assertEq(
+    //         personalAccount1.implementation(),
+    //         address(newPersonalAccountImpl)
+    //     );
+    //     assertEq(
+    //         personalAccount1.xrplOwner(),
+    //         xrplAddress1
+    //     );
+    //     assertEq(
+    //         personalAccount1.controllerAddress(),
+    //         address(masterAccountController)
+    //     );
 
-        // execute transaction for xrplAddress2; new personal account should be created with new implementation
-        // and at the expected address
-        assertEq(
-            predictedAddress2.code.length,
-            0
-        );
-        proof.data.requestBody.transactionId = bytes32("tx2");
-        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
-        fxrp.mint(predictedAddress2, 12345);
-        masterAccountController.executeInstruction(proof, xrplAddress2);
-        personalAccount2 = IPersonalAccount(masterAccountController.getPersonalAccount(xrplAddress2));
-        // check that the personal account was created at the expected address
-        assertEq(
-            address(personalAccount2),
-            predictedAddress2
-        );
-        assertNotEq(
-            predictedAddress2.code.length,
-            0
-        );
-        // check implementation of the new personal account
-        assertEq(
-            personalAccount2.implementation(),
-            address(newPersonalAccountImpl)
-        );
-        assertEq(
-            personalAccount2.xrplOwner(),
-            xrplAddress2
-        );
-        assertEq(
-            personalAccount2.controllerAddress(),
-            address(masterAccountController)
-        );
-    }
+    //     // execute transaction for xrplAddress2; new personal account should be created with new implementation
+    //     // and at the expected address
+    //     assertEq(
+    //         predictedAddress2.code.length,
+    //         0
+    //     );
+    //     proof.data.requestBody.transactionId = bytes32("tx2");
+    //     proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
+    //     fxrp.mint(predictedAddress2, 12345);
+    //     masterAccountController.executeInstruction(proof, xrplAddress2);
+    //     personalAccount2 = IPersonalAccount(masterAccountController.getPersonalAccount(xrplAddress2));
+    //     // check that the personal account was created at the expected address
+    //     assertEq(
+    //         address(personalAccount2),
+    //         predictedAddress2
+    //     );
+    //     assertNotEq(
+    //         predictedAddress2.code.length,
+    //         0
+    //     );
+    //     // check implementation of the new personal account
+    //     assertEq(
+    //         personalAccount2.implementation(),
+    //         address(newPersonalAccountImpl)
+    //     );
+    //     assertEq(
+    //         personalAccount2.xrplOwner(),
+    //         xrplAddress2
+    //     );
+    //     assertEq(
+    //         personalAccount2.controllerAddress(),
+    //         address(masterAccountController)
+    //     );
+    // }
 
     //// reserveCollateral tests
     function testReserveCollateralRevertInvalidInstruction() public {
