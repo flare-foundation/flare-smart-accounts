@@ -241,14 +241,14 @@ interface IMasterAccountController {
      * @notice Emitted when a redeem is made from a vault.
      * @param personalAccount The personal account address.
      * @param vault The vault address.
-     * @param amount The amount redeemed.
-     * @param shares The number of shares burned.
+     * @param shares The number of shares to redeem.
+     * @param amount The amount to redeem.
      */
     event Redeemed(
         address indexed personalAccount,
         address indexed vault,
-        uint256 amount,
-        uint256 shares
+        uint256 shares,
+        uint256 amount
     );
 
     /**
@@ -511,6 +511,14 @@ interface IMasterAccountController {
     );
 
     /**
+     * @notice Reverts if the instruction fee is not set.
+     * @param instructionId The instruction ID.
+     */
+    error InstructionFeeNotSet(
+        uint256 instructionId
+    );
+
+    /**
      * @notice Reverts if the personal account was not successfully deployed.
      * @param personalAccountAddress The address of the personal account.
      */
@@ -548,6 +556,8 @@ interface IMasterAccountController {
     error XrplProviderWalletAlreadyExists(
         string xrplProviderWallet
     );
+
+    error InvalidMaxSlippagePPM();
 
     /**
      * @notice Reserve collateral for minting operation.
