@@ -7,7 +7,6 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 
-
 /**
  * @title UniswapV3
  * @dev Library for interacting with Uniswap V3 protocol.

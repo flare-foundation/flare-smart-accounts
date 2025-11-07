@@ -7,8 +7,7 @@ import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIInstructionsFacet} from "../interface/IIInstructionsFacet.sol";
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
-
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
 import {PaymentProofs} from "../library/PaymentProofs.sol";
 import {FXrp} from "../library/FXrp.sol";
@@ -231,7 +230,7 @@ contract InstructionsFacet is IIInstructionsFacet {
     {
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
         Vaults.VaultInfo memory vaultInfo = Vaults.getState().vaults[_vaultId];
-        require(vaultInfo.vaultAddress != address(0), InvalidVaultId(_vaultId));
+        require(vaultInfo.vaultAddress != address(0), IVaultsFacet.InvalidVaultId(_vaultId));
         if (vaultInfo.vaultType == 1) {
             // Firelight vault
             Vault.claimWithdrawal(personalAccount, vaultInfo.vaultAddress, _epoch);
@@ -239,7 +238,7 @@ contract InstructionsFacet is IIInstructionsFacet {
             // Upshift vault
             Vault.claim(personalAccount, vaultInfo.vaultAddress, _epoch);
         } else {
-            revert InvalidVaultType(vaultInfo.vaultType);
+            revert IVaultsFacet.InvalidVaultType(vaultInfo.vaultType);
         }
 
         emit WithdrawalExecuted(

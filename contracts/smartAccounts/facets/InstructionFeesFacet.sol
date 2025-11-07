@@ -2,8 +2,6 @@
 pragma solidity ^0.8.27;
 
 import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
-import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIInstructionFeesFacet} from "../interface/IIInstructionFeesFacet.sol";
 import {IInstructionFeesFacet} from "../../userInterfaces/facets/IInstructionFeesFacet.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
@@ -35,7 +33,7 @@ contract InstructionFeesFacet is IIInstructionFeesFacet {
     {
         LibDiamond.enforceIsContractOwner();
         InstructionFees.State storage state = InstructionFees.getState();
-        require(_instructionIds.length == _fees.length, LengthsMismatch());
+        require(_instructionIds.length == _fees.length, InstructionFeesLengthsMismatch());
         for (uint256 i = 0; i < _instructionIds.length; i++) {
             uint256 instructionId = _instructionIds[i];
             uint256 fee = _fees[i];

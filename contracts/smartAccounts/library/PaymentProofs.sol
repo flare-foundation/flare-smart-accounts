@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {XrplProviderWallets} from "./XrplProviderWallets.sol";
 import {IPaymentProofsFacet} from "../../userInterfaces/facets/IPaymentProofsFacet.sol";
-
 
 library PaymentProofs {
 

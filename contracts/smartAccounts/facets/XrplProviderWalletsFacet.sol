@@ -2,10 +2,6 @@
 pragma solidity ^0.8.27;
 
 import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
-import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
-import {AgentInfo} from "flare-periphery/src/flare/data/AgentInfo.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIXrplProviderWalletsFacet} from "../interface/IIXrplProviderWalletsFacet.sol";
 import {IXrplProviderWalletsFacet} from "../../userInterfaces/facets/IXrplProviderWalletsFacet.sol";
 import {XrplProviderWallets} from "../library/XrplProviderWallets.sol";

@@ -22,7 +22,7 @@ interface IVaultsFacet {
     /**
      * @notice Reverts if array lengths do not match.
      */
-    error LengthsMismatch();
+    error VaultsLengthsMismatch();
 
     /**
      * @notice Reverts if the vault ID is already used.

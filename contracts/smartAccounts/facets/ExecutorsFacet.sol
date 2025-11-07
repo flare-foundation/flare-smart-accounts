@@ -2,8 +2,6 @@
 pragma solidity ^0.8.27;
 
 import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
-import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIExecutorsFacet} from "../interface/IIExecutorsFacet.sol";
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 import {Executors} from "../library/Executors.sol";

@@ -2,19 +2,11 @@
 pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
-import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
-
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
-import {PersonalAccounts} from "../library/PersonalAccounts.sol";
-import {PaymentProofs} from "../library/PaymentProofs.sol";
 import {FXrp} from "../library/FXrp.sol";
 import {Vault} from "../library/Vault.sol";
 import {Vaults} from "../library/Vaults.sol";
-import {AgentVaults} from "../library/AgentVaults.sol";
-import {InstructionFees} from "../library/InstructionFees.sol";
 
 // payment reference format (32 bytes):
 // instruction id consists of instruction type (4 bits) and instruction command (4 bits)

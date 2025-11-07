@@ -5,7 +5,6 @@ import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AgentInfo.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIAgentVaultsFacet} from "../interface/IIAgentVaultsFacet.sol";
 import {IAgentVaultsFacet} from "../../userInterfaces/facets/IAgentVaultsFacet.sol";
 import {AgentVaults} from "../library/AgentVaults.sol";
@@ -24,7 +23,7 @@ contract AgentVaultsFacet is IIAgentVaultsFacet {
         external
     {
         LibDiamond.enforceIsContractOwner();
-        require(_agentVaultIds.length == _agentVaultAddresses.length, LengthsMismatch());
+        require(_agentVaultIds.length == _agentVaultAddresses.length, AgentsVaultsLengthsMismatch());
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
         AgentVaults.State storage state = AgentVaults.getState();
         for (uint256 i = 0; i < _agentVaultIds.length; i++) {

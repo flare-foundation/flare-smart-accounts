@@ -2,8 +2,6 @@
 pragma solidity ^0.8.27;
 
 import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
-import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIVaultsFacet} from "../interface/IIVaultsFacet.sol";
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {Vaults} from "../library/Vaults.sol";
@@ -23,8 +21,8 @@ contract VaultsFacet is IIVaultsFacet {
         external
     {
         LibDiamond.enforceIsContractOwner();
-        require(_vaultIds.length == _vaultAddresses.length, LengthsMismatch());
-        require(_vaultIds.length == _vaultTypes.length, LengthsMismatch());
+        require(_vaultIds.length == _vaultAddresses.length, VaultsLengthsMismatch());
+        require(_vaultIds.length == _vaultTypes.length, VaultsLengthsMismatch());
         Vaults.State storage state = Vaults.getState();
         for (uint256 i = 0; i < _vaultIds.length; i++) {
             uint256 vaultId = _vaultIds[i];

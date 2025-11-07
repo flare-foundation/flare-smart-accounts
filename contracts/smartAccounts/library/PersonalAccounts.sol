@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
-import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
-import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {PersonalAccountProxy} from "../proxy/PersonalAccountProxy.sol";
 import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
+import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IPersonalAccountsFacet} from "../../userInterfaces/facets/IPersonalAccountsFacet.sol";
-
 
 library PersonalAccounts {
 
     /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
-    address constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+    address internal constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
 
     struct State {
         /// @notice PersonalAccount implementation used by BeaconProxy PA instances via IBeacon

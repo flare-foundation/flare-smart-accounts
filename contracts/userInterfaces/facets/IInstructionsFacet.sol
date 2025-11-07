@@ -250,22 +250,6 @@ interface IInstructionsFacet {
     error InvalidMinter();
 
     /**
-     * @notice Reverts if the vault ID is invalid.
-     * @param vaultId The vault ID.
-     */
-    error InvalidVaultId(
-        uint256 vaultId
-    );
-
-    /**
-     * @notice Reverts if the vault type is invalid.
-     * @param vaultType The vault type.
-     */
-    error InvalidVaultType(
-        uint8 vaultType
-    );
-
-    /**
      * @notice Reserve collateral for minting operation.
      * @param _xrplAddress The XRPL address requesting the collateral reservation.
      * @param _paymentReference The payment reference associated with the request.

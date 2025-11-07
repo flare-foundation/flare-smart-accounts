@@ -30,7 +30,7 @@ interface IAgentVaultsFacet {
     /**
      * @notice Reverts if array lengths do not match.
      */
-    error LengthsMismatch();
+    error AgentsVaultsLengthsMismatch();
 
     /**
      * @notice Reverts if the agent vault ID is already used.

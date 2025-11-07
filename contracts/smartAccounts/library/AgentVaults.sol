@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
-import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
-import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
-import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
-import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {IAgentVaultsFacet} from "../../userInterfaces/facets/IAgentVaultsFacet.sol";
-
 
 library AgentVaults {
 
@@ -25,7 +18,6 @@ library AgentVaults {
         _agentVault = state.agentVaults[agentVaultId];
         require(_agentVault != address(0), IAgentVaultsFacet.InvalidAgentVault(agentVaultId));
     }
-
 
     bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.AgentVaults.State");
 

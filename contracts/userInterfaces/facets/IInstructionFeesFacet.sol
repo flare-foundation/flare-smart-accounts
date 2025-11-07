@@ -36,7 +36,7 @@ interface IInstructionFeesFacet {
     /**
      * @notice Reverts if array lengths do not match.
      */
-    error LengthsMismatch();
+    error InstructionFeesLengthsMismatch();
 
     /**
      * @notice Reverts if the instruction fee is invalid.
