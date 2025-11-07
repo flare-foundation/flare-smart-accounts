@@ -7,6 +7,7 @@ import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IMasterAccountController} from "../../userInterfaces/IMasterAccountController.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
+import {IAgentVaultsFacet} from "../../userInterfaces/facets/IAgentVaultsFacet.sol";
 
 
 library AgentVaults {
@@ -22,7 +23,7 @@ library AgentVaults {
         uint256 agentVaultId = (uint256(_paymentReference) >> 144) & ((uint256(1) << 16) - 1);
         State storage state = getState();
         _agentVault = state.agentVaults[agentVaultId];
-        require(_agentVault != address(0), IMasterAccountController.InvalidAgentVault(agentVaultId));
+        require(_agentVault != address(0), IAgentVaultsFacet.InvalidAgentVault(agentVaultId));
     }
 
 
