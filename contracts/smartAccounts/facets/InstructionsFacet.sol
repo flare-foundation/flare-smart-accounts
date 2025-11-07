@@ -146,8 +146,7 @@ contract InstructionsFacet is IIInstructionsFacet {
         // check that minter and amount match
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
         require(address(personalAccount) == reservationInfo.minter, InvalidMinter());
-        uint256 lots = _getValue(paymentReference);
-        uint256 amount = FXrp.lotsToAmount(lots);
+        uint256 amount = FXrp.lotsToAmount(_getValue(paymentReference));
         // could revert if lot size changes between minting and deposit, but very unlikely
         // user should call deposit in that case
         require(amount == reservationInfo.valueUBA, InvalidAmount());
