@@ -107,8 +107,8 @@ contract InstructionsFacet is IIInstructionsFacet {
         // user should call deposit in that case
         require(amount == reservationInfo.valueUBA, InvalidAmount());
         // mark transaction as used
-        require(!state.usedPaymentHashes[transactionId], TransactionAlreadyExecuted());
-        state.usedPaymentHashes[transactionId] = true;
+        require(!state.usedTransactionIds[transactionId], TransactionAlreadyExecuted());
+        state.usedTransactionIds[transactionId] = true;
 
         // execute deposit
         address vault = Vaults.getVaultAddress(paymentReference);
@@ -149,8 +149,8 @@ contract InstructionsFacet is IIInstructionsFacet {
         // mark transaction as used
         Instructions.State storage state = Instructions.getState();
         bytes32 transactionId = _proof.data.requestBody.transactionId;
-        require(!state.usedPaymentHashes[transactionId], TransactionAlreadyExecuted());
-        state.usedPaymentHashes[transactionId] = true;
+        require(!state.usedTransactionIds[transactionId], TransactionAlreadyExecuted());
+        state.usedTransactionIds[transactionId] = true;
 
         // create or get existing Personal Account for the XRPL address
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
@@ -200,5 +200,27 @@ contract InstructionsFacet is IIInstructionsFacet {
             _xrplAddress,
             _epoch
         );
+    }
+
+    /// @inheritdoc IInstructionsFacet
+    function isTransactionIdUsed(
+        bytes32 _transactionId
+    )
+        external view
+        returns (bool)
+    {
+        Instructions.State storage state = Instructions.getState();
+        return state.usedTransactionIds[_transactionId];
+    }
+
+    /// @inheritdoc IInstructionsFacet
+    function getTransactionIdForCollateralReservation(
+        uint256 _collateralReservationId
+    )
+        external view
+        returns (bytes32)
+    {
+        Instructions.State storage state = Instructions.getState();
+        return state.collateralReservationIdToTransactionId[_collateralReservationId];
     }
 }

@@ -21,11 +21,22 @@ import {MockSingletonFactory} from "../contracts/mock/MockSingletonFactory.sol";
 import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
 import {IISingletonFactory} from "../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {DateUtils} from "../contracts/mock/DateUtils.sol";
 import {IDiamond} from "../contracts/diamond/interfaces/IDiamond.sol";
 import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
 import {DiamondArgs} from "../contracts/diamond/implementation/Diamond.sol";
+import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
+import {MasterAccountControllerInit} from "../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
+import {IInstructionsFacet} from "../contracts/userInterfaces/facets/IInstructionsFacet.sol";
+import {IAgentVaultsFacet} from "../contracts/userInterfaces/facets/IAgentVaultsFacet.sol";
+import {IPaymentProofsFacet} from "../contracts/userInterfaces/facets/IPaymentProofsFacet.sol";
+import {IExecutorsFacet} from "../contracts/userInterfaces/facets/IExecutorsFacet.sol";
+import {IInstructionFeesFacet} from "../contracts/userInterfaces/facets/IInstructionFeesFacet.sol";
+import {IXrplProviderWalletsFacet} from "../contracts/userInterfaces/facets/IXrplProviderWalletsFacet.sol";
+import {IAgentVaultsFacet} from "../contracts/userInterfaces/facets/IAgentVaultsFacet.sol";
+import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
+import {IPersonalAccountsFacet} from "../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
+import {ISwapFacet} from "../contracts/userInterfaces/facets/ISwapFacet.sol";
 
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test, FacetsDeploy {
@@ -131,7 +142,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // deploy facets
         IDiamond.FacetCut[] memory baseCuts = deployBaseFacets();
         DiamondArgs memory args = DiamondArgs({
-            owner: address(0),
+            owner: initialOwner,
             initAddress: address(0),
             initCalldata: ""
         });
@@ -143,20 +154,19 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         ));
 
         IDiamond.FacetCut[] memory smartAccountsCuts = deploySmartAccountFacets();
+        MasterAccountControllerInit masterAccountControllerInit = new MasterAccountControllerInit();
+        vm.prank(initialOwner);
         masterAccountController.diamondCut(
             smartAccountsCuts,
-            address(0),
-            bytes("")
-        );
-
-        // initialize controller
-        vm.prank(initialOwner);
-        masterAccountController.initialize(
-            payable(executor),
-            executorFee,
-            paymentProofValidityDurationSeconds,
-            defaultInstructionFee,
-            personalAccountImplementation
+            address(masterAccountControllerInit),
+            abi.encodeWithSelector(
+                MasterAccountControllerInit.init.selector,
+                payable(executor),
+                executorFee,
+                paymentProofValidityDurationSeconds,
+                defaultInstructionFee,
+                personalAccountImplementation
+            )
         );
 
         // set swap parameters
@@ -211,153 +221,153 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         xrplAddress2 = "xrplAddress2";
     }
 
-    // function testUpgrades() public {
-    //     IPayment.Proof memory proof;
-    //     proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
-    //     proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
-    //     proof.data.requestBody.transactionId = bytes32("tx1");
-    //     proof.data.responseBody.receivedAmount = 1000000;
-    //     proof.data.responseBody.standardPaymentReference = _encodeFirelightPaymentReference(1, 0, 12345, 0, 0);
-    //     _mockVerifyPayment(true);
+    function testUpgrades() public {
+        IPayment.Proof memory proof;
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        proof.data.responseBody.receivedAmount = 1000000;
+        proof.data.responseBody.standardPaymentReference = _encodeFirelightPaymentReference(1, 0, 12345, 0, 0);
+        _mockVerifyPayment(true);
 
-    //     address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
-    //     assertEq(
-    //         predictedAddress1.code.length,
-    //         0
-    //     );
-    //     fxrp.mint(predictedAddress1, 12345);
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(
+            predictedAddress1.code.length,
+            0
+        );
+        fxrp.mint(predictedAddress1, 12345);
 
-    //     vm.expectEmit();
-    //     emit IPersonalAccount.Approved(
-    //         address(fxrp),
-    //         address(depositVault),
-    //         12345
-    //     );
-    //     masterAccountController.executeInstruction(proof, xrplAddress1);
+        vm.expectEmit();
+        emit IPersonalAccount.Approved(
+            address(fxrp),
+            address(depositVault),
+            12345
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
 
-    //     // check that the personal account was created at the expected address
-    //     assertNotEq(
-    //         predictedAddress1.code.length,
-    //         0
-    //     );
-    //     assertEq(
-    //         masterAccountController.getPersonalAccount(xrplAddress1),
-    //         predictedAddress1
-    //     );
-    //     personalAccount1 = IPersonalAccount(predictedAddress1);
-    //     assertEq(
-    //         personalAccount1.implementation(),
-    //         address(personalAccountImpl)
-    //     );
-    //     assertEq(
-    //         personalAccount1.xrplOwner(),
-    //         xrplAddress1
-    //     );
-    //     assertEq(
-    //         personalAccount1.controllerAddress(),
-    //         address(masterAccountController)
-    //     );
+        // check that the personal account was created at the expected address
+        assertNotEq(
+            predictedAddress1.code.length,
+            0
+        );
+        assertEq(
+            masterAccountController.getPersonalAccount(xrplAddress1),
+            predictedAddress1
+        );
+        personalAccount1 = IPersonalAccount(predictedAddress1);
+        assertEq(
+            personalAccount1.implementation(),
+            address(personalAccountImpl)
+        );
+        assertEq(
+            personalAccount1.xrplOwner(),
+            xrplAddress1
+        );
+        assertEq(
+            personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
 
-    //     // change implementation of MasterAccountController
-    //     assertEq(
-    //         masterAccountController.controllerImplementation(),
-    //         address(masterAccountControllerImpl)
-    //     );
-    //     MasterAccountController newMasterAccountControllerImpl = new MasterAccountController();
-    //     vm.prank(governance);
-    //     masterAccountController.upgradeToAndCall(
-    //         address(newMasterAccountControllerImpl),
-    //         bytes("")
-    //     );
-    //     assertEq(
-    //         masterAccountController.controllerImplementation(),
-    //         address(newMasterAccountControllerImpl)
-    //     );
-    //     assertEq(
-    //         masterAccountController.getPersonalAccount(xrplAddress1),
-    //         address(personalAccount1)
-    //     );
-    //     assertEq(
-    //         personalAccount1.controllerAddress(),
-    //         address(masterAccountController)
-    //     );
+        // change implementation of MasterAccountController TODO change facet?
+        // assertEq(
+        //     masterAccountController.controllerImplementation(),
+        //     address(masterAccountControllerImpl)
+        // );
+        // MasterAccountController newMasterAccountControllerImpl = new MasterAccountController();
+        // vm.prank(governance);
+        // masterAccountController.upgradeToAndCall(
+        //     address(newMasterAccountControllerImpl),
+        //     bytes("")
+        // );
+        // assertEq(
+        //     masterAccountController.controllerImplementation(),
+        //     address(newMasterAccountControllerImpl)
+        // );
+        // assertEq(
+        //     masterAccountController.getPersonalAccount(xrplAddress1),
+        //     address(personalAccount1)
+        // );
+        // assertEq(
+        //     personalAccount1.controllerAddress(),
+        //     address(masterAccountController)
+        // );
 
-    //     // deploy a new PersonalAccount implementation
-    //     PersonalAccount newPersonalAccountImpl = new PersonalAccount();
+        // deploy a new PersonalAccount implementation
+        PersonalAccount newPersonalAccountImpl = new PersonalAccount();
 
-    //     // compute address of personal account for xrplAddress2 before implementation change
-    //     address predictedAddress2 = masterAccountController.getPersonalAccount(xrplAddress2);
+        // compute address of personal account for xrplAddress2 before implementation change
+        address predictedAddress2 = masterAccountController.getPersonalAccount(xrplAddress2);
 
-    //     // update PersonalAccount implementation on MasterAccountController
-    //     vm.prank(governance);
-    //     masterAccountController.setPersonalAccountImplementation(address(newPersonalAccountImpl));
-    //     assertEq(
-    //         masterAccountController.personalAccountImplementation(),
-    //         address(newPersonalAccountImpl)
-    //     );
-    //     assertEq(
-    //         masterAccountController.implementation(), // beacon implementation
-    //         address(newPersonalAccountImpl)
-    //     );
-    //     assertEq(
-    //         masterAccountController.getPersonalAccount(xrplAddress1),
-    //         address(personalAccount1)
-    //     );
-    //     assertEq(
-    //         personalAccount1.implementation(),
-    //         address(newPersonalAccountImpl)
-    //     );
-    //     assertEq(
-    //         personalAccount1.xrplOwner(),
-    //         xrplAddress1
-    //     );
-    //     assertEq(
-    //         personalAccount1.controllerAddress(),
-    //         address(masterAccountController)
-    //     );
+        // update PersonalAccount implementation on MasterAccountController
+        vm.prank(governance);
+        masterAccountController.setPersonalAccountImplementation(address(newPersonalAccountImpl));
+        assertEq(
+            masterAccountController.implementation(),
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            masterAccountController.implementation(), // beacon implementation
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            masterAccountController.getPersonalAccount(xrplAddress1),
+            address(personalAccount1)
+        );
+        assertEq(
+            personalAccount1.implementation(),
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            personalAccount1.xrplOwner(),
+            xrplAddress1
+        );
+        assertEq(
+            personalAccount1.controllerAddress(),
+            address(masterAccountController)
+        );
 
-    //     // execute transaction for xrplAddress2; new personal account should be created with new implementation
-    //     // and at the expected address
-    //     assertEq(
-    //         predictedAddress2.code.length,
-    //         0
-    //     );
-    //     proof.data.requestBody.transactionId = bytes32("tx2");
-    //     proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
-    //     fxrp.mint(predictedAddress2, 12345);
-    //     masterAccountController.executeInstruction(proof, xrplAddress2);
-    //     personalAccount2 = IPersonalAccount(masterAccountController.getPersonalAccount(xrplAddress2));
-    //     // check that the personal account was created at the expected address
-    //     assertEq(
-    //         address(personalAccount2),
-    //         predictedAddress2
-    //     );
-    //     assertNotEq(
-    //         predictedAddress2.code.length,
-    //         0
-    //     );
-    //     // check implementation of the new personal account
-    //     assertEq(
-    //         personalAccount2.implementation(),
-    //         address(newPersonalAccountImpl)
-    //     );
-    //     assertEq(
-    //         personalAccount2.xrplOwner(),
-    //         xrplAddress2
-    //     );
-    //     assertEq(
-    //         personalAccount2.controllerAddress(),
-    //         address(masterAccountController)
-    //     );
-    // }
+        // execute transaction for xrplAddress2; new personal account should be created with new implementation
+        // and at the expected address
+        assertEq(
+            predictedAddress2.code.length,
+            0
+        );
+        proof.data.requestBody.transactionId = bytes32("tx2");
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress2));
+        fxrp.mint(predictedAddress2, 12345);
+        masterAccountController.executeInstruction(proof, xrplAddress2);
+        personalAccount2 = IPersonalAccount(masterAccountController.getPersonalAccount(xrplAddress2));
+        // check that the personal account was created at the expected address
+        assertEq(
+            address(personalAccount2),
+            predictedAddress2
+        );
+        assertNotEq(
+            predictedAddress2.code.length,
+            0
+        );
+        // check implementation of the new personal account
+        assertEq(
+            personalAccount2.implementation(),
+            address(newPersonalAccountImpl)
+        );
+        assertEq(
+            personalAccount2.xrplOwner(),
+            xrplAddress2
+        );
+        assertEq(
+            personalAccount2.controllerAddress(),
+            address(masterAccountController)
+        );
+    }
 
-    //// reserveCollateral tests
+    // reserveCollateral tests
     function testReserveCollateralRevertInvalidInstruction() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(9, 0, 1000, 0);
         bytes32 transactionId = bytes32("tx1");
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidInstruction.selector,
+                IInstructionsFacet.InvalidInstruction.selector,
                 0,
                 9
             )
@@ -372,7 +382,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testReserveCollateralRevertInvalidTransactionId() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 0);
         bytes32 transactionId = bytes32(0);
-        vm.expectRevert(IMasterAccountController.InvalidTransactionId.selector);
+        vm.expectRevert(IInstructionsFacet.InvalidTransactionId.selector);
         masterAccountController.reserveCollateral(
             xrplAddress1,
             paymentReference,
@@ -385,7 +395,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes32 transactionId = bytes32("tx1");
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidAgentVault.selector,
+                IAgentVaultsFacet.InvalidAgentVault.selector,
                 1
             )
         );
@@ -399,7 +409,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testReserveCollateralRevertValueZero() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 0, 0); // value 0
         bytes32 transactionId = bytes32("tx1");
-        vm.expectRevert(IMasterAccountController.ValueZero.selector);
+        vm.expectRevert(IInstructionsFacet.ValueZero.selector);
         masterAccountController.reserveCollateral(
             xrplAddress1,
             paymentReference,
@@ -419,13 +429,13 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(predictedAddress1.code.length, 0);
 
         vm.expectEmit();
-        emit IMasterAccountController.CollateralReserved(
+        emit IInstructionsFacet.CollateralReserved(
             predictedAddress1,
             transactionId,
             paymentReference,
             xrplAddress1,
             22,
-            masterAccountController.agentVaults(0),
+            agent,
             lots,
             executor,
             executorFee
@@ -448,7 +458,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         assertEq(
-            masterAccountController.collateralReservationIdToTransactionId(collateralReservationId),
+            masterAccountController.getTransactionIdForCollateralReservation(collateralReservationId),
             transactionId
         );
     }
@@ -460,7 +470,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidInstruction.selector,
+                IInstructionsFacet.InvalidInstruction.selector,
                 0,
                 9
             )
@@ -475,7 +485,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.UnknownCollateralReservationId.selector,
+                IInstructionsFacet.UnknownCollateralReservationId.selector,
                 0
             )
         );
@@ -492,7 +502,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.requestBody.transactionId = transactionId;
 
-        vm.expectRevert(IMasterAccountController.MintingNotCompleted.selector);
+        vm.expectRevert(IInstructionsFacet.MintingNotCompleted.selector);
         masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
     }
 
@@ -508,7 +518,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.requestBody.transactionId = transactionId;
         _mockVerifyPayment(true);
-        vm.expectRevert(IMasterAccountController.InvalidMinter.selector);
+        vm.expectRevert(IInstructionsFacet.InvalidMinter.selector);
         masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
     }
 
@@ -526,7 +536,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.requestBody.transactionId = transactionId;
         _mockVerifyPayment(true);
         _mockLotSize(100);
-        vm.expectRevert(IMasterAccountController.InvalidAmount.selector);
+        vm.expectRevert(IInstructionsFacet.InvalidAmount.selector);
         masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
     }
 
@@ -554,14 +564,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(predictedAddress1, lots * lotSize);
 
         vm.expectEmit();
-        emit IMasterAccountController.Deposited(
+        emit IInstructionsFacet.Deposited(
             predictedAddress1,
             address(depositVault),
             lots * lotSize,
             lots * lotSize // assuming 1:1 initial share:asset for simplicity
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             predictedAddress1,
             paymentReference,
             transactionId,
@@ -579,7 +589,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidPaymentAmount.selector,
+                IInstructionsFacet.InvalidPaymentAmount.selector,
                 defaultInstructionFee
             )
         );
@@ -588,7 +598,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee) - 1;
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidPaymentAmount.selector,
+                IInstructionsFacet.InvalidPaymentAmount.selector,
                 defaultInstructionFee
             )
         );
@@ -602,7 +612,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 1;
 
-        vm.expectRevert(IMasterAccountController.InvalidTransactionStatus.selector);
+        vm.expectRevert(IPaymentProofsFacet.InvalidTransactionStatus.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -615,7 +625,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.blockTimestamp = 1234;
         vm.warp(1234 + paymentProofValidityDurationSeconds + 1);
 
-        vm.expectRevert(IMasterAccountController.PaymentProofExpired.selector);
+        vm.expectRevert(IPaymentProofsFacet.PaymentProofExpired.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -628,7 +638,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
         proof.data.responseBody.sourceAddressHash = keccak256(bytes("differentXrplAddress"));
 
-        vm.expectRevert(IMasterAccountController.MismatchingSourceAndXrplAddr.selector);
+        vm.expectRevert(IPaymentProofsFacet.MismatchingSourceAndXrplAddr.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -642,7 +652,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
         proof.data.responseBody.receivingAddressHash = keccak256(bytes("invalidReceivingAddress"));
 
-        vm.expectRevert(IMasterAccountController.InvalidReceivingAddressHash.selector);
+        vm.expectRevert(IPaymentProofsFacet.InvalidReceivingAddressHash.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -661,7 +671,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(predictedAddress1, 2 * defaultInstructionFee);
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
-        vm.expectRevert(IMasterAccountController.TransactionAlreadyExecuted.selector);
+        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -676,7 +686,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         _mockVerifyPayment(false);
 
-        vm.expectRevert(IMasterAccountController.InvalidTransactionProof.selector);
+        vm.expectRevert(IPaymentProofsFacet.InvalidTransactionProof.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -697,14 +707,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockVerifyPayment(true);
 
         vm.expectEmit();
-        emit IMasterAccountController.Deposited(
+        emit IInstructionsFacet.Deposited(
             personalAccountAddr,
             address(depositVault),
             123,
             123 // assuming 1:1 initial share:asset
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -744,14 +754,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockVerifyPayment(true);
 
         vm.expectEmit();
-        emit IMasterAccountController.Deposited(
+        emit IInstructionsFacet.Deposited(
             personalAccountAddr,
             address(depositVault),
             123,
             123 // assuming 1:1 initial share:asset
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -800,13 +810,13 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectEmit();
-        emit IMasterAccountController.FXrpTransferred(
+        emit IInstructionsFacet.FXrpTransferred(
             personalAccountAddr,
             recipient,
             123
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -840,7 +850,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.requestBody.transactionId = bytes32("tx1");
         _mockVerifyPayment(true);
 
-        vm.expectRevert(IMasterAccountController.AddressZero.selector);
+        vm.expectRevert(IInstructionsFacet.AddressZero.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -860,7 +870,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockRedeem(3 * lotSize);
 
         vm.expectEmit();
-        emit IMasterAccountController.FXrpRedeemed(
+        emit IInstructionsFacet.FXrpRedeemed(
             personalAccountAddr,
             3,
             3 * lotSize,
@@ -868,7 +878,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             executorFee
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -907,14 +917,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockVerifyPayment(true);
 
         vm.expectEmit();
-        emit IMasterAccountController.Redeemed(
+        emit IInstructionsFacet.Redeemed(
             personalAccountAddr,
             address(depositVault),
             100,
             100 // assuming 1:1 share:asset for simplicity
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -961,14 +971,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockVerifyPayment(true);
 
         vm.expectEmit();
-        emit IMasterAccountController.WithdrawalClaimed(
+        emit IInstructionsFacet.WithdrawalClaimed(
             personalAccountAddr,
             address(depositVault),
             period,
             100
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -1017,14 +1027,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockRedeem(100);
 
         vm.expectEmit();
-        emit IMasterAccountController.WithdrawalClaimed(
+        emit IInstructionsFacet.WithdrawalClaimed(
             personalAccountAddr,
             address(depositVault),
             period,
             100
         );
         vm.expectEmit();
-        emit IMasterAccountController.FXrpRedeemed(
+        emit IInstructionsFacet.FXrpRedeemed(
             personalAccountAddr,
             1,
             100,
@@ -1032,7 +1042,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             executorFee
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -1109,11 +1119,12 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.requestBody.transactionId = bytes32("tx2");
         _mockVerifyPayment(true);
 
-        (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + depositVault.lagDuration());
+        (uint256 year, uint256 month, uint256 day) =
+            DateUtils.timestampToDate(block.timestamp + depositVault.lagDuration());
         uint256 claimableEpoch = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0);
         uint256 period = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0) / 1 days;
         vm.expectEmit();
-        emit IMasterAccountController.RedeemRequested(
+        emit IInstructionsFacet.RedeemRequested(
             personalAccountAddr,
             address(depositVault),
             100,
@@ -1121,7 +1132,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             claimableEpoch
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -1166,7 +1177,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockVerifyPayment(true);
 
         vm.expectEmit();
-        emit IMasterAccountController.Claimed(
+        emit IInstructionsFacet.Claimed(
             personalAccountAddr,
             address(depositVault),
             1970,
@@ -1176,7 +1187,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             100
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -1219,7 +1230,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockRedeem(100);
 
         // vm.expectEmit();
-        emit IMasterAccountController.Claimed(
+        emit IInstructionsFacet.Claimed(
             personalAccountAddr,
             address(depositVault),
             1970,
@@ -1229,7 +1240,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             100
         );
         vm.expectEmit();
-        emit IMasterAccountController.FXrpRedeemed(
+        emit IInstructionsFacet.FXrpRedeemed(
             personalAccountAddr,
             1,
             100,
@@ -1237,7 +1248,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             executorFee
         );
         vm.expectEmit();
-        emit IMasterAccountController.InstructionExecuted(
+        emit IInstructionsFacet.InstructionExecuted(
             personalAccountAddr,
             proof.data.requestBody.transactionId,
             paymentReference,
@@ -1265,7 +1276,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidInstruction.selector,
+                IInstructionsFacet.InvalidInstruction.selector,
                 2,
                 9
             )
@@ -1286,15 +1297,16 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testSetExecutorRevertOnlyOwner() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.setExecutor(payable(makeAddr("newExecutor")));
     }
 
     function testSetExecutorRevertAddressZero() public {
-        vm.expectRevert(IMasterAccountController.InvalidExecutor.selector);
+        vm.expectRevert(IExecutorsFacet.InvalidExecutor.selector);
         vm.prank(governance);
         masterAccountController.setExecutor(payable(address(0)));
     }
@@ -1305,7 +1317,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(returnedFee, executorFee);
         vm.prank(governance);
         vm.expectEmit();
-        emit IMasterAccountController.ExecutorFeeSet(_fee);
+        emit IExecutorsFacet.ExecutorFeeSet(_fee);
         masterAccountController.setExecutorFee(_fee);
         (, uint256 newFee) = masterAccountController.getExecutorInfo();
         assertEq(newFee, _fee);
@@ -1314,31 +1326,32 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testSetExecutorFeeRevertOnlyOwner() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.setExecutorFee(5000);
     }
 
     function testSetExecutorFeeRevertInvalidFee() public {
-        vm.expectRevert(IMasterAccountController.InvalidExecutorFee.selector);
+        vm.expectRevert(IExecutorsFacet.InvalidExecutorFee.selector);
         vm.prank(governance);
         masterAccountController.setExecutorFee(0);
     }
 
     function testSetPaymentProofValidityDuration(uint256 _duration) public {
         assertEq(
-            masterAccountController.paymentProofValidityDurationSeconds(),
+            masterAccountController.getPaymentProofValidityDurationSeconds(),
             paymentProofValidityDurationSeconds
         );
         vm.prank(governance);
         vm.assume(_duration > 0);
         vm.expectEmit();
-        emit IMasterAccountController.PaymentProofValidityDurationSecondsSet(_duration);
+        emit IPaymentProofsFacet.PaymentProofValidityDurationSecondsSet(_duration);
         masterAccountController.setPaymentProofValidityDuration(_duration);
         assertEq(
-            masterAccountController.paymentProofValidityDurationSeconds(),
+            masterAccountController.getPaymentProofValidityDurationSeconds(),
             _duration
         );
     }
@@ -1346,31 +1359,32 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testSetPaymentProofValidityDurationRevertOnlyOwner() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.setPaymentProofValidityDuration(1000);
     }
 
     function testSetPaymentProofValidityDurationRevertInvalidDuration() public {
-        vm.expectRevert(IMasterAccountController.InvalidPaymentProofValidityDuration.selector);
+        vm.expectRevert(IPaymentProofsFacet.InvalidPaymentProofValidityDuration.selector);
         vm.prank(governance);
         masterAccountController.setPaymentProofValidityDuration(0);
     }
 
     function testSetDefaultInstructionFee(uint128 _fee) public {
         assertEq(
-            masterAccountController.defaultInstructionFee(),
+            masterAccountController.getDefaultInstructionFee(),
             defaultInstructionFee
         );
         vm.prank(governance);
         vm.assume(_fee > 0);
         vm.expectEmit();
-        emit IMasterAccountController.DefaultInstructionFeeSet(_fee);
+        emit IInstructionFeesFacet.DefaultInstructionFeeSet(_fee);
         masterAccountController.setDefaultInstructionFee(_fee);
         assertEq(
-            masterAccountController.defaultInstructionFee(),
+            masterAccountController.getDefaultInstructionFee(),
             _fee
         );
     }
@@ -1378,8 +1392,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testSetDefaultInstructionFeeRevertOnlyOwner(uint128 _fee) public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.setDefaultInstructionFee(_fee);
@@ -1419,9 +1434,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         newFees[1] = 2 * newFee;
         vm.prank(governance);
         vm.expectEmit();
-        emit IMasterAccountController.InstructionFeeSet(instructionIds[0], newFees[0]);
+        emit IInstructionFeesFacet.InstructionFeeSet(instructionIds[0], newFees[0]);
         vm.expectEmit();
-        emit IMasterAccountController.InstructionFeeSet(instructionIds[1], newFees[1]);
+        emit IInstructionFeesFacet.InstructionFeeSet(instructionIds[1], newFees[1]);
         masterAccountController.setInstructionFees(instructionIds, newFees);
         assertEq(
             masterAccountController.getInstructionFee(_getInstructionId(1, 1)),
@@ -1432,7 +1447,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.requestBody.transactionId = bytes32("tx2");
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidPaymentAmount.selector,
+                IInstructionsFacet.InvalidPaymentAmount.selector,
                 newFee
             )
         );
@@ -1452,8 +1467,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         newFees[0] = 2 * 1e6;
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.setInstructionFees(instructionIds, newFees);
@@ -1466,7 +1482,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256[] memory newFees = new uint256[](1);
         newFees[0] = 2 * 1e6;
         vm.prank(governance);
-        vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
+        vm.expectRevert(IInstructionFeesFacet.InstructionFeesLengthsMismatch.selector);
         masterAccountController.setInstructionFees(instructionIds, newFees);
     }
 
@@ -1502,8 +1518,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         instructionIds[0] = 11;
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.removeInstructionFees(instructionIds);
@@ -1517,7 +1534,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
-        // assertFalse(masterAccountController.isXrplProviderWallet(newWalet));
         // make tx with new wallet as receiving address - should revert
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 0);
         IPayment.Proof memory proof;
@@ -1530,7 +1546,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.requestBody.transactionId = bytes32("tx1");
         _mockVerifyPayment(true);
 
-        vm.expectRevert(IMasterAccountController.InvalidReceivingAddressHash.selector);
+        vm.expectRevert(IPaymentProofsFacet.InvalidReceivingAddressHash.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
         // add new wallet
@@ -1539,9 +1555,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         newWallets[1] = "newWallet2";
         vm.prank(governance);
         vm.expectEmit();
-        emit IMasterAccountController.XrplProviderWalletAdded(newWallets[0]);
+        emit IXrplProviderWalletsFacet.XrplProviderWalletAdded(newWallets[0]);
         vm.expectEmit();
-        emit IMasterAccountController.XrplProviderWalletAdded(newWallets[1]);
+        emit IXrplProviderWalletsFacet.XrplProviderWalletAdded(newWallets[1]);
         masterAccountController.addXrplProviderWallets(newWallets);
         assertEq(
             masterAccountController.getXrplProviderWallets().length,
@@ -1558,8 +1574,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         newWallets[0] = "newXrplWallet";
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.addXrplProviderWallets(newWallets);
@@ -1572,7 +1589,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidXrplProviderWallet.selector,
+                IXrplProviderWalletsFacet.InvalidXrplProviderWallet.selector,
                 newWallets[1]
             )
         );
@@ -1585,7 +1602,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.XrplProviderWalletAlreadyExists.selector,
+                IXrplProviderWalletsFacet.XrplProviderWalletAlreadyExists.selector,
                 newWallets[0]
             )
         );
@@ -1602,7 +1619,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         walletsToRemove[0] = xrplProviderWallet;
         vm.prank(governance);
         vm.expectEmit();
-        emit IMasterAccountController.XrplProviderWalletRemoved(walletsToRemove[0]);
+        emit IXrplProviderWalletsFacet.XrplProviderWalletRemoved(walletsToRemove[0]);
         masterAccountController.removeXrplProviderWallets(walletsToRemove);
         assertEq(
             masterAccountController.getXrplProviderWallets().length,
@@ -1619,7 +1636,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         walletsToRemove[0] = xrplProviderWallet;
         vm.prank(governance);
         vm.expectEmit();
-        emit IMasterAccountController.XrplProviderWalletRemoved(walletsToRemove[0]);
+        emit IXrplProviderWalletsFacet.XrplProviderWalletRemoved(walletsToRemove[0]);
         masterAccountController.removeXrplProviderWallets(walletsToRemove);
         assertEq(
             masterAccountController.getXrplProviderWallets().length,
@@ -1641,9 +1658,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.prank(governance);
         vm.expectEmit();
-        emit IMasterAccountController.AgentVaultAdded(1, addresses[0]);
+        emit IAgentVaultsFacet.AgentVaultAdded(1, addresses[0]);
         vm.expectEmit();
-        emit IMasterAccountController.AgentVaultAdded(2, addresses[1]);
+        emit IAgentVaultsFacet.AgentVaultAdded(2, addresses[1]);
         masterAccountController.addAgentVaults(ids, addresses);
 
         (uint256[] memory returnedIds, address[] memory addrs) = masterAccountController.getAgentVaults();
@@ -1664,8 +1681,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.addAgentVaults(ids, addresses);
@@ -1679,16 +1697,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         addresses[0] = makeAddr("agentVault1");
 
         vm.prank(governance);
-        vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
-        masterAccountController.addAgentVaults(ids, addresses);
-    }
-
-    function testAddAgentVaultsRevertZeroLength() public {
-        uint256[] memory ids = new uint256[](0);
-        address[] memory addresses = new address[](0);
-
-        vm.prank(governance);
-        // vm.expectRevert(IMasterAccountController.NoAgentVaults.selector);
+        vm.expectRevert(IAgentVaultsFacet.AgentsVaultsLengthsMismatch.selector);
         masterAccountController.addAgentVaults(ids, addresses);
     }
 
@@ -1707,7 +1716,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.AgentVaultIdAlreadyUsed.selector,
+                IAgentVaultsFacet.AgentVaultIdAlreadyUsed.selector,
                 1
             )
         );
@@ -1728,7 +1737,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidAgentVault.selector,
+                IAgentVaultsFacet.InvalidAgentVault.selector,
                 1
             )
         );
@@ -1751,7 +1760,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.AgentNotAvailable.selector,
+                IAgentVaultsFacet.AgentNotAvailable.selector,
                 addresses[1]
             )
         );
@@ -1768,7 +1777,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         idsToRemove[0] = 0;
         vm.prank(governance);
         vm.expectEmit();
-        emit IMasterAccountController.AgentVaultRemoved(0, agent);
+        emit IAgentVaultsFacet.AgentVaultRemoved(0, agent);
         masterAccountController.removeAgentVaults(idsToRemove);
 
         (returnedIds, addrs) = masterAccountController.getAgentVaults();
@@ -1784,8 +1793,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         idsToRemove[0] = 0;
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.removeAgentVaults(idsToRemove);
@@ -1797,7 +1807,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidAgentVault.selector,
+                IAgentVaultsFacet.InvalidAgentVault.selector,
                 1
             )
         );
@@ -1816,9 +1826,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vaultTypes[1] = 2;
 
         vm.expectEmit();
-        emit IMasterAccountController.VaultAdded(vaultIds[0], vaultAddresses[0], vaultTypes[0]);
+        emit IVaultsFacet.VaultAdded(vaultIds[0], vaultAddresses[0], vaultTypes[0]);
         vm.expectEmit();
-        emit IMasterAccountController.VaultAdded(vaultIds[1], vaultAddresses[1], vaultTypes[1]);
+        emit IVaultsFacet.VaultAdded(vaultIds[1], vaultAddresses[1], vaultTypes[1]);
         vm.prank(governance);
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
 
@@ -1849,8 +1859,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
@@ -1867,7 +1878,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidVaultId.selector,
+                IVaultsFacet.InvalidVaultId.selector,
                 1
             )
         );
@@ -1885,7 +1896,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidVaultType.selector,
+                IVaultsFacet.InvalidVaultType.selector,
                 0
             )
         );
@@ -1902,7 +1913,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vaultTypes[0] = 1;
 
         vm.prank(governance);
-        vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
+        vm.expectRevert(IVaultsFacet.VaultsLengthsMismatch.selector);
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
@@ -1916,7 +1927,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vaultTypes[1] = 2;
 
         vm.prank(governance);
-        vm.expectRevert(IMasterAccountController.LengthsMismatch.selector);
+        vm.expectRevert(IVaultsFacet.VaultsLengthsMismatch.selector);
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
@@ -1931,7 +1942,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.VaultIdAlreadyUsed.selector,
+                IVaultsFacet.VaultIdAlreadyUsed.selector,
                 0
             )
         );
@@ -1939,27 +1950,28 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testSetPersonalAccountImplementation(address _newImplementation) public {
-        assertEq(masterAccountController.personalAccountImplementation(), personalAccountImplementation);
+        assertEq(masterAccountController.implementation(), personalAccountImplementation);
         vm.prank(governance);
         vm.assume(_newImplementation != address(0));
         vm.expectEmit();
-        emit IMasterAccountController.PersonalAccountImplementationSet(_newImplementation);
+        emit IPersonalAccountsFacet.PersonalAccountImplementationSet(_newImplementation);
         masterAccountController.setPersonalAccountImplementation(_newImplementation);
-        assertEq(masterAccountController.personalAccountImplementation(), _newImplementation);
+        assertEq(masterAccountController.implementation(), _newImplementation);
     }
 
     function testSetPersonalAccountImplementationRevertOnlyOwner() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.setPersonalAccountImplementation(makeAddr("newImplementation"));
     }
 
     function testSetPersonalAccountImplementationRevertInvalidPersonalAccountImplementation() public {
-        vm.expectRevert(IMasterAccountController.InvalidPersonalAccountImplementation.selector);
+        vm.expectRevert(IPersonalAccountsFacet.InvalidPersonalAccountImplementation.selector);
         vm.prank(governance);
         masterAccountController.setPersonalAccountImplementation(address(0));
     }
@@ -1972,7 +1984,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint24 maxSlippageBps = 100;
         vm.prank(governance);
         vm.expectEmit();
-        emit IMasterAccountController.SwapParamsSet(
+        emit ISwapFacet.SwapParamsSet(
             router,
             newUsdt0,
             wnatusdtFee,
@@ -2003,8 +2015,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testSetSwapParamsRevertOnlyOwner() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                OwnableUpgradeable.OwnableUnauthorizedAccount.selector,
-                address(this)
+                NotContractOwner.selector,
+                address(this),
+                governance
             )
         );
         masterAccountController.setSwapParams(
@@ -2017,7 +2030,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testSwapParamsRevertInvalidUniswapV3Router() public {
-        vm.expectRevert(IMasterAccountController.InvalidUniswapV3Router.selector);
+        vm.expectRevert(ISwapFacet.InvalidUniswapV3Router.selector);
         vm.prank(governance);
         masterAccountController.setSwapParams(
             address(0),
@@ -2029,7 +2042,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testSwapParamsRevertInvalidPoolFeeTierPPM1() public {
-        vm.expectRevert(IMasterAccountController.InvalidPoolFeeTierPPM.selector);
+        vm.expectRevert(ISwapFacet.InvalidPoolFeeTierPPM.selector);
         vm.prank(governance);
         masterAccountController.setSwapParams(
             makeAddr("router"),
@@ -2041,7 +2054,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testSwapParamsRevertInvalidPoolFeeTierPPM2() public {
-        vm.expectRevert(IMasterAccountController.InvalidPoolFeeTierPPM.selector);
+        vm.expectRevert(ISwapFacet.InvalidPoolFeeTierPPM.selector);
         vm.prank(governance);
         masterAccountController.setSwapParams(
             makeAddr("router"),
@@ -2053,7 +2066,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testSwapParamsRevertInvalidUsdt0() public {
-        vm.expectRevert(IMasterAccountController.InvalidUsdt0.selector);
+        vm.expectRevert(ISwapFacet.InvalidUsdt0.selector);
         vm.prank(governance);
         masterAccountController.setSwapParams(
             makeAddr("router"),
@@ -2084,7 +2097,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.PersonalAccountNotSuccessfullyDeployed.selector,
+                IPersonalAccountsFacet.PersonalAccountNotSuccessfullyDeployed.selector,
                 personalAccountAddr
             )
         );
@@ -2108,7 +2121,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                IMasterAccountController.InvalidVaultId.selector,
+                IVaultsFacet.InvalidVaultId.selector,
                 1
             )
         );

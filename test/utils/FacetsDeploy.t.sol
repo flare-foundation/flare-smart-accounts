@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.27;
 
-import {Test} from "forge-std/Test.sol";
+import {Test,console2} from "forge-std/Test.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {MockSingletonFactory} from "../../contracts/mock/MockSingletonFactory.sol";
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
@@ -10,8 +10,15 @@ import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {DiamondCutFacet} from "../../contracts/diamond/facets/DiamondCutFacet.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
 import {OwnershipFacet} from "../../contracts/diamond/facets/OwnershipFacet.sol";
+import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaultsFacet.sol";
+import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
+import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
+import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
+import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {SwapFacet} from "../../contracts/smartAccounts/facets/SwapFacet.sol";
+import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
+import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 contract FacetsDeploy is Test {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -50,16 +57,25 @@ contract FacetsDeploy is Test {
     function deploySmartAccountFacets() internal returns (IDiamond.FacetCut[] memory) {
         delete diamondCuts;
 
+        addFacetData(address(new AgentVaultsFacet()), "AgentVaultsFacet");
+        addFacetData(address(new ExecutorsFacet()), "ExecutorsFacet");
+        addFacetData(address(new InstructionFeesFacet()), "InstructionFeesFacet");
         addFacetData(address(new InstructionsFacet()), "InstructionsFacet");
+        addFacetData(address(new PaymentProofsFacet()), "PaymentProofsFacet");
+        addFacetData(address(new PersonalAccountsFacet()), "PersonalAccountsFacet");
         addFacetData(address(new SwapFacet()), "SwapFacet");
+        addFacetData(address(new VaultsFacet()), "VaultsFacet");
+        addFacetData(address(new XrplProviderWalletsFacet()), "XrplProviderWalletsFacet");
 
         return diamondCuts;
     }
 
     function addFacetData(address facetAddr, string memory facetName) internal {
         string[] memory cmds = new string[](3);
-        cmds[0] = "bash";
-        cmds[1] = "lib/test-utils/forge/master-controller-selectors.sh";
+        // cmds[0] = "bash";
+        // cmds[1] = "scripts/master-controller-selectors.sh";
+        cmds[0] = "node";
+        cmds[1] = "scripts/master-controller-selectors.js";
         cmds[2] = facetName;
         bytes memory out = vm.ffi(cmds);
         bytes4[] memory selectors = abi.decode(out, (bytes4[]));

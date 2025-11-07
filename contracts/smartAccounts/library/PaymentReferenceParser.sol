@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
+
 // payment reference format (32 bytes):
 // instruction id consists of instruction type (4 bits) and instruction command (4 bits)
 // FXRP (instruction type 0)

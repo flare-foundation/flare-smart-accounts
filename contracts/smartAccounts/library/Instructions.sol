@@ -11,8 +11,8 @@ import {PaymentReferenceParser} from "./PaymentReferenceParser.sol";
 library Instructions {
 
     struct State {
-        /// @notice Indicates if payment instruction has already been executed.
-        mapping(bytes32 transactionId => bool) usedPaymentHashes;
+        /// @notice Indicates if transaction has already been executed.
+        mapping(bytes32 transactionId => bool) usedTransactionIds;
         /// @notice Mapping from collateral reservation ID to XRPL transaction ID - used for deposit after minting
         mapping(uint256 collateralReservationId => bytes32 transactionId) collateralReservationIdToTransactionId;
     }

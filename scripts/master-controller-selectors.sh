@@ -22,12 +22,15 @@ INTERFACE_FUNCS=$(jq -r '.abi[] | select(.type == "function") | "\(.name)(\(.inp
 SELECTORS=()
 
 FACET_FUNCS=$(jq -r '.abi[] | select(.type == "function") | "\(.name)(\(.inputs | map(.type) | join(",")))"' "$FACET_JSON_PATH")
+# TODO: fix if param is tuple
 
 # iterate over facet functions and check if they appear in the INTERFACE_FUNCS
 for sig in $FACET_FUNCS; do
+  echo "Checking signature: $sig"
   # Check if the signature exists in the interface functions
   if echo "$INTERFACE_FUNCS" | grep -qF "$sig"; then
     selector=$(cast sig "$sig" 2>/dev/null || true)
+    echo $selector
     if [ -n "$selector" ]; then
       SELECTORS+=("$selector")
     fi
@@ -44,4 +47,5 @@ for i in "${!SELECTORS[@]}"; do
 done
 SELECTORS_STR+="]"
 SELECTORS_STR="${SELECTORS_STR}"
+echo $SELECTORS_STR
 cast abi-encode "f(bytes4[])" "$SELECTORS_STR"

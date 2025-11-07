@@ -301,4 +301,26 @@ interface IInstructionsFacet {
         uint256 _epoch
     )
         external;
+
+    /**
+     * @notice Returns true if the transaction id has already been used.
+     * @param _transactionId The transaction id to check.
+     * @return True if used, false otherwise.
+     */
+    function isTransactionIdUsed(
+        bytes32 _transactionId
+    )
+        external view
+        returns (bool);
+
+    /**
+     * @notice Returns the transaction id for a given collateral reservation id.
+     * @param _collateralReservationId The collateral reservation id.
+     * @return _transactionId The transaction id associated with the collateral reservation.
+     */
+    function getTransactionIdForCollateralReservation(
+        uint256 _collateralReservationId
+    )
+        external view
+        returns (bytes32 _transactionId);
 }
