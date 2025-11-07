@@ -19,6 +19,17 @@ library PersonalAccounts {
         mapping(string xrplAddress => IIPersonalAccount) personalAccounts;
     }
 
+    function setPersonalAccountImplementation(
+        address _implementation
+    )
+        external
+    {
+        require(_implementation != address(0), IPersonalAccountsFacet.InvalidPersonalAccountImplementation());
+        State storage state = getState();
+        state.personalAccountImplementation = _implementation;
+        emit IPersonalAccountsFacet.PersonalAccountImplementationSet(_implementation);
+    }
+
     function getOrCreatePersonalAccount(
         string memory _xrplOwner
     )

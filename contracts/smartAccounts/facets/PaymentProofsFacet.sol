@@ -19,10 +19,7 @@ contract PaymentProofsFacet is IIPaymentProofsFacet {
         external
     {
         LibDiamond.enforceIsContractOwner();
-        require(_paymentProofValidityDurationSeconds > 0, InvalidPaymentProofValidityDuration());
-        PaymentProofs.State storage state = PaymentProofs.getState();
-        state.paymentProofValidityDurationSeconds = _paymentProofValidityDurationSeconds;
-        emit PaymentProofValidityDurationSecondsSet(_paymentProofValidityDurationSeconds);
+        PaymentProofs.setPaymentProofValidityDuration(_paymentProofValidityDurationSeconds);
     }
 
     /// @inheritdoc IPaymentProofsFacet

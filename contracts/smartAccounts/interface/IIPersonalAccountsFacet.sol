@@ -10,11 +10,11 @@ import {IPersonalAccountsFacet} from "../../userInterfaces/facets/IPersonalAccou
 interface IIPersonalAccountsFacet is IPersonalAccountsFacet {
     /**
      * @notice Sets new PersonalAccount implementation address.
-     * @param _newImplementation New PersonalAccount implementation address.
+     * @param _implementation New PersonalAccount implementation address.
      * Can only be called by the owner.
      */
     function setPersonalAccountImplementation(
-        address _newImplementation
+        address _implementation
     )
         external;
 }

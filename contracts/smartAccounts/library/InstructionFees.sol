@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+import {IInstructionFeesFacet} from "../../userInterfaces/facets/IInstructionFeesFacet.sol";
+
 library InstructionFees {
 
     struct State {
@@ -11,6 +13,16 @@ library InstructionFees {
     }
 
     bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.InstructionFees.State");
+
+    function setDefaultInstructionFee(
+        uint256 _defaultInstructionFee
+    )
+        internal
+    {
+        State storage state = getState();
+        state.defaultInstructionFee = _defaultInstructionFee;
+        emit IInstructionFeesFacet.DefaultInstructionFeeSet(_defaultInstructionFee);
+    }
 
     function getInstructionFee(
         uint256 _instructionId

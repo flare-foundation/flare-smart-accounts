@@ -19,10 +19,7 @@ contract ExecutorsFacet is IIExecutorsFacet {
         external
     {
         LibDiamond.enforceIsContractOwner();
-        require(_executor != address(0), InvalidExecutor());
-        Executors.State storage state = Executors.getState();
-        state.executor = _executor;
-        emit ExecutorSet(_executor);
+        Executors.setExecutor(_executor);
     }
 
     /// @inheritdoc IIExecutorsFacet
@@ -32,10 +29,7 @@ contract ExecutorsFacet is IIExecutorsFacet {
         external
     {
         LibDiamond.enforceIsContractOwner();
-        require(_executorFee > 0, InvalidExecutorFee());
-        Executors.State storage state = Executors.getState();
-        state.executorFee = _executorFee;
-        emit ExecutorFeeSet(_executorFee);
+        Executors.setExecutorFee(_executorFee);
     }
 
     /// @inheritdoc IExecutorsFacet

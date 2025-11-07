@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
+
 library Executors {
 
     struct State {
@@ -11,6 +13,28 @@ library Executors {
     }
 
     bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Executors.State");
+
+    function setExecutor(
+        address payable _executor
+    )
+        internal
+    {
+        require(_executor != address(0), IExecutorsFacet.InvalidExecutor());
+        State storage state = getState();
+        state.executor = _executor;
+        emit IExecutorsFacet.ExecutorSet(_executor);
+    }
+
+    function setExecutorFee(
+        uint256 _executorFee
+    )
+        internal
+    {
+        require(_executorFee > 0, IExecutorsFacet.InvalidExecutorFee());
+        State storage state = getState();
+        state.executorFee = _executorFee;
+        emit IExecutorsFacet.ExecutorFeeSet(_executorFee);
+    }
 
     function getExecutorInfo()
         internal view

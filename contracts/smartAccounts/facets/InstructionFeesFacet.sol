@@ -19,9 +19,7 @@ contract InstructionFeesFacet is IIInstructionFeesFacet {
         external
     {
         LibDiamond.enforceIsContractOwner();
-        InstructionFees.State storage state = InstructionFees.getState();
-        state.defaultInstructionFee = _defaultInstructionFee;
-        emit DefaultInstructionFeeSet(_defaultInstructionFee);
+        InstructionFees.setDefaultInstructionFee(_defaultInstructionFee);
     }
 
     /// @inheritdoc IIInstructionFeesFacet

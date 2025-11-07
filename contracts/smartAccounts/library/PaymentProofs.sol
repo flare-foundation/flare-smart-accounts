@@ -15,6 +15,17 @@ library PaymentProofs {
 
     bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.PaymentProofs.State");
 
+    function setPaymentProofValidityDuration(
+        uint256 _paymentProofValidityDurationSeconds
+    )
+        internal
+    {
+        require(_paymentProofValidityDurationSeconds > 0, IPaymentProofsFacet.InvalidPaymentProofValidityDuration());
+        PaymentProofs.State storage state = PaymentProofs.getState();
+        state.paymentProofValidityDurationSeconds = _paymentProofValidityDurationSeconds;
+        emit IPaymentProofsFacet.PaymentProofValidityDurationSecondsSet(_paymentProofValidityDurationSeconds);
+    }
+
     /**
      * @notice Verifies the provided payment proof against the expected XRPL address.
      * @param _proof The payment proof to verify.
