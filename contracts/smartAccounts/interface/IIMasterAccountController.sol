@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
+import {IDiamond} from "../../diamond/interfaces/IDiamond.sol";
+import {IDiamondCut} from "../../diamond/interfaces/IDiamondCut.sol";
+import {IDiamondLoupe} from "../../diamond/interfaces/IDiamondLoupe.sol";
+import {IERC165} from "../../diamond/interfaces/IERC165.sol";
+import {IERC173} from "../../diamond/interfaces/IERC173.sol";
+
 import {IIAgentVaultsFacet} from "./IIAgentVaultsFacet.sol";
 import {IIExecutorsFacet} from "./IIExecutorsFacet.sol";
 import {IIInstructionFeesFacet} from "./IIInstructionFeesFacet.sol";
@@ -17,6 +23,11 @@ import {IIXrplProviderWalletsFacet} from "./IIXrplProviderWalletsFacet.sol";
  * which manages personal accounts and executes XRPL instructions.
  */
 interface IIMasterAccountController is
+    IDiamond,
+    IDiamondCut,
+    IDiamondLoupe,
+    IERC165,
+    IERC173,
     IIAgentVaultsFacet,
     IIExecutorsFacet,
     IIInstructionFeesFacet,
