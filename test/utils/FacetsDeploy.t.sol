@@ -22,7 +22,7 @@ import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/Xrp
 
 contract FacetsDeploy is Test {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
-    IDiamond.FacetCut[] public diamondCuts;
+    IDiamond.FacetCut[] private diamondCuts;
 
     constructor() {
         MockSingletonFactory mockFactory = new MockSingletonFactory();
@@ -54,7 +54,7 @@ contract FacetsDeploy is Test {
         return diamondCuts;
     }
 
-    function deploySmartAccountFacets() internal returns (IDiamond.FacetCut[] memory) {
+    function deploySmartAccountsFacets() internal returns (IDiamond.FacetCut[] memory) {
         delete diamondCuts;
 
         addFacetData(address(new AgentVaultsFacet()), "AgentVaultsFacet");

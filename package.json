@@ -28,13 +28,15 @@
     "lint-forge": "yarn solhint \"test/**/*.sol\""
   },
   "dependencies": {
-    "web3": "^1.0.0",
-    "solhint": "^6.0.1"
   },
   "devDependencies": {
+    "dotenv-cli": "^7.0.0",
+    "typescript": "^5.0.0",
+    "web3": "^1.0.0",
     "@coverage.rocks/genhtml": "^1.16.0",
     "prettier": "^3.6.2",
     "prettier-plugin-solidity": "^2.1.0",
-    "solidity-coverage": "^0.8.11"
+    "solidity-coverage": "^0.8.11",
+    "solhint": "^6.0.1"
   }
 }

@@ -4,20 +4,33 @@ pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
-import {MasterAccountControllerBase}
-    from "../../contracts/smartAccounts/implementation/MasterAccountControllerBase.sol";
 import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
-import {MasterAccountControllerProxy} from "../../contracts/smartAccounts/proxy/MasterAccountControllerProxy.sol";
+import {DiamondArgs} from "../../contracts/diamond/implementation/Diamond.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
+import {IIMasterAccountController} from "../../contracts/smartAccounts/interface/IIMasterAccountController.sol";
+import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+// facets
+import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
+import {DiamondCutFacet} from "../../contracts/diamond/facets/DiamondCutFacet.sol";
+import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
+import {OwnershipFacet} from "../../contracts/diamond/facets/OwnershipFacet.sol";
+import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaultsFacet.sol";
+import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
+import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
+import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
+import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
+import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
+import {SwapFacet} from "../../contracts/smartAccounts/facets/SwapFacet.sol";
+import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
+import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 // solhint-disable-next-line max-line-length
 // forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
 
 contract DeploySmartAccounts is Script {
-
     struct MasterAccountControllerParams {
         address initialOwner;
         address governance;
@@ -39,12 +52,24 @@ contract DeploySmartAccounts is Script {
 
     PersonalAccount private personalAccountImpl;
     address private personalAccountImplAddress;
-    MasterAccountControllerProxy private masterAccountControllerProxy;
-    MasterAccountController private masterAccountControllerImpl;
+    IIMasterAccountController private masterAccountController;
     address private masterAccountControllerAddress;
-    MasterAccountController private masterAccountController;
-    address private seedMasterAccountControllerBase;
-    address private masterAccountControllerProxyAddr;
+
+    // facets
+    IDiamond.FacetCut[] private baseCuts;
+    IDiamond.FacetCut[] private smartAccountsCuts;
+    address private diamondCutFacet;
+    address private diamondLoupeFacet;
+    address private ownershipFacet;
+    AgentVaultsFacet private agentVaultsFacet;
+    ExecutorsFacet private executorsFacet;
+    InstructionFeesFacet private instructionFeesFacet;
+    InstructionsFacet private instructionsFacet;
+    PaymentProofsFacet private paymentProofsFacet;
+    PersonalAccountsFacet private personalAccountsFacet;
+    SwapFacet private swapFacet;
+    VaultsFacet private vaultsFacet;
+    XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
@@ -88,76 +113,141 @@ contract DeploySmartAccounts is Script {
 
         vm.startBroadcast();
 
-        // deploy controller base seed via EIP-2470 singleton factory using CREATE2
-        // same on all networks
+        // (re)deploy personal account implementation
+        personalAccountImpl = new PersonalAccount();
+        personalAccountImplAddress = address(personalAccountImpl);
+
+        // bytes32 salt = bytes32(0);
+        bytes32 salt = keccak256(abi.encodePacked("salt", block.timestamp)); // only for testing
+        // deploy diamond cut, diamond loupe and ownership facets via EIP-2470 singleton factory using CREATE2
+        // same address on all networks
         bytes memory bytecode = abi.encodePacked(
-            type(MasterAccountControllerBase).creationCode
+            type(DiamondCutFacet).creationCode
         );
-        bytes32 salt = bytes32(0);
         address expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
         uint256 codeSize = expected.code.length;
         if (codeSize == 0) {
-            console2.log("Deploying seed MasterAccountControllerBase via singleton factory");
-            seedMasterAccountControllerBase = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+            console2.log("Deploying DiamondCutFacet via singleton factory");
+            diamondCutFacet = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
             require(
-                expected == seedMasterAccountControllerBase && expected.code.length > 0,
-                "Seed MasterAccountControllerBase deployment failed"
+                expected == diamondCutFacet && expected.code.length > 0,
+                "DiamondCutFacet deployment failed"
             );
         } else {
-            console2.log("Seed MasterAccountControllerBase already deployed, skipping");
-            seedMasterAccountControllerBase = expected;
+            console2.log("DiamondCutFacet already deployed, skipping");
+            diamondCutFacet = expected;
         }
+        baseCuts.push(_addFacet(diamondCutFacet, "DiamondCutFacet"));
 
-        // deploy controller proxy using CREATE2
-        // same on all networks
         bytecode = abi.encodePacked(
-            type(MasterAccountControllerProxy).creationCode,
+            type(DiamondLoupeFacet).creationCode
+        );
+        expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
+        codeSize = expected.code.length;
+        if (codeSize == 0) {
+            console2.log("Deploying DiamondLoupeFacet via singleton factory");
+            diamondLoupeFacet = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+            require(
+                expected == diamondLoupeFacet && expected.code.length > 0,
+                "DiamondLoupeFacet deployment failed"
+            );
+        } else {
+            console2.log("DiamondLoupeFacet already deployed, skipping");
+            diamondLoupeFacet = expected;
+        }
+        baseCuts.push(_addFacet(diamondLoupeFacet, "DiamondLoupeFacet"));
+
+        bytecode = abi.encodePacked(
+            type(OwnershipFacet).creationCode
+        );
+        expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
+        codeSize = expected.code.length;
+        if (codeSize == 0) {
+            console2.log("Deploying OwnershipFacet via singleton factory");
+            ownershipFacet = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+            require(
+                expected == ownershipFacet && expected.code.length > 0,
+                "OwnershipFacet deployment failed"
+            );
+        } else {
+            console2.log("OwnershipFacet already deployed, skipping");
+            ownershipFacet = expected;
+        }
+        baseCuts.push(_addFacet(ownershipFacet, "OwnershipFacet"));
+
+        // deploy MasterAccountController using CREATE2 (same address on all networks)
+        // TODO check if cuts are already deployed and skip deployment if so
+        DiamondArgs memory args = DiamondArgs({
+            owner: params.initialOwner,
+            initAddress: address(0),
+            initCalldata: ""
+        });
+        bytecode = abi.encodePacked(
+            type(MasterAccountController).creationCode,
             abi.encode(
-                seedMasterAccountControllerBase,
-                params.initialOwner
+                baseCuts,
+                args
             )
         );
         expected = Create2.computeAddress(salt, keccak256(bytecode), SINGLETON_FACTORY);
         codeSize = expected.code.length;
         if (codeSize == 0) {
-            console2.log("Deploying MasterAccountControllerProxy via singleton factory");
-            masterAccountControllerProxyAddr = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+            console2.log("Deploying MasterAccountController via singleton factory");
+            masterAccountControllerAddress = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
             require(
-                expected == masterAccountControllerProxyAddr && expected.code.length > 0,
-                "MasterAccountControllerProxy deployment failed"
+                expected == masterAccountControllerAddress && expected.code.length > 0,
+                "MasterAccountController deployment failed"
             );
         } else {
-            console2.log("MasterAccountControllerProxy already deployed, skipping");
-            masterAccountControllerProxyAddr = expected;
+            console2.log("MasterAccountController already deployed, skipping");
+            masterAccountControllerAddress = expected;
         }
+        masterAccountController = IIMasterAccountController(masterAccountControllerAddress);
 
-        // (re)deploy personal account implementation
-        personalAccountImpl = new PersonalAccount();
-        personalAccountImplAddress = address(personalAccountImpl);
-
-        // (re)deploy real controller implementation
-        masterAccountControllerImpl = new MasterAccountController();
+        // deploy smart account facets and initialize master account controller
+        _deploySmartAccountsFacets();
+        MasterAccountControllerInit masterAccountControllerInit = new MasterAccountControllerInit();
+        masterAccountController.diamondCut(
+            smartAccountsCuts,
+            address(masterAccountControllerInit),
+            abi.encodeWithSelector(
+                MasterAccountControllerInit.init.selector,
+                payable(params.executor),
+                params.executorFee,
+                params.paymentProofValidityDurationSeconds,
+                params.defaultInstructionFee,
+                personalAccountImplAddress
+            )
+        );
 
         // Log deployment info for post-processing
         console2.log(
             string.concat(
-                "DEPLOYED: SeedMasterAccountControllerImplementation, ",
-                "MasterAccountControllerBase.sol: ",
-                vm.toString(seedMasterAccountControllerBase)
+                "DEPLOYED: DiamondCutFacet, ",
+                "DiamondCutFacet.sol:  ",
+                vm.toString(diamondCutFacet)
             )
         );
+        console2.log(
+            string.concat(
+                "DEPLOYED: DiamondLoupeFacet, ",
+                "DiamondLoupeFacet.sol:  ",
+                vm.toString(diamondLoupeFacet)
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: OwnershipFacet, ",
+                "OwnershipFacet.sol:  ",
+                vm.toString(ownershipFacet)
+            )
+        );
+        _logSmartAccountsFacetAddresses();
         console2.log(
             string.concat(
                 "DEPLOYED: MasterAccountController, ",
-                "MasterAccountControllerProxy.sol:  ",
-                vm.toString(masterAccountControllerProxyAddr)
-            )
-        );
-        console2.log(
-            string.concat(
-                "DEPLOYED: MasterAccountControllerImplementation, ",
-                "MasterAccountController.sol: ",
-                vm.toString(address(masterAccountControllerImpl))
+                "MasterAccountController.sol:  ",
+                vm.toString(address(masterAccountController))
             )
         );
         console2.log(
@@ -168,36 +258,36 @@ contract DeploySmartAccounts is Script {
             )
         );
 
-        masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
-        if (deployer != masterAccountController.owner()) {
-            console2.log("Deployer is not owner, skipping upgrades");
-            vm.stopBroadcast();
-            return;
-        }
+        // masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
+        // if (deployer != masterAccountController.owner()) {
+        //     console2.log("Deployer is not owner, skipping upgrades");
+        //     vm.stopBroadcast();
+        //     return;
+        // }
 
-        if (seedMasterAccountControllerBase != masterAccountController.controllerImplementation()) {
-            // deployer is owner, perform upgrades (initialization was already done)
-            console2.log("Upgrading MasterAccountController and PersonalAccount implementations");
-            masterAccountController.setPersonalAccountImplementation(personalAccountImplAddress);
-            masterAccountController.upgradeToAndCall(address(masterAccountControllerImpl), bytes(""));
-            vm.stopBroadcast();
-            return;
-        }
+        // if (seedMasterAccountControllerBase != masterAccountController.controllerImplementation()) {
+        //     // deployer is owner, perform upgrades (initialization was already done)
+        //     console2.log("Upgrading MasterAccountController and PersonalAccount implementations");
+        //     masterAccountController.setPersonalAccountImplementation(personalAccountImplAddress);
+        //     masterAccountController.upgradeToAndCall(address(masterAccountControllerImpl), bytes(""));
+        //     vm.stopBroadcast();
+        //     return;
+        // }
 
-        // deployer is owner, perform upgrade and initialization
-        console2.log("Upgrading MasterAccountController implementation and initializing");
-        // upgrade controller proxy to real implementation and initialize in one call
-        masterAccountController.upgradeToAndCall(
-            address(masterAccountControllerImpl),
-            abi.encodeWithSelector(
-                MasterAccountController.initialize.selector,
-                payable(params.executor),
-                params.executorFee,
-                params.paymentProofValidityDurationSeconds,
-                params.defaultInstructionFee,
-                personalAccountImplAddress
-            )
-        );
+        // // deployer is owner, perform upgrade and initialization
+        // console2.log("Upgrading MasterAccountController implementation and initializing");
+        // // upgrade controller proxy to real implementation and initialize in one call
+        // masterAccountController.upgradeToAndCall(
+        //     address(masterAccountControllerImpl),
+        //     abi.encodeWithSelector(
+        //         MasterAccountController.initialize.selector,
+        //         payable(params.executor),
+        //         params.executorFee,
+        //         params.paymentProofValidityDurationSeconds,
+        //         params.defaultInstructionFee,
+        //         personalAccountImplAddress
+        //     )
+        // );
 
         // set swap parameters
         if (params.uniswapV3Router != address(0)) {
@@ -244,4 +334,117 @@ contract DeploySmartAccounts is Script {
         }
         vm.stopBroadcast();
     }
+
+    function _addFacet(
+        address facetAddr,
+        string memory facetName
+    )
+        internal
+        returns (IDiamond.FacetCut memory)
+    {
+        string[] memory cmds = new string[](3);
+        cmds[0] = "bash";
+        cmds[1] = "scripts/master-controller-selectors.sh";
+        // cmds[0] = "node";
+        // cmds[1] = "scripts/master-controller-selectors.js";
+        cmds[2] = facetName;
+        bytes memory out = vm.ffi(cmds);
+        bytes4[] memory selectors = abi.decode(out, (bytes4[]));
+        return IDiamond.FacetCut({
+            facetAddress: facetAddr,
+            action: IDiamond.FacetCutAction.Add,
+            functionSelectors: selectors
+        });
+    }
+
+    function _deploySmartAccountsFacets() internal {
+        agentVaultsFacet = new AgentVaultsFacet();
+        executorsFacet = new ExecutorsFacet();
+        instructionFeesFacet = new InstructionFeesFacet();
+        instructionsFacet = new InstructionsFacet();
+        paymentProofsFacet = new PaymentProofsFacet();
+        personalAccountsFacet = new PersonalAccountsFacet();
+        swapFacet = new SwapFacet();
+        vaultsFacet = new VaultsFacet();
+        xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
+
+        smartAccountsCuts = new IDiamond.FacetCut[](9);
+        smartAccountsCuts[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
+        smartAccountsCuts[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
+        smartAccountsCuts[2] = _addFacet(address(instructionFeesFacet), "InstructionFeesFacet");
+        smartAccountsCuts[3] = _addFacet(address(instructionsFacet), "InstructionsFacet");
+        smartAccountsCuts[4] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
+        smartAccountsCuts[5] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
+        smartAccountsCuts[6] = _addFacet(address(swapFacet), "SwapFacet");
+        smartAccountsCuts[7] = _addFacet(address(vaultsFacet), "VaultsFacet");
+        smartAccountsCuts[8] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+    }
+
+    function _logSmartAccountsFacetAddresses() internal view {
+        console2.log("Smart Accounts Facet Addresses:");
+        console2.log(
+            string.concat(
+                "DEPLOYED: AgentVaultsFacet, ",
+                "AgentVaultsFacet.sol: ",
+                vm.toString(address(agentVaultsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: ExecutorsFacet, ",
+                "ExecutorsFacet.sol: ",
+                vm.toString(address(executorsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: InstructionFeesFacet, ",
+                "InstructionFeesFacet.sol: ",
+                vm.toString(address(instructionFeesFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: InstructionsFacet, ",
+                "InstructionsFacet.sol: ",
+                vm.toString(address(instructionsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: PaymentProofsFacet, ",
+                "PaymentProofsFacet.sol: ",
+                vm.toString(address(paymentProofsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: PersonalAccountsFacet, ",
+                "PersonalAccountsFacet.sol: ",
+                vm.toString(address(personalAccountsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: SwapFacet, ",
+                "SwapFacet.sol: ",
+                vm.toString(address(swapFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: VaultsFacet, ",
+                "VaultsFacet.sol: ",
+                vm.toString(address(vaultsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: XrplProviderWalletsFacet, ",
+                "XrplProviderWalletsFacet.sol: ",
+                vm.toString(address(xrplProviderWalletsFacet))
+            )
+        );
+    }
 }
+

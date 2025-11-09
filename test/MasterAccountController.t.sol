@@ -40,13 +40,14 @@ import {ISwapFacet} from "../contracts/userInterfaces/facets/ISwapFacet.sol";
 
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test, FacetsDeploy {
+    address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+
     IIMasterAccountController private masterAccountController;
     PersonalAccount private personalAccountImpl;
     PersonalAccountProxy private personalAccountProxy;
     IPersonalAccount private personalAccount1;
     IPersonalAccount private personalAccount2;
 
-    address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
     MockSingletonFactory private mockFactory;
 
     address private governance;
@@ -110,35 +111,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         personalAccountImpl = new PersonalAccount();
         personalAccountImplementation = address(personalAccountImpl);
 
-        // // deploy controller base seed using create2
-        // // same on all chains
-        // bytes memory bytecode = abi.encodePacked(
-        //     type(MasterAccountControllerBase).creationCode
-        // );
-        // address seedControllerBase = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
-
-        // // deploy controller proxy
-        // // same on all chains
-        // bytecode = abi.encodePacked(
-        //     type(MasterAccountControllerProxy).creationCode,
-        //     abi.encode(
-        //         seedControllerBase,
-        //         initialOwner
-        //     )
-        // );
-        // address masterAccountControllerProxyAddr = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
-
-        // // deploy real controller implementation
-        // masterAccountControllerImpl = new MasterAccountController();
-
-        // // upgrade controller proxy to real implementation
-        // vm.prank(initialOwner);
-        // UUPSUpgradeable(masterAccountControllerProxyAddr).upgradeToAndCall(
-        //     address(masterAccountControllerImpl), bytes("")
-        // );
-        // masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
-
-
         // deploy facets
         IDiamond.FacetCut[] memory baseCuts = deployBaseFacets();
         DiamondArgs memory args = DiamondArgs({
@@ -146,14 +118,15 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             initAddress: address(0),
             initCalldata: ""
         });
-        masterAccountController = IIMasterAccountController(address(
-            new MasterAccountController(
-                baseCuts,
-                args
-            )
-        ));
+        bytes memory bytecode = abi.encodePacked(
+        type(MasterAccountController).creationCode,
+            abi.encode(baseCuts, args)
+        );
+        bytes32 salt = bytes32(0);
+        address deployed = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, salt);
+        masterAccountController = IIMasterAccountController(deployed);
 
-        IDiamond.FacetCut[] memory smartAccountsCuts = deploySmartAccountFacets();
+        IDiamond.FacetCut[] memory smartAccountsCuts = deploySmartAccountsFacets();
         MasterAccountControllerInit masterAccountControllerInit = new MasterAccountControllerInit();
         vm.prank(initialOwner);
         masterAccountController.diamondCut(
@@ -268,7 +241,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             address(masterAccountController)
         );
 
-        // change implementation of MasterAccountController TODO change facet?
+        // TODO change facet?
+        // change implementation of MasterAccountController
         // assertEq(
         //     masterAccountController.controllerImplementation(),
         //     address(masterAccountControllerImpl)
@@ -1263,7 +1237,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertInvalidInstruction() public {
-         bytes32 paymentReference = _encodeUpshiftPaymentReference(9, 0, 20250913, 0, 3);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(9, 0, 20250913, 0, 3);
         IPayment.Proof memory proof;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
@@ -2127,6 +2101,126 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
+
+    function testExecuteWithdrawalFirelight() public {
+        uint16 period = 1;
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        testExecuteInstructionRedeem();
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            100
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+
+        // move to the claimable period (to period 3)
+        vm.warp(block.timestamp + 2 days);
+
+        vm.expectEmit();
+        emit IInstructionsFacet.WithdrawalClaimed(
+            personalAccountAddr,
+            address(depositVault),
+            period,
+            100
+        );
+        vm.expectEmit();
+        emit IInstructionsFacet.WithdrawalExecuted(
+            personalAccountAddr,
+            address(depositVault),
+            xrplAddress1,
+            period
+        );
+        masterAccountController.executeWithdrawal(xrplAddress1, 0, period);
+
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            0
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            100
+        );
+    }
+
+    function testExecuteWithdrawalUpshift() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        testExecuteInstructionRequestRedeem();
+        vm.warp(block.timestamp + 1 days); // move to next epoch
+        uint256 claimableEpoch = 1;
+        uint256 date = 19700102;
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
+            100
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            0
+        );
+
+        vm.expectEmit();
+        emit IInstructionsFacet.Claimed(
+            personalAccountAddr,
+            address(depositVault),
+            1970,
+            1,
+            2,
+            100,
+            100
+        );
+        vm.expectEmit();
+        emit IInstructionsFacet.WithdrawalExecuted(
+            personalAccountAddr,
+            address(depositVault),
+            xrplAddress1,
+            date
+        );
+        masterAccountController.executeWithdrawal(xrplAddress1, 3, date);
+
+        assertEq(
+            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
+            0
+        );
+        assertEq(
+            fxrp.balanceOf(personalAccountAddr),
+            100
+        );
+    }
+
+    function testExecuteWithdrawalRevertInvalidInvalidVaultId() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultsFacet.InvalidVaultId.selector,
+                5
+            )
+        );
+        masterAccountController.executeWithdrawal(xrplAddress1, 5, 0);
+    }
+
+    function testExecuteInstructionRevertInvalidInstructionType() public {
+        // use upshift vault for firelight instruction type
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 3);
+        IPayment.Proof memory proof;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = bytes32("tx1");
+        _mockVerifyPayment(true);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IInstructionsFacet.InvalidInstructionType.selector,
+                1
+            )
+        );
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+
 
     // function testSwapWNatForUsdt0() public {
     //     _mockGetContractAddressByHash("WNat", wNatMock);

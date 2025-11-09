@@ -1,22 +1,72 @@
 [
   {
-    "name": "SeedMasterAccountControllerImplementation",
-    "contractName": "MasterAccountControllerBase.sol",
-    "address": "0x3838B77977827EA99BE1381fEb4ed37E9344E1AD"
+    "name": "DiamondCutFacet",
+    "contractName": "DiamondCutFacet.sol",
+    "address": "0x012Fcc214A752bC5C5c21BE76D04a9888184caF9"
+  },
+  {
+    "name": "DiamondLoupeFacet",
+    "contractName": "DiamondLoupeFacet.sol",
+    "address": "0x748a8f07eD0E47980758c806b285aD796fB85E78"
+  },
+  {
+    "name": "OwnershipFacet",
+    "contractName": "OwnershipFacet.sol",
+    "address": "0x7b013FFc9cadACFEC2fcf9afD58afaf1Ad0A31cE"
+  },
+  {
+    "name": "AgentVaultsFacet",
+    "contractName": "AgentVaultsFacet.sol",
+    "address": "0x77B966F7be7D264f463C2B40c8d9CcFEF0f606f9"
+  },
+  {
+    "name": "ExecutorsFacet",
+    "contractName": "ExecutorsFacet.sol",
+    "address": "0x46e653A2aD94c267F2E9e4e7Fa62d5D88cc76ce9"
+  },
+  {
+    "name": "InstructionFeesFacet",
+    "contractName": "InstructionFeesFacet.sol",
+    "address": "0xA7b0ca28c380A565c41D3dCFa1F4c0CecFA077F9"
+  },
+  {
+    "name": "InstructionsFacet",
+    "contractName": "InstructionsFacet.sol",
+    "address": "0x2e9B4Cb0F27c75d5f8419d11d5297cdf593950AD"
+  },
+  {
+    "name": "PaymentProofsFacet",
+    "contractName": "PaymentProofsFacet.sol",
+    "address": "0x5fa7F98C04F36bDf10CE9A60936C44943601464C"
+  },
+  {
+    "name": "PersonalAccountsFacet",
+    "contractName": "PersonalAccountsFacet.sol",
+    "address": "0xdcdf07559d878a25681B1B5060cD26fe42bEf250"
+  },
+  {
+    "name": "SwapFacet",
+    "contractName": "SwapFacet.sol",
+    "address": "0x57c25b680a8a74fDd288C69d27785edfC9456ab8"
+  },
+  {
+    "name": "VaultsFacet",
+    "contractName": "VaultsFacet.sol",
+    "address": "0xF784B2520e455083c60e623747957c76d6ff2cF4"
+  },
+  {
+    "name": "XrplProviderWalletsFacet",
+    "contractName": "XrplProviderWalletsFacet.sol",
+    "address": "0x080D406B56d4bB31e731654cFBE97AC4d166eceB"
   },
   {
     "name": "MasterAccountController",
-    "contractName": "MasterAccountControllerProxy.sol",
-    "address": "0xE5BC94F9137Dd4C69BCeD5DE25560c8CB2F9141A"
-  },
-  {
-    "name": "MasterAccountControllerImplementation",
     "contractName": "MasterAccountController.sol",
-    "address": "0x31470d10b9004078034529554F5860674A7cCd2B"
+    "address": "0x324a717e0C61C068957F10a35d2b39326ed0b547"
   },
   {
     "name": "PersonalAccountImplementation",
     "contractName": "PersonalAccount.sol",
-    "address": "0xD358d894121dD539d572A79a6b1825587bE88BbD"
+    "address": "0xbe15Fb5E46C45fE5D5E261C068Ec1a9E2A8B3FA6"
   }
 ]
