@@ -84,8 +84,8 @@ library PersonalAccounts {
         internal view
         returns (bytes memory)
     {
-        // Use the controller proxy address as the beacon so the controller acts as IBeacon for PAs.
-        // address(this) resolves to the proxy address when called via delegatecall.
+        // Use the controller (diamond) address as the beacon so the controller acts as IBeacon for PAs.
+        // address(this) resolves to the diamond address when called via delegatecall from facet.
         return abi.encodePacked(
             type(PersonalAccountProxy).creationCode,
             abi.encode(address(this), _xrplOwner)

@@ -4,8 +4,16 @@ process.on('warning', e => {
 });
 
 const { readFileSync } = require("fs");
-const Web3 = require("web3");
+let Web3 = require("web3");
+// Support both CommonJS and ESM builds of web3
+Web3 = Web3.default || Web3;
 const web3 = new Web3();
+
+function removeAbiExtras(abiItem) {
+    // Return a copy without 'outputs' and 'stateMutability'
+    const { outputs, stateMutability, ...rest } = abiItem;
+    return rest;
+}
 
 function getInterfaceSelectors() {
     const iiMasterAccountControllerArtifactPath = 'artifacts/IIMasterAccountController.sol/IIMasterAccountController.json';
@@ -17,7 +25,7 @@ function getInterfaceSelectors() {
 function getInterfaceSelectorMap(abiItems) {
     const interfaceSelectorPairs = abiItems
         .filter(it => it.type === 'function')
-        .map(it => [web3.eth.abi.encodeFunctionSignature(it), it]);
+        .map(it => [web3.eth.abi.encodeFunctionSignature(removeAbiExtras(it)), it]);
     return new Map(interfaceSelectorPairs);
 }
 
@@ -26,7 +34,8 @@ function getContractSelectors(contractName) {
     const contractArtifactPath = `artifacts/${contractName}.sol/${contractName}.json`;
     const contractArtifact = JSON.parse(readFileSync(contractArtifactPath, 'utf8'));
     const contractSelectors = contractArtifact.abi
-        .map(it => web3.eth.abi.encodeFunctionSignature(it));
+        .filter(it => it.type === 'function')
+        .map(it => web3.eth.abi.encodeFunctionSignature(removeAbiExtras(it)));
     const exposedSelectors = contractSelectors.filter(sel => filterSelectors.has(sel));
     return exposedSelectors;
 }

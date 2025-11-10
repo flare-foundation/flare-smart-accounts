@@ -3,15 +3,12 @@ pragma solidity ^0.8.27;
 
 import {Test,console2} from "forge-std/Test.sol";
 import {MasterAccountController} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
-import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
 import {IIMasterAccountController} from "../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IGovernanceSettings} from "flare-periphery/src/flare/IGovernanceSettings.sol";
 import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerification.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
-import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
@@ -33,7 +30,6 @@ import {IPaymentProofsFacet} from "../contracts/userInterfaces/facets/IPaymentPr
 import {IExecutorsFacet} from "../contracts/userInterfaces/facets/IExecutorsFacet.sol";
 import {IInstructionFeesFacet} from "../contracts/userInterfaces/facets/IInstructionFeesFacet.sol";
 import {IXrplProviderWalletsFacet} from "../contracts/userInterfaces/facets/IXrplProviderWalletsFacet.sol";
-import {IAgentVaultsFacet} from "../contracts/userInterfaces/facets/IAgentVaultsFacet.sol";
 import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
 import {IPersonalAccountsFacet} from "../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
 import {ISwapFacet} from "../contracts/userInterfaces/facets/ISwapFacet.sol";
