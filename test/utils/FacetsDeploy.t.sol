@@ -94,10 +94,10 @@ contract FacetsDeploy is Test {
         returns (IDiamond.FacetCut memory)
     {
         string[] memory cmds = new string[](3);
-        cmds[0] = "bash";
-        cmds[1] = "scripts/master-controller-selectors.sh";
-        // cmds[0] = "node";
-        // cmds[1] = "scripts/master-controller-selectors.js";
+        // cmds[0] = "bash";
+        // cmds[1] = "scripts/master-controller-selectors.sh";
+        cmds[0] = "node";
+        cmds[1] = "scripts/master-controller-selectors.js";
         cmds[2] = _facetName;
         bytes memory out = vm.ffi(cmds);
         bytes4[] memory selectors = abi.decode(out, (bytes4[]));
