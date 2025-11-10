@@ -22,7 +22,6 @@ import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/Xrp
 
 contract FacetsDeploy is Test {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
-    IDiamond.FacetCut[] private diamondCuts;
 
     constructor() {
         MockSingletonFactory mockFactory = new MockSingletonFactory();
@@ -31,59 +30,82 @@ contract FacetsDeploy is Test {
 
 
     function deployBaseFacets() internal returns (IDiamond.FacetCut[] memory) {
-        delete diamondCuts;
-
+        IDiamond.FacetCut[] memory baseCuts = new IDiamond.FacetCut[](3);
         bytes memory bytecode = abi.encodePacked(
             type(DiamondCutFacet).creationCode
         );
         address diamondCutFacet = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
-        addFacetData(diamondCutFacet, "DiamondCutFacet");
+        baseCuts[0] = _buildFacetCut(diamondCutFacet, "DiamondCutFacet", IDiamond.FacetCutAction.Add);
 
         bytecode = abi.encodePacked(
             type(DiamondLoupeFacet).creationCode
         );
         address diamondLoupeFacet = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
-        addFacetData(diamondLoupeFacet, "DiamondLoupeFacet");
+        baseCuts[1] = _buildFacetCut(diamondLoupeFacet, "DiamondLoupeFacet", IDiamond.FacetCutAction.Add);
 
         bytecode = abi.encodePacked(
             type(OwnershipFacet).creationCode
         );
         address ownershipFacet = IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, 0);
-        addFacetData(ownershipFacet, "OwnershipFacet");
+        baseCuts[2] = _buildFacetCut(ownershipFacet, "OwnershipFacet", IDiamond.FacetCutAction.Add);
 
-        return diamondCuts;
+        return baseCuts;
     }
 
     function deploySmartAccountsFacets() internal returns (IDiamond.FacetCut[] memory) {
-        delete diamondCuts;
+        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](9);
 
-        addFacetData(address(new AgentVaultsFacet()), "AgentVaultsFacet");
-        addFacetData(address(new ExecutorsFacet()), "ExecutorsFacet");
-        addFacetData(address(new InstructionFeesFacet()), "InstructionFeesFacet");
-        addFacetData(address(new InstructionsFacet()), "InstructionsFacet");
-        addFacetData(address(new PaymentProofsFacet()), "PaymentProofsFacet");
-        addFacetData(address(new PersonalAccountsFacet()), "PersonalAccountsFacet");
-        addFacetData(address(new SwapFacet()), "SwapFacet");
-        addFacetData(address(new VaultsFacet()), "VaultsFacet");
-        addFacetData(address(new XrplProviderWalletsFacet()), "XrplProviderWalletsFacet");
-
+        diamondCuts[0] = _buildFacetCut(
+            address(new AgentVaultsFacet()), "AgentVaultsFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[1] = _buildFacetCut(
+            address(new ExecutorsFacet()), "ExecutorsFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[2] = _buildFacetCut(
+            address(new InstructionFeesFacet()), "InstructionFeesFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[3] = _buildFacetCut(
+            address(new InstructionsFacet()), "InstructionsFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[4] = _buildFacetCut(
+            address(new PaymentProofsFacet()), "PaymentProofsFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[5] = _buildFacetCut(
+            address(new PersonalAccountsFacet()), "PersonalAccountsFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[6] = _buildFacetCut(
+            address(new SwapFacet()), "SwapFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[7] = _buildFacetCut(
+            address(new VaultsFacet()), "VaultsFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[8] = _buildFacetCut(
+            address(new XrplProviderWalletsFacet()), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Add
+        );
         return diamondCuts;
     }
 
-    function addFacetData(address facetAddr, string memory facetName) internal {
+    function _buildFacetCut(
+        address _facetAddr,
+        string memory _facetName,
+        IDiamond.FacetCutAction _action
+    )
+        internal
+        returns (IDiamond.FacetCut memory)
+    {
         string[] memory cmds = new string[](3);
         cmds[0] = "bash";
         cmds[1] = "scripts/master-controller-selectors.sh";
         // cmds[0] = "node";
         // cmds[1] = "scripts/master-controller-selectors.js";
-        cmds[2] = facetName;
+        cmds[2] = _facetName;
         bytes memory out = vm.ffi(cmds);
         bytes4[] memory selectors = abi.decode(out, (bytes4[]));
-        diamondCuts.push(IDiamond.FacetCut({
-            facetAddress: facetAddr,
-            action: IDiamond.FacetCutAction.Add,
+        return IDiamond.FacetCut({
+            facetAddress: _facetAddr,
+            action: _action,
             functionSelectors: selectors
-        }));
+        });
     }
 
 }

@@ -37,6 +37,9 @@ import {IAgentVaultsFacet} from "../contracts/userInterfaces/facets/IAgentVaults
 import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
 import {IPersonalAccountsFacet} from "../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
 import {ISwapFacet} from "../contracts/userInterfaces/facets/ISwapFacet.sol";
+import {SwapFacet} from "../contracts/smartAccounts/facets/SwapFacet.sol";
+import {XrplProviderWalletsFacet} from "../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
+
 
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test, FacetsDeploy {
@@ -194,7 +197,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         xrplAddress2 = "xrplAddress2";
     }
 
-    function testUpgrades() public {
+    function testPersonalAccountUpgrades() public {
         IPayment.Proof memory proof;
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
@@ -240,31 +243,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             personalAccount1.controllerAddress(),
             address(masterAccountController)
         );
-
-        // TODO change facet?
-        // change implementation of MasterAccountController
-        // assertEq(
-        //     masterAccountController.controllerImplementation(),
-        //     address(masterAccountControllerImpl)
-        // );
-        // MasterAccountController newMasterAccountControllerImpl = new MasterAccountController();
-        // vm.prank(governance);
-        // masterAccountController.upgradeToAndCall(
-        //     address(newMasterAccountControllerImpl),
-        //     bytes("")
-        // );
-        // assertEq(
-        //     masterAccountController.controllerImplementation(),
-        //     address(newMasterAccountControllerImpl)
-        // );
-        // assertEq(
-        //     masterAccountController.getPersonalAccount(xrplAddress1),
-        //     address(personalAccount1)
-        // );
-        // assertEq(
-        //     personalAccount1.controllerAddress(),
-        //     address(masterAccountController)
-        // );
 
         // deploy a new PersonalAccount implementation
         PersonalAccount newPersonalAccountImpl = new PersonalAccount();
@@ -332,6 +310,139 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(
             personalAccount2.controllerAddress(),
             address(masterAccountController)
+        );
+    }
+
+    function testRemoveCuts() public {
+        // get current facet cuts
+        address[] memory currentCuts = masterAccountController.facetAddresses();
+        assertEq(
+            currentCuts.length,
+            3 + 9 // base facets + smart accounts facets
+        );
+
+        IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](2);
+        removeCuts[0] = _buildFacetCut(address(0), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Remove);
+        removeCuts[1] = _buildFacetCut(address(0), "SwapFacet", IDiamond.FacetCutAction.Remove);
+        vm.prank(governance);
+        masterAccountController.diamondCut(
+            removeCuts,
+            address(0),
+            ""
+        );
+        // check facets were removed
+        address[] memory updatedCuts = masterAccountController.facetAddresses();
+        assertEq(
+            updatedCuts.length,
+            currentCuts.length - 2
+        );
+        for (uint256 i = 0; i < updatedCuts.length; i++) {
+            assertNotEq(
+                updatedCuts[i],
+                currentCuts[9] // SwapFacet
+            );
+            assertNotEq(
+                updatedCuts[i],
+                currentCuts[11] // XrplProviderWalletsFacet
+            );
+        }
+    }
+
+    function testReplaceCuts() public {
+        // get current facet cuts
+        address[] memory currentCuts = masterAccountController.facetAddresses();
+        assertEq(
+            currentCuts.length,
+            3 + 9 // base facets + smart accounts facets
+        );
+
+        // replace facets
+        IDiamond.FacetCut[] memory updateCuts = new IDiamond.FacetCut[](2);
+        address newSwapFacetAddress = address(new SwapFacet());
+        updateCuts[0] = _buildFacetCut(
+            newSwapFacetAddress, "SwapFacet", IDiamond.FacetCutAction.Replace
+        );
+        address newXrplProviderWalletsFacetAddress = address(new XrplProviderWalletsFacet());
+        updateCuts[1] = _buildFacetCut(
+            newXrplProviderWalletsFacetAddress, "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Replace
+        );
+        vm.prank(governance);
+        masterAccountController.diamondCut(
+            updateCuts,
+            address(0),
+            ""
+        );
+        // check facets were replaced
+        address[] memory finalCuts = masterAccountController.facetAddresses();
+        assertEq(
+            finalCuts.length,
+            currentCuts.length
+        );
+        assertEq(
+            finalCuts[9], // SwapFacet
+            newSwapFacetAddress
+        );
+        assertEq(
+            finalCuts[11], // XrplProviderWalletsFacet
+            newXrplProviderWalletsFacetAddress
+        );
+    }
+
+    function testDiamondOnlyOwner() public {
+        address notOwner = makeAddr("notOwner");
+        IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](1);
+        removeCuts[0] = _buildFacetCut(address(0), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Remove);
+        vm.prank(notOwner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NotContractOwner.selector,
+                notOwner,
+                governance
+            )
+        );
+        masterAccountController.diamondCut(
+            removeCuts,
+            address(0),
+            ""
+        );
+    }
+
+    function testDiamondTransferOwnership() public {
+        assertEq(
+            masterAccountController.owner(),
+            governance
+        );
+        address newOwner = makeAddr("newOwner");
+        vm.prank(governance);
+        masterAccountController.transferOwnership(newOwner);
+        assertEq(
+            masterAccountController.owner(),
+            newOwner
+        );
+
+        // old owner can no longer perform owner actions
+        IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](1);
+        removeCuts[0] = _buildFacetCut(address(0), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Remove);
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NotContractOwner.selector,
+                governance,
+                newOwner
+            )
+        );
+        masterAccountController.diamondCut(
+            removeCuts,
+            address(0),
+            ""
+        );
+
+        // new owner can perform owner actions
+        vm.prank(newOwner);
+        masterAccountController.diamondCut(
+            removeCuts,
+            address(0),
+            ""
         );
     }
 
