@@ -863,6 +863,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             fxrp.balanceOf(personalAccountAddr),
             0
         );
+        assertEq(
+            masterAccountController.isTransactionIdUsed(proof.data.requestBody.transactionId),
+            true
+        );
     }
 
     function testExecuteInstructionTransfer() public {
@@ -1607,6 +1611,19 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.removeInstructionFees(instructionIds);
     }
 
+    function testRemoveInstructionFeesRevertInstructionFeeNotSet() public {
+        uint256[] memory instructionIds = new uint256[](1);
+        instructionIds[0] = 11; // not set
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IInstructionFeesFacet.InstructionFeeNotSet.selector,
+                instructionIds[0]
+            )
+        );
+        masterAccountController.removeInstructionFees(instructionIds);
+    }
+
     function testAddXrplProviderWallets() public {
         string memory newWalet = "newXrplWallet";
         assertEq(
@@ -2150,6 +2167,18 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             500,
             3000,
             100
+        );
+    }
+
+    function testSwapParamsRevertInvalidMaxSlippagePPM() public {
+        vm.expectRevert(ISwapFacet.InvalidMaxSlippagePPM.selector);
+        vm.prank(governance);
+        masterAccountController.setSwapParams(
+            makeAddr("router"),
+            makeAddr("usdt0"),
+            500,
+            3000,
+            1e6 + 1
         );
     }
 

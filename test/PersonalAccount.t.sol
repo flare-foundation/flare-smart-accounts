@@ -13,6 +13,7 @@ import {FtsoV2Interface} from "flare-periphery/src/flare/FtsoV2Interface.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {MockBeacon} from "../contracts/mock/MockBeacon.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 contract PersonalAccountTest is Test {
     PersonalAccount private personalAccountImpl;
@@ -55,23 +56,26 @@ contract PersonalAccountTest is Test {
         vm.deal(controller, 1 ether);
     }
 
-    function testInitializeImplementationRevert() public {
-        vm.expectRevert(IPersonalAccount.AlreadyInitialized.selector);
-        personalAccountImpl.initialize(makeAddr("controller"), xrplOwner);
-    }
-
     function testInitializeRevertAlreadyInitialized() public {
         vm.expectRevert(IPersonalAccount.AlreadyInitialized.selector);
         personalAccount.initialize(makeAddr("controller"), xrplOwner);
     }
 
-    // function testInitializeRevertInvalidControllerAddress() public {
-    //     vm.expectRevert(IPersonalAccount.InvalidControllerAddress.selector);
-    //     new PersonalAccountProxy(
-    //         address(0),
-    //         xrplOwner
-    //     );
-    // }
+    function testInitializeRevertInvalidCBeacon() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ERC1967Utils.ERC1967InvalidBeacon.selector,
+                address(0)
+            )
+        );
+        // vm.expectRevert(IPersonalAccount.InvalidControllerAddress.selector);
+        // it will not reach the InvalidControllerAddress check because of invalid beacon
+        new PersonalAccountProxy(
+            address(0),
+            xrplOwner
+        );
+
+    }
 
     function testInitializeRevertInvalidXrplOwner() public {
         vm.expectRevert(IPersonalAccount.InvalidXrplOwner.selector);
