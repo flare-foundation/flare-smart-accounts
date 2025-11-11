@@ -2391,7 +2391,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             usdt0PriceInWei
         );
         uniswapV3Router.setPriceInWei(address(wNatMock), wNatPriceInWei);
-        uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei * 2); // set higher price to cause too little received
+        // set higher price to cause too little received
+        uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei * 2);
 
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         wNatMock.mint(personalAccountAddr, amountIn); // 100 WNat in personal account
@@ -2415,7 +2416,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testSwapUsdt0ForFAsset() public {
         testSetSwapParams();
-        uint256 amountIn = 1e20; // 100 WNat
+        uint256 amountIn = 1e20; // 100 USDT0
         uint256 usdt0PriceInWei = 1e18; // $1
         uint256 fassetPriceInWei = 3e18; // $3
         _mockGetFeedsByIdInWei(
@@ -2472,7 +2473,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testSwapUsdt0ForFassetRevertTooLittleReceived() public {
         testSetSwapParams();
-        uint256 amountIn = 1e20; // 100 WNat
+        uint256 amountIn = 1e20; // 100 USDT0
         uint256 usdt0PriceInWei = 1e18; // $1
         uint256 fassetPriceInWei = 3e18; // $3
         _mockGetFeedsByIdInWei(
@@ -2482,7 +2483,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             fassetPriceInWei
         );
         uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei);
-        uniswapV3Router.setPriceInWei(address(fxrp), fassetPriceInWei * 2); // set higher price to cause too little received
+        // set higher price to cause too little received
+        uniswapV3Router.setPriceInWei(address(fxrp), fassetPriceInWei * 2);
 
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         usdt0.mint(personalAccountAddr, amountIn); // 100 USDT0 in personal account
