@@ -62,14 +62,11 @@ contract PersonalAccount is
         require(IERC20(fxrp).approve(_vault, _amount), ApprovalFailed());
         emit Approved(fxrp, _vault, _amount);
 
-        uint256 actualAmount = IFirelightVault(_vault).mint(
+        uint256 shares = IFirelightVault(_vault).deposit(
             _amount,
             address(this)
         );
-        emit Deposited(_vault, _amount, actualAmount);
-        // TODO: amount is shares? and return value is amount (assets)? that wont be the same always?
-        // require(amount == actualAmount, "Deposited != amount requested");
-        // TODO that will not always be true, as ERC4626.mint can return less than requested due to rounding?
+        emit Deposited(_vault, _amount, shares);
     }
 
     /// @inheritdoc IIPersonalAccount
@@ -77,12 +74,12 @@ contract PersonalAccount is
         uint256 _amount,
         address _vault
     ) external onlyController nonReentrant {
-        uint256 actualAmount = IFirelightVault(_vault).withdraw(
+        uint256 shares = IFirelightVault(_vault).withdraw(
             _amount,
             address(this),
             address(this)
         );
-        emit Withdrawn(_vault, _amount, actualAmount);
+        emit Withdrawn(_vault, _amount, shares);
     }
 
     function claimWithdraw(

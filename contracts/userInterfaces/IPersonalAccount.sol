@@ -6,8 +6,8 @@ pragma solidity >=0.8.4 <0.9;
  * @notice Interface for PersonalAccount contract.
  */
 interface IPersonalAccount {
-    event Deposited(address vault, uint256 amount, uint256 actualAmount);
-    event Withdrawn(address vault, uint256 amount, uint256 actualAmount);
+    event Deposited(address vault, uint256 amount, uint256 shares);
+    event Withdrawn(address vault, uint256 amount, uint256 shares);
     event WithdrawalClaimed(
         address vault,
         uint256 rewardEpochId,
