@@ -1892,14 +1892,15 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
-    function testSetPersonalAccountImplementation(address _newImplementation) public {
+    function testSetPersonalAccountImplementation() public {
         assertEq(masterAccountController.implementation(), personalAccountImplementation);
+        address newImplementation = address(new PersonalAccount());
+        assertNotEq(newImplementation, personalAccountImplementation);
         vm.prank(governance);
-        vm.assume(_newImplementation != address(0));
         vm.expectEmit();
-        emit IPersonalAccountsFacet.PersonalAccountImplementationSet(_newImplementation);
-        masterAccountController.setPersonalAccountImplementation(_newImplementation);
-        assertEq(masterAccountController.implementation(), _newImplementation);
+        emit IPersonalAccountsFacet.PersonalAccountImplementationSet(newImplementation);
+        masterAccountController.setPersonalAccountImplementation(newImplementation);
+        assertEq(masterAccountController.implementation(), newImplementation);
     }
 
     function testSetPersonalAccountImplementationRevertOnlyOwner() public {
