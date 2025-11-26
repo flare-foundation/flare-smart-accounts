@@ -654,8 +654,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.InstructionExecuted(
             predictedAddress1,
-            paymentReference,
             transactionId,
+            paymentReference,
             xrplAddress1,
             _getInstructionId(1, 0)
         );

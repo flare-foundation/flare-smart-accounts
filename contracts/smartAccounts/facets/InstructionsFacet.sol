@@ -117,8 +117,8 @@ contract InstructionsFacet is IIInstructionsFacet {
         // emit event
         emit InstructionExecuted(
             address(personalAccount),
-            paymentReference,
             transactionId,
+            paymentReference,
             _xrplAddress,
             PaymentReferenceParser.getInstructionId(paymentReference)
         );
