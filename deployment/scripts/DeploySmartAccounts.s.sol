@@ -38,6 +38,7 @@ contract DeploySmartAccounts is Script {
         uint256[] vaultTypes;
         address executor;
         uint256 executorFee;
+        bytes32 sourceId;
         uint256 paymentProofValidityDurationSeconds;
         uint256 defaultInstructionFee;
         string[] xrplProviderWallets;
@@ -97,6 +98,7 @@ contract DeploySmartAccounts is Script {
         params.vaultTypes = vm.parseJsonUintArray(config, ".vaultTypes");
         params.executor = vm.parseJsonAddress(config, ".executor");
         params.executorFee = vm.parseJsonUint(config, ".executorFee");
+        params.sourceId = bytes32(bytes(vm.parseJsonString(config, ".sourceId")));
         params.paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
         params.defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
         params.xrplProviderWallets = vm.parseJsonStringArray(config, ".xrplProviderWallets");
@@ -214,6 +216,7 @@ contract DeploySmartAccounts is Script {
                 MasterAccountControllerInit.init.selector,
                 payable(params.executor),
                 params.executorFee,
+                params.sourceId,
                 params.paymentProofValidityDurationSeconds,
                 params.defaultInstructionFee,
                 personalAccountImplAddress

@@ -31,6 +31,11 @@ interface IPaymentProofsFacet {
     error InvalidReceivingAddressHash();
 
     /**
+     * @notice Reverts if the source ID is invalid.
+     */
+    error InvalidSourceId();
+
+    /**
      * @notice Reverts if the transaction status is invalid.
      */
     error InvalidTransactionStatus();
@@ -44,6 +49,14 @@ interface IPaymentProofsFacet {
      * @notice Reverts if the payment proof has expired.
      */
     error PaymentProofExpired();
+
+    /**
+     * @notice Gets the source ID used for payment verification.
+     * @return The source ID.
+     */
+    function getSourceId()
+        external view
+        returns (bytes32);
 
     /**
      * @notice Gets the payment proof validity duration in seconds.

@@ -63,6 +63,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     MintableERC20 private fxrp;
     string private xrplProviderWallet;
     bytes32 private xrplProviderWalletHash;
+    bytes32 private sourceId;
     uint256 private paymentProofValidityDurationSeconds;
     uint256 private defaultInstructionFee;
     MockUniswapV3Router private uniswapV3Router;
@@ -103,6 +104,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         wNatMock = new MintableERC20("WFLR", "WFLR", 18);
         ftsoV2Mock = makeAddr("FtsoV2Mock");
         executorFee = 100;
+        sourceId = bytes32("testXRP");
         paymentProofValidityDurationSeconds = 1 days;
         defaultInstructionFee = 1000000; // 1 XRP
         uniswapV3Router = new MockUniswapV3Router();
@@ -143,6 +145,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
                 MasterAccountControllerInit.init.selector,
                 payable(executor),
                 executorFee,
+                sourceId,
                 paymentProofValidityDurationSeconds,
                 defaultInstructionFee,
                 personalAccountImplementation
@@ -195,6 +198,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testPersonalAccountUpgrades() public {
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
         proof.data.requestBody.transactionId = bytes32("tx1");
@@ -547,6 +551,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteDepositAfterMintingRevertInvalidInstruction() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(9, 0, 1000, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
 
         vm.expectRevert(
@@ -562,6 +567,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteDepositAfterMintingRevertUnknownCollateralReservationId() public {
         bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 1000, 0, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
 
         vm.expectRevert(
@@ -580,6 +586,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes32 transactionId = bytes32("tx1");
         testReserveCollateral();
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.requestBody.transactionId = transactionId;
 
@@ -593,6 +600,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes32 transactionId = bytes32("tx1");
         testReserveCollateral();
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.requestBody.transactionId = transactionId;
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
@@ -610,6 +618,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes32 transactionId = bytes32("tx1");
         testReserveCollateral();
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.requestBody.transactionId = transactionId;
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
@@ -634,6 +643,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes32 transactionId = bytes32("tx1");
         testReserveCollateral();
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
@@ -665,6 +675,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteInstructionRevertInvalidPaymentAmount() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = -1;
 
@@ -686,9 +697,21 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
+    function testExecuteInstructionRevertInvalidSourceId() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        IPayment.Proof memory proof;
+        proof.data.sourceId = bytes32("invalidSourceId");
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
+
+        vm.expectRevert(IPaymentProofsFacet.InvalidSourceId.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
     function testExecuteInstructionRevertInvalidTransactionStatus() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 1;
@@ -700,6 +723,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteInstructionRevertPaymentProofExpired() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -713,6 +737,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteInstructionRevertMismatchingSourceAndXrplAddr() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -726,6 +751,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteInstructionInvalidReceivingAddressHash() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -740,6 +766,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteInstructionRevertTransactionAlreadyExecuted() public {
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 2, 0, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -759,6 +786,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteInstructionRevertInvalidTransactionProof() public {
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 2, 0, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -778,6 +806,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -825,6 +854,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
         bytes32 paymentReference = _encodeUpshiftPaymentReference(1, 0, 123, 0, 3);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -876,6 +906,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address recipient = makeAddr("recipient");
         bytes32 paymentReference = _encodeFxrpTransferPaymentReference(0, 123, recipient);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -926,6 +957,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(personalAccountAddr, 123);
         bytes32 paymentReference = _encodeFxrpTransferPaymentReference(0, 123, address(0));
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -944,6 +976,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256 lotSize = 100;
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -992,6 +1025,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
         bytes32 paymentReference = _encodeFirelightPaymentReference(2, 0, 100, 0, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -1046,6 +1080,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         bytes32 paymentReference = _encodeFirelightPaymentReference(3, 0, period, 0, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -1096,6 +1131,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
         bytes32 paymentReference = _encodeUpshiftPaymentReference(2, 0, 100, 0, 3);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -1153,6 +1189,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         bytes32 paymentReference = _encodeUpshiftPaymentReference(3, 0, 19700102, 0, 3);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -1195,6 +1232,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteInstructionRevertInvalidInstruction() public {
         bytes32 paymentReference = _encodeUpshiftPaymentReference(9, 0, 20250913, 0, 3);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -1270,6 +1308,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.setExecutorFee(0);
     }
 
+    function testGetSourceId() public {
+        bytes32 returnedSourceId = masterAccountController.getSourceId();
+        assertEq(returnedSourceId, sourceId);
+    }
+
     function testSetPaymentProofValidityDuration(uint256 _duration) public {
         assertEq(
             masterAccountController.getPaymentProofValidityDurationSeconds(),
@@ -1340,6 +1383,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 10, 0, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee); // default fee
         proof.data.responseBody.status = 0;
@@ -1480,6 +1524,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // make tx with new wallet as receiving address - should revert
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 0);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -2037,6 +2082,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 1);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -2061,6 +2107,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 1);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;
@@ -2179,6 +2226,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // use upshift vault for firelight instruction type
         bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 3);
         IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
         proof.data.responseBody.receivedAmount = int256(2 * defaultInstructionFee);
         proof.data.responseBody.status = 0;

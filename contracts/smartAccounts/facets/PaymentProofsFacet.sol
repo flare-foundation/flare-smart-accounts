@@ -23,6 +23,15 @@ contract PaymentProofsFacet is IIPaymentProofsFacet {
     }
 
     /// @inheritdoc IPaymentProofsFacet
+    function getSourceId()
+        external view
+        returns (bytes32)
+    {
+        PaymentProofs.State storage state = PaymentProofs.getState();
+        return state.sourceId;
+    }
+
+    /// @inheritdoc IPaymentProofsFacet
     function getPaymentProofValidityDurationSeconds()
         external view
         returns (uint256)

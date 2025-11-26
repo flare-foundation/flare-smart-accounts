@@ -9,11 +9,22 @@ import {IPaymentProofsFacet} from "../../userInterfaces/facets/IPaymentProofsFac
 library PaymentProofs {
 
     struct State {
+        /// @notice Source ID used for payment verification
+        bytes32 sourceId;
         /// @notice Duration (in seconds) for which the payment proof is valid
         uint256 paymentProofValidityDurationSeconds;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.PaymentProofs.State");
+
+    function setSourceId(
+        bytes32 _sourceId
+    )
+        internal
+    {
+        State storage state = PaymentProofs.getState();
+        state.sourceId = _sourceId;
+    }
 
     function setPaymentProofValidityDuration(
         uint256 _paymentProofValidityDurationSeconds
@@ -38,6 +49,10 @@ library PaymentProofs {
         internal view
     {
         State storage state = getState();
+        require(
+            _proof.data.sourceId == state.sourceId,
+            IPaymentProofsFacet.InvalidSourceId()
+        );
         require(
             _proof.data.responseBody.status == 0,
             IPaymentProofsFacet.InvalidTransactionStatus()

@@ -19,6 +19,7 @@ contract MasterAccountControllerInit {
     function init(
         address payable _executor,
         uint256 _executorFee,
+        bytes32 _sourceId,
         uint256 _paymentProofValidityDurationSeconds,
         uint256 _defaultInstructionFee,
         address _personalAccountImplementation
@@ -42,6 +43,7 @@ contract MasterAccountControllerInit {
 
         Executors.setExecutor(_executor);
         Executors.setExecutorFee(_executorFee);
+        PaymentProofs.setSourceId(_sourceId);
         PaymentProofs.setPaymentProofValidityDuration(_paymentProofValidityDurationSeconds);
         InstructionFees.setDefaultInstructionFee(_defaultInstructionFee);
         // set the PA implementation that this controller (as beacon) will return
