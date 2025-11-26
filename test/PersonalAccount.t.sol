@@ -11,6 +11,7 @@ import {AgentInfo} from "flare-periphery/src/flare/data/AgentInfo.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {FtsoV2Interface} from "flare-periphery/src/flare/FtsoV2Interface.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {MockBeacon} from "../contracts/mock/MockBeacon.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
@@ -444,6 +445,24 @@ contract PersonalAccountTest is Test {
                 address(personalAccount)
             ),
             abi.encode(amountIn)
+        );
+
+        // mock tokenIn decimals
+        vm.mockCall(
+            tokenIn,
+            abi.encodeWithSelector(
+                IERC20Metadata.decimals.selector
+            ),
+            abi.encode(18)
+        );
+
+        // mock tokenOut decimals
+        vm.mockCall(
+            tokenOut,
+            abi.encodeWithSelector(
+                IERC20Metadata.decimals.selector
+            ),
+            abi.encode(6)
         );
 
         address ftsoV2 = makeAddr("ftsoV2");

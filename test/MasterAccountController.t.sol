@@ -89,7 +89,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         governance = makeAddr("governance");
         initialOwner = makeAddr("initialOwner");
         executor = makeAddr("executor");
-        fxrp = new MintableERC20("F-XRPL", "fXRP");
+        fxrp = new MintableERC20("F-XRPL", "fXRP", 6);
         depositVault = new MyERC4626(
             IERC20(address(fxrp)),
             "Deposit Vault",
@@ -100,14 +100,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         xrplProviderWalletHash = keccak256(bytes(xrplProviderWallet));
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
         fdcVerificationMock = makeAddr("FDCVerificationMock");
-        wNatMock = new MintableERC20("WFLR", "WFLR");
+        wNatMock = new MintableERC20("WFLR", "WFLR", 18);
         ftsoV2Mock = makeAddr("FtsoV2Mock");
         executorFee = 100;
         paymentProofValidityDurationSeconds = 1 days;
         defaultInstructionFee = 1000000; // 1 XRP
         uniswapV3Router = new MockUniswapV3Router();
         wNatUsdt0PoolFeeTierPPM = 3000; // 0.3%
-        usdt0 = new MintableERC20("USDT0", "USDT0");
+        usdt0 = new MintableERC20("USDT0", "USDT0", 6);
         usdt0FXrpPoolFeeTierPPM = 500; // 0.05%
         maxSlippagePPM = 20000; // 2%
         assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
@@ -2353,7 +2353,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testSwapWNatForUsdt0() public {
         testSetSwapParams();
-        uint256 amountIn = 1e20; // 100 WNat
+        uint256 amountTokenIn = 1e20; // 100 WNat
+        uint256 amountTokenOut = 1e8; // 100 USDT0
         uint256 wNatPriceInWei = 2e16; // $0.02
         uint256 usdt0PriceInWei = 1e18; // $1
         _mockGetFeedsByIdInWei(
@@ -2366,14 +2367,15 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei);
 
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        wNatMock.mint(personalAccountAddr, amountIn); // 100 WNat in personal account
-        usdt0.mint(address(uniswapV3Router), amountIn); // 100 USDT0 liquidity in router
-        uint256 amountOut = wNatPriceInWei * amountIn * (1e6 - wNatUsdt0PoolFeeTierPPM) / 1e6 / usdt0PriceInWei;
+        wNatMock.mint(personalAccountAddr, amountTokenIn); // 100 WNat in personal account
+        usdt0.mint(address(uniswapV3Router), amountTokenOut); // 100 USDT0 liquidity in router
+        uint256 amountOut = wNatPriceInWei * amountTokenIn * (10 ** 6) * (1e6 - wNatUsdt0PoolFeeTierPPM) /
+            1e6 / usdt0PriceInWei / (10 ** 18);
         vm.expectEmit(personalAccountAddr);
         emit IPersonalAccount.SwapExecuted(
             address(wNatMock),
             address(usdt0),
-            amountIn,
+            amountTokenIn,
             amountOut
         );
         vm.expectEmit();
@@ -2382,7 +2384,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             address(wNatMock),
             address(usdt0),
             xrplAddress1,
-            amountIn,
+            amountTokenIn,
             amountOut
         );
         masterAccountController.swapWNatForUsdt0(xrplAddress1);
@@ -2392,7 +2394,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
         assertEq(
             wNatMock.balanceOf(address(uniswapV3Router)),
-            amountIn
+            amountTokenIn
         );
         assertEq(
             wNatMock.allowance(personalAccountAddr, address(uniswapV3Router)),
@@ -2404,13 +2406,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
         assertEq(
             usdt0.balanceOf(address(uniswapV3Router)),
-            amountIn - amountOut
+            amountTokenOut - amountOut
         );
     }
 
     function testSwapWNatForUsdt0RevertTooLittleReceived() public {
         testSetSwapParams();
-        uint256 amountIn = 1e20; // 100 WNat
+        uint256 amountTokenIn = 1e20; // 100 WNat
+        uint256 amountTokenOut = 1e8; // 100 USDT0
         uint256 wNatPriceInWei = 2e16; // $0.02
         uint256 usdt0PriceInWei = 1e18; // $1
         _mockGetFeedsByIdInWei(
@@ -2424,8 +2427,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei * 2);
 
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        wNatMock.mint(personalAccountAddr, amountIn); // 100 WNat in personal account
-        usdt0.mint(address(uniswapV3Router), amountIn); // 100 USDT0 liquidity in router
+        wNatMock.mint(personalAccountAddr, amountTokenIn); // 100 WNat in personal account
+        usdt0.mint(address(uniswapV3Router), amountTokenOut); // 100 USDT0 liquidity in router
         vm.expectRevert(MockUniswapV3Router.TooLittleReceived.selector);
         masterAccountController.swapWNatForUsdt0(xrplAddress1);
     }
@@ -2445,7 +2448,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testSwapUsdt0ForFAsset() public {
         testSetSwapParams();
-        uint256 amountIn = 1e20; // 100 USDT0
+        uint256 amountTokenIn = 1e8; // 100 USDT0
+        uint256 amountTokenOut = 1e8; // 100 FXRP
         uint256 usdt0PriceInWei = 1e18; // $1
         uint256 fassetPriceInWei = 3e18; // $3
         _mockGetFeedsByIdInWei(
@@ -2458,14 +2462,15 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uniswapV3Router.setPriceInWei(address(fxrp), fassetPriceInWei);
 
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        usdt0.mint(personalAccountAddr, amountIn); // 100 USDT0 in personal account
-        fxrp.mint(address(uniswapV3Router), amountIn); // 100 FXRP liquidity in router
-        uint256 amountOut = usdt0PriceInWei * amountIn * (1e6 - usdt0FXrpPoolFeeTierPPM) / 1e6 / fassetPriceInWei;
+        usdt0.mint(personalAccountAddr, amountTokenIn); // 100 USDT0 in personal account
+        fxrp.mint(address(uniswapV3Router), amountTokenOut); // 100 FXRP liquidity in router
+        // decimals are the same for USDT0 and FXRP, so no adjustment needed
+        uint256 amountOut = usdt0PriceInWei * amountTokenIn * (1e6 - usdt0FXrpPoolFeeTierPPM) / 1e6 / fassetPriceInWei;
         vm.expectEmit(personalAccountAddr);
         emit IPersonalAccount.SwapExecuted(
             address(usdt0),
             address(fxrp),
-            amountIn,
+            amountTokenIn,
             amountOut
         );
         vm.expectEmit();
@@ -2474,7 +2479,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             address(usdt0),
             address(fxrp),
             xrplAddress1,
-            amountIn,
+            amountTokenIn,
             amountOut
         );
         masterAccountController.swapUsdt0ForFAsset(xrplAddress1);
@@ -2484,7 +2489,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
         assertEq(
             usdt0.balanceOf(address(uniswapV3Router)),
-            amountIn
+            amountTokenIn
         );
         assertEq(
             usdt0.allowance(personalAccountAddr, address(uniswapV3Router)),
@@ -2496,13 +2501,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
         assertEq(
             fxrp.balanceOf(address(uniswapV3Router)),
-            amountIn - amountOut
+            amountTokenOut - amountOut
         );
     }
 
     function testSwapUsdt0ForFassetRevertTooLittleReceived() public {
         testSetSwapParams();
-        uint256 amountIn = 1e20; // 100 USDT0
+        uint256 amountTokenIn = 1e8; // 100 USDT0
+        uint256 amountTokenOut = 1e8; // 100 FXRP
         uint256 usdt0PriceInWei = 1e18; // $1
         uint256 fassetPriceInWei = 3e18; // $3
         _mockGetFeedsByIdInWei(
@@ -2516,8 +2522,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uniswapV3Router.setPriceInWei(address(fxrp), fassetPriceInWei * 2);
 
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        usdt0.mint(personalAccountAddr, amountIn); // 100 USDT0 in personal account
-        fxrp.mint(address(uniswapV3Router), amountIn); // 100 FXRP liquidity in router
+        usdt0.mint(personalAccountAddr, amountTokenIn); // 100 USDT0 in personal account
+        fxrp.mint(address(uniswapV3Router), amountTokenOut); // 100 FXRP liquidity in router
         vm.expectRevert(MockUniswapV3Router.TooLittleReceived.selector);
         masterAccountController.swapUsdt0ForFAsset(xrplAddress1);
     }

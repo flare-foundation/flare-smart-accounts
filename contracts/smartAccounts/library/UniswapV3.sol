@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
@@ -12,7 +12,7 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
  * @dev Library for interacting with Uniswap V3 protocol.
  */
 library UniswapV3 {
-    using SafeERC20 for IERC20;
+    using SafeERC20 for IERC20Metadata;
 
     /**
      * @notice Reverts if the swap is disabled - no Uniswap V3 router provided.
@@ -48,7 +48,8 @@ library UniswapV3 {
         // Ensure swap router is provided
         require(_uniswapV3Router != address(0), SwapDisabled());
         // Check input token balance
-        _amountIn = IERC20(_tokenIn).balanceOf(address(this));
+        IERC20Metadata tokenIn = IERC20Metadata(_tokenIn);
+        _amountIn = tokenIn.balanceOf(address(this));
         require(_amountIn > 0, AmountInZero());
 
         // Fetch price feeds
@@ -57,12 +58,19 @@ library UniswapV3 {
         feedIds[1] = _tokenOutFeedId;
         (uint256[] memory valuesInWei, ) = ContractRegistry.getFtsoV2().getFeedsByIdInWei(feedIds);
 
+        uint256 tokenInDecimals = tokenIn.decimals();
+        uint256 tokenOutDecimals = IERC20Metadata(_tokenOut).decimals();
+
         // Calculate minimum amount out based on max slippage
-        uint256 expectedAmountOut = Math.mulDiv(_amountIn, valuesInWei[0], valuesInWei[1]);
+        uint256 expectedAmountOut = Math.mulDiv(
+            _amountIn,
+            valuesInWei[0] * (10 ** tokenOutDecimals),
+            valuesInWei[1] * (10 ** tokenInDecimals)
+        );
         uint256 minAmountOut = Math.mulDiv(expectedAmountOut, 1e6 - _maxSlippagePPM, 1e6);
 
         // Approve router to spend tokens using SafeERC20
-        IERC20(_tokenIn).safeIncreaseAllowance(_uniswapV3Router, _amountIn);
+        tokenIn.safeIncreaseAllowance(_uniswapV3Router, _amountIn);
 
         // Prepare swap parameters
         ISwapRouter.ExactInputSingleParams memory params = ISwapRouter.ExactInputSingleParams({

@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 /// @title MockUniswapV3Router
 /// @notice This is the mock router that is used by MasterAccountController contract only for test purposes.
@@ -30,8 +31,11 @@ contract MockUniswapV3Router {
         external
         returns (uint256 _amountOut)
     {
+        uint256 tokenInDecimals = IERC20Metadata(_params.tokenIn).decimals();
+        uint256 tokenOutDecimals = IERC20Metadata(_params.tokenOut).decimals();
         // calculate amountOut based on set prices and fee
-        _amountOut = prices[_params.tokenIn] * _params.amountIn * (1e6 - _params.fee) / 1e6 / prices[_params.tokenOut];
+        _amountOut = prices[_params.tokenIn] * _params.amountIn * (1e6 - _params.fee) * (10 ** tokenOutDecimals) /
+            1e6 / prices[_params.tokenOut] / (10 ** tokenInDecimals);
 
         require(_amountOut >= _params.amountOutMinimum, TooLittleReceived());
 

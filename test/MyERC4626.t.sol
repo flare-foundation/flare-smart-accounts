@@ -12,7 +12,7 @@ contract MyERC4626Test is Test {
     address private user = makeAddr("user");
 
     function setUp() public {
-        mintableERC20 = new MintableERC20("Mintable Token", "MNT");
+        mintableERC20 = new MintableERC20("Mintable Token", "MNT", 18);
         myERC4626 = new MyERC4626(mintableERC20, "My ERC4626", "MERC4626");
     }
 
