@@ -46,12 +46,6 @@ library Instructions {
             uint256 period = PaymentReferenceParser.getValue(_paymentReference);
             address vault = Vaults.getVaultAddress(_paymentReference);
             Vault.claimWithdrawal(_personalAccount, vault, period);
-        } else if (_instructionType == 1 && _instructionCommand == 4) { // claim withdraw and redeem FXRP
-            uint256 period = PaymentReferenceParser.getValue(_paymentReference);
-            address vault = Vaults.getVaultAddress(_paymentReference);
-            uint256 amount = Vault.claimWithdrawal(_personalAccount, vault, period);
-            uint256 lots = FXrp.amountToLots(amount);
-            FXrp.redeem(_personalAccount, lots);
         } else if (_instructionType == 2 && _instructionCommand == 2) { // requestRedeem
             uint256 shares = PaymentReferenceParser.getValue(_paymentReference);
             address vault = Vaults.getVaultAddress(_paymentReference);
@@ -60,12 +54,6 @@ library Instructions {
             uint256 date = PaymentReferenceParser.getValue(_paymentReference);
             address vault = Vaults.getVaultAddress(_paymentReference);
             Vault.claim(_personalAccount, vault, date);
-        } else if (_instructionType == 2 && _instructionCommand == 4) { // claim and redeem FXRP
-            uint256 date = PaymentReferenceParser.getValue(_paymentReference);
-            address vault = Vaults.getVaultAddress(_paymentReference);
-            uint256 amount = Vault.claim(_personalAccount, vault, date);
-            uint256 lots = FXrp.amountToLots(amount);
-            FXrp.redeem(_personalAccount, lots);
         } else {
             revert IInstructionsFacet.InvalidInstruction(_instructionType, _instructionCommand);
         }

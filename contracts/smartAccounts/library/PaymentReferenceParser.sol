@@ -24,7 +24,6 @@ import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet
     // 11: deposit
     // 12: redeem
     // 13: claim withdraw
-    // 14: claim withdraw and redeem FXRP
 // bytes 01: uint8 -> wallet identifier
 // bytes 02-11: uint80 -> value (amount, shares, lots, period,...)
 // bytes 12-13: uint16 -> agent vault address id
@@ -37,7 +36,6 @@ import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet
     // 21: deposit
     // 22: requestRedeem
     // 23: claim
-    // 24: claim and redeem FXRP
 // bytes 01: uint8 -> wallet identifier
 // bytes 02-11: uint80 -> value (amount, shares, lots, date(yyyymmdd),...)
 // bytes 12-13: uint16 -> agent vault address id
