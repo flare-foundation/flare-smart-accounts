@@ -17,7 +17,10 @@ library Vaults {
 
     struct State {
         /// @notice Mapping from vault ID to vault information
-        mapping(uint256 vaultId => VaultInfo vaultInfo) vaults;
+        mapping(uint256 vaultId => VaultInfo vaultInfo) vaultIdToVaultInfo;
+        /// @notice Mapping from vault address to vault ID
+        mapping(address vaultAddress => uint256 vaultId) vaultAddressToVaultId;
+        /// @notice Array of vault IDs
         uint256[] vaultIds;
     }
 
@@ -26,7 +29,7 @@ library Vaults {
     function getVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
         uint256 vaultId = PaymentReferenceParser.getVaultId(_paymentReference);
         State storage state = getState();
-        VaultInfo memory vaultInfo = state.vaults[vaultId];
+        VaultInfo memory vaultInfo = state.vaultIdToVaultInfo[vaultId];
         _vault = vaultInfo.vaultAddress;
         uint256 instructionType = PaymentReferenceParser.getInstructionType(_paymentReference);
         require(_vault != address(0), IVaultsFacet.InvalidVaultId(vaultId));

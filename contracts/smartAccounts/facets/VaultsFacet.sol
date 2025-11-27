@@ -28,14 +28,20 @@ contract VaultsFacet is IIVaultsFacet {
         Vaults.State storage state = Vaults.getState();
         for (uint256 i = 0; i < _vaultIds.length; i++) {
             uint256 vaultId = _vaultIds[i];
-            address vaultAddress = _vaultAddresses[i];
+            require(vaultId > 0, VaultIdZero(i));
+            Vaults.VaultInfo storage vaultInfo = state.vaultIdToVaultInfo[vaultId];
+            require(vaultInfo.vaultAddress == address(0), VaultIdAlreadyAdded(vaultId));
             uint8 vaultType = _vaultTypes[i];
-            Vaults.VaultInfo storage vaultInfo = state.vaults[vaultId];
-            require(vaultInfo.vaultAddress == address(0), VaultIdAlreadyUsed(vaultId));
-            require(vaultAddress != address(0), InvalidVaultId(vaultId));
             require(vaultType == 1 || vaultType == 2, InvalidVaultType(vaultType));
+            address vaultAddress = _vaultAddresses[i];
+            require(vaultAddress != address(0), VaultAddressZero(i));
+            require(
+                state.vaultAddressToVaultId[vaultAddress] == 0,
+                VaultAddressAlreadyAdded(vaultAddress)
+            );
             vaultInfo.vaultAddress = vaultAddress;
             vaultInfo.vaultType = vaultType;
+            state.vaultAddressToVaultId[vaultAddress] = vaultId;
             state.vaultIds.push(vaultId);
             emit VaultAdded(vaultId, vaultAddress, vaultType);
         }
@@ -51,7 +57,7 @@ contract VaultsFacet is IIVaultsFacet {
         _vaultAddresses = new address[](_vaultIds.length);
         _vaultTypes = new uint8[](_vaultIds.length);
         for (uint256 i = 0; i < _vaultIds.length; i++) {
-            Vaults.VaultInfo memory vaultInfo = state.vaults[_vaultIds[i]];
+            Vaults.VaultInfo memory vaultInfo = state.vaultIdToVaultInfo[_vaultIds[i]];
             _vaultAddresses[i] = vaultInfo.vaultAddress;
             _vaultTypes[i] = vaultInfo.vaultType;
         }

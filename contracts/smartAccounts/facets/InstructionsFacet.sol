@@ -182,7 +182,7 @@ contract InstructionsFacet is IIInstructionsFacet {
         external
     {
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
-        Vaults.VaultInfo memory vaultInfo = Vaults.getState().vaults[_vaultId];
+        Vaults.VaultInfo memory vaultInfo = Vaults.getState().vaultIdToVaultInfo[_vaultId];
         require(vaultInfo.vaultAddress != address(0), IVaultsFacet.InvalidVaultId(_vaultId));
         if (vaultInfo.vaultType == 1) {
             // Firelight vault

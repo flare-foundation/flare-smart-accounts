@@ -28,12 +28,21 @@ contract AgentVaultsFacet is IIAgentVaultsFacet {
         AgentVaults.State storage state = AgentVaults.getState();
         for (uint256 i = 0; i < _agentVaultIds.length; i++) {
             uint256 agentVaultId = _agentVaultIds[i];
+            require(agentVaultId > 0, AgentVaultIdZero(i));
+            require(
+                state.agentVaultIdToAgentVaultAddress[agentVaultId] == address(0),
+                AgentVaultIdAlreadyAdded(agentVaultId)
+            );
             address agentVaultAddress = _agentVaultAddresses[i];
-            require(state.agentVaults[agentVaultId] == address(0), AgentVaultIdAlreadyUsed(agentVaultId));
-            require(agentVaultAddress != address(0), InvalidAgentVault(agentVaultId));
+            require(agentVaultAddress != address(0), AgentVaultAddressZero(i));
+            require(
+                state.agentVaultAddressToAgentVaultId[agentVaultAddress] == 0,
+                AgentVaultAddressAlreadyAdded(agentVaultAddress)
+            );
             AgentInfo.Info memory agentInfo = assetManager.getAgentInfo(agentVaultAddress);
             require(agentInfo.status == AgentInfo.Status.NORMAL, AgentNotAvailable(agentVaultAddress));
-            state.agentVaults[agentVaultId] = agentVaultAddress;
+            state.agentVaultIdToAgentVaultAddress[agentVaultId] = agentVaultAddress;
+            state.agentVaultAddressToAgentVaultId[agentVaultAddress] = agentVaultId;
             state.agentVaultIds.push(agentVaultId);
             emit AgentVaultAdded(agentVaultId, agentVaultAddress);
         }
@@ -49,10 +58,11 @@ contract AgentVaultsFacet is IIAgentVaultsFacet {
         AgentVaults.State storage state = AgentVaults.getState();
         for (uint256 i = 0; i < _agentVaultIds.length; i++) {
             uint256 agentVaultId = _agentVaultIds[i];
-            address agentVault = state.agentVaults[agentVaultId];
+            address agentVault = state.agentVaultIdToAgentVaultAddress[agentVaultId];
             require(agentVault != address(0), InvalidAgentVault(agentVaultId));
-            // remove from mapping
-            delete state.agentVaults[agentVaultId];
+            // remove from mappings
+            delete state.agentVaultIdToAgentVaultAddress[agentVaultId];
+            delete state.agentVaultAddressToAgentVaultId[agentVault];
             // remove from array
             for (uint256 j = 0; j < state.agentVaultIds.length; j++) {
                 if (state.agentVaultIds[j] == agentVaultId) {
@@ -74,7 +84,7 @@ contract AgentVaultsFacet is IIAgentVaultsFacet {
         _agentVaultIds = state.agentVaultIds;
         _agentVaultAddresses = new address[](_agentVaultIds.length);
         for (uint256 i = 0; i < _agentVaultIds.length; i++) {
-            _agentVaultAddresses[i] = state.agentVaults[_agentVaultIds[i]];
+            _agentVaultAddresses[i] = state.agentVaultIdToAgentVaultAddress[_agentVaultIds[i]];
         }
     }
 }

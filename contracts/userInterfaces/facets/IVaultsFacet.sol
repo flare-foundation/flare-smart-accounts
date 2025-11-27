@@ -25,11 +25,35 @@ interface IVaultsFacet {
     error VaultsLengthsMismatch();
 
     /**
-     * @notice Reverts if the vault ID is already used.
+     * @notice Reverts if the vault ID is zero.
+     * @param index The index in the input array.
+     */
+    error VaultIdZero(
+        uint256 index
+    );
+
+    /**
+     * @notice Reverts if the vault ID is already added.
      * @param vaultId The vault ID.
      */
-    error VaultIdAlreadyUsed(
+    error VaultIdAlreadyAdded(
         uint256 vaultId
+    );
+
+    /**
+     * @notice Reverts if the vault address is zero.
+     * @param index The index in the input array.
+     */
+    error VaultAddressZero(
+        uint256 index
+    );
+
+    /**
+     * @notice Reverts if the vault address is already added.
+     * @param vaultAddress The vault address.
+     */
+    error VaultAddressAlreadyAdded(
+        address vaultAddress
     );
 
     /**

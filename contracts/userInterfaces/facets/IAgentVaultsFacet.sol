@@ -33,11 +33,35 @@ interface IAgentVaultsFacet {
     error AgentsVaultsLengthsMismatch();
 
     /**
-     * @notice Reverts if the agent vault ID is already used.
+     * @notice Reverts if the agent vault ID is zero.
+     * @param index The index in the input array.
+     */
+    error AgentVaultIdZero(
+        uint256 index
+    );
+
+    /**
+     * @notice Reverts if the agent vault ID is already added.
      * @param agentVaultId The agent vault ID.
      */
-    error AgentVaultIdAlreadyUsed(
+    error AgentVaultIdAlreadyAdded(
         uint256 agentVaultId
+    );
+
+    /**
+    * @notice Reverts if the agent vault address is zero.
+    * @param index The index in the input array.
+    */
+    error AgentVaultAddressZero(
+        uint256 index
+    );
+
+    /**
+     * @notice Reverts if the agent vault address is already added.
+     * @param agentVaultAddress The agent vault address.
+     */
+    error AgentVaultAddressAlreadyAdded(
+        address agentVaultAddress
     );
 
     /**

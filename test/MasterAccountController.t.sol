@@ -59,7 +59,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     address private initialOwner;
     address private executor;
     uint256 private executorFee;
-    MyERC4626 private depositVault;
+    MyERC4626 private firelightVault;
+    MyERC4626 private upshiftVault;
     MintableERC20 private fxrp;
     string private xrplProviderWallet;
     bytes32 private xrplProviderWalletHash;
@@ -91,12 +92,18 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         initialOwner = makeAddr("initialOwner");
         executor = makeAddr("executor");
         fxrp = new MintableERC20("F-XRPL", "fXRP", 6);
-        depositVault = new MyERC4626(
+        firelightVault = new MyERC4626(
             IERC20(address(fxrp)),
-            "Deposit Vault",
-            "DV"
+            "Firelight Vault",
+            "FV"
         );
-        depositVault.setLagDuration(1 days);
+        firelightVault.setLagDuration(1 days);
+        upshiftVault = new MyERC4626(
+            IERC20(address(fxrp)),
+            "Upshift Vault",
+            "UV"
+        );
+        upshiftVault.setLagDuration(1 days);
         xrplProviderWallet = "rXrplProviderWallet";
         xrplProviderWalletHash = keccak256(bytes(xrplProviderWallet));
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
@@ -172,7 +179,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // add agent vault
         uint256[] memory agentVaultIds = new uint256[](1);
         address[] memory agentVaultAddresses = new address[](1);
-        agentVaultIds[0] = 0;
+        agentVaultIds[0] = 1;
         agentVaultAddresses[0] = agent;
         vm.prank(governance);
         masterAccountController.addAgentVaults(
@@ -183,10 +190,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256[] memory vaultIds = new uint256[](2);
         address[] memory vaultAddresses = new address[](2);
         uint8[] memory vaultTypes = new uint8[](2);
-        vaultIds[0] = 0;
-        vaultIds[1] = 3;
-        vaultAddresses[0] = address(depositVault);
-        vaultAddresses[1] = address(depositVault);
+        vaultIds[0] = 1;
+        vaultIds[1] = 4;
+        vaultAddresses[0] = address(firelightVault);
+        vaultAddresses[1] = address(upshiftVault);
         vaultTypes[0] = 1;
         vaultTypes[1] = 2;
         vm.prank(governance);
@@ -203,7 +210,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
         proof.data.requestBody.transactionId = bytes32("tx1");
         proof.data.responseBody.receivedAmount = 1000000;
-        proof.data.responseBody.standardPaymentReference = _encodeFirelightPaymentReference(1, 0, 12345, 0, 0);
+        proof.data.responseBody.standardPaymentReference = _encodeFirelightPaymentReference(1, 0, 12345, 1, 1);
         _mockVerifyPayment(true);
 
         address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
@@ -216,7 +223,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IPersonalAccount.Approved(
             address(fxrp),
-            address(depositVault),
+            address(firelightVault),
             12345
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
@@ -448,7 +455,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     // reserveCollateral tests
     function testReserveCollateralRevertInvalidInstruction() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(9, 0, 1000, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(9, 0, 1000, 1);
         bytes32 transactionId = bytes32("tx1");
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -465,7 +472,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testReserveCollateralRevertInvalidTransactionId() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 1);
         bytes32 transactionId = bytes32(0);
         vm.expectRevert(IInstructionsFacet.InvalidTransactionId.selector);
         masterAccountController.reserveCollateral(
@@ -476,12 +483,12 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testReserveCollateralRevertInvalidAgentVault() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 1); // agent vault 1 does not exist
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 2); // agent vault 2 does not exist
         bytes32 transactionId = bytes32("tx1");
         vm.expectRevert(
             abi.encodeWithSelector(
                 IAgentVaultsFacet.InvalidAgentVault.selector,
-                1
+                2
             )
         );
         masterAccountController.reserveCollateral(
@@ -492,7 +499,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testReserveCollateralRevertValueZero() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 0, 0); // value 0
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 0, 1); // value 0
         bytes32 transactionId = bytes32("tx1");
         vm.expectRevert(IInstructionsFacet.ValueZero.selector);
         masterAccountController.reserveCollateral(
@@ -504,7 +511,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testReserveCollateral() public {
         uint16 lots = 2;
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, lots, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, lots, 1);
         bytes32 transactionId = bytes32("tx1");
 
         _mockCollateralReservationFee(lots, 123);
@@ -549,7 +556,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteDepositAfterMintingRevertInvalidInstruction() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(9, 0, 1000, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(9, 0, 1000, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -565,7 +572,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteDepositAfterMintingRevertUnknownCollateralReservationId() public {
-        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 1000, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 1000, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -580,7 +587,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteDepositAfterMintingRevertMintingNotCompleted() public {
-        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 1, 1);
         address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
         _mockCollateralReservationInfo(CollateralReservationInfo.Status.ACTIVE, predictedAddress1, 0);
         bytes32 transactionId = bytes32("tx1");
@@ -595,7 +602,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteDepositAfterMintingRevertInvalidMinter() public {
-        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 1, 1);
         _mockCollateralReservationInfo(CollateralReservationInfo.Status.SUCCESSFUL, makeAddr("wrongMinter"), 0);
         bytes32 transactionId = bytes32("tx1");
         testReserveCollateral();
@@ -612,7 +619,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteDepositAfterMintingRevertInvalidAmount() public {
-        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, 2, 1, 1);
         address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
         _mockCollateralReservationInfo(CollateralReservationInfo.Status.SUCCESSFUL, predictedAddress1, 0);
         bytes32 transactionId = bytes32("tx1");
@@ -633,7 +640,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testExecuteDepositAfterMinting() public {
         uint16 lots = 2;
         uint256 lotSize = 100;
-        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, lots, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, lots, 1, 1);
         address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
         _mockCollateralReservationInfo(
             CollateralReservationInfo.Status.SUCCESSFUL,
@@ -657,7 +664,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.Deposited(
             predictedAddress1,
-            address(depositVault),
+            address(firelightVault),
             lots * lotSize,
             lots * lotSize // assuming 1:1 initial share:asset for simplicity
         );
@@ -673,7 +680,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertInvalidPaymentAmount() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -698,7 +705,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertInvalidSourceId() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = bytes32("invalidSourceId");
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -709,7 +716,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertInvalidTransactionStatus() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -721,7 +728,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertPaymentProofExpired() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -735,7 +742,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertMismatchingSourceAndXrplAddr() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -749,7 +756,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionInvalidReceivingAddressHash() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 2, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -764,7 +771,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertTransactionAlreadyExecuted() public {
-        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 2, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 2, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -784,7 +791,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertInvalidTransactionProof() public {
-        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 2, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 2, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -804,7 +811,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -819,7 +826,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.Deposited(
             personalAccountAddr,
-            address(depositVault),
+            address(firelightVault),
             123,
             123 // assuming 1:1 initial share:asset
         );
@@ -834,11 +841,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
         // check that fxrp were deposited into the deposit vault
         assertEq(
-            depositVault.balanceOf(personalAccountAddr),
+            firelightVault.balanceOf(personalAccountAddr),
             123
         );
         assertEq(
-            fxrp.balanceOf(address(depositVault)),
+            fxrp.balanceOf(address(firelightVault)),
             123
         );
         assertEq(
@@ -852,7 +859,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(1, 0, 123, 0, 3);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(1, 0, 123, 1, 4);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -867,7 +874,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.Deposited(
             personalAccountAddr,
-            address(depositVault),
+            address(upshiftVault),
             123,
             123 // assuming 1:1 initial share:asset
         );
@@ -882,11 +889,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
         // check that fxrp were deposited into the deposit vault
         assertEq(
-            depositVault.balanceOf(personalAccountAddr),
+            upshiftVault.balanceOf(personalAccountAddr),
             123
         );
         assertEq(
-            fxrp.balanceOf(address(depositVault)),
+            fxrp.balanceOf(address(upshiftVault)),
             123
         );
         assertEq(
@@ -972,7 +979,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRedeemFxrp() public {
-        bytes32 paymentReference = _encodeFxrpPaymentReference(2, 0, 3, 0);
+        bytes32 paymentReference = _encodeFxrpPaymentReference(2, 0, 3, 1);
         uint256 lotSize = 100;
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         IPayment.Proof memory proof;
@@ -1016,14 +1023,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         testExecuteInstructionDeposit();
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         assertEq(
-            depositVault.balanceOf(personalAccountAddr),
+            firelightVault.balanceOf(personalAccountAddr),
             123
         );
         assertEq(
             fxrp.balanceOf(personalAccountAddr),
             0
         );
-        bytes32 paymentReference = _encodeFirelightPaymentReference(2, 0, 100, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(2, 0, 100, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -1038,7 +1045,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.Redeemed(
             personalAccountAddr,
-            address(depositVault),
+            address(firelightVault),
             100,
             100 // assuming 1:1 share:asset for simplicity
         );
@@ -1053,11 +1060,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
         assertEq(
-            depositVault.balanceOf(personalAccountAddr),
+            firelightVault.balanceOf(personalAccountAddr),
             23 // 123 - 100 redeemed
         );
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, 1),
+            firelightVault.pendingWithdrawAssets(personalAccountAddr, 1),
             100
         );
     }
@@ -1067,7 +1074,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         testExecuteInstructionRedeem();
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            firelightVault.pendingWithdrawAssets(personalAccountAddr, period),
             100
         );
         assertEq(
@@ -1078,7 +1085,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // move to the claimable period (to period 3)
         vm.warp(block.timestamp + 2 days);
 
-        bytes32 paymentReference = _encodeFirelightPaymentReference(3, 0, period, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(3, 0, period, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -1093,7 +1100,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.WithdrawalClaimed(
             personalAccountAddr,
-            address(depositVault),
+            address(firelightVault),
             period,
             100
         );
@@ -1108,7 +1115,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            firelightVault.pendingWithdrawAssets(personalAccountAddr, period),
             0
         );
         assertEq(
@@ -1122,14 +1129,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         testExecuteInstructionDeposit2();
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         assertEq(
-            depositVault.balanceOf(personalAccountAddr),
+            upshiftVault.balanceOf(personalAccountAddr),
             123
         );
         assertEq(
             fxrp.balanceOf(personalAccountAddr),
             0
         );
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(2, 0, 100, 0, 3);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(2, 0, 100, 1, 4);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -1142,13 +1149,13 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockVerifyPayment(true);
 
         (uint256 year, uint256 month, uint256 day) =
-            DateUtils.timestampToDate(block.timestamp + depositVault.lagDuration());
+            DateUtils.timestampToDate(block.timestamp + upshiftVault.lagDuration());
         uint256 claimableEpoch = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0);
         uint256 period = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0) / 1 days;
         vm.expectEmit();
         emit IInstructionsFacet.RedeemRequested(
             personalAccountAddr,
-            address(depositVault),
+            address(upshiftVault),
             100,
             100,
             claimableEpoch
@@ -1164,11 +1171,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
         assertEq(
-            depositVault.balanceOf(personalAccountAddr),
+            upshiftVault.balanceOf(personalAccountAddr),
             23 // 123 - 100 redeemed
         );
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            upshiftVault.pendingWithdrawAssets(personalAccountAddr, period),
             100
         );
     }
@@ -1179,7 +1186,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.warp(block.timestamp + 1 days); // move to next epoch
         uint256 claimableEpoch = 1;
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
+            upshiftVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             100
         );
         assertEq(
@@ -1187,7 +1194,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             0
         );
 
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(3, 0, 19700102, 0, 3);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(3, 0, 19700102, 1, 4);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -1202,7 +1209,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.Claimed(
             personalAccountAddr,
-            address(depositVault),
+            address(upshiftVault),
             1970,
             1,
             2,
@@ -1220,7 +1227,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
+            upshiftVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             0
         );
         assertEq(
@@ -1230,7 +1237,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testExecuteInstructionRevertInvalidInstruction() public {
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(9, 0, 20250913, 0, 3);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(9, 0, 20250913, 1, 4);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -1381,7 +1388,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 10, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 10, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -1522,7 +1529,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         // make tx with new wallet as receiving address - should revert
-        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 0);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -1635,10 +1642,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddAgentVaults() public {
         uint256[] memory ids = new uint256[](2);
         address[] memory addresses = new address[](2);
-        ids[0] = 1;
-        addresses[0] = makeAddr("agentVault1");
-        ids[1] = 2;
-        addresses[1] = makeAddr("agentVault2");
+        ids[0] = 2;
+        addresses[0] = makeAddr("agentVault2");
+        ids[1] = 3;
+        addresses[1] = makeAddr("agentVault3");
 
         agentInfo.status = AgentInfo.Status.NORMAL;
         _mockGetAgentInfo(addresses[0], agentInfo);
@@ -1646,16 +1653,16 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.prank(governance);
         vm.expectEmit();
-        emit IAgentVaultsFacet.AgentVaultAdded(1, addresses[0]);
+        emit IAgentVaultsFacet.AgentVaultAdded(2, addresses[0]);
         vm.expectEmit();
-        emit IAgentVaultsFacet.AgentVaultAdded(2, addresses[1]);
+        emit IAgentVaultsFacet.AgentVaultAdded(3, addresses[1]);
         masterAccountController.addAgentVaults(ids, addresses);
 
         (uint256[] memory returnedIds, address[] memory addrs) = masterAccountController.getAgentVaults();
         assertEq(returnedIds.length, 3);
-        assertEq(returnedIds[0], 0);
-        assertEq(returnedIds[1], 1);
-        assertEq(returnedIds[2], 2);
+        assertEq(returnedIds[0], 1);
+        assertEq(returnedIds[1], 2);
+        assertEq(returnedIds[2], 3);
         assertEq(addrs[0], agent);
         assertEq(addrs[1], addresses[0]);
         assertEq(addrs[2], addresses[1]);
@@ -1664,8 +1671,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddAgentVaultsRevertOnlyOwner() public {
         uint256[] memory ids = new uint256[](1);
         address[] memory addresses = new address[](1);
-        ids[0] = 1;
-        addresses[0] = makeAddr("agentVault1");
+        ids[0] = 2;
+        addresses[0] = makeAddr("agentVault2");
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1680,20 +1687,36 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddAgentVaultsRevertLengthsMismatch() public {
         uint256[] memory ids = new uint256[](2);
         address[] memory addresses = new address[](1);
-        ids[0] = 1;
-        ids[1] = 2;
-        addresses[0] = makeAddr("agentVault1");
+        ids[0] = 2;
+        ids[1] = 3;
+        addresses[0] = makeAddr("agentVault2");
 
         vm.prank(governance);
         vm.expectRevert(IAgentVaultsFacet.AgentsVaultsLengthsMismatch.selector);
         masterAccountController.addAgentVaults(ids, addresses);
     }
 
-    function testAddAgentVaultsRevertAgentVaultIdAlreadyUsed() public {
+    function testAddAgentVaultsRevertAgentVaultIdZero() public {
         uint256[] memory ids = new uint256[](1);
         address[] memory addresses = new address[](1);
-        ids[0] = 1;
-        addresses[0] = makeAddr("agentVault1");
+        ids[0] = 0; // invalid
+        addresses[0] = makeAddr("agentVault2");
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAgentVaultsFacet.AgentVaultIdZero.selector,
+                0
+            )
+        );
+        masterAccountController.addAgentVaults(ids, addresses);
+    }
+
+    function testAddAgentVaultsRevertAgentVaultIdAlreadyAdded() public {
+        uint256[] memory ids = new uint256[](1);
+        address[] memory addresses = new address[](1);
+        ids[0] = 2;
+        addresses[0] = makeAddr("agentVault2");
 
         agentInfo.status = AgentInfo.Status.NORMAL;
         _mockGetAgentInfo(addresses[0], agentInfo);
@@ -1704,20 +1727,20 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAgentVaultsFacet.AgentVaultIdAlreadyUsed.selector,
-                1
+                IAgentVaultsFacet.AgentVaultIdAlreadyAdded.selector,
+                2
             )
         );
         masterAccountController.addAgentVaults(ids, addresses);
     }
 
-    function testAddAgentVaultsRevertInvalidAgentVault() public {
+    function testAddAgentVaultsRevertAgentVaultAddressZero() public {
         uint256[] memory ids = new uint256[](2);
         address[] memory addresses = new address[](2);
-        ids[1] = 1;
-        addresses[1] = address(0); // invalid
         ids[0] = 2;
+        ids[1] = 3;
         addresses[0] = makeAddr("agentVault2");
+        addresses[1] = address(0); // invalid
 
         agentInfo.status = AgentInfo.Status.NORMAL;
         _mockGetAgentInfo(addresses[0], agentInfo);
@@ -1725,8 +1748,27 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAgentVaultsFacet.InvalidAgentVault.selector,
+                IAgentVaultsFacet.AgentVaultAddressZero.selector,
                 1
+            )
+        );
+        masterAccountController.addAgentVaults(ids, addresses);
+    }
+
+    function testAddAgentVaultsRevertAgentVaultAddressAlreadyAdded() public {
+        uint256[] memory ids = new uint256[](1);
+        address[] memory addresses = new address[](1);
+        ids[0] = 2;
+        addresses[0] = agent; // already added
+
+        agentInfo.status = AgentInfo.Status.NORMAL;
+        _mockGetAgentInfo(addresses[0], agentInfo);
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAgentVaultsFacet.AgentVaultAddressAlreadyAdded.selector,
+                agent
             )
         );
         masterAccountController.addAgentVaults(ids, addresses);
@@ -1735,10 +1777,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddAgentVaultsRevertAgentNotAvailable() public {
         uint256[] memory ids = new uint256[](2);
         address[] memory addresses = new address[](2);
-        ids[1] = 1;
-        addresses[1] = makeAddr("agentVault1");
         ids[0] = 2;
+        ids[1] = 3;
         addresses[0] = makeAddr("agentVault2");
+        addresses[1] = makeAddr("agentVault3");
 
         agentInfo.status = AgentInfo.Status.LIQUIDATION;
         _mockGetAgentInfo(addresses[1], agentInfo);
@@ -1762,23 +1804,23 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         // remove first added agent vault
         uint256[] memory idsToRemove = new uint256[](1);
-        idsToRemove[0] = 0;
+        idsToRemove[0] = 1;
         vm.prank(governance);
         vm.expectEmit();
-        emit IAgentVaultsFacet.AgentVaultRemoved(0, agent);
+        emit IAgentVaultsFacet.AgentVaultRemoved(1, agent);
         masterAccountController.removeAgentVaults(idsToRemove);
 
         (returnedIds, addrs) = masterAccountController.getAgentVaults();
         assertEq(returnedIds.length, 2);
-        assertEq(returnedIds[0], 2);
-        assertEq(returnedIds[1], 1);
-        assertEq(addrs[0], makeAddr("agentVault2"));
-        assertEq(addrs[1], makeAddr("agentVault1"));
+        assertEq(returnedIds[0], 3);
+        assertEq(returnedIds[1], 2);
+        assertEq(addrs[0], makeAddr("agentVault3"));
+        assertEq(addrs[1], makeAddr("agentVault2"));
     }
 
     function testRemoveAgentVaultsRevertOnlyOwner() public {
         uint256[] memory idsToRemove = new uint256[](1);
-        idsToRemove[0] = 0;
+        idsToRemove[0] = 1;
         vm.expectRevert(
             abi.encodeWithSelector(
                 NotContractOwner.selector,
@@ -1791,12 +1833,12 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testRemoveAgentVaultsRevertInvalidAgentVault() public {
         uint256[] memory idsToRemove = new uint256[](1);
-        idsToRemove[0] = 1;
+        idsToRemove[0] = 2;
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
                 IAgentVaultsFacet.InvalidAgentVault.selector,
-                1
+                2
             )
         );
         masterAccountController.removeAgentVaults(idsToRemove);
@@ -1806,10 +1848,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256[] memory vaultIds = new uint256[](2);
         address[] memory vaultAddresses = new address[](2);
         uint8[] memory vaultTypes = new uint8[](2);
-        vaultIds[0] = 1;
-        vaultIds[1] = 2;
-        vaultAddresses[0] = makeAddr("vault1");
-        vaultAddresses[1] = makeAddr("vault2");
+        vaultIds[0] = 2;
+        vaultIds[1] = 3;
+        vaultAddresses[0] = makeAddr("vault2");
+        vaultAddresses[1] = makeAddr("vault3");
         vaultTypes[0] = 1;
         vaultTypes[1] = 2;
 
@@ -1823,12 +1865,12 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         (uint256[] memory returnedIds, address[] memory addrs, uint8[] memory types) =
             masterAccountController.getVaults();
         assertEq(returnedIds.length, 4);
-        assertEq(returnedIds[0], 0);
-        assertEq(returnedIds[1], 3);
-        assertEq(returnedIds[2], 1);
-        assertEq(returnedIds[3], 2);
-        assertEq(addrs[0], address(depositVault));
-        assertEq(addrs[1], address(depositVault));
+        assertEq(returnedIds[0], 1);
+        assertEq(returnedIds[1], 4);
+        assertEq(returnedIds[2], 2);
+        assertEq(returnedIds[3], 3);
+        assertEq(addrs[0], address(firelightVault));
+        assertEq(addrs[1], address(upshiftVault));
         assertEq(addrs[2], vaultAddresses[0]);
         assertEq(addrs[3], vaultAddresses[1]);
         assertEq(types[0], 1);
@@ -1841,8 +1883,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
         uint8[] memory vaultTypes = new uint8[](1);
-        vaultIds[0] = 1;
-        vaultAddresses[0] = makeAddr("vault1");
+        vaultIds[0] = 2;
+        vaultAddresses[0] = makeAddr("vault2");
         vaultTypes[0] = 1;
 
         vm.expectRevert(
@@ -1855,30 +1897,12 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
-    function testAddVaultsRevertInvalidVaultId() public {
-        uint256[] memory vaultIds = new uint256[](1);
-        address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](1);
-        vaultIds[0] = 1;
-        vaultAddresses[0] = address(0); // invalid
-        vaultTypes[0] = 1;
-
-        vm.prank(governance);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IVaultsFacet.InvalidVaultId.selector,
-                1
-            )
-        );
-        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
-    }
-
     function testAddVaultsRevertInvalidVaultType() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
         uint8[] memory vaultTypes = new uint8[](1);
-        vaultIds[0] = 1;
-        vaultAddresses[0] = makeAddr("vault1");
+        vaultIds[0] = 2;
+        vaultAddresses[0] = makeAddr("vault2");
         vaultTypes[0] = 0; // invalid
 
         vm.prank(governance);
@@ -1895,9 +1919,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](2);
         uint8[] memory vaultTypes = new uint8[](1);
-        vaultIds[0] = 1;
-        vaultAddresses[0] = makeAddr("vault1");
-        vaultAddresses[1] = makeAddr("vault2");
+        vaultIds[0] = 2;
+        vaultAddresses[0] = makeAddr("vault2");
+        vaultAddresses[1] = makeAddr("vault3");
         vaultTypes[0] = 1;
 
         vm.prank(governance);
@@ -1909,8 +1933,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
         uint8[] memory vaultTypes = new uint8[](2);
-        vaultIds[0] = 1;
-        vaultAddresses[0] = makeAddr("vault1");
+        vaultIds[0] = 2;
+        vaultAddresses[0] = makeAddr("vault2");
         vaultTypes[0] = 1;
         vaultTypes[1] = 2;
 
@@ -1919,19 +1943,73 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
     }
 
-    function testAddVaultsRevertVaultIdAlreadyUsed() public {
+    function testAddVaultsRevertVaultIdZero() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
         uint8[] memory vaultTypes = new uint8[](1);
-        vaultIds[0] = 0; // already used
-        vaultAddresses[0] = makeAddr("vault1");
+        vaultIds[0] = 0; // invalid
+        vaultAddresses[0] = makeAddr("vault2");
         vaultTypes[0] = 1;
 
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IVaultsFacet.VaultIdAlreadyUsed.selector,
+                IVaultsFacet.VaultIdZero.selector,
                 0
+            )
+        );
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
+    }
+
+    function testAddVaultsRevertVaultIdAlreadyAdded() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](1);
+        vaultIds[0] = 1; // already added
+        vaultAddresses[0] = makeAddr("vault2");
+        vaultTypes[0] = 1;
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultsFacet.VaultIdAlreadyAdded.selector,
+                1
+            )
+        );
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
+    }
+
+    function testAddVaultsRevertVaultAddressZero() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](1);
+        vaultIds[0] = 2;
+        vaultAddresses[0] = address(0); // invalid
+        vaultTypes[0] = 1;
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultsFacet.VaultAddressZero.selector,
+                0
+            )
+        );
+        masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
+    }
+
+    function testAddVaultsRevertVaultAddressAlreadyAdded() public {
+        uint256[] memory vaultIds = new uint256[](1);
+        address[] memory vaultAddresses = new address[](1);
+        uint8[] memory vaultTypes = new uint8[](1);
+        vaultIds[0] = 2;
+        vaultAddresses[0] = address(upshiftVault); // already added
+        vaultTypes[0] = 1;
+
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultsFacet.VaultAddressAlreadyAdded.selector,
+                vaultAddresses[0]
             )
         );
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
@@ -2080,7 +2158,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 1);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 1, 1);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -2105,7 +2183,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 1);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 1, 2);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
@@ -2120,7 +2198,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultsFacet.InvalidVaultId.selector,
-                1
+                2
             )
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
@@ -2131,7 +2209,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         testExecuteInstructionRedeem();
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            firelightVault.pendingWithdrawAssets(personalAccountAddr, period),
             100
         );
         assertEq(
@@ -2145,21 +2223,21 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.WithdrawalClaimed(
             personalAccountAddr,
-            address(depositVault),
+            address(firelightVault),
             period,
             100
         );
         vm.expectEmit();
         emit IInstructionsFacet.WithdrawalExecuted(
             personalAccountAddr,
-            address(depositVault),
+            address(firelightVault),
             xrplAddress1,
             period
         );
-        masterAccountController.executeWithdrawal(xrplAddress1, 0, period);
+        masterAccountController.executeWithdrawal(xrplAddress1, 1, period);
 
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, period),
+            firelightVault.pendingWithdrawAssets(personalAccountAddr, period),
             0
         );
         assertEq(
@@ -2175,7 +2253,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256 claimableEpoch = 1;
         uint256 date = 19700102;
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
+            upshiftVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             100
         );
         assertEq(
@@ -2186,7 +2264,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.Claimed(
             personalAccountAddr,
-            address(depositVault),
+            address(upshiftVault),
             1970,
             1,
             2,
@@ -2196,14 +2274,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.WithdrawalExecuted(
             personalAccountAddr,
-            address(depositVault),
+            address(upshiftVault),
             xrplAddress1,
             date
         );
-        masterAccountController.executeWithdrawal(xrplAddress1, 3, date);
+        masterAccountController.executeWithdrawal(xrplAddress1, 4, date);
 
         assertEq(
-            depositVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
+            upshiftVault.pendingWithdrawAssets(personalAccountAddr, claimableEpoch),
             0
         );
         assertEq(
@@ -2224,7 +2302,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testExecuteInstructionRevertInvalidInstructionType() public {
         // use upshift vault for firelight instruction type
-        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 0, 3);
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 123, 1, 4);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;

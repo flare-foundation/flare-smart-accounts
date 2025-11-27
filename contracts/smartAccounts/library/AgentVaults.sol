@@ -8,7 +8,10 @@ library AgentVaults {
 
     struct State {
         /// @notice Mapping from agent vault ID to agent vault address
-        mapping(uint256 agentVaultId => address agentVaultAddress) agentVaults;
+        mapping(uint256 agentVaultId => address agentVaultAddress) agentVaultIdToAgentVaultAddress;
+        /// @notice Mapping from agent vault address to agent vault ID
+        mapping(address agentVaultAddress => uint256 agentVaultId) agentVaultAddressToAgentVaultId;
+        /// @notice Array of agent vault IDs
         uint256[] agentVaultIds;
     }
 
@@ -17,7 +20,7 @@ library AgentVaults {
     function getAgentVaultAddress(bytes32 _paymentReference) internal view returns (address _agentVault) {
         uint256 agentVaultId = PaymentReferenceParser.getAgentVaultId(_paymentReference);
         State storage state = getState();
-        _agentVault = state.agentVaults[agentVaultId];
+        _agentVault = state.agentVaultIdToAgentVaultAddress[agentVaultId];
         require(_agentVault != address(0), IAgentVaultsFacet.InvalidAgentVault(agentVaultId));
     }
 
