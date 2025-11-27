@@ -52,22 +52,25 @@ library UniswapV3 {
         _amountIn = tokenIn.balanceOf(address(this));
         require(_amountIn > 0, AmountInZero());
 
-        // Fetch price feeds
-        bytes21[] memory feedIds = new bytes21[](2);
-        feedIds[0] = _tokenInFeedId;
-        feedIds[1] = _tokenOutFeedId;
-        (uint256[] memory valuesInWei, ) = ContractRegistry.getFtsoV2().getFeedsByIdInWei(feedIds);
+        uint256 minAmountOut;
+        {
+            // Fetch price feeds
+            bytes21[] memory feedIds = new bytes21[](2);
+            feedIds[0] = _tokenInFeedId;
+            feedIds[1] = _tokenOutFeedId;
+            (uint256[] memory valuesInWei, ) = ContractRegistry.getFtsoV2().getFeedsByIdInWei(feedIds);
 
-        uint256 tokenInDecimals = tokenIn.decimals();
-        uint256 tokenOutDecimals = IERC20Metadata(_tokenOut).decimals();
+            uint256 tokenInDecimals = tokenIn.decimals();
+            uint256 tokenOutDecimals = IERC20Metadata(_tokenOut).decimals();
 
-        // Calculate minimum amount out based on max slippage
-        uint256 expectedAmountOut = Math.mulDiv(
-            _amountIn,
-            valuesInWei[0] * (10 ** tokenOutDecimals),
-            valuesInWei[1] * (10 ** tokenInDecimals)
-        );
-        uint256 minAmountOut = Math.mulDiv(expectedAmountOut, 1e6 - _maxSlippagePPM, 1e6);
+            // Calculate minimum amount out based on max slippage
+            uint256 expectedAmountOut = Math.mulDiv(
+                _amountIn,
+                valuesInWei[0] * (10 ** tokenOutDecimals),
+                valuesInWei[1] * (10 ** tokenInDecimals)
+            );
+            minAmountOut = Math.mulDiv(expectedAmountOut, 1e6 - _maxSlippagePPM, 1e6);
+        }
 
         // Approve router to spend tokens using SafeERC20
         tokenIn.safeIncreaseAllowance(_uniswapV3Router, _amountIn);
