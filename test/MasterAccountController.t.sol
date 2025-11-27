@@ -203,6 +203,133 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         xrplAddress2 = "xrplAddress2";
     }
 
+    function testInitialization() public {
+        assertEq(
+            masterAccountController.owner(),
+            governance
+        );
+
+        (address payable returnedExecutor, uint256 returnedExecutorFee) =
+            masterAccountController.getExecutorInfo();
+        assertEq(
+            returnedExecutor,
+            executor
+        );
+        assertEq(
+            returnedExecutorFee,
+            executorFee
+        );
+        assertEq(
+            masterAccountController.getSourceId(),
+            sourceId
+        );
+        assertEq(
+            masterAccountController.getPaymentProofValidityDurationSeconds(),
+            paymentProofValidityDurationSeconds
+        );
+        assertEq(
+            masterAccountController.getDefaultInstructionFee(),
+            defaultInstructionFee
+        );
+        assertEq(
+            masterAccountController.implementation(),
+            personalAccountImplementation
+        );
+    }
+
+    function testInitializationRevertInvalidExecutor() public {
+        MasterAccountControllerInit masterAccountControllerInit = new MasterAccountControllerInit();
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IExecutorsFacet.InvalidExecutor.selector
+            )
+        );
+        masterAccountController.diamondCut(
+            new IDiamond.FacetCut[](0),
+            address(masterAccountControllerInit),
+            abi.encodeWithSelector(
+                MasterAccountControllerInit.init.selector,
+                payable(address(0)),
+                executorFee,
+                sourceId,
+                paymentProofValidityDurationSeconds,
+                defaultInstructionFee,
+                personalAccountImplementation
+            )
+        );
+    }
+
+    function testInitializationRevertInvalidExecutorFee() public {
+        MasterAccountControllerInit masterAccountControllerInit = new MasterAccountControllerInit();
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IExecutorsFacet.InvalidExecutorFee.selector
+            )
+        );
+        masterAccountController.diamondCut(
+            new IDiamond.FacetCut[](0),
+            address(masterAccountControllerInit),
+            abi.encodeWithSelector(
+                MasterAccountControllerInit.init.selector,
+                payable(executor),
+                0,
+                sourceId,
+                paymentProofValidityDurationSeconds,
+                defaultInstructionFee,
+                personalAccountImplementation
+            )
+        );
+    }
+
+    function testInitializationRevertInvalidPaymentProofValidityDuration() public {
+        MasterAccountControllerInit masterAccountControllerInit = new MasterAccountControllerInit();
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPaymentProofsFacet.InvalidPaymentProofValidityDuration.selector
+            )
+        );
+        masterAccountController.diamondCut(
+            new IDiamond.FacetCut[](0),
+            address(masterAccountControllerInit),
+            abi.encodeWithSelector(
+                MasterAccountControllerInit.init.selector,
+                payable(executor),
+                executorFee,
+                sourceId,
+                0,
+                defaultInstructionFee,
+                personalAccountImplementation
+            )
+        );
+    }
+
+    function testInitializationRevertInvalidPersonalAccountImplementation(address _implementation) public {
+        vm.assume(_implementation.code.length == 0);
+        MasterAccountControllerInit masterAccountControllerInit = new MasterAccountControllerInit();
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPersonalAccountsFacet.InvalidPersonalAccountImplementation.selector
+            )
+        );
+        masterAccountController.diamondCut(
+            new IDiamond.FacetCut[](0),
+            address(masterAccountControllerInit),
+            abi.encodeWithSelector(
+                MasterAccountControllerInit.init.selector,
+                payable(executor),
+                executorFee,
+                sourceId,
+                paymentProofValidityDurationSeconds,
+                defaultInstructionFee,
+                _implementation
+            )
+        );
+    }
+
     function testPersonalAccountUpgrades() public {
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
@@ -677,6 +804,73 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             _getInstructionId(1, 0)
         );
         masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
+
+         // check that fxrp were deposited into the vault
+        assertEq(
+            firelightVault.balanceOf(predictedAddress1),
+            lots * lotSize
+        );
+        assertEq(
+            fxrp.balanceOf(address(firelightVault)),
+            lots * lotSize
+        );
+        assertEq(
+            fxrp.balanceOf(predictedAddress1),
+            0
+        );
+        assertEq(
+            masterAccountController.isTransactionIdUsed(proof.data.requestBody.transactionId),
+            true
+        );
+    }
+
+    function testExecuteDepositAfterMintingRevertTransactionAlreadyExecuted() public {
+        testExecuteDepositAfterMinting();
+
+        // make a new collateral reservation
+        uint16 lots = 2;
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, lots, 1, 1);
+        bytes32 transactionId = bytes32("tx1");
+
+        _mockCollateralReservationFee(lots, 123);
+        _mockReserveCollateral(23);
+
+        address personalAccountAddress = masterAccountController.getPersonalAccount(xrplAddress1);
+
+        vm.expectEmit();
+        emit IInstructionsFacet.CollateralReserved(
+            personalAccountAddress,
+            transactionId,
+            paymentReference,
+            xrplAddress1,
+            23,
+            agent,
+            lots,
+            executor,
+            executorFee
+        );
+        uint256 collateralReservationId = masterAccountController.reserveCollateral{value: 123 + executorFee}(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+        assertEq(collateralReservationId, 23);
+
+        assertEq(
+            masterAccountController.getTransactionIdForCollateralReservation(collateralReservationId),
+            transactionId
+        );
+
+        // attempt to execute deposit after minting again with the same transaction id
+        IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = transactionId;
+
+        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        masterAccountController.executeDepositAfterMinting(23, proof, xrplAddress1);
     }
 
     function testExecuteInstructionRevertInvalidPaymentAmount() public {
@@ -839,7 +1033,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             _getInstructionId(1, 1)
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
-        // check that fxrp were deposited into the deposit vault
+        // check that fxrp were deposited into the vault
         assertEq(
             firelightVault.balanceOf(personalAccountAddr),
             123
@@ -887,7 +1081,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             _getInstructionId(2, 1)
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
-        // check that fxrp were deposited into the deposit vault
+        // check that fxrp were deposited into the vault
         assertEq(
             upshiftVault.balanceOf(personalAccountAddr),
             123
@@ -1264,6 +1458,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(returnedExecutor, executor);
         vm.assume(_executor != address(0));
         vm.prank(governance);
+        vm.expectEmit();
+        emit IExecutorsFacet.ExecutorSet(_executor);
         masterAccountController.setExecutor(payable(_executor));
         (address newExecutor,) = masterAccountController.getExecutorInfo();
         assertEq(newExecutor, _executor);
@@ -1637,6 +1833,34 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             masterAccountController.getXrplProviderWallets().length,
             2
         );
+    }
+
+    function testRemoveXrplProviderWalletsRevertOnlyOwner() public {
+        // remove existing wallet
+        string[] memory walletsToRemove = new string[](1);
+        walletsToRemove[0] = xrplProviderWallet;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NotContractOwner.selector,
+                address(this),
+                governance
+            )
+        );
+        masterAccountController.removeXrplProviderWallets(walletsToRemove);
+    }
+
+    function testRemoveXrplProviderWalletsRevertInvalidXrplProviderWallet() public {
+        // remove existing wallet
+        string[] memory walletsToRemove = new string[](1);
+        walletsToRemove[0] = "nonExistingWallet";
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IXrplProviderWalletsFacet.InvalidXrplProviderWallet.selector,
+                walletsToRemove[0]
+            )
+        );
+        masterAccountController.removeXrplProviderWallets(walletsToRemove);
     }
 
     function testAddAgentVaults() public {

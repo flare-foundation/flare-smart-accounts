@@ -20,10 +20,7 @@ contract PersonalAccountsFacet is IIPersonalAccountsFacet {
         external
     {
         LibDiamond.enforceIsContractOwner();
-        require(_newImplementation.code.length > 0, InvalidPersonalAccountImplementation());
-        PersonalAccounts.State storage state = PersonalAccounts.getState();
-        state.personalAccountImplementation = _newImplementation;
-        emit PersonalAccountImplementationSet(_newImplementation);
+        PersonalAccounts.setPersonalAccountImplementation(_newImplementation);
     }
 
     /// @inheritdoc IPersonalAccountsFacet

@@ -26,7 +26,7 @@ library PersonalAccounts {
     )
         external
     {
-        require(_implementation != address(0), IPersonalAccountsFacet.InvalidPersonalAccountImplementation());
+        require(_implementation.code.length > 0, IPersonalAccountsFacet.InvalidPersonalAccountImplementation());
         State storage state = getState();
         state.personalAccountImplementation = _implementation;
         emit IPersonalAccountsFacet.PersonalAccountImplementationSet(_implementation);
