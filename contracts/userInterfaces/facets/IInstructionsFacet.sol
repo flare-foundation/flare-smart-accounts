@@ -170,20 +170,6 @@ interface IInstructionsFacet {
     );
 
     /**
-     * @notice Emitted when a withdrawal is executed.
-     * @param personalAccount The personal account address.
-     * @param vault The vault address.
-     * @param xrplOwner The XRPL owner address.
-     * @param epoch The epoch representing the withdrawal period or date.
-     */
-    event WithdrawalExecuted(
-        address indexed personalAccount,
-        address indexed vault,
-        string xrplOwner,
-        uint256 epoch
-    );
-
-    /**
      * @notice Reverts if the payment amount is invalid.
      * @param requiredAmount The required payment amount.
      */
@@ -288,19 +274,6 @@ interface IInstructionsFacet {
         string calldata _xrplAddress
     )
         external payable;
-
-    /**
-     * @notice Execute withdrawal from a vault for a given XRPL address.
-     * @param _xrplAddress The XRPL address requesting the withdrawal.
-     * @param _vaultId The ID of the vault from which to withdraw.
-     * @param _epoch The epoch representing the withdrawal period or date.
-     */
-    function executeWithdrawal(
-        string calldata _xrplAddress,
-        uint256 _vaultId,
-        uint256 _epoch
-    )
-        external;
 
     /**
      * @notice Returns true if the transaction id has already been used.

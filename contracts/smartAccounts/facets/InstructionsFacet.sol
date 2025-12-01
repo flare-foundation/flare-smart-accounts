@@ -174,35 +174,6 @@ contract InstructionsFacet is IIInstructionsFacet {
     }
 
     /// @inheritdoc IInstructionsFacet
-    function executeWithdrawal(
-        string calldata _xrplAddress,
-        uint256 _vaultId,
-        uint256 _epoch
-    )
-        external
-    {
-        IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
-        Vaults.VaultInfo memory vaultInfo = Vaults.getState().vaultIdToVaultInfo[_vaultId];
-        require(vaultInfo.vaultAddress != address(0), IVaultsFacet.InvalidVaultId(_vaultId));
-        if (vaultInfo.vaultType == 1) {
-            // Firelight vault
-            Vault.claimWithdrawal(personalAccount, vaultInfo.vaultAddress, _epoch);
-        } else if (vaultInfo.vaultType == 2) {
-            // Upshift vault
-            Vault.claim(personalAccount, vaultInfo.vaultAddress, _epoch);
-        } else {
-            revert IVaultsFacet.InvalidVaultType(vaultInfo.vaultType);
-        }
-
-        emit WithdrawalExecuted(
-            address(personalAccount),
-            vaultInfo.vaultAddress,
-            _xrplAddress,
-            _epoch
-        );
-    }
-
-    /// @inheritdoc IInstructionsFacet
     function isTransactionIdUsed(
         bytes32 _transactionId
     )
