@@ -13,8 +13,8 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
-import {DiamondCutFacet} from "../../contracts/diamond/facets/DiamondCutFacet.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
+import {DiamondCutFacet} from "../../contracts/smartAccounts/facets/DiamondCutFacet.sol";
 import {OwnershipFacet} from "../../contracts/diamond/facets/OwnershipFacet.sol";
 import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaultsFacet.sol";
 import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
@@ -23,6 +23,7 @@ import {InstructionsFacet} from "../../contracts/smartAccounts/facets/Instructio
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {SwapFacet} from "../../contracts/smartAccounts/facets/SwapFacet.sol";
+import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
@@ -108,7 +109,7 @@ contract DeploySmartAccounts is Script {
         params.wNatUsdt0PoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".wNatUsdt0PoolFeeTierPPM"));
         params.usdt0FXrpPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".usdt0FXrpPoolFeeTierPPM"));
         params.maxSlippagePPM = uint24(vm.parseJsonUint(config, ".maxSlippagePPM"));
-        timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
+        params.timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
 
         // if initial owner not set in config, use deployer address - for testing purposes
         if (params.initialOwner == address(0)) {
@@ -301,7 +302,7 @@ contract DeploySmartAccounts is Script {
         masterAccountController.addVaults(vaultIds, params.vaults, vaultTypes);
 
         console2.log("Setting timelock duration");
-        masterAccountController.setTimelockDuration(timelockDurationSeconds);
+        masterAccountController.setTimelockDuration(params.timelockDurationSeconds);
 
         if (params.governance == address(0)) {
             console2.log("Governance address is zero, skipping ownership transfer");
