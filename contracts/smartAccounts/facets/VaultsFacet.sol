@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {IIVaultsFacet} from "../interface/IIVaultsFacet.sol";
 // import is needed for @inheritdoc
 // solhint-disable-next-line no-unused-import
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {Vaults} from "../library/Vaults.sol";
-
+import {FacetBase} from "./FacetBase.sol";
 /**
  * @title VaultsFacet
  * @notice Facet for handling vault-related functions.
  */
-contract VaultsFacet is IIVaultsFacet {
+contract VaultsFacet is IIVaultsFacet, FacetBase {
 
     /// @inheritdoc IIVaultsFacet
     function addVaults(
@@ -21,8 +20,8 @@ contract VaultsFacet is IIVaultsFacet {
         uint8[] calldata _vaultTypes
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         require(_vaultIds.length == _vaultAddresses.length, VaultsLengthsMismatch());
         require(_vaultIds.length == _vaultTypes.length, VaultsLengthsMismatch());
         Vaults.State storage state = Vaults.getState();

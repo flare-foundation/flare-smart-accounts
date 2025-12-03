@@ -1,20 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IISwapFacet} from "../interface/IISwapFacet.sol";
 import {ISwapFacet} from "../../userInterfaces/facets/ISwapFacet.sol";
 import {Swap} from "../library/Swap.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {FacetBase} from "./FacetBase.sol";
 
 /**
  * @title SwapFacet
  * @notice Facet for handling token swaps using Uniswap V3.
  */
-contract SwapFacet is IISwapFacet, ReentrancyGuard {
+contract SwapFacet is IISwapFacet, FacetBase {
 
     /// @notice FLR/USD feed IDs for price oracles
     bytes21 private constant FLR_USD_FEED_ID = 0x01464c522f55534400000000000000000000000000;
@@ -88,12 +87,12 @@ contract SwapFacet is IISwapFacet, ReentrancyGuard {
         uint24 _maxSlippagePPM
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         require(_uniswapV3Router != address(0), InvalidUniswapV3Router());
         require(_usdt0 != address(0), InvalidUsdt0());
         require(
-            isPoolFeeTierPPMValid(_wNatUsdt0PoolFeeTierPPM) && isPoolFeeTierPPMValid(_usdt0FXrpPoolFeeTierPPM),
+            _isPoolFeeTierPPMValid(_wNatUsdt0PoolFeeTierPPM) && _isPoolFeeTierPPMValid(_usdt0FXrpPoolFeeTierPPM),
             InvalidPoolFeeTierPPM()
         );
         require(_maxSlippagePPM <= 1e6, InvalidMaxSlippagePPM());
@@ -131,7 +130,7 @@ contract SwapFacet is IISwapFacet, ReentrancyGuard {
         _maxSlippagePPM = state.maxSlippagePPM;
     }
 
-    function isPoolFeeTierPPMValid(uint24 _poolFeeTierPPM) internal pure returns (bool) {
+    function _isPoolFeeTierPPMValid(uint24 _poolFeeTierPPM) internal pure returns (bool) {
         return _poolFeeTierPPM == 100 || _poolFeeTierPPM == 500 || _poolFeeTierPPM == 3000 || _poolFeeTierPPM == 10000;
     }
 }

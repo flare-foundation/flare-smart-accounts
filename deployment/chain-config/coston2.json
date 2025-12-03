@@ -13,5 +13,6 @@
   "usdt0": "0x21709E63fC7F264F329e0826Ea82197694B82775",
   "wNatUsdt0PoolFeeTierPPM": 3000,
   "usdt0FXrpPoolFeeTierPPM": 500,
-  "maxSlippagePPM": 20000
+  "maxSlippagePPM": 20000,
+  "timelockDurationSeconds": 3600
 }

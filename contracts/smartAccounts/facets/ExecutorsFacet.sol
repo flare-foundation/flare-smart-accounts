@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {IIExecutorsFacet} from "../interface/IIExecutorsFacet.sol";
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 import {Executors} from "../library/Executors.sol";
+import {FacetBase} from "./FacetBase.sol";
 
 /**
  * @title ExecutorsFacet
  * @notice Facet for handling executor-related functions.
  */
-contract ExecutorsFacet is IIExecutorsFacet {
+contract ExecutorsFacet is IIExecutorsFacet, FacetBase {
 
     /// @inheritdoc IIExecutorsFacet
     function setExecutor(
         address payable _executor
     )
         external
+        onlyOwner
     {
-        LibDiamond.enforceIsContractOwner();
         Executors.setExecutor(_executor);
     }
 
@@ -27,8 +27,8 @@ contract ExecutorsFacet is IIExecutorsFacet {
         uint256 _executorFee
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         Executors.setExecutorFee(_executorFee);
     }
 

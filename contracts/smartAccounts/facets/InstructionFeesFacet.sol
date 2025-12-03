@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {IIInstructionFeesFacet} from "../interface/IIInstructionFeesFacet.sol";
 import {IInstructionFeesFacet} from "../../userInterfaces/facets/IInstructionFeesFacet.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
+import {FacetBase} from "./FacetBase.sol";
 
 /**
  * @title InstructionFeesFacet
  * @notice Facet for handling instruction fees-related functions.
  */
-contract InstructionFeesFacet is IIInstructionFeesFacet {
+contract InstructionFeesFacet is IIInstructionFeesFacet, FacetBase {
 
     /// @inheritdoc IIInstructionFeesFacet
     function setDefaultInstructionFee(
         uint256 _defaultInstructionFee
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         InstructionFees.setDefaultInstructionFee(_defaultInstructionFee);
     }
 
@@ -28,8 +28,8 @@ contract InstructionFeesFacet is IIInstructionFeesFacet {
         uint256[] calldata _fees
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         InstructionFees.State storage state = InstructionFees.getState();
         require(_instructionIds.length == _fees.length, InstructionFeesLengthsMismatch());
         for (uint256 i = 0; i < _instructionIds.length; i++) {
@@ -45,8 +45,8 @@ contract InstructionFeesFacet is IIInstructionFeesFacet {
         uint256[] calldata _instructionIds
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         InstructionFees.State storage state = InstructionFees.getState();
         for (uint256 i = 0; i < _instructionIds.length; i++) {
             uint256 instructionId = _instructionIds[i];

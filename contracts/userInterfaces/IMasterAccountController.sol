@@ -13,6 +13,7 @@ import {IInstructionsFacet} from "./facets/IInstructionsFacet.sol";
 import {IPaymentProofsFacet} from "./facets/IPaymentProofsFacet.sol";
 import {IPersonalAccountsFacet} from "./facets/IPersonalAccountsFacet.sol";
 import {ISwapFacet} from "./facets/ISwapFacet.sol";
+import {ITimelockFacet} from "./facets/ITimelockFacet.sol";
 import {IVaultsFacet} from "./facets/IVaultsFacet.sol";
 import {IXrplProviderWalletsFacet} from "./facets/IXrplProviderWalletsFacet.sol";
 
@@ -33,6 +34,7 @@ interface IMasterAccountController is
     IPaymentProofsFacet,
     IPersonalAccountsFacet,
     ISwapFacet,
+    ITimelockFacet,
     IVaultsFacet,
     IXrplProviderWalletsFacet
 {}

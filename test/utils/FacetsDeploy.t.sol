@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.27;
 
-import {Test,console2} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {MockSingletonFactory} from "../../contracts/mock/MockSingletonFactory.sol";
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 
 // facets
-import {DiamondCutFacet} from "../../contracts/diamond/facets/DiamondCutFacet.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
 import {OwnershipFacet} from "../../contracts/diamond/facets/OwnershipFacet.sol";
+import {DiamondCutFacet} from "../../contracts/smartAccounts/facets/DiamondCutFacet.sol";
 import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaultsFacet.sol";
 import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
@@ -17,6 +17,7 @@ import {InstructionsFacet} from "../../contracts/smartAccounts/facets/Instructio
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {SwapFacet} from "../../contracts/smartAccounts/facets/SwapFacet.sol";
+import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
@@ -53,7 +54,7 @@ contract FacetsDeploy is Test {
     }
 
     function deploySmartAccountsFacets() internal returns (IDiamond.FacetCut[] memory) {
-        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](9);
+        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](10);
 
         diamondCuts[0] = _buildFacetCut(
             address(new AgentVaultsFacet()), "AgentVaultsFacet", IDiamond.FacetCutAction.Add
@@ -77,9 +78,12 @@ contract FacetsDeploy is Test {
             address(new SwapFacet()), "SwapFacet", IDiamond.FacetCutAction.Add
         );
         diamondCuts[7] = _buildFacetCut(
-            address(new VaultsFacet()), "VaultsFacet", IDiamond.FacetCutAction.Add
+            address(new TimelockFacet()), "TimelockFacet", IDiamond.FacetCutAction.Add
         );
         diamondCuts[8] = _buildFacetCut(
+            address(new VaultsFacet()), "VaultsFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[9] = _buildFacetCut(
             address(new XrplProviderWalletsFacet()), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Add
         );
         return diamondCuts;

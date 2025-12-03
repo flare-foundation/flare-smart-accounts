@@ -46,6 +46,7 @@ contract DeploySmartAccounts is Script {
         uint24 wNatUsdt0PoolFeeTierPPM;
         uint24 usdt0FXrpPoolFeeTierPPM;
         uint24 maxSlippagePPM;
+        uint256 timelockDurationSeconds;
     }
 
     address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -68,6 +69,7 @@ contract DeploySmartAccounts is Script {
     PaymentProofsFacet private paymentProofsFacet;
     PersonalAccountsFacet private personalAccountsFacet;
     SwapFacet private swapFacet;
+    TimelockFacet private timelockFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
@@ -106,6 +108,7 @@ contract DeploySmartAccounts is Script {
         params.wNatUsdt0PoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".wNatUsdt0PoolFeeTierPPM"));
         params.usdt0FXrpPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".usdt0FXrpPoolFeeTierPPM"));
         params.maxSlippagePPM = uint24(vm.parseJsonUint(config, ".maxSlippagePPM"));
+        timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
 
         // if initial owner not set in config, use deployer address - for testing purposes
         if (params.initialOwner == address(0)) {
@@ -260,37 +263,6 @@ contract DeploySmartAccounts is Script {
             )
         );
 
-        // masterAccountController = MasterAccountController(masterAccountControllerProxyAddr);
-        // if (deployer != masterAccountController.owner()) {
-        //     console2.log("Deployer is not owner, skipping upgrades");
-        //     vm.stopBroadcast();
-        //     return;
-        // }
-
-        // if (seedMasterAccountControllerBase != masterAccountController.controllerImplementation()) {
-        //     // deployer is owner, perform upgrades (initialization was already done)
-        //     console2.log("Upgrading MasterAccountController and PersonalAccount implementations");
-        //     masterAccountController.setPersonalAccountImplementation(personalAccountImplAddress);
-        //     masterAccountController.upgradeToAndCall(address(masterAccountControllerImpl), bytes(""));
-        //     vm.stopBroadcast();
-        //     return;
-        // }
-
-        // // deployer is owner, perform upgrade and initialization
-        // console2.log("Upgrading MasterAccountController implementation and initializing");
-        // // upgrade controller proxy to real implementation and initialize in one call
-        // masterAccountController.upgradeToAndCall(
-        //     address(masterAccountControllerImpl),
-        //     abi.encodeWithSelector(
-        //         MasterAccountController.initialize.selector,
-        //         payable(params.executor),
-        //         params.executorFee,
-        //         params.paymentProofValidityDurationSeconds,
-        //         params.defaultInstructionFee,
-        //         personalAccountImplAddress
-        //     )
-        // );
-
         // set swap parameters
         if (params.uniswapV3Router != address(0)) {
             console2.log("Setting swap parameters");
@@ -327,6 +299,9 @@ contract DeploySmartAccounts is Script {
             vaultTypes[i] = uint8(params.vaultTypes[i]);
         }
         masterAccountController.addVaults(vaultIds, params.vaults, vaultTypes);
+
+        console2.log("Setting timelock duration");
+        masterAccountController.setTimelockDuration(timelockDurationSeconds);
 
         if (params.governance == address(0)) {
             console2.log("Governance address is zero, skipping ownership transfer");
@@ -367,10 +342,11 @@ contract DeploySmartAccounts is Script {
         paymentProofsFacet = new PaymentProofsFacet();
         personalAccountsFacet = new PersonalAccountsFacet();
         swapFacet = new SwapFacet();
+        timelockFacet = new TimelockFacet();
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
 
-        smartAccountsCuts = new IDiamond.FacetCut[](9);
+        smartAccountsCuts = new IDiamond.FacetCut[](10);
         smartAccountsCuts[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
         smartAccountsCuts[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
         smartAccountsCuts[2] = _addFacet(address(instructionFeesFacet), "InstructionFeesFacet");
@@ -378,8 +354,9 @@ contract DeploySmartAccounts is Script {
         smartAccountsCuts[4] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
         smartAccountsCuts[5] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
         smartAccountsCuts[6] = _addFacet(address(swapFacet), "SwapFacet");
-        smartAccountsCuts[7] = _addFacet(address(vaultsFacet), "VaultsFacet");
-        smartAccountsCuts[8] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+        smartAccountsCuts[7] = _addFacet(address(timelockFacet), "TimelockFacet");
+        smartAccountsCuts[8] = _addFacet(address(vaultsFacet), "VaultsFacet");
+        smartAccountsCuts[9] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {
@@ -431,6 +408,13 @@ contract DeploySmartAccounts is Script {
                 "DEPLOYED: SwapFacet, ",
                 "SwapFacet.sol: ",
                 vm.toString(address(swapFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: TimelockFacet, ",
+                "TimelockFacet.sol: ",
+                vm.toString(address(timelockFacet))
             )
         );
         console2.log(

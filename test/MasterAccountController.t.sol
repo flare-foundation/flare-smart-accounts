@@ -452,7 +452,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 9 // base facets + smart accounts facets
+            3 + 10 // base facets + smart accounts facets
         );
 
         IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](2);
@@ -477,7 +477,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             );
             assertNotEq(
                 updatedCuts[i],
-                currentCuts[11] // XrplProviderWalletsFacet
+                currentCuts[12] // XrplProviderWalletsFacet
             );
         }
     }
@@ -487,7 +487,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 9 // base facets + smart accounts facets
+            3 + 10 // base facets + smart accounts facets
         );
 
         // replace facets
@@ -517,7 +517,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             newSwapFacetAddress
         );
         assertEq(
-            finalCuts[11], // XrplProviderWalletsFacet
+            finalCuts[12], // XrplProviderWalletsFacet
             newXrplProviderWalletsFacetAddress
         );
     }

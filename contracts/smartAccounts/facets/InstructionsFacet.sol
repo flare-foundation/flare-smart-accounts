@@ -19,12 +19,13 @@ import {AgentVaults} from "../library/AgentVaults.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
 import {Instructions} from "../library/Instructions.sol";
 import {PaymentReferenceParser} from "../library/PaymentReferenceParser.sol";
+import {FacetBase} from "./FacetBase.sol";
 
 /**
  * @title InstructionsFacet
  * @notice Facet for handling instructions.
  */
-contract InstructionsFacet is IIInstructionsFacet {
+contract InstructionsFacet is IIInstructionsFacet, FacetBase {
 
     /// @inheritdoc IInstructionsFacet
     function reserveCollateral(

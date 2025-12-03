@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {IIXrplProviderWalletsFacet} from "../interface/IIXrplProviderWalletsFacet.sol";
 import {IXrplProviderWalletsFacet} from "../../userInterfaces/facets/IXrplProviderWalletsFacet.sol";
 import {XrplProviderWallets} from "../library/XrplProviderWallets.sol";
+import {FacetBase} from "./FacetBase.sol";
 
 /**
  * @title XrplProviderWalletsFacet
  * @notice Facet for handling XRPL provider wallet-related functions.
  */
-contract XrplProviderWalletsFacet is IIXrplProviderWalletsFacet {
+contract XrplProviderWalletsFacet is IIXrplProviderWalletsFacet, FacetBase {
 
     /// @inheritdoc IIXrplProviderWalletsFacet
     function addXrplProviderWallets(
         string[] calldata _xrplProviderWallets
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         XrplProviderWallets.State storage state = XrplProviderWallets.getState();
         for (uint256 i = 0; i < _xrplProviderWallets.length; i++) {
             string memory xrplProviderWallet = _xrplProviderWallets[i];
@@ -42,8 +42,8 @@ contract XrplProviderWalletsFacet is IIXrplProviderWalletsFacet {
         string[] calldata _xrplProviderWallets
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         XrplProviderWallets.State storage state = XrplProviderWallets.getState();
         for (uint256 i = 0; i < _xrplProviderWallets.length; i++) {
             string calldata xrplProviderWallet = _xrplProviderWallets[i];

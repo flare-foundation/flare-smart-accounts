@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AgentInfo.sol";
 import {IIAgentVaultsFacet} from "../interface/IIAgentVaultsFacet.sol";
 import {IAgentVaultsFacet} from "../../userInterfaces/facets/IAgentVaultsFacet.sol";
 import {AgentVaults} from "../library/AgentVaults.sol";
+import {FacetBase} from "./FacetBase.sol";
 
 /**
  * @title AgentVaultsFacet
  * @notice Facet for handling agent vault-related functions.
  */
-contract AgentVaultsFacet is IIAgentVaultsFacet {
+contract AgentVaultsFacet is IIAgentVaultsFacet, FacetBase {
 
     /// @inheritdoc IIAgentVaultsFacet
     function addAgentVaults(
@@ -21,8 +21,8 @@ contract AgentVaultsFacet is IIAgentVaultsFacet {
         address[] calldata _agentVaultAddresses
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         require(_agentVaultIds.length == _agentVaultAddresses.length, AgentsVaultsLengthsMismatch());
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
         AgentVaults.State storage state = AgentVaults.getState();
@@ -53,8 +53,8 @@ contract AgentVaultsFacet is IIAgentVaultsFacet {
         uint256[] calldata _agentVaultIds
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         AgentVaults.State storage state = AgentVaults.getState();
         for (uint256 i = 0; i < _agentVaultIds.length; i++) {
             uint256 agentVaultId = _agentVaultIds[i];

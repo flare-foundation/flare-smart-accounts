@@ -1,25 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {LibDiamond} from "../../diamond/libraries/LibDiamond.sol";
 import {IIPersonalAccountsFacet} from "../interface/IIPersonalAccountsFacet.sol";
 import {IPersonalAccountsFacet} from "../../userInterfaces/facets/IPersonalAccountsFacet.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
+import {FacetBase} from "./FacetBase.sol";
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 
 /**
  * @title PersonalAccountsFacet
  * @notice Facet for handling personal accounts.
  */
-contract PersonalAccountsFacet is IIPersonalAccountsFacet {
+contract PersonalAccountsFacet is IIPersonalAccountsFacet, FacetBase {
 
     /// @inheritdoc IIPersonalAccountsFacet
     function setPersonalAccountImplementation(
         address _newImplementation
     )
         external
+        onlyOwnerWithTimelock
     {
-        LibDiamond.enforceIsContractOwner();
         PersonalAccounts.setPersonalAccountImplementation(_newImplementation);
     }
 
