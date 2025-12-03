@@ -2679,10 +2679,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             newDuration
         );
         vm.expectEmit();
-        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), block.timestamp + 2 days);
+        uint256 allowedAfterTimestamp = block.timestamp + 2 days;
+        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), allowedAfterTimestamp);
         masterAccountController.setTimelockDuration(newDuration);
         uint256 timestamp = masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
-        assertEq(timestamp, block.timestamp + 2 days);
+        assertEq(timestamp, allowedAfterTimestamp);
         vm.prank(governance);
         vm.expectEmit();
         emit ITimelockFacet.TimelockedCallCanceled(keccak256(encodedCall));
@@ -2727,11 +2728,12 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             newDuration
         );
         vm.expectEmit();
-        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), block.timestamp + 2 days);
+        uint256 allowedAfterTimestamp = block.timestamp + 2 days;
+        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), allowedAfterTimestamp);
         masterAccountController.setTimelockDuration(newDuration);
         uint256 timestamp = masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
-        assertEq(timestamp, block.timestamp + 2 days);
-        vm.warp(block.timestamp + 2 days);
+        assertEq(timestamp, allowedAfterTimestamp);
+        vm.warp(allowedAfterTimestamp);
         vm.expectEmit();
         emit ITimelockFacet.TimelockedCallExecuted(keccak256(encodedCall));
         masterAccountController.executeTimelockedCall(encodedCall);
@@ -2759,15 +2761,16 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             newDuration
         );
         vm.expectEmit();
-        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), block.timestamp + 2 days);
+        uint256 allowedAfterTimestamp = block.timestamp + 2 days;
+        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), allowedAfterTimestamp);
         masterAccountController.setTimelockDuration(newDuration);
         uint256 timestamp = masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
-        assertEq(timestamp, block.timestamp + 2 days);
-        vm.warp(block.timestamp + 2 days - 1);
+        assertEq(timestamp, allowedAfterTimestamp);
+        vm.warp(allowedAfterTimestamp - 1);
         vm.expectRevert(ITimelockFacet.TimelockNotAllowedYet.selector);
         masterAccountController.executeTimelockedCall(encodedCall);
         timestamp = masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
-        assertEq(timestamp, block.timestamp + 2 days);
+        assertEq(timestamp, allowedAfterTimestamp);
     }
 
     //// helper functions ////
