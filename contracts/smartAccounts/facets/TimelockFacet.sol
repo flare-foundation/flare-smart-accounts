@@ -12,6 +12,8 @@ import {FacetBase} from "./FacetBase.sol";
  */
 contract TimelockFacet is IITimelockFacet, FacetBase {
 
+    uint256 constant internal MAX_TIMELOCK_DURATION_SECONDS = 7 days;
+
     /// @inheritdoc ITimelockFacet
     function executeTimelockedCall(
         bytes calldata _encodedCall
@@ -53,9 +55,10 @@ contract TimelockFacet is IITimelockFacet, FacetBase {
         external
         onlyOwnerWithTimelock
     {
+        require(_timelockDurationSeconds <= MAX_TIMELOCK_DURATION_SECONDS, TimelockDurationTooLong());
         Timelock.State storage state = Timelock.getState();
         state.timelockDurationSeconds = _timelockDurationSeconds;
-        emit TimelockSet(_timelockDurationSeconds);
+        emit TimelockDurationSet(_timelockDurationSeconds);
     }
 
     /// @inheritdoc ITimelockFacet

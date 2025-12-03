@@ -37,6 +37,8 @@ import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol"
 import {IPersonalAccountsFacet} from "../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
 import {ISwapFacet} from "../contracts/userInterfaces/facets/ISwapFacet.sol";
 import {SwapFacet} from "../contracts/smartAccounts/facets/SwapFacet.sol";
+import {ITimelockFacet} from "../contracts/userInterfaces/facets/ITimelockFacet.sol";
+import {IITimelockFacet} from "../contracts/smartAccounts/interface/IITimelockFacet.sol";
 import {XrplProviderWalletsFacet} from "../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 
@@ -2639,6 +2641,133 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         vm.expectRevert(UniswapV3.AmountInZero.selector, personalAccountAddr);
         masterAccountController.swapUsdt0ForFAsset(xrplAddress1);
+    }
+
+    function testSetTimelockDuration() public {
+        assertEq(masterAccountController.getTimelockDurationSeconds(), 0);
+        uint256 newDuration = 2 days;
+        vm.prank(governance);
+        vm.expectEmit();
+        emit ITimelockFacet.TimelockDurationSet(newDuration);
+        masterAccountController.setTimelockDuration(newDuration);
+        assertEq(masterAccountController.getTimelockDurationSeconds(), newDuration);
+    }
+
+    function testSetTimelockDurationRevertOnlyOwner() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NotContractOwner.selector,
+                address(this),
+                governance
+            )
+        );
+        masterAccountController.setTimelockDuration(1 days);
+    }
+
+    function testSetTimelockDurationRevertTimelockDurationTooLong() public {
+        vm.expectRevert(ITimelockFacet.TimelockDurationTooLong.selector);
+        vm.prank(governance);
+        masterAccountController.setTimelockDuration(7 days + 1);
+    }
+
+    function testCancelTimelockedCall() public {
+        testSetTimelockDuration();
+        vm.prank(governance);
+        uint256 newDuration = 3 days;
+        bytes memory encodedCall = abi.encodeWithSelector(
+            IITimelockFacet.setTimelockDuration.selector,
+            newDuration
+        );
+        vm.expectEmit();
+        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), block.timestamp + 2 days);
+        masterAccountController.setTimelockDuration(newDuration);
+        uint256 timestamp = masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
+        assertEq(timestamp, block.timestamp + 2 days);
+        vm.prank(governance);
+        vm.expectEmit();
+        emit ITimelockFacet.TimelockedCallCanceled(keccak256(encodedCall));
+        masterAccountController.cancelTimelockedCall(encodedCall);
+        vm.expectRevert(ITimelockFacet.TimelockInvalidSelector.selector);
+        masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
+    }
+
+    function testCancelTimelockedCallRevertOnlyOwner() public {
+        uint256 newDuration = 3 days;
+        bytes memory encodedCall = abi.encodeWithSelector(
+            IITimelockFacet.setTimelockDuration.selector,
+            newDuration
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                NotContractOwner.selector,
+                address(this),
+                governance
+            )
+        );
+        masterAccountController.cancelTimelockedCall(encodedCall);
+    }
+
+    function testCancelTimelockedCallRevertTimelockInvalidSelector() public {
+        vm.prank(governance);
+        uint256 newDuration = 3 days;
+        bytes memory encodedCall = abi.encodeWithSelector(
+            IITimelockFacet.setTimelockDuration.selector,
+            newDuration
+        );
+        vm.expectRevert(ITimelockFacet.TimelockInvalidSelector.selector);
+        masterAccountController.cancelTimelockedCall(encodedCall);
+    }
+
+    function testExecuteTimelockedCall() public {
+        testSetTimelockDuration();
+        vm.prank(governance);
+        uint256 newDuration = 3 days;
+        bytes memory encodedCall = abi.encodeWithSelector(
+            IITimelockFacet.setTimelockDuration.selector,
+            newDuration
+        );
+        vm.expectEmit();
+        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), block.timestamp + 2 days);
+        masterAccountController.setTimelockDuration(newDuration);
+        uint256 timestamp = masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
+        assertEq(timestamp, block.timestamp + 2 days);
+        vm.warp(block.timestamp + 2 days);
+        vm.expectEmit();
+        emit ITimelockFacet.TimelockedCallExecuted(keccak256(encodedCall));
+        masterAccountController.executeTimelockedCall(encodedCall);
+        vm.expectRevert(ITimelockFacet.TimelockInvalidSelector.selector);
+        masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
+    }
+
+    function testExecuteTimelockedCallRevertTimelockInvalidSelector() public {
+        testSetTimelockDuration();
+        uint256 newDuration = 3 days;
+        bytes memory encodedCall = abi.encodeWithSelector(
+            IITimelockFacet.setTimelockDuration.selector,
+            newDuration
+        );
+        vm.expectRevert(ITimelockFacet.TimelockInvalidSelector.selector);
+        masterAccountController.executeTimelockedCall(encodedCall);
+    }
+
+    function testExecuteTimelockedCallRevertTimelockNotAllowedYet() public {
+        testSetTimelockDuration();
+        vm.prank(governance);
+        uint256 newDuration = 3 days;
+        bytes memory encodedCall = abi.encodeWithSelector(
+            IITimelockFacet.setTimelockDuration.selector,
+            newDuration
+        );
+        vm.expectEmit();
+        emit ITimelockFacet.CallTimelocked(encodedCall, keccak256(encodedCall), block.timestamp + 2 days);
+        masterAccountController.setTimelockDuration(newDuration);
+        uint256 timestamp = masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
+        assertEq(timestamp, block.timestamp + 2 days);
+        vm.warp(block.timestamp + 2 days - 1);
+        vm.expectRevert(ITimelockFacet.TimelockNotAllowedYet.selector);
+        masterAccountController.executeTimelockedCall(encodedCall);
+        timestamp = masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
+        assertEq(timestamp, block.timestamp + 2 days);
     }
 
     //// helper functions ////

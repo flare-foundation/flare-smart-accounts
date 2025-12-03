@@ -8,12 +8,13 @@ import {ISwapFacet} from "../../userInterfaces/facets/ISwapFacet.sol";
 import {Swap} from "../library/Swap.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
 import {FacetBase} from "./FacetBase.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title SwapFacet
  * @notice Facet for handling token swaps using Uniswap V3.
  */
-contract SwapFacet is IISwapFacet, FacetBase {
+contract SwapFacet is IISwapFacet, ReentrancyGuard, FacetBase {
 
     /// @notice FLR/USD feed IDs for price oracles
     bytes21 private constant FLR_USD_FEED_ID = 0x01464c522f55534400000000000000000000000000;

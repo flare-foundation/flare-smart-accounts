@@ -39,7 +39,7 @@ interface ITimelockFacet {
      * @notice Emitted when the timelock duration is set.
      * @param timelockDurationSeconds The new timelock duration in seconds.
      */
-    event TimelockSet(
+    event TimelockDurationSet(
         uint256 timelockDurationSeconds
     );
 
@@ -52,6 +52,11 @@ interface ITimelockFacet {
      * @notice Reverts if the timelock period has not yet expired.
      */
     error TimelockNotAllowedYet();
+
+    /**
+     * @notice Reverts if the timelock duration is too long.
+     */
+    error TimelockDurationTooLong();
 
     /**
      * @notice Execute a timelocked call once the timelock period expires.
