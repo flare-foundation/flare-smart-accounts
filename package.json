@@ -1,7 +1,7 @@
 {
   "name": "flare-smart-accounts",
   "version": "0.0.1",
-  "description": "Smart contracts implementing XRPL control wallet.",
+  "description": "Smart contracts implementing Flare Smart Accounts.",
   "main": "",
   "repository": {
     "type": "git",
