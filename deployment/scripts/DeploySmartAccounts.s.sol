@@ -27,6 +27,7 @@ import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
+// solhint-disable no-console
 // solhint-disable-next-line max-line-length
 // forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
 
@@ -87,7 +88,7 @@ contract DeploySmartAccounts is Script {
         } else if (chainId == 114) {
             network = "coston2";
         } else {
-            configFile = "scdev";
+            network = "scdev";
         }
         configFile = string.concat(configFile, network, ".json");
         console2.log(string.concat("NETWORK: ", network));

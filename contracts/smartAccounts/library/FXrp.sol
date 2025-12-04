@@ -77,9 +77,4 @@ library FXrp {
         uint256 lotSize = ContractRegistry.getAssetManagerFXRP().lotSize();
         return _lots * lotSize;
     }
-
-    function amountToLots(uint256 _amount) internal view returns (uint256) {
-        uint256 lotSize = ContractRegistry.getAssetManagerFXRP().lotSize();
-        return _amount / lotSize; // there might be a remainder
-    }
 }

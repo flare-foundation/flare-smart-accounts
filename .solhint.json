@@ -41,6 +41,8 @@
     "gas-increment-by-one": "off",
     "gas-strict-inequalities": "off",
     "gas-indexed-events": "off",
-    "import-path-check": "off"
+    "import-path-check": "off",
+    "gas-small-strings": "off",
+    "function-max-lines": "off"
   }
 }

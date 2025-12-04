@@ -1,11 +1,11 @@
 {
-  "name": "xrpcw-contracts",
+  "name": "flare-smart-accounts",
   "version": "0.0.1",
   "description": "Smart contracts implementing XRPL control wallet.",
   "main": "",
   "repository": {
     "type": "git",
-    "url": "git+https://gitlab.com/flarenetwork/xrpcw-contracts.git"
+    "url": "git+https://gitlab.com/flarenetwork/smart-accounts/flare-smart-accounts.git"
   },
   "engines": {
     "node": ">=20"
@@ -23,9 +23,12 @@
     "deploy_my_erc462_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast'",
     "---------VERIFIER---SCRIPTS": "",
     "verify_contracts_coston2": "ts-node deployment/scripts/verify-contracts.ts coston2",
+    "verify_contracts_coston2_staging": "ts-node deployment/scripts/verify-contracts.ts coston2-staging",
     "---------OTHER---SCRIPTS": "",
-    "lint": "yarn solhint \"contracts/**/*.sol\"",
-    "lint-forge": "yarn solhint \"test/**/*.sol\""
+    "lint": "yarn lint-contracts && yarn lint-test && yarn lint-deployment",
+    "lint-contracts": "yarn solhint \"contracts/**/*.sol\"",
+    "lint-test": "yarn solhint \"test/**/*.sol\"",
+    "lint-deployment": "yarn solhint \"deployment/**/*.sol\""
   },
   "dependencies": {
   },
