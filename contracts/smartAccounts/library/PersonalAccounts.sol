@@ -24,7 +24,7 @@ library PersonalAccounts {
     function setPersonalAccountImplementation(
         address _implementation
     )
-        external
+        internal
     {
         require(_implementation.code.length > 0, IPersonalAccountsFacet.InvalidPersonalAccountImplementation());
         State storage state = getState();
