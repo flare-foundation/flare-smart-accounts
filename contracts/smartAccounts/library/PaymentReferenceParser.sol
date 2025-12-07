@@ -5,18 +5,21 @@ import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet
 
 // payment reference format (32 bytes):
 // instruction id consists of instruction type (4 bits) and instruction command (4 bits)
+
 // FXRP (instruction type 0)
 // bytes 00: bytes1 (hex) -> instruction id
     // 00: collateral reservation
     // 01: transfer
     // 02: redeem
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-11: uint80 -> value (value, lots)
 // collateral reservation:
+// bytes 02-11: uint80 -> value (lots)
 // bytes 12-13: uint16 -> agent vault address id (collateral reservation)
-// bytes 14-31: future use
 // transfer:
+// bytes 02-11: uint80 -> value (amount in drops)
 // bytes 12-31: address (20 bytes) -> recipient address
+// redeem:
+// bytes 02-11: uint80 -> value (lots)
 
 // Firelight vaults (instruction type 1)
 // bytes 00: bytes1 (hex) -> instruction id
@@ -25,10 +28,19 @@ import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet
     // 12: redeem
     // 13: claim withdraw
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-11: uint80 -> value (amount, shares, lots, period,...)
+// collateral reservation and deposit:
+// bytes 02-11: uint80 -> value (lots)
 // bytes 12-13: uint16 -> agent vault address id
-// bytes 14-15: uint16 -> deposit/withdraw vault address id
-// bytes 16-31: future use
+// bytes 14-15: uint16 -> deposit vault address id
+// deposit:
+// bytes 02-11: uint80 -> value (assets in drops)
+// bytes 14-15: uint16 -> deposit vault address id
+// redeem:
+// bytes 02-11: uint80 -> value (shares in drops)
+// bytes 14-15: uint16 -> withdraw vault address id
+// claim withdraw:
+// bytes 02-11: uint80 -> value (period)
+// bytes 14-15: uint16 -> withdraw vault address id
 
 // Upshift vaults (instruction type 2)
 // bytes 00: bytes1 (hex) -> instruction id
@@ -37,10 +49,19 @@ import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet
     // 22: requestRedeem
     // 23: claim
 // bytes 01: uint8 -> wallet identifier
-// bytes 02-11: uint80 -> value (amount, shares, lots, date(yyyymmdd),...)
+// collateral reservation and deposit:
+// bytes 02-11: uint80 -> value (lots)
 // bytes 12-13: uint16 -> agent vault address id
-// bytes 14-15: uint16 -> deposit/withdraw vault address id
-// bytes 16-31: future use
+// bytes 14-15: uint16 -> deposit vault address id
+// deposit:
+// bytes 02-11: uint80 -> value (assets in drops)
+// bytes 14-15: uint16 -> deposit vault address id
+// requestRedeem:
+// bytes 02-11: uint80 -> value (shares in drops)
+// bytes 14-15: uint16 -> withdraw vault address id
+// claim:
+// bytes 02-11: uint80 -> value (date(yyyymmdd))
+// bytes 14-15: uint16 -> withdraw vault address id
 
 library PaymentReferenceParser {
 
