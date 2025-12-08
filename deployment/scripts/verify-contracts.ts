@@ -13,6 +13,7 @@ const isValidNetwork = allowedBaseNetworks.includes(network) || (network.endsWit
 if (!isValidNetwork) {
   throw new Error(`Invalid network: ${network}`);
 }
+console.log(`Verifying contracts on network: ${network}`);
 
 const isMock = process.argv[3] === "mock";
 // set paths and URLs based on network

@@ -59,8 +59,8 @@ contract DeploySmartAccounts is Script {
     address private masterAccountControllerAddress;
 
     // facets
-    IDiamond.FacetCut[] private baseCuts;
-    IDiamond.FacetCut[] private smartAccountsCuts;
+    IDiamond.FacetCut[] private baseFacets;
+    IDiamond.FacetCut[] private smartAccountsFacets;
     address private diamondCutFacet;
     address private diamondLoupeFacet;
     address private ownershipFacet;
@@ -75,7 +75,7 @@ contract DeploySmartAccounts is Script {
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
-    function run() external {
+    function run(bool _fullDeploy) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
@@ -143,7 +143,7 @@ contract DeploySmartAccounts is Script {
             console2.log("DiamondCutFacet already deployed, skipping");
             diamondCutFacet = expected;
         }
-        baseCuts.push(_addFacet(diamondCutFacet, "DiamondCutFacet"));
+        baseFacets.push(_addFacet(diamondCutFacet, "DiamondCutFacet"));
 
         bytecode = abi.encodePacked(
             type(DiamondLoupeFacet).creationCode
@@ -161,7 +161,7 @@ contract DeploySmartAccounts is Script {
             console2.log("DiamondLoupeFacet already deployed, skipping");
             diamondLoupeFacet = expected;
         }
-        baseCuts.push(_addFacet(diamondLoupeFacet, "DiamondLoupeFacet"));
+        baseFacets.push(_addFacet(diamondLoupeFacet, "DiamondLoupeFacet"));
 
         bytecode = abi.encodePacked(
             type(OwnershipFacet).creationCode
@@ -179,10 +179,10 @@ contract DeploySmartAccounts is Script {
             console2.log("OwnershipFacet already deployed, skipping");
             ownershipFacet = expected;
         }
-        baseCuts.push(_addFacet(ownershipFacet, "OwnershipFacet"));
+        baseFacets.push(_addFacet(ownershipFacet, "OwnershipFacet"));
 
-        // deploy MasterAccountController using CREATE2 (same address on all networks)
-        // TODO check if cuts are already deployed and skip deployment if so
+        // deploy MasterAccountController (with base facets) using CREATE2 (same address on all networks)
+        // TODO check if facets are already deployed and skip deployment if so
         DiamondArgs memory args = DiamondArgs({
             owner: params.initialOwner,
             initAddress: address(0),
@@ -191,7 +191,7 @@ contract DeploySmartAccounts is Script {
         bytecode = abi.encodePacked(
             type(MasterAccountController).creationCode,
             abi.encode(
-                baseCuts,
+                baseFacets,
                 args
             )
         );
@@ -213,19 +213,26 @@ contract DeploySmartAccounts is Script {
         // deploy smart account facets and initialize master account controller
         _deploySmartAccountsFacets();
         MasterAccountControllerInit masterAccountControllerInit = new MasterAccountControllerInit();
-        masterAccountController.diamondCut(
-            smartAccountsCuts,
-            address(masterAccountControllerInit),
-            abi.encodeWithSelector(
-                MasterAccountControllerInit.init.selector,
-                payable(params.executor),
-                params.executorFee,
-                params.sourceId,
-                params.paymentProofValidityDurationSeconds,
-                params.defaultInstructionFee,
-                personalAccountImplAddress
-            )
-        );
+
+        if (_fullDeploy) {
+            console2.log("Executing diamond cut to add smart accounts facets and initialize");
+            masterAccountController.diamondCut(
+                smartAccountsFacets,
+                address(masterAccountControllerInit),
+                abi.encodeWithSelector(
+                    MasterAccountControllerInit.init.selector,
+                    payable(params.executor),
+                    params.executorFee,
+                    params.sourceId,
+                    params.paymentProofValidityDurationSeconds,
+                    params.defaultInstructionFee,
+                    personalAccountImplAddress
+                )
+            );
+        } else {
+            console2.log("Skipping diamond cut execution and initialization as per input flag");
+        }
+
 
         // Log deployment info for post-processing
         console2.log(
@@ -252,6 +259,13 @@ contract DeploySmartAccounts is Script {
         _logSmartAccountsFacetAddresses();
         console2.log(
             string.concat(
+                "DEPLOYED: MasterAccountControllerInit, ",
+                "MasterAccountControllerInit.sol:  ",
+                vm.toString(address(masterAccountControllerInit))
+            )
+        );
+        console2.log(
+            string.concat(
                 "DEPLOYED: MasterAccountController, ",
                 "MasterAccountController.sol:  ",
                 vm.toString(address(masterAccountController))
@@ -265,45 +279,52 @@ contract DeploySmartAccounts is Script {
             )
         );
 
-        // set swap parameters
-        if (params.uniswapV3Router != address(0)) {
-            console2.log("Setting swap parameters");
-            masterAccountController.setSwapParams(
-                params.uniswapV3Router,
-                params.usdt0,
-                params.wNatUsdt0PoolFeeTierPPM,
-                params.usdt0FXrpPoolFeeTierPPM,
-                params.maxSlippagePPM
+        if (_fullDeploy) {
+            // set swap parameters
+            if (params.uniswapV3Router != address(0)) {
+                console2.log("Setting swap parameters");
+                masterAccountController.setSwapParams(
+                    params.uniswapV3Router,
+                    params.usdt0,
+                    params.wNatUsdt0PoolFeeTierPPM,
+                    params.usdt0FXrpPoolFeeTierPPM,
+                    params.maxSlippagePPM
+                );
+            } else {
+                console2.log("Swap parameters not set, swap is disabled");
+            }
+
+            console2.log("Adding XRPL provider wallets");
+            masterAccountController.addXrplProviderWallets(params.xrplProviderWallets);
+
+            console2.log("Adding agent vaults");
+            // get available agent vaults and add them
+            (address[] memory agentVaultAddresses, ) =
+                ContractRegistry.getAssetManagerFXRP().getAvailableAgentsList(0, 10);
+            uint256[] memory agentVaultIds = new uint256[](agentVaultAddresses.length);
+            for (uint256 i = 0; i < agentVaultAddresses.length; i++) {
+                agentVaultIds[i] = i + 1; // agent vault IDs are 1-based
+            }
+            masterAccountController.addAgentVaults(agentVaultIds, agentVaultAddresses);
+
+            console2.log("Adding vaults");
+            assert(params.vaults.length == params.vaultTypes.length);
+            uint256[] memory vaultIds = new uint256[](params.vaults.length);
+            uint8[] memory vaultTypes = new uint8[](params.vaultTypes.length);
+            for (uint256 i = 0; i < params.vaults.length; i++) {
+                vaultIds[i] = i + 1; // vault IDs are 1-based
+                vaultTypes[i] = uint8(params.vaultTypes[i]);
+            }
+            masterAccountController.addVaults(vaultIds, params.vaults, vaultTypes);
+
+            console2.log("Setting timelock duration");
+            masterAccountController.setTimelockDuration(params.timelockDurationSeconds);
+        }
+        else {
+            console2.log(
+                "Skipping setting parameters as per input flag"
             );
-        } else {
-            console2.log("Swap parameters not set, swap is disabled");
         }
-
-        console2.log("Adding XRPL provider wallets");
-        masterAccountController.addXrplProviderWallets(params.xrplProviderWallets);
-
-        console2.log("Adding agent vaults");
-        // get available agent vaults and add them
-        (address[] memory agentVaultAddresses, ) =
-            ContractRegistry.getAssetManagerFXRP().getAvailableAgentsList(0, 10);
-        uint256[] memory agentVaultIds = new uint256[](agentVaultAddresses.length);
-        for (uint256 i = 0; i < agentVaultAddresses.length; i++) {
-            agentVaultIds[i] = i + 1; // agent vault IDs are 1-based
-        }
-        masterAccountController.addAgentVaults(agentVaultIds, agentVaultAddresses);
-
-        console2.log("Adding vaults");
-        assert(params.vaults.length == params.vaultTypes.length);
-        uint256[] memory vaultIds = new uint256[](params.vaults.length);
-        uint8[] memory vaultTypes = new uint8[](params.vaultTypes.length);
-        for (uint256 i = 0; i < params.vaults.length; i++) {
-            vaultIds[i] = i + 1; // vault IDs are 1-based
-            vaultTypes[i] = uint8(params.vaultTypes[i]);
-        }
-        masterAccountController.addVaults(vaultIds, params.vaults, vaultTypes);
-
-        console2.log("Setting timelock duration");
-        masterAccountController.setTimelockDuration(params.timelockDurationSeconds);
 
         if (params.governance == address(0)) {
             console2.log("Governance address is zero, skipping ownership transfer");
@@ -348,17 +369,17 @@ contract DeploySmartAccounts is Script {
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
 
-        smartAccountsCuts = new IDiamond.FacetCut[](10);
-        smartAccountsCuts[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
-        smartAccountsCuts[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
-        smartAccountsCuts[2] = _addFacet(address(instructionFeesFacet), "InstructionFeesFacet");
-        smartAccountsCuts[3] = _addFacet(address(instructionsFacet), "InstructionsFacet");
-        smartAccountsCuts[4] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
-        smartAccountsCuts[5] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
-        smartAccountsCuts[6] = _addFacet(address(swapFacet), "SwapFacet");
-        smartAccountsCuts[7] = _addFacet(address(timelockFacet), "TimelockFacet");
-        smartAccountsCuts[8] = _addFacet(address(vaultsFacet), "VaultsFacet");
-        smartAccountsCuts[9] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+        smartAccountsFacets = new IDiamond.FacetCut[](10);
+        smartAccountsFacets[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
+        smartAccountsFacets[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
+        smartAccountsFacets[2] = _addFacet(address(instructionFeesFacet), "InstructionFeesFacet");
+        smartAccountsFacets[3] = _addFacet(address(instructionsFacet), "InstructionsFacet");
+        smartAccountsFacets[4] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
+        smartAccountsFacets[5] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
+        smartAccountsFacets[6] = _addFacet(address(swapFacet), "SwapFacet");
+        smartAccountsFacets[7] = _addFacet(address(timelockFacet), "TimelockFacet");
+        smartAccountsFacets[8] = _addFacet(address(vaultsFacet), "VaultsFacet");
+        smartAccountsFacets[9] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {

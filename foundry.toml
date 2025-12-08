@@ -12,7 +12,11 @@ libs = [
     "dependencies",
 ]
 fs_permissions = [
-    { access = "read", path = "deployment/chain-config/" }
+    { access = "read", path = "deployment/chain-config/" },
+    { access = "read", path = "deployment/deploys/" },
+    { access = "read-write", path = "deployment/output-internal" },
+    { access = "read", path = "deployment/cuts/" },
+    { access = "read", path = "artifacts/" }
 ]
 ffi = true
 via_ir = true

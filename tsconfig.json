@@ -12,16 +12,10 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "outDir": "dist",
-    "typeRoots": ["node_modules/@types", "types"]
   },
   "include": [
     "./deployment",
-    "./typechain-types",
-    "./typechain",
-    "./typechain-truffle",
-    "./typechain-web3",
     "./test",
     "./scripts"
-  ],
-  "files": ["./hardhat.config.ts"]
+  ]
 }

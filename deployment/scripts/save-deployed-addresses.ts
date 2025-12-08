@@ -29,8 +29,15 @@ lines.forEach((line: string) => {
 });
 
 if (network === "unknown") {
-  throw new Error("Network name not found in output.");
+  throw new Error("Network name not found in output");
 }
+
+const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev"];
+const isValidNetwork = allowedBaseNetworks.includes(network) || (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
+if (!isValidNetwork) {
+  throw new Error(`Invalid network: ${network}`);
+}
+
 fs.mkdirSync("deployment/deploys", { recursive: true });
 const isMock = process.argv[2] === "mock";
 fs.writeFileSync(`deployment/deploys/${network}${isMock ? "_mock" : ""}.json`, JSON.stringify(contracts, null, 2));
