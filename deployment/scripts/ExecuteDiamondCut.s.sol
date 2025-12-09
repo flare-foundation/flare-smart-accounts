@@ -8,7 +8,7 @@ import {IDiamondCut} from "../../contracts/diamond/interfaces/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../contracts/diamond/interfaces/IDiamondLoupe.sol";
 
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
-
+// TODO if deploying new facets, update deployment/deploys/<network>.json accordingly
 // solhint-disable no-console
 contract ExecuteDiamondCut is Script {
     using stdJson for string;

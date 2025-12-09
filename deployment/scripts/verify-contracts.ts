@@ -24,9 +24,29 @@ const rpcUrl = `https://${baseNetwork}-api.flare.network/ext/C/rpc`;
 const verifierUrl = `https://${baseNetwork}-explorer.flare.network/api/`;
 const verifier = "blockscout";
 
-const contracts = JSON.parse(fs.readFileSync(addressesFilePath, "utf8"));
 
-contracts.forEach((contract: any) => {
+const raw: unknown = JSON.parse(fs.readFileSync(addressesFilePath, "utf8"));
+if (!Array.isArray(raw)) {
+  throw new Error("Invalid contract info format");
+}
+const contracts = raw.map((item) => {
+  if (
+    typeof item === "object" &&
+    item !== null &&
+    typeof (item as { address?: unknown }).address === "string" &&
+    typeof (item as { contractName?: unknown }).contractName === "string" &&
+    typeof (item as { name?: unknown }).name === "string"
+  ) {
+    return {
+      name: (item as { name?: unknown }).name,
+      contractName: (item as { contractName: string }).contractName,
+      address: (item as { address: string }).address,
+    };
+  }
+  throw new Error("Invalid contract info item");
+});
+
+contracts.forEach(contract => {
   const address = contract.address;
   const contractFile = contract.contractName;
   // remove .sol from contractFile for the contract name
@@ -40,7 +60,7 @@ contracts.forEach((contract: any) => {
   if (matches.length > 1) {
     throw new Error(`Multiple contract files found for ${contractFile}: ${matches.join(", ")}`);
   }
-  let contractPath = matches[0];
+  const contractPath = matches[0];
   const verifyCmd = `forge verify-contract \
     --rpc-url ${rpcUrl} \
     --verifier ${verifier} \
