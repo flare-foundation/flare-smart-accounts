@@ -15,6 +15,7 @@ library Vaults {
         uint8 vaultType;
     }
 
+    /// @custom:storage-location erc8042:smartAccounts.Vaults.State
     struct State {
         /// @notice Mapping from vault ID to vault information
         mapping(uint256 vaultId => VaultInfo vaultInfo) vaultIdToVaultInfo;

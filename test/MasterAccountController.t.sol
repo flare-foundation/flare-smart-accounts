@@ -1055,7 +1055,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(personalAccountAddr, 123);
         assertEq(fxrp.balanceOf(personalAccountAddr), 123);
-        bytes32 paymentReference = _encodeUpshiftPaymentReference(1, 0, 123, 1, 4);
+        bytes32 paymentReference = _encodeUpshiftPaymentReference(1, 0, 123, 0, 4);
         IPayment.Proof memory proof;
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;

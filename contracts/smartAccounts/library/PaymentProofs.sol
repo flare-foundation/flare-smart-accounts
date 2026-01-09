@@ -8,6 +8,7 @@ import {IPaymentProofsFacet} from "../../userInterfaces/facets/IPaymentProofsFac
 
 library PaymentProofs {
 
+    /// @custom:storage-location erc8042:smartAccounts.PaymentProofs.State
     struct State {
         /// @notice Source ID used for payment verification
         bytes32 sourceId;

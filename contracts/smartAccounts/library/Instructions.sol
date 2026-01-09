@@ -10,6 +10,7 @@ import {PaymentReferenceParser} from "./PaymentReferenceParser.sol";
 
 library Instructions {
 
+    /// @custom:storage-location erc8042:smartAccounts.Instructions.State
     struct State {
         /// @notice Indicates if transaction has already been executed.
         mapping(bytes32 transactionId => bool) usedTransactionIds;

@@ -9,6 +9,7 @@ import {IPersonalAccountsFacet} from "../../userInterfaces/facets/IPersonalAccou
 
 library PersonalAccounts {
 
+    /// @custom:storage-location erc8042:smartAccounts.PersonalAccounts.State
     struct State {
         /// @notice PersonalAccount implementation used by BeaconProxy PA instances via IBeacon
         address personalAccountImplementation;

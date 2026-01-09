@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 library Swap {
 
+    /// @custom:storage-location erc8042:smartAccounts.Swap.State
     struct State {
         /// @notice Uniswap V3 router address
         address uniswapV3Router;

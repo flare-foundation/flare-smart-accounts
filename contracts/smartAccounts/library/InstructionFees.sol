@@ -5,6 +5,7 @@ import {IInstructionFeesFacet} from "../../userInterfaces/facets/IInstructionFee
 
 library InstructionFees {
 
+    /// @custom:storage-location erc8042:smartAccounts.InstructionFees.State
     struct State {
         /// @notice Default fee for instruction execution in underlying asset's smallest unit (drops for XRP)
         uint256 defaultInstructionFee;

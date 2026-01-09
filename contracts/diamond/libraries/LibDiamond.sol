@@ -36,6 +36,8 @@ library LibDiamond {
         uint16 selectorPosition;
     }
 
+
+    /// @custom:storage-location erc8042:diamond.standard.diamond.storage
     struct DiamondStorage {
         // function selector => facet address and selector position in selectors array
         mapping(bytes4 => FacetAddressAndSelectorPosition) facetAddressAndSelectorPosition;

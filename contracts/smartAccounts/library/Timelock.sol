@@ -6,6 +6,7 @@ import {ITimelockFacet} from "../../userInterfaces/facets/ITimelockFacet.sol";
 
 library Timelock {
 
+    /// @custom:storage-location erc8042:smartAccounts.Timelock.State
     struct State {
         // execution lock
         bool executing;

@@ -6,6 +6,7 @@ import {PaymentReferenceParser} from "./PaymentReferenceParser.sol";
 
 library AgentVaults {
 
+    /// @custom:storage-location erc8042:smartAccounts.AgentVaults.State
     struct State {
         /// @notice Mapping from agent vault ID to agent vault address
         mapping(uint256 agentVaultId => address agentVaultAddress) agentVaultIdToAgentVaultAddress;

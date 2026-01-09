@@ -3,6 +3,8 @@ pragma solidity ^0.8.27;
 
 library XrplProviderWallets {
 
+
+   /// @custom:storage-location erc8042:smartAccounts.XrplProviderWallets.State
     struct State {
         /// @notice XRPL provider wallet addresses
         string[] xrplProviderWallets;

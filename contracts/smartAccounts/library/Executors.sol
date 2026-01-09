@@ -5,6 +5,7 @@ import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 
 library Executors {
 
+    /// @custom:storage-location erc8042:smartAccounts.Executors.State
     struct State {
         /// @notice The mint and redeem executor.
         address payable executor;

@@ -8,7 +8,7 @@
     "url": "git+https://gitlab.com/flarenetwork/smart-accounts/flare-smart-accounts.git"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "author": "Flare SC team",
   "license": "MIT",
