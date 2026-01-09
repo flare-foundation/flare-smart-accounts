@@ -13,7 +13,8 @@ contract MyERC4626 is ERC4626 {
 
     /// @notice The duration of the time-lock for withdrawals (in seconds).
     uint256 public lagDuration;
-
+    /// @notice The total amount of assets pending withdrawal across all periods.
+    uint256 public assetsPendingWithdraw;
     mapping(address receiverAddr => mapping(uint256 period => uint256 assets)) public pendingWithdrawAssets;
     mapping(address receiverAddr => mapping(uint256 period => uint256 shares)) public pendingWithdrawShares;
     mapping(address receiverAddr => mapping(uint256 period => uint256 timestamp)) public requestTimestamps;
@@ -133,6 +134,14 @@ contract MyERC4626 is ERC4626 {
         lagDuration = _lagDuration;
     }
 
+    /**
+     * @notice Returns the total assets in the vault excluding those marked for withdrawal.
+     * @return The total assets held by the vault.
+     */
+    function totalAssets() public view override returns (uint256) {
+        return super.totalAssets() - assetsPendingWithdraw;
+    }
+
     function _withdraw(
         address _caller,
         address _receiver,
@@ -150,6 +159,7 @@ contract MyERC4626 is ERC4626 {
         (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
         uint256 period = _getPeriodFromDate(year, month, day);
 
+        assetsPendingWithdraw += _assets;
         pendingWithdrawAssets[_receiver][period] += _assets;
         pendingWithdrawShares[_receiver][period] += _shares;
         requestTimestamps[_receiver][period] = block.timestamp;
@@ -170,6 +180,7 @@ contract MyERC4626 is ERC4626 {
         _shares = pendingWithdrawShares[_receiverAddr][_period];
         require(_shares > 0, NoPendingWithdrawShares());
         _requestTs = requestTimestamps[_receiverAddr][_period];
+        assetsPendingWithdraw -= _assets;
         delete pendingWithdrawAssets[_receiverAddr][_period];
         delete pendingWithdrawShares[_receiverAddr][_period];
         delete requestTimestamps[_receiverAddr][_period];
