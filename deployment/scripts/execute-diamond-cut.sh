@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: scripts/deploy-cuts.sh <network> <cut-json>
-# Example: scripts/deploy-cuts.sh coston2 cut-test.json
+# Usage: scripts/deploy-cuts.sh <network> <cut-json-file-name-without-extension>
+# Example: scripts/deploy-cuts.sh coston2 cut-example
 
 if [[ $# -ne 2 ]]; then
-  echo "Usage: $0 <network> <cut-json>" >&2
+  echo "Usage: $0 <network> <cut-json-file-name-without-extension>" >&2
   exit 2
 fi
 

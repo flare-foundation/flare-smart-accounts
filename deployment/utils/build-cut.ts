@@ -13,6 +13,20 @@ import {
 
 const web3 = new Web3();
 
+interface CutConfig {
+  diamond: string;
+  facets: string[];
+  deleteAllOldMethods?: boolean;
+  deleteSelectorSigs?: string[];
+  init?: {
+    contract: string;
+    method: string;
+    args: unknown[];
+    calldata?: string;
+  };
+  execute?: boolean;
+}
+
 function main() {
   const a = parseArgs(process.argv);
   const diamond = a['diamond'];
@@ -40,9 +54,9 @@ function main() {
   });
 
   const rawCfg = fs.readFileSync(configPath, 'utf8');
-  const cfg = JSON.parse(rawCfg);
+  const cfg: CutConfig = JSON.parse(rawCfg) as CutConfig;
   const deleteAllOldMethods: boolean = !!cfg.deleteAllOldMethods;
-  const deleteSelectorSigs: string[] = Array.isArray(cfg.deleteSelectorSigs) ? cfg.deleteSelectorSigs.map((s: any) => String(s)) : [];
+  const deleteSelectorSigs: string[] = Array.isArray(cfg.deleteSelectorSigs) ? cfg.deleteSelectorSigs.map(String) : [];
   // init: read raw calldata if provided; otherwise build from contract+method+args
   let initAddress = '0x0000000000000000000000000000000000000000';
   let initCalldata = '0x';
@@ -54,15 +68,23 @@ function main() {
     } else if (init.contract && init.method) {
       const initContractName: string = String(init.contract);
       const method: string = String(init.method);
-      const argsArr: any[] = Array.isArray(init.args) ? init.args : [];
+      const argsArr: unknown[] = Array.isArray(init.args) ? init.args : [];
       // build calldata using ABI from artifacts
       const abi = loadAbi(initContractName);
-      const fn = abi.filter(i => i.type === 'function' && typeof (i as any).name === 'string').find(i => (i as any).name === method);
+      const fn = abi
+        .filter((i): i is AbiFunctionFragment => i.type === 'function' && typeof (i as AbiFunctionFragment).name === 'string')
+        .find(i => i.name === method);
       if (!fn) {
         throw new Error(`Init method ${method} not found in ${initContractName} ABI`);
       }
-      const inputsForEncoding = (fn.inputs || []).map((inp, idx) => ({ name: inp.name || `arg${idx}`, type: inp.type }));
-      initCalldata = web3.eth.abi.encodeFunctionCall({ name: method, type: 'function', inputs: inputsForEncoding as any }, argsArr);
+      const inputsForEncoding: AbiFunctionFragment['inputs'] = (fn.inputs || []).map((inp, idx) => ({
+        name: inp.name || `arg${idx}`,
+        type: inp.type,
+      }));
+      initCalldata = web3.eth.abi.encodeFunctionCall(
+        { name: method, type: 'function', inputs: inputsForEncoding },
+        argsArr
+      );
     }
   }
 
@@ -79,7 +101,7 @@ function main() {
   } as const;
 
   const encoded = web3.eth.abi.encodeParameters(
-    [facetCutType as any, 'address', 'bytes'],
+    [facetCutType, 'address', 'bytes'],
     [
       result.cuts.map(c => ({
         facetAddress: c.facetAddress,

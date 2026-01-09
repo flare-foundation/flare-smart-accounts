@@ -1,5 +1,5 @@
 import fs from 'fs';
-import Web3, { AbiItem } from 'web3';
+import Web3, { AbiFunctionFragment, AbiItem } from 'web3';
 import { DiamondSelectors, type DiamondCut } from "./diamond";
 
 const web3 = new Web3();
@@ -90,8 +90,15 @@ export function selectorsFromLoupeData(facets: Array<{ facetAddress: string; fun
 }
 
 // narrow to function fragments before encoding; avoids passing constructors/events
-export function isFunctionFragment(item: any): item is { type: string; name: string; inputs?: any[] } {
-  return typeof item === "object" && item?.type === "function" && typeof item?.name === "string";
+export function isFunctionFragment(item: unknown): item is AbiFunctionFragment {
+  return (
+    typeof item === "object" &&
+    item !== null &&
+    "type" in item &&
+    (item as { type?: string }).type === "function" &&
+    "name" in item &&
+    typeof (item as { name?: unknown }).name === "string"
+  );
 }
 
 export function toSelector(item: string | AbiItem) {
@@ -104,7 +111,7 @@ export function toSelector(item: string | AbiItem) {
 
 export function loadAbi(contractName: string): AbiItem[] {
   const raw = fs.readFileSync(`artifacts/${contractName}.sol/${contractName}.json`, 'utf8');
-  const parsed = JSON.parse(raw);
+  const parsed = JSON.parse(raw) as { abi: AbiItem[] };
   return parsed.abi;
 }
 

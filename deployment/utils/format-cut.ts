@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 import fs from 'fs';
-import Web3 from 'web3';
-import { parseArgs } from './prep-cut';
+import Web3, { AbiItem } from 'web3';
+import { isFunctionFragment, parseArgs } from './prep-cut';
 
-function resultToTuple(value: any): any {
+function resultToTuple(value: unknown): unknown {
   if (typeof value === "object" && value !== null) {
-    if (typeof value.isBN === "function" && value.isBN()) {
-      return value.ltn(1e9) ? Number(value) : value.toString();
+    if (typeof (value as { isBN?: () => boolean }).isBN === "function" && (value as { isBN: () => boolean }).isBN()) {
+      return (value as { ltn: (n: number) => boolean; toString: () => string }).ltn(1e9) ? Number(value) : (value as { toString: () => string }).toString();
     }
     if (Array.isArray(value)) {
       return value.map(resultToTuple);
     }
     const tuple = [];
     for (let i = 0; i in value; i++) {
-      tuple.push(resultToTuple(value[i]));
+      tuple.push(resultToTuple((value as Record<number, unknown>)[i]));
     }
     return tuple;
   }
@@ -40,13 +40,15 @@ const facetCutType = {
     { name: 'functionSelectors', type: 'bytes4[]' },
   ],
 } as const;
-const diamondCutAbi = JSON.parse(fs.readFileSync('artifacts/DiamondCutFacet.sol/DiamondCutFacet.json', 'utf8')).abi;
-const diamondCutFn = diamondCutAbi.find((f: any) => f.type === 'function' && f.name === 'diamondCut');
+
+const diamondCutArtifact = JSON.parse(fs.readFileSync('artifacts/DiamondCutFacet.sol/DiamondCutFacet.json', 'utf8')) as { abi: AbiItem[] };
+const diamondCutAbi = diamondCutArtifact.abi;
+
+const diamondCutFn = diamondCutAbi.find(isFunctionFragment);
 
 if (diamondCutFn) {
-  const params = diamondCutFn.inputs;
   const decoded = web3.eth.abi.decodeParameters(
-    [facetCutType as any, 'address', 'bytes'],
+    [facetCutType, 'address', 'bytes'],
     encoded
   );
   const tupleOut = resultToTuple([decoded[0], decoded[1], decoded[2]]);

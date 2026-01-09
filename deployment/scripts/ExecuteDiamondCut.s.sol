@@ -65,7 +65,7 @@ contract ExecuteDiamondCut is Script {
         vm.startBroadcast();
         for (uint256 i = 0; i < facetNames.length; i++) {
             // check deployed facets; if bytecode matches, reuse; else deploy new
-            address candidate = _findDeployedAddressFromFile("deployment/deploys/coston2.json", facetNames[i]);
+            address candidate = _findDeployedAddressFromFile(deployedContractsFile, facetNames[i]);
             string memory artifactPath = string.concat("artifacts/", facetNames[i], ".sol/", facetNames[i], ".json");
             console2.log("Checking facet:", facetNames[i], "candidate address:", candidate);
             if (_deployedCodeMatches(candidate, artifactPath)) {
@@ -74,10 +74,19 @@ contract ExecuteDiamondCut is Script {
             } else {
                 console2.log("Deploying facet:", facetNames[i]);
                 facetAddrs[i] = _deployFacet(facetNames[i]);
+                // if executing update facet address in deploys file
+                // otherwise do it manually after manual execution
+                if (execute) {
+                    _updateAddressInFile(
+                        deployedContractsFile,
+                        facetNames[i],
+                        facetAddrs[i]
+                    );
+                }
             }
         }
 
-        // f init contract (facet) is not already included in facets (it should be) deploy it separately
+        // if init contract (facet) is not already included in facets (it should be) deploy it separately
         address initAddr = address(0);
         string memory initName = abi.decode(json.parseRaw(".init.contract"), (string));
         if (bytes(initName).length > 0) {
@@ -91,12 +100,21 @@ contract ExecuteDiamondCut is Script {
             }
             if (!foundInFacets) {
                 // try reuse from deploys if code matches; else deploy from artifact
-                address candidate = _findDeployedAddressFromFile("deployment/deploys/coston2.json", initName);
+                address candidate = _findDeployedAddressFromFile(deployedContractsFile, initName);
                 string memory artifactPath = string.concat("artifacts/", initName, ".sol/", initName, ".json");
                 if (_deployedCodeMatches(candidate, artifactPath)) {
                     initAddr = candidate;
                 } else {
                     initAddr = _deployFacet(initName);
+                    // if executing update facet address in deploys file
+                    // otherwise do it manually after manual execution
+                    if (execute) {
+                        _updateAddressInFile(
+                            deployedContractsFile,
+                            initName,
+                            initAddr
+                        );
+                    }
                 }
             }
         }
@@ -250,6 +268,23 @@ contract ExecuteDiamondCut is Script {
         vm.writeFile(_path, data);
     }
 
+    function _updateAddressInFile(
+        string memory _contractsFilePath,
+        string memory _facetName,
+        address _facetAddress
+    )
+        internal
+    {
+        string[] memory cmd = new string[](6);
+        cmd[0] = "npx";
+        cmd[1] = "tsx";
+        cmd[2] = "deployment/utils/update-facet-address.ts";
+        cmd[3] = _contractsFilePath;
+        cmd[4] = _facetName;
+        cmd[5] = _addrToString(_facetAddress);
+        vm.ffi(cmd);
+    }
+
     function _deployFacet(
         string memory _name
     )
@@ -258,14 +293,13 @@ contract ExecuteDiamondCut is Script {
     {
         // try deploy from compiled artifact bytecode
         string memory artifactPath = string.concat("artifacts/", _name, ".sol/", _name, ".json");
-        bytes memory creation;
         // vm.getCode may revert on unlinked bytecode; it should not happen here
         bytes memory byteCode = vm.getCode(artifactPath);
 
-        if (creation.length > 0) {
+        if (byteCode.length > 0) {
             //solhint-disable-next-line no-inline-assembly
             assembly {
-                _deployed := create(0, add(creation, 0x20), mload(byteCode))
+                _deployed := create(0, add(byteCode, 0x20), mload(byteCode))
                 if iszero(_deployed) { revert(0, 0) }
             }
             return _deployed;
@@ -356,13 +390,13 @@ contract ExecuteDiamondCut is Script {
     }
 
     function _stringEq(
-        string memory a,
-        string memory b
+        string memory _a,
+        string memory _b
     )
         internal pure
         returns (bool)
     {
-        return keccak256(bytes(a)) == keccak256(bytes(b));
+        return keccak256(bytes(_a)) == keccak256(bytes(_b));
     }
 
     function _toHex(bytes4 _selector) internal pure returns (string memory) {
@@ -376,12 +410,12 @@ contract ExecuteDiamondCut is Script {
         return string(str);
     }
 
-    function _toHexBytes(bytes memory data) internal pure returns (string memory) {
+    function _toHexBytes(bytes memory _data) internal pure returns (string memory) {
         bytes memory hexChars = "0123456789abcdef";
-        bytes memory str = new bytes(data.length * 2);
-        for (uint256 i = 0; i < data.length; i++) {
-            str[i * 2] = hexChars[uint8(data[i] >> 4)];
-            str[i * 2 + 1] = hexChars[uint8(data[i] & 0x0f)];
+        bytes memory str = new bytes(_data.length * 2);
+        for (uint256 i = 0; i < _data.length; i++) {
+            str[i * 2] = hexChars[uint8(_data[i] >> 4)];
+            str[i * 2 + 1] = hexChars[uint8(_data[i] & 0x0f)];
         }
         return string(str);
     }
