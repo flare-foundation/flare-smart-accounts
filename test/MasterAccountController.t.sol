@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.27;
 
-import {Test,console2} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 import {MasterAccountController} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {IIMasterAccountController} from "../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
@@ -2277,27 +2277,35 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             address(usdt0),
             wNatUsdt0PoolFeeTierPPM,
             usdt0FXrpPoolFeeTierPPM,
-            maxSlippagePPM
+            maxSlippagePPM,
+            USDT_USD_FEED_ID,
+            FLR_USD_FEED_ID
         );
         masterAccountController.setSwapParams(
             address(uniswapV3Router),
             address(usdt0),
             wNatUsdt0PoolFeeTierPPM,
             usdt0FXrpPoolFeeTierPPM,
-            maxSlippagePPM
+            maxSlippagePPM,
+            USDT_USD_FEED_ID,
+            FLR_USD_FEED_ID
         );
         (
             address returnedRouter,
             address returnedUsdt0,
-            uint24 returnedWnatusdtFee,
+            uint24 returnedWnatUsdt0Fee,
             uint24 returnedUsdt0fxrpFee,
-            uint24 returnedMaxSlippage
+            uint24 returnedMaxSlippage,
+            bytes21 returnedStableCoinUsdFeedId,
+            bytes21 returnedWNatUsdFeedId
         ) = masterAccountController.getSwapParams();
         assertEq(returnedRouter, address(uniswapV3Router));
         assertEq(returnedUsdt0, address(usdt0));
-        assertEq(returnedWnatusdtFee, wNatUsdt0PoolFeeTierPPM);
+        assertEq(returnedWnatUsdt0Fee, wNatUsdt0PoolFeeTierPPM);
         assertEq(returnedUsdt0fxrpFee, usdt0FXrpPoolFeeTierPPM);
         assertEq(returnedMaxSlippage, maxSlippagePPM);
+        assertEq(returnedStableCoinUsdFeedId, USDT_USD_FEED_ID);
+        assertEq(returnedWNatUsdFeedId, FLR_USD_FEED_ID);
     }
 
     function testSetSwapParamsRevertOnlyOwner() public {
@@ -2313,7 +2321,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             makeAddr("usdt0"),
             500,
             3000,
-            100
+            100,
+            USDT_USD_FEED_ID,
+            FLR_USD_FEED_ID
         );
     }
 
@@ -2325,7 +2335,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             makeAddr("usdt0"),
             500,
             3000,
-            100
+            100,
+            USDT_USD_FEED_ID,
+            FLR_USD_FEED_ID
         );
     }
 
@@ -2337,7 +2349,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             makeAddr("usdt0"),
             200,
             3000,
-            100
+            100,
+            USDT_USD_FEED_ID,
+            FLR_USD_FEED_ID
         );
     }
 
@@ -2349,19 +2363,23 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             makeAddr("usdt0"),
             500,
             7000,
-            100
+            100,
+            USDT_USD_FEED_ID,
+            FLR_USD_FEED_ID
         );
     }
 
-    function testSwapParamsRevertInvalidUsdt0() public {
-        vm.expectRevert(ISwapFacet.InvalidUsdt0.selector);
+    function testSwapParamsRevertInvalidStableCoin() public {
+        vm.expectRevert(ISwapFacet.InvalidStableCoin.selector);
         vm.prank(governance);
         masterAccountController.setSwapParams(
             makeAddr("router"),
             address(0),
             500,
             3000,
-            100
+            100,
+            USDT_USD_FEED_ID,
+            FLR_USD_FEED_ID
         );
     }
 
@@ -2373,7 +2391,35 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             makeAddr("usdt0"),
             500,
             3000,
-            1e6 + 1
+            1e6 + 1,
+            USDT_USD_FEED_ID,
+            FLR_USD_FEED_ID
+        );
+    }
+
+    function testSwapParamsRevertInvalidFeedId() public {
+        vm.expectRevert(ISwapFacet.InvalidFeedId.selector);
+        vm.prank(governance);
+        masterAccountController.setSwapParams(
+            makeAddr("router"),
+            makeAddr("usdt0"),
+            500,
+            3000,
+            100,
+            bytes21(0),
+            FLR_USD_FEED_ID
+        );
+
+        vm.expectRevert(ISwapFacet.InvalidFeedId.selector);
+        vm.prank(governance);
+        masterAccountController.setSwapParams(
+            makeAddr("router"),
+            makeAddr("usdt0"),
+            500,
+            3000,
+            100,
+            USDT_USD_FEED_ID,
+            bytes21(0)
         );
     }
 
@@ -2453,7 +2499,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
-    function testSwapWNatForUsdt0() public {
+    function testSwapWNatForStableCoin() public {
         testSetSwapParams();
         uint256 amountTokenIn = 1e20; // 100 WNat
         uint256 amountTokenOut = 1e8; // 100 USDT0
@@ -2489,7 +2535,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             amountTokenIn,
             amountOut
         );
-        masterAccountController.swapWNatForUsdt0(xrplAddress1);
+        masterAccountController.swapWNatForStableCoin(xrplAddress1);
         assertEq(
             wNatMock.balanceOf(personalAccountAddr),
             0
@@ -2512,7 +2558,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
     }
 
-    function testSwapWNatForUsdt0RevertTooLittleReceived() public {
+    function testSwapWNatForStableCoinRevertTooLittleReceived() public {
         testSetSwapParams();
         uint256 amountTokenIn = 1e20; // 100 WNat
         uint256 amountTokenOut = 1e8; // 100 USDT0
@@ -2532,23 +2578,23 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         wNatMock.mint(personalAccountAddr, amountTokenIn); // 100 WNat in personal account
         usdt0.mint(address(uniswapV3Router), amountTokenOut); // 100 USDT0 liquidity in router
         vm.expectRevert(MockUniswapV3Router.TooLittleReceived.selector);
-        masterAccountController.swapWNatForUsdt0(xrplAddress1);
+        masterAccountController.swapWNatForStableCoin(xrplAddress1);
     }
 
-    function testSwapWNatForUsdt0RevertSwapDisabled() public {
+    function testSwapWNatForStableCoinRevertSwapDisabled() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         vm.expectRevert(UniswapV3.SwapDisabled.selector, personalAccountAddr);
-        masterAccountController.swapWNatForUsdt0(xrplAddress1);
+        masterAccountController.swapWNatForStableCoin(xrplAddress1);
     }
 
-    function testSwapWNatForUsdt0RevertAmountInZero() public {
+    function testSwapWNatForStableCoinRevertAmountInZero() public {
         testSetSwapParams();
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         vm.expectRevert(UniswapV3.AmountInZero.selector, personalAccountAddr);
-        masterAccountController.swapWNatForUsdt0(xrplAddress1);
+        masterAccountController.swapWNatForStableCoin(xrplAddress1);
     }
 
-    function testSwapUsdt0ForFAsset() public {
+    function testSwapStableCoinForFAsset() public {
         testSetSwapParams();
         uint256 amountTokenIn = 1e8; // 100 USDT0
         uint256 amountTokenOut = 1e8; // 100 FXRP
@@ -2584,7 +2630,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             amountTokenIn,
             amountOut
         );
-        masterAccountController.swapUsdt0ForFAsset(xrplAddress1);
+        masterAccountController.swapStableCoinForFAsset(xrplAddress1);
         assertEq(
             usdt0.balanceOf(personalAccountAddr),
             0
@@ -2607,7 +2653,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
     }
 
-    function testSwapUsdt0ForFassetRevertTooLittleReceived() public {
+    function testSwapStableCoinForFassetRevertTooLittleReceived() public {
         testSetSwapParams();
         uint256 amountTokenIn = 1e8; // 100 USDT0
         uint256 amountTokenOut = 1e8; // 100 FXRP
@@ -2627,20 +2673,20 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         usdt0.mint(personalAccountAddr, amountTokenIn); // 100 USDT0 in personal account
         fxrp.mint(address(uniswapV3Router), amountTokenOut); // 100 FXRP liquidity in router
         vm.expectRevert(MockUniswapV3Router.TooLittleReceived.selector);
-        masterAccountController.swapUsdt0ForFAsset(xrplAddress1);
+        masterAccountController.swapStableCoinForFAsset(xrplAddress1);
     }
 
-    function testSwapUsdt0ForFassetRevertSwapDisabled() public {
+    function testSwapStableCoinForFassetRevertSwapDisabled() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         vm.expectRevert(UniswapV3.SwapDisabled.selector, personalAccountAddr);
-        masterAccountController.swapUsdt0ForFAsset(xrplAddress1);
+        masterAccountController.swapStableCoinForFAsset(xrplAddress1);
     }
 
-    function testSwapUsdt0ForFassetRevertAmountInZero() public {
+    function testSwapStableCoinForFassetRevertAmountInZero() public {
         testSetSwapParams();
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         vm.expectRevert(UniswapV3.AmountInZero.selector, personalAccountAddr);
-        masterAccountController.swapUsdt0ForFAsset(xrplAddress1);
+        masterAccountController.swapStableCoinForFAsset(xrplAddress1);
     }
 
     function testSetTimelockDuration() public {

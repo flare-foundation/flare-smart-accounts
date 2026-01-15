@@ -9,7 +9,6 @@ import {IIInstructionsFacet} from "../interface/IIInstructionsFacet.sol";
 // import is needed for @inheritdoc
 // solhint-disable-next-line no-unused-import
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
-import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
 import {PaymentProofs} from "../library/PaymentProofs.sol";
 import {FXrp} from "../library/FXrp.sol";

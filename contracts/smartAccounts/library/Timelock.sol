@@ -18,17 +18,6 @@ library Timelock {
 
     bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Timelock.State");
 
-    function getState()
-        internal pure
-        returns (State storage _state)
-    {
-        bytes32 position = STATE_POSITION;
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            _state.slot := position
-        }
-    }
-
     function beforeExecute() internal {
         State storage state = getState();
         if (state.executing) {
@@ -59,5 +48,16 @@ library Timelock {
 
     function checkOnlyOwner() internal view {
         LibDiamond.enforceIsContractOwner();
+    }
+
+    function getState()
+        internal pure
+        returns (State storage _state)
+    {
+        bytes32 position = STATE_POSITION;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            _state.slot := position
+        }
     }
 }

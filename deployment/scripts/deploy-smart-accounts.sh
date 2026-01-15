@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: scripts/deploy-cuts.sh <network> <fullDeploy:boolean>
-# Example: scripts/deploy-cuts.sh coston2 false
+# Usage: scripts/deploy-smart-accounts.sh <network> <fullDeploy:boolean>
+# Example: scripts/deploy-smart-accounts.sh coston2 false
 
 if [[ $# -ne 2 ]]; then
   echo "Usage: $0 <network> <fullDeploy:boolean>" >&2

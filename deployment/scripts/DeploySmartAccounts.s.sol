@@ -45,9 +45,11 @@ contract DeploySmartAccounts is Script {
         string[] xrplProviderWallets;
         address uniswapV3Router;
         address usdt0;
-        uint24 wNatUsdt0PoolFeeTierPPM;
-        uint24 usdt0FXrpPoolFeeTierPPM;
+        uint24 wNatStableCoinPoolFeeTierPPM;
+        uint24 stableCoinFXrpPoolFeeTierPPM;
         uint24 maxSlippagePPM;
+        bytes21 stableCoinUsdFeedId;
+        bytes21 wNatUsdFeedId;
         uint256 timelockDurationSeconds;
     }
 
@@ -107,9 +109,11 @@ contract DeploySmartAccounts is Script {
         params.xrplProviderWallets = vm.parseJsonStringArray(config, ".xrplProviderWallets");
         params.uniswapV3Router = vm.parseJsonAddress(config, ".uniswapV3Router");
         params.usdt0 = vm.parseJsonAddress(config, ".usdt0");
-        params.wNatUsdt0PoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".wNatUsdt0PoolFeeTierPPM"));
-        params.usdt0FXrpPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".usdt0FXrpPoolFeeTierPPM"));
+        params.wNatStableCoinPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".wNatStableCoinPoolFeeTierPPM"));
+        params.stableCoinFXrpPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".stableCoinFXrpPoolFeeTierPPM"));
         params.maxSlippagePPM = uint24(vm.parseJsonUint(config, ".maxSlippagePPM"));
+        params.stableCoinUsdFeedId = bytes21(vm.parseJsonBytes(config, ".stableCoinUsdFeedId"));
+        params.wNatUsdFeedId = bytes21(vm.parseJsonBytes(config, ".wNatUsdFeedId"));
         params.timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
 
         // if initial owner not set in config, use deployer address - for testing purposes
@@ -286,9 +290,11 @@ contract DeploySmartAccounts is Script {
                 masterAccountController.setSwapParams(
                     params.uniswapV3Router,
                     params.usdt0,
-                    params.wNatUsdt0PoolFeeTierPPM,
-                    params.usdt0FXrpPoolFeeTierPPM,
-                    params.maxSlippagePPM
+                    params.wNatStableCoinPoolFeeTierPPM,
+                    params.stableCoinFXrpPoolFeeTierPPM,
+                    params.maxSlippagePPM,
+                    params.stableCoinUsdFeedId,
+                    params.wNatUsdFeedId
                 );
             } else {
                 console2.log("Swap parameters not set, swap is disabled");

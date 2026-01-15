@@ -16,15 +16,11 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
  */
 contract SwapFacet is IISwapFacet, ReentrancyGuard, FacetBase {
 
-    /// @notice FLR/USD feed IDs for price oracles
-    bytes21 private constant FLR_USD_FEED_ID = 0x01464c522f55534400000000000000000000000000;
-    /// @notice USDT/USD feed IDs for price oracles
-    bytes21 private constant USDT_USD_FEED_ID = 0x01555344542f555344000000000000000000000000;
     /// @notice XRP/USD feed IDs for price oracles
     bytes21 private constant XRP_USD_FEED_ID = 0x015852502f55534400000000000000000000000000;
 
     /// @inheritdoc ISwapFacet
-    function swapWNatForUsdt0(
+    function swapWNatForStableCoin(
         string calldata _xrplAddress
     )
         external nonReentrant
@@ -32,19 +28,20 @@ contract SwapFacet is IISwapFacet, ReentrancyGuard, FacetBase {
         Swap.State storage state = Swap.getState();
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
         address tokenIn = address(ContractRegistry.getWNat());
+        address tokenOut = state.stableCoin;
         (uint256 amountIn, uint256 amountOut) = personalAccount.executeSwap(
             state.uniswapV3Router,
             tokenIn,
-            FLR_USD_FEED_ID,
-            state.usdt0,
-            USDT_USD_FEED_ID,
-            state.wNatUsdt0PoolFeeTierPPM,
+            state.wNatUsdFeedId,
+            tokenOut,
+            state.stableCoinUsdFeedId,
+            state.wNatStableCoinPoolFeeTierPPM,
             state.maxSlippagePPM
         );
         emit SwapExecuted(
             address(personalAccount),
             tokenIn,
-            state.usdt0,
+            tokenOut,
             _xrplAddress,
             amountIn,
             amountOut
@@ -52,26 +49,27 @@ contract SwapFacet is IISwapFacet, ReentrancyGuard, FacetBase {
     }
 
     /// @inheritdoc ISwapFacet
-    function swapUsdt0ForFAsset(
+    function swapStableCoinForFAsset(
         string calldata _xrplAddress
     )
         external nonReentrant
     {
         Swap.State storage state = Swap.getState();
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
+        address tokenIn = state.stableCoin;
         address tokenOut = address(ContractRegistry.getAssetManagerFXRP().fAsset());
         (uint256 amountIn, uint256 amountOut) = personalAccount.executeSwap(
             state.uniswapV3Router,
-            state.usdt0,
-            USDT_USD_FEED_ID,
+            tokenIn,
+            state.stableCoinUsdFeedId,
             tokenOut,
             XRP_USD_FEED_ID,
-            state.usdt0FXrpPoolFeeTierPPM,
+            state.stableCoinFXrpPoolFeeTierPPM,
             state.maxSlippagePPM
         );
         emit SwapExecuted(
             address(personalAccount),
-            state.usdt0,
+            tokenIn,
             tokenOut,
             _xrplAddress,
             amountIn,
@@ -82,33 +80,41 @@ contract SwapFacet is IISwapFacet, ReentrancyGuard, FacetBase {
     /// @inheritdoc IISwapFacet
     function setSwapParams(
         address _uniswapV3Router,
-        address _usdt0,
-        uint24 _wNatUsdt0PoolFeeTierPPM,
-        uint24 _usdt0FXrpPoolFeeTierPPM,
-        uint24 _maxSlippagePPM
+        address _stableCoin,
+        uint24 _wNatStableCoinPoolFeeTierPPM,
+        uint24 _stableCoinFXrpPoolFeeTierPPM,
+        uint24 _maxSlippagePPM,
+        bytes21 _stableCoinUsdFeedId,
+        bytes21 _wNatUsdFeedId
     )
         external
         onlyOwnerWithTimelock
     {
         require(_uniswapV3Router != address(0), InvalidUniswapV3Router());
-        require(_usdt0 != address(0), InvalidUsdt0());
+        require(_stableCoin != address(0), InvalidStableCoin());
         require(
-            _isPoolFeeTierPPMValid(_wNatUsdt0PoolFeeTierPPM) && _isPoolFeeTierPPMValid(_usdt0FXrpPoolFeeTierPPM),
+            _isPoolFeeTierPPMValid(_wNatStableCoinPoolFeeTierPPM) &&
+            _isPoolFeeTierPPMValid(_stableCoinFXrpPoolFeeTierPPM),
             InvalidPoolFeeTierPPM()
         );
         require(_maxSlippagePPM <= 1e6, InvalidMaxSlippagePPM());
+        require(_stableCoinUsdFeedId != bytes21(0) && _wNatUsdFeedId != bytes21(0), InvalidFeedId());
         Swap.State storage state = Swap.getState();
         state.uniswapV3Router = _uniswapV3Router;
-        state.usdt0 = _usdt0;
-        state.wNatUsdt0PoolFeeTierPPM = _wNatUsdt0PoolFeeTierPPM;
-        state.usdt0FXrpPoolFeeTierPPM = _usdt0FXrpPoolFeeTierPPM;
+        state.stableCoin = _stableCoin;
+        state.wNatStableCoinPoolFeeTierPPM = _wNatStableCoinPoolFeeTierPPM;
+        state.stableCoinFXrpPoolFeeTierPPM = _stableCoinFXrpPoolFeeTierPPM;
         state.maxSlippagePPM = _maxSlippagePPM;
+        state.stableCoinUsdFeedId = _stableCoinUsdFeedId;
+        state.wNatUsdFeedId = _wNatUsdFeedId;
         emit SwapParamsSet(
             _uniswapV3Router,
-            _usdt0,
-            _wNatUsdt0PoolFeeTierPPM,
-            _usdt0FXrpPoolFeeTierPPM,
-            _maxSlippagePPM
+            _stableCoin,
+            _wNatStableCoinPoolFeeTierPPM,
+            _stableCoinFXrpPoolFeeTierPPM,
+            _maxSlippagePPM,
+            _stableCoinUsdFeedId,
+            _wNatUsdFeedId
         );
     }
 
@@ -117,18 +123,22 @@ contract SwapFacet is IISwapFacet, ReentrancyGuard, FacetBase {
         external view
         returns (
             address _uniswapV3Router,
-            address _usdt0,
-            uint24 _wNatUsdt0PoolFeeTierPPM,
-            uint24 _usdt0FXrpPoolFeeTierPPM,
-            uint24 _maxSlippagePPM
+            address _stableCoin,
+            uint24 _wNatStableCoinPoolFeeTierPPM,
+            uint24 _stableCoinFXrpPoolFeeTierPPM,
+            uint24 _maxSlippagePPM,
+            bytes21 _stableCoinUsdFeedId,
+            bytes21 _wNatUsdFeedId
         )
     {
         Swap.State storage state = Swap.getState();
         _uniswapV3Router = state.uniswapV3Router;
-        _usdt0 = state.usdt0;
-        _wNatUsdt0PoolFeeTierPPM = state.wNatUsdt0PoolFeeTierPPM;
-        _usdt0FXrpPoolFeeTierPPM = state.usdt0FXrpPoolFeeTierPPM;
+        _stableCoin = state.stableCoin;
+        _wNatStableCoinPoolFeeTierPPM = state.wNatStableCoinPoolFeeTierPPM;
+        _stableCoinFXrpPoolFeeTierPPM = state.stableCoinFXrpPoolFeeTierPPM;
         _maxSlippagePPM = state.maxSlippagePPM;
+        _stableCoinUsdFeedId = state.stableCoinUsdFeedId;
+        _wNatUsdFeedId = state.wNatUsdFeedId;
     }
 
     function _isPoolFeeTierPPMValid(uint24 _poolFeeTierPPM) internal pure returns (bool) {
