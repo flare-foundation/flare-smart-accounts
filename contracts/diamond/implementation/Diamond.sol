@@ -8,6 +8,9 @@ pragma solidity ^0.8.0;
 * Implementation of a diamond.
 /******************************************************************************/
 
+// solhint-disable ordering
+// solhint-disable no-inline-assembly
+
 import { LibDiamond } from "../libraries/LibDiamond.sol";
 import { IDiamondCut } from "../interfaces/IDiamondCut.sol";
 
@@ -23,7 +26,6 @@ struct DiamondArgs {
     bytes initCalldata;
 }
 
-// solhint-disable no-inline-assembly
 contract Diamond {
 
     constructor(IDiamondCut.FacetCut[] memory _diamondCut, DiamondArgs memory _args) payable {

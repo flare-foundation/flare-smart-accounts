@@ -13,6 +13,7 @@ import { IDiamondLoupe } from "../interfaces/IDiamondLoupe.sol";
 import { IERC165 } from "../interfaces/IERC165.sol";
 
 // solhint-disable no-inline-assembly
+// solhint-disable ordering
 contract DiamondLoupeFacet is IDiamondLoupe, IERC165 {
     // Diamond Loupe Functions
     ////////////////////////////////////////////////////////////////////

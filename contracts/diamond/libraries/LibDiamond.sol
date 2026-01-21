@@ -28,9 +28,10 @@ error CannotRemoveImmutableFunction(bytes4 _selector);
 error InitializationFunctionReverted(address _initializationContractAddress, bytes _calldata);
 
 // solhint-disable no-inline-assembly
+// solhint-disable ordering
 library LibDiamond {
     bytes32 internal constant DIAMOND_STORAGE_POSITION = keccak256(
-        abi.encode(uint256(keccak256("diamond.standard.diamond.storage")) - 1)) & ~bytes32(uint256(0xff)
+        abi.encode(uint256(keccak256("smartAccounts.LibDiamond.DiamondStorage")) - 1)) & ~bytes32(uint256(0xff)
     );
 
     struct FacetAddressAndSelectorPosition {
@@ -39,7 +40,7 @@ library LibDiamond {
     }
 
 
-    /// @custom:storage-location erc7201:diamond.standard.diamond.storage
+    /// @custom:storage-location erc7201:smartAccounts.LibDiamond.DiamondStorage
     struct DiamondStorage {
         // function selector => facet address and selector position in selectors array
         mapping(bytes4 => FacetAddressAndSelectorPosition) facetAddressAndSelectorPosition;
