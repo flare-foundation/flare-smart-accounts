@@ -112,7 +112,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
 
         // execute deposit
         address vault = Vaults.getVaultAddress(paymentReference);
-        Vault.deposit(personalAccount, vault, amount);
+        Vault.deposit(personalAccount, instructionType, vault, amount); // instructionType == vaultType
 
         // emit event
         emit InstructionExecuted(

@@ -8,12 +8,13 @@ library Vault {
 
     function deposit(
         IIPersonalAccount _personalAccount,
+        uint256 _vaultType,
         address _vault,
         uint256 _amount
     )
         internal
     {
-        uint256 shares = _personalAccount.deposit(_vault, _amount);
+        uint256 shares = _personalAccount.deposit(_vaultType, _vault, _amount);
         emit IInstructionsFacet.Deposited(
             address(_personalAccount),
             _vault,
@@ -62,13 +63,16 @@ library Vault {
     )
         internal
     {
-        (uint256 amount, uint256 claimableEpoch) = _personalAccount.requestRedeem(_vault, _shares);
+        (uint256 claimableEpoch, uint256 year, uint256 month, uint256 day) =
+            _personalAccount.requestRedeem(_vault, _shares);
         emit IInstructionsFacet.RedeemRequested(
             address(_personalAccount),
             _vault,
             _shares,
-            amount,
-            claimableEpoch
+            claimableEpoch,
+            year,
+            month,
+            day
         );
     }
 

@@ -1353,8 +1353,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             personalAccountAddr,
             address(upshiftVault),
             100,
-            100,
-            claimableEpoch
+            claimableEpoch,
+            year,
+            month,
+            day
         );
         vm.expectEmit();
         emit IInstructionsFacet.InstructionExecuted(

@@ -54,11 +54,13 @@ interface IIPersonalAccount is IPersonalAccount {
 
     /**
      * @notice Deposit assets into the vault.
+     * @param _vaultType The type of the vault (1: Firelight, 2: Upshift).
      * @param _vault Vault address.
      * @param _assets The amount of assets to deposit.
      * @return _shares The received shares.
      */
     function deposit(
+        uint256 _vaultType,
         address _vault,
         uint256 _assets
     )
@@ -95,15 +97,17 @@ interface IIPersonalAccount is IPersonalAccount {
      * @notice Request redemption of shares from the vault.
      * @param _vault Vault address.
      * @param _shares Number of shares to redeem.
-     * @return _assets The amount of assets to be redeemed.
      * @return _claimableEpoch The epoch when the assets can be claimed.
+     * @return _year The year of the claimable date.
+     * @return _month The month of the claimable date.
+     * @return _day The day of the claimable date.
      */
     function requestRedeem(
         address _vault,
         uint256 _shares
     )
         external
-        returns (uint256 _assets, uint256 _claimableEpoch);
+        returns (uint256 _claimableEpoch, uint256 _year, uint256 _month, uint256 _day);
 
     /**
      * @notice Claim requested redeemed shares for a specific date from the vault.

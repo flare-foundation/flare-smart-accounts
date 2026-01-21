@@ -19,6 +19,14 @@ contract MyERC4626 is ERC4626 {
     mapping(address receiverAddr => mapping(uint256 period => uint256 shares)) public pendingWithdrawShares;
     mapping(address receiverAddr => mapping(uint256 period => uint256 timestamp)) public requestTimestamps;
 
+    event Deposit(
+        address assetIn,
+        uint256 amountIn,
+        uint256 shares,
+        address indexed senderAddr,
+        address indexed receiverAddr
+    );
+
     event WithdrawRequest(
         address indexed sender,
         address indexed receiver,
@@ -35,28 +43,22 @@ contract MyERC4626 is ERC4626 {
     );
 
     event WithdrawalRequested(
-        address ownerAddr,
-        address receiverAddr,
         uint256 shares,
-        uint256 assets,
-        uint256 fee,
-        uint256 year,
-        uint256 month,
-        uint256 day
+        address indexed holderAddr,
+        address indexed receiverAddr
     );
 
     event WithdrawalProcessed(
         uint256 assetsAmount,
-        uint256 processedOn,
-        address receiverAddr,
-        uint256 requestedOn,
-        bool wasBlacklisted
+        address indexed receiverAddr
     );
 
+    error InvalidAsset();
     error NoPendingWithdrawAssets();
     error NoPendingWithdrawShares();
     error InvalidPeriod();
     error TooEarly();
+    error LagDurationZero();
 
     /// @notice constructor
     /// @param baseAsset_ base asset address - FXRP
@@ -84,26 +86,34 @@ contract MyERC4626 is ERC4626 {
         emit CompleteWithdraw(msg.sender, _assets, _period);
     }
 
+    /// upshift vault - multi asset deposit
+    function deposit(
+        address _assetIn,
+        uint256 _amountIn,
+        address _receiverAddr
+    )
+        public
+        returns (uint256 _shares)
+    {
+        require(_assetIn == asset(), InvalidAsset());
+        _shares = super.deposit(_amountIn, _receiverAddr);
+        emit Deposit(_assetIn, _amountIn, _shares, msg.sender, _receiverAddr);
+    }
+
     /// upshift vault - using requestRedeem + claim
     function requestRedeem(
         uint256 _shares,
-        address _receiver,
-        address _owner
+        address _receiver
     )
         public
-        returns (uint256 _assets, uint256 _claimableEpoch)
+        returns (uint256 _claimableEpoch, uint256 _year, uint256 _month, uint256 _day)
     {
-        _assets = redeem(_shares, _receiver, _owner);
+        redeem(_shares, _receiver, msg.sender);
         // The time slot (cluster) of the lagged withdrawal
-        (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
+        (_year, _month, _day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
 
         // The withdrawal will be processed at the following epoch
-        _claimableEpoch = DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0);
-
-        if (lagDuration == 0) {
-            _claimableEpoch = block.timestamp;
-            claim(year, month, day, _receiver);
-        }
+        _claimableEpoch = DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0);
     }
 
     function claim(
@@ -115,22 +125,21 @@ contract MyERC4626 is ERC4626 {
         public
         returns (uint256 _shares, uint256 _assets)
     {
-        if (lagDuration > 0) {
-            // Make sure withdrawals are processed at the expected epoch only.
-            require(
-                block.timestamp >= DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0),
-                TooEarly()
-            );
-        }
+        // Make sure withdrawals are processed at the expected epoch only.
+        require(
+            block.timestamp >= DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0),
+            TooEarly()
+        );
         uint256 period = _getPeriodFromDate(_year, _month, _day);
         uint256 requestTs;
         (_shares, _assets, requestTs) = _completeWithdraw(_receiverAddr, period);
-        emit WithdrawalProcessed(_assets, block.timestamp, _receiverAddr, requestTs, false);
+        emit WithdrawalProcessed(_assets, _receiverAddr);
     }
 
     /// @notice Sets the lag duration for withdrawals.
     /// @param _lagDuration The new lag duration in seconds.
     function setLagDuration(uint256 _lagDuration) public {
+        require(_lagDuration > 0, LagDurationZero());
         lagDuration = _lagDuration;
     }
 
@@ -142,6 +151,61 @@ contract MyERC4626 is ERC4626 {
         return super.totalAssets() - assetsPendingWithdraw;
     }
 
+    ////////////////////////// upshift specific functions //////////////////////////
+    /**
+     * @notice Gets the total number of shares to burn at the date specified for a given receiver.
+     * @dev This is a forecast on the amount of assets that can be claimed by a given party on the date specified.
+     * @param _year The year.
+     * @param _month The month.
+     * @param _day The day.
+     * @param _receiverAddr The address of the receiver.
+     * @return _shares The total number of shares to burn at the date specified for a given receiver.
+     */
+    function getBurnableAmountByReceiver(
+        uint256 _year,
+        uint256 _month,
+        uint256 _day,
+        address _receiverAddr
+    ) external view returns (uint256 _shares) {
+        uint256 period = _getPeriodFromDate(_year, _month, _day);
+        _shares = pendingWithdrawShares[_receiverAddr][period];
+    }
+
+    /**
+     * @notice Previews the deposit of a whitelisted asset.
+     * @param _assetIn The asset to deposit
+     * @param _amountIn The deposit amount
+     * @return _shares The equivalent number of shares
+     * @return _amountInReferenceTokens The deposit amount expressed in reference tokens
+     */
+    function previewDeposit(
+        address _assetIn,
+        uint256 _amountIn
+    ) external view returns (uint256 _shares, uint256 _amountInReferenceTokens) {
+        require(_assetIn == asset(), InvalidAsset());
+        _shares = super.previewDeposit(_amountIn);
+        _amountInReferenceTokens = _amountIn;
+    }
+
+    /**
+     * @notice Previews a redemption.
+     * @param _shares The number of shares to redeem.
+     * @param _isInstant Indicates whether the redemption is lagged or instant.
+     * @return _assetsAmount The withdrawal amount without any applicable fees.
+     * @return _assetsAfterFee The effective withdrawal amount.
+     */
+    function previewRedemption(
+        uint256 _shares,
+        bool _isInstant //solhint-disable no-unused-vars
+    ) external view returns (
+        uint256 _assetsAmount,
+        uint256 _assetsAfterFee
+    ) {
+        _assetsAmount = super.previewRedeem(_shares);
+        _assetsAfterFee = _assetsAmount;
+    }
+
+    ////////////////////////// internal methods //////////////////////////
     function _withdraw(
         address _caller,
         address _receiver,
@@ -165,7 +229,7 @@ contract MyERC4626 is ERC4626 {
         requestTimestamps[_receiver][period] = block.timestamp;
 
         emit WithdrawRequest(_caller, _receiver, _owner, period, _assets, _shares);
-        emit WithdrawalRequested(_owner, _receiver, _shares, _assets, 0, year, month, day);
+        emit WithdrawalRequested(_shares, _owner, _receiver);
     }
 
     function _completeWithdraw(

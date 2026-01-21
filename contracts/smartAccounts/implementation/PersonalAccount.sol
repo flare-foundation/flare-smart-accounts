@@ -131,6 +131,7 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
 
     /// @inheritdoc IIPersonalAccount
     function deposit(
+        uint256 _vaultType,
         address _vault,
         uint256 _assets
     )
@@ -138,11 +139,16 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
         onlyController nonReentrant
         returns (uint256 _shares)
     {
+        assert(_vaultType == 1 || _vaultType == 2); // 1: Firelight, 2: Upshift
         IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
         require(fxrp.approve(_vault, _assets), ApprovalFailed());
         emit Approved(address(fxrp), _vault, _assets);
 
-        _shares = IIVault(_vault).deposit(_assets, address(this));
+        if (_vaultType == 1) {
+            _shares = IIVault(_vault).deposit(_assets, address(this));
+        } else {
+            _shares = IIVault(_vault).deposit(address(fxrp), _assets, address(this));
+        }
         emit Deposited(_vault, _assets, _shares);
     }
 
@@ -183,14 +189,13 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
     )
         external
         onlyController nonReentrant
-        returns (uint256 _assets, uint256 _claimableEpoch)
+        returns (uint256 _claimableEpoch, uint256 _year, uint256 _month, uint256 _day)
     {
-        (_assets, _claimableEpoch) = IIVault(_vault).requestRedeem(
+        (_claimableEpoch, _year, _month, _day) = IIVault(_vault).requestRedeem(
             _shares,
-            address(this),
             address(this)
         );
-        emit RedeemRequested(_vault, _shares, _assets, _claimableEpoch);
+        emit RedeemRequested(_vault, _shares, _claimableEpoch, _year, _month, _day);
     }
 
     /// @inheritdoc IIPersonalAccount

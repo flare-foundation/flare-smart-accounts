@@ -40,7 +40,7 @@ library Instructions {
         } else if ((_instructionType == 1 || _instructionType == 2) && _instructionCommand == 1) { // deposit
             uint256 amount = PaymentReferenceParser.getValue(_paymentReference);
             address vault = Vaults.getVaultAddress(_paymentReference);
-            Vault.deposit(_personalAccount, vault, amount);
+            Vault.deposit(_personalAccount, _instructionType, vault, amount); // instructionType == vaultType
         } else if (_instructionType == 1 && _instructionCommand == 2) { // redeem
             address vault = Vaults.getVaultAddress(_paymentReference);
             uint256 shares = PaymentReferenceParser.getValue(_paymentReference);

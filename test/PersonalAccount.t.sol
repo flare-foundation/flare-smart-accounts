@@ -211,6 +211,7 @@ contract PersonalAccountTest is Test {
     function testDepositRevertOnlyController() public {
         vm.expectRevert(IPersonalAccount.OnlyController.selector);
         personalAccount.deposit(
+            1,
             depositVault,
             100
         );
@@ -222,12 +223,13 @@ contract PersonalAccountTest is Test {
         vm.prank(controller);
         vm.expectRevert(IPersonalAccount.ApprovalFailed.selector);
         personalAccount.deposit(
+            1,
             depositVault,
             0
         );
     }
 
-    function testDeposit() public {
+    function testDeposit1() public {
         uint256 assets = 500;
         uint256 shares = 501;
         _mockApprove(true);
@@ -236,7 +238,7 @@ contract PersonalAccountTest is Test {
         vm.mockCall(
             depositVault,
             abi.encodeWithSelector(
-                IIVault.deposit.selector
+                bytes4(keccak256("deposit(uint256,address)"))
             ),
             abi.encode(shares)
         );
@@ -255,6 +257,42 @@ contract PersonalAccountTest is Test {
             shares
         );
         uint256 returnedShares = personalAccount.deposit(
+            1,
+            depositVault,
+            assets
+        );
+        assertEq(returnedShares, shares);
+    }
+
+    function testDeposit2() public {
+        uint256 assets = 500;
+        uint256 shares = 501;
+        _mockApprove(true);
+        _mockAsset();
+
+        vm.mockCall(
+            depositVault,
+            abi.encodeWithSelector(
+                bytes4(keccak256("deposit(address,uint256,address)"))
+            ),
+            abi.encode(shares)
+        );
+
+        vm.prank(controller);
+        vm.expectEmit();
+        emit IPersonalAccount.Approved(
+            fxrp,
+            depositVault,
+            assets
+        );
+        vm.expectEmit();
+        emit IPersonalAccount.Deposited(
+            depositVault,
+            assets,
+            shares
+        );
+        uint256 returnedShares = personalAccount.deposit(
+            2,
             depositVault,
             assets
         );
@@ -340,15 +378,17 @@ contract PersonalAccountTest is Test {
 
     function testRequestRedeem() public {
         uint256 shares = 500;
-        uint256 assets = 600;
         uint256 claimableEpoch = 42;
+        uint256 year = 2024;
+        uint256 month = 1;
+        uint256 day = 1;
 
         vm.mockCall(
             depositVault,
             abi.encodeWithSelector(
                 IIVault.requestRedeem.selector
             ),
-            abi.encode(assets, claimableEpoch)
+            abi.encode(claimableEpoch, year, month, day)
         );
 
         vm.prank(controller);
@@ -356,15 +396,20 @@ contract PersonalAccountTest is Test {
         emit IPersonalAccount.RedeemRequested(
             depositVault,
             shares,
-            assets,
-            claimableEpoch
+            claimableEpoch,
+            year,
+            month,
+            day
         );
-        (uint256 returnedAssets, uint256 returnedClaimableEpoch) = personalAccount.requestRedeem(
-            depositVault,
-            shares
-        );
-        assertEq(returnedAssets, assets);
+        (uint256 returnedClaimableEpoch, uint256 returnedYear, uint256 returnedMonth, uint256 returnedDay) =
+            personalAccount.requestRedeem(
+                depositVault,
+                shares
+            );
         assertEq(returnedClaimableEpoch, claimableEpoch);
+        assertEq(returnedYear, year);
+        assertEq(returnedMonth, month);
+        assertEq(returnedDay, day);
     }
 
     function testClaimRevertOnlyController() public {

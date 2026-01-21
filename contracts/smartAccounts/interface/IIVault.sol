@@ -4,7 +4,7 @@ pragma solidity >=0.7.6 <0.9;
 // ERC4626-compatible vault
 interface IIVault {
 
-    // Firelight and Upshift
+    // Firelight
     function deposit(
         uint256 _assets,
         address _receiver
@@ -29,13 +29,21 @@ interface IIVault {
         returns (uint256 _assets);
 
     // Upshift
-    function requestRedeem(
-        uint256 _shares,
-        address _receiverAddr,
-        address _holderAddr
+    function deposit(
+        address _assetIn,
+        uint256 _amountIn,
+        address _receiverAddr
     )
         external
-        returns (uint256 _assets, uint256 _claimableEpoch);
+        returns (uint256 _shares);
+
+    // Upshift
+    function requestRedeem(
+        uint256 _shares,
+        address _receiverAddr
+    )
+        external
+        returns (uint256 _claimableEpoch, uint256 _year, uint256 _month, uint256 _day);
 
     // Upshift
     function claim(
@@ -45,6 +53,6 @@ interface IIVault {
         address _receiverAddr
     )
         external
-        returns (uint256 _shares, uint256 _assets);
+        returns (uint256 _shares, uint256 _assetsAfterFee);
 
 }
