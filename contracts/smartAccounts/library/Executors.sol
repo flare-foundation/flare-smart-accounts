@@ -5,7 +5,7 @@ import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 
 library Executors {
 
-    /// @custom:storage-location erc8042:smartAccounts.Executors.State
+    /// @custom:storage-location erc7201:smartAccounts.Executors.State
     struct State {
         /// @notice The mint and redeem executor.
         address payable executor;
@@ -13,7 +13,9 @@ library Executors {
         uint256 executorFee;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Executors.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.Executors.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     function setExecutor(
         address payable _executor

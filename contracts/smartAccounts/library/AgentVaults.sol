@@ -6,7 +6,7 @@ import {PaymentReferenceParser} from "./PaymentReferenceParser.sol";
 
 library AgentVaults {
 
-    /// @custom:storage-location erc8042:smartAccounts.AgentVaults.State
+    /// @custom:storage-location erc7201:smartAccounts.AgentVaults.State
     struct State {
         /// @notice Mapping from agent vault ID to agent vault address
         mapping(uint256 agentVaultId => address agentVaultAddress) agentVaultIdToAgentVaultAddress;
@@ -16,7 +16,9 @@ library AgentVaults {
         uint256[] agentVaultIds;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.AgentVaults.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.AgentVaults.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     function getAgentVaultAddress(bytes32 _paymentReference) internal view returns (address _agentVault) {
         uint256 agentVaultId = PaymentReferenceParser.getAgentVaultId(_paymentReference);

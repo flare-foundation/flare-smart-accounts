@@ -29,7 +29,10 @@ error InitializationFunctionReverted(address _initializationContractAddress, byt
 
 // solhint-disable no-inline-assembly
 library LibDiamond {
-    bytes32 internal constant DIAMOND_STORAGE_POSITION = keccak256("diamond.standard.diamond.storage");
+    bytes32 internal constant DIAMOND_STORAGE_POSITION = keccak256(
+        abi.encode(
+        uint256(keccak256("diamond.standard.diamond.storage")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     struct FacetAddressAndSelectorPosition {
         address facetAddress;
@@ -37,7 +40,7 @@ library LibDiamond {
     }
 
 
-    /// @custom:storage-location erc8042:diamond.standard.diamond.storage
+    /// @custom:storage-location erc7201:diamond.standard.diamond.storage
     struct DiamondStorage {
         // function selector => facet address and selector position in selectors array
         mapping(bytes4 => FacetAddressAndSelectorPosition) facetAddressAndSelectorPosition;

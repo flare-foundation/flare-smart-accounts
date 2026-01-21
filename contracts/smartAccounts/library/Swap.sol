@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 library Swap {
 
-    /// @custom:storage-location erc8042:smartAccounts.Swap.State
+    /// @custom:storage-location erc7201:smartAccounts.Swap.State
     struct State {
         /// @notice Uniswap V3 router address
         address uniswapV3Router;
@@ -21,7 +21,9 @@ library Swap {
         bytes21 wNatUsdFeedId;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Swap.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.Swap.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     function getState()
         internal pure

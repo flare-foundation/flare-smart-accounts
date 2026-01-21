@@ -9,7 +9,7 @@ import {IPersonalAccountsFacet} from "../../userInterfaces/facets/IPersonalAccou
 
 library PersonalAccounts {
 
-    /// @custom:storage-location erc8042:smartAccounts.PersonalAccounts.State
+    /// @custom:storage-location erc7201:smartAccounts.PersonalAccounts.State
     struct State {
         /// @notice PersonalAccount implementation used by BeaconProxy PA instances via IBeacon
         address personalAccountImplementation;
@@ -17,7 +17,9 @@ library PersonalAccounts {
         mapping(string xrplAddress => IIPersonalAccount) personalAccounts;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.PersonalAccounts.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.PersonalAccounts.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     /// @notice EIP-2470 Singleton Factory address used as the CREATE2 deployer
     address internal constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;

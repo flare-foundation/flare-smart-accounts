@@ -10,7 +10,7 @@ import {PaymentReferenceParser} from "./PaymentReferenceParser.sol";
 
 library Instructions {
 
-    /// @custom:storage-location erc8042:smartAccounts.Instructions.State
+    /// @custom:storage-location erc7201:smartAccounts.Instructions.State
     struct State {
         /// @notice Indicates if transaction has already been executed.
         mapping(bytes32 transactionId => bool) usedTransactionIds;
@@ -18,7 +18,9 @@ library Instructions {
         mapping(uint256 collateralReservationId => bytes32 transactionId) collateralReservationIdToTransactionId;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Instructions.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.Instructions.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     function executeInstruction(
         uint256 _instructionType,

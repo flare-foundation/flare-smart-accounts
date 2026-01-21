@@ -15,7 +15,7 @@ library Vaults {
         uint8 vaultType;
     }
 
-    /// @custom:storage-location erc8042:smartAccounts.Vaults.State
+    /// @custom:storage-location erc7201:smartAccounts.Vaults.State
     struct State {
         /// @notice Mapping from vault ID to vault information
         mapping(uint256 vaultId => VaultInfo vaultInfo) vaultIdToVaultInfo;
@@ -25,7 +25,9 @@ library Vaults {
         uint256[] vaultIds;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Vaults.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.Vaults.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     function getVaultAddress(bytes32 _paymentReference) internal view returns (address _vault) {
         uint256 vaultId = PaymentReferenceParser.getVaultId(_paymentReference);

@@ -8,7 +8,7 @@ import {IPaymentProofsFacet} from "../../userInterfaces/facets/IPaymentProofsFac
 
 library PaymentProofs {
 
-    /// @custom:storage-location erc8042:smartAccounts.PaymentProofs.State
+    /// @custom:storage-location erc7201:smartAccounts.PaymentProofs.State
     struct State {
         /// @notice Source ID used for payment verification
         bytes32 sourceId;
@@ -16,7 +16,9 @@ library PaymentProofs {
         uint256 paymentProofValidityDurationSeconds;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.PaymentProofs.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.PaymentProofs.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     function setSourceId(
         bytes32 _sourceId

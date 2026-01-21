@@ -5,7 +5,7 @@ import {IInstructionFeesFacet} from "../../userInterfaces/facets/IInstructionFee
 
 library InstructionFees {
 
-    /// @custom:storage-location erc8042:smartAccounts.InstructionFees.State
+    /// @custom:storage-location erc7201:smartAccounts.InstructionFees.State
     struct State {
         /// @notice Default fee for instruction execution in underlying asset's smallest unit (drops for XRP)
         uint256 defaultInstructionFee;
@@ -13,7 +13,9 @@ library InstructionFees {
         mapping(uint256 instructionId => uint256 fee) instructionFees;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.InstructionFees.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.InstructionFees.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     function setDefaultInstructionFee(
         uint256 _defaultInstructionFee

@@ -6,7 +6,7 @@ import {ITimelockFacet} from "../../userInterfaces/facets/ITimelockFacet.sol";
 
 library Timelock {
 
-    /// @custom:storage-location erc8042:smartAccounts.Timelock.State
+    /// @custom:storage-location erc7201:smartAccounts.Timelock.State
     struct State {
         // execution lock
         bool executing;
@@ -16,7 +16,9 @@ library Timelock {
         mapping(bytes32 encodedCallHash => uint256 allowedAfterTimestamp) timelockedCalls;
     }
 
-    bytes32 internal constant STATE_POSITION = keccak256("smartAccounts.Timelock.State");
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.Timelock.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
 
     function beforeExecute() internal {
         State storage state = getState();
