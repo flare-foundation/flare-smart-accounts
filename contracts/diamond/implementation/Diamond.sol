@@ -8,8 +8,8 @@ pragma solidity ^0.8.0;
 * Implementation of a diamond.
 /******************************************************************************/
 
-// solhint-disable ordering
 // solhint-disable no-inline-assembly
+// solhint-disable ordering
 
 import { LibDiamond } from "../libraries/LibDiamond.sol";
 import { IDiamondCut } from "../interfaces/IDiamondCut.sol";
