@@ -11,6 +11,8 @@ import {DateUtils} from "./DateUtils.sol";
 /// @notice This is the vault that is used by MasterAccountController contract only for demo purposes.
 contract MyERC4626 is ERC4626 {
 
+    uint256 public constant PERIOD_DURATION = 1 days;
+
     /// @notice The duration of the time-lock for withdrawals (in seconds).
     uint256 public lagDuration;
     /// @notice The total amount of assets pending withdrawal across all periods.
@@ -151,6 +153,39 @@ contract MyERC4626 is ERC4626 {
         return super.totalAssets() - assetsPendingWithdraw;
     }
 
+    ////////////////////////// firelight specific functions //////////////////////////
+
+    struct PeriodConfiguration {
+        uint48 epoch;
+        uint48 duration;
+        uint256 startingPeriod;
+    }
+
+    /**
+     * @notice Returns the period configuration for the current period.
+     * @return _periodConfig The period configuration corresponding to the current period.
+     */
+    function currentPeriodConfiguration()
+        public view
+        returns (PeriodConfiguration memory _periodConfig)
+    {
+        _periodConfig.epoch = 0;
+        _periodConfig.duration = uint48(PERIOD_DURATION);
+        _periodConfig.startingPeriod = 0;
+    }
+
+    /**
+     * @notice Returns the current active period.
+     * @return The current period number since contract deployment.
+     */
+    function currentPeriod()
+        public view
+        returns (uint256)
+    {
+        (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp);
+        return _getPeriodFromDate(year, month, day);
+    }
+
     ////////////////////////// upshift specific functions //////////////////////////
     /**
      * @notice Gets the total number of shares to burn at the date specified for a given receiver.
@@ -166,7 +201,10 @@ contract MyERC4626 is ERC4626 {
         uint256 _month,
         uint256 _day,
         address _receiverAddr
-    ) external view returns (uint256 _shares) {
+    )
+        external view
+        returns (uint256 _shares)
+    {
         uint256 period = _getPeriodFromDate(_year, _month, _day);
         _shares = pendingWithdrawShares[_receiverAddr][period];
     }
@@ -181,7 +219,10 @@ contract MyERC4626 is ERC4626 {
     function previewDeposit(
         address _assetIn,
         uint256 _amountIn
-    ) external view returns (uint256 _shares, uint256 _amountInReferenceTokens) {
+    )
+        external view
+        returns (uint256 _shares, uint256 _amountInReferenceTokens)
+    {
         require(_assetIn == asset(), InvalidAsset());
         _shares = super.previewDeposit(_amountIn);
         _amountInReferenceTokens = _amountIn;
@@ -197,10 +238,10 @@ contract MyERC4626 is ERC4626 {
     function previewRedemption(
         uint256 _shares,
         bool _isInstant //solhint-disable no-unused-vars
-    ) external view returns (
-        uint256 _assetsAmount,
-        uint256 _assetsAfterFee
-    ) {
+    )
+        external view
+        returns (uint256 _assetsAmount, uint256 _assetsAfterFee)
+    {
         _assetsAmount = super.previewRedeem(_shares);
         _assetsAfterFee = _assetsAmount;
     }
@@ -260,6 +301,6 @@ contract MyERC4626 is ERC4626 {
         pure
         returns (uint256)
     {
-        return DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0) / 1 days;
+        return DateUtils.timestampFromDateTime(year, month, day, 0, 0, 0) / PERIOD_DURATION;
     }
 }
