@@ -45,18 +45,6 @@ contract ExecuteDiamondCut is Script {
 
         address diamond = abi.decode(json.parseRaw(".diamond"), (address));
         string[] memory facetNames = abi.decode(json.parseRaw(".facets"), (string[]));
-        // optional list of selector signatures to delete
-        string[] memory deleteSelectorSigs = new string[](0);
-        bytes memory rawDelete = json.parseRaw(".deleteSelectorSigs");
-        if (rawDelete.length > 0) {
-            deleteSelectorSigs = abi.decode(rawDelete, (string[]));
-        }
-        // optional flag to delete all previously existing selectors on diamond
-        bool deleteAllOldMethods = false;
-        bytes memory rawDeleteAll = json.parseRaw(".deleteAllOldMethods");
-        if (rawDeleteAll.length > 0) {
-            deleteAllOldMethods = abi.decode(rawDeleteAll, (bool));
-        }
 
         address[] memory facetAddrs = new address[](facetNames.length);
         // deploy facets
@@ -72,22 +60,23 @@ contract ExecuteDiamondCut is Script {
             } else {
                 console2.log("Deploying facet:", facetNames[i]);
                 facetAddrs[i] = _deployFacet(facetNames[i]);
-                // if executing update facet address in deploys file
-                // otherwise do it manually after manual execution
-                if (execute) {
-                    _updateAddressInFile(
-                        deployedContractsFile,
-                        facetNames[i],
-                        facetAddrs[i]
-                    );
-                }
+                // always update facet address in deploys file
+                _updateAddressInFile(
+                    deployedContractsFile,
+                    facetNames[i],
+                    facetAddrs[i]
+                );
             }
         }
 
         // if init contract (facet) is not already included in facets (it should be) deploy it separately
         address initAddr = address(0);
-        string memory initName = abi.decode(json.parseRaw(".init.contract"), (string));
-        if (bytes(initName).length > 0) {
+        bytes memory rawInit = json.parseRaw(".init");
+        if (rawInit.length > 0) {
+            bytes memory rawInitName = json.parseRaw(".init.contract");
+            require(rawInitName.length > 0, "init.contract is required if init object exists");
+            string memory initName = abi.decode(rawInitName, (string));
+            require(bytes(initName).length > 0, "init.contract cannot be empty");
             bool foundInFacets = false;
             for (uint256 i = 0; i < facetNames.length; i++) {
                 if (_stringEq(facetNames[i], initName)) {
@@ -104,15 +93,12 @@ contract ExecuteDiamondCut is Script {
                     initAddr = candidate;
                 } else {
                     initAddr = _deployFacet(initName);
-                    // if executing update facet address in deploys file
-                    // otherwise do it manually after manual execution
-                    if (execute) {
-                        _updateAddressInFile(
-                            deployedContractsFile,
-                            initName,
-                            initAddr
-                        );
-                    }
+                    // always update facet address in deploys file
+                    _updateAddressInFile(
+                        deployedContractsFile,
+                        initName,
+                        initAddr
+                    );
                 }
             }
         }
@@ -138,6 +124,13 @@ contract ExecuteDiamondCut is Script {
     )
         internal
     {
+        // Create output directory if it doesn't exist
+        string[] memory mkdirCmd = new string[](3);
+        mkdirCmd[0] = "mkdir";
+        mkdirCmd[1] = "-p";
+        mkdirCmd[2] = string.concat("deployment/output-internal/", network);
+        vm.ffi(mkdirCmd);
+
         // 1. read facets from diamond loupe
         IDiamondLoupe.Facet[] memory loupeFacets = IDiamondLoupe(_diamond).facets();
         // 2. write minimal text inputs for TS script
