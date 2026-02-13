@@ -342,9 +342,10 @@ contract DeploySmartAccounts is Script {
             );
         }
 
-        if (params.governance == address(0)) {
-            console2.log("Governance address is zero, skipping ownership transfer");
-        } else {
+        if (params.governance == address(0) || params.initialOwner != deployer) {
+            console2.log("Governance address is zero or initial owner is not deployer, skipping ownership transfer");
+        }
+        else {
             console2.log("Transferring ownership to governance");
             masterAccountController.transferOwnership(params.governance);
         }
