@@ -10,8 +10,7 @@
     "SwapFacet",
     "TimelockFacet",
     "VaultsFacet",
-    "XrplProviderWalletsFacet",
-    "CustomInstructionsFacet"
+    "XrplProviderWalletsFacet"
   ],
   "deleteAllOldMethods": false,
   "deleteSelectorSigs": [],
