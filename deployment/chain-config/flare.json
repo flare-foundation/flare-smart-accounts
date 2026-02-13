@@ -52,7 +52,7 @@
 
   ],
   "xrplProviderWallets": ["rM2LEysS4isvAJkZFfxKDL5z4aTfWcBTXV"],
-  "uniswapV3Router": "",
+  "uniswapV3Router": "0x5FD34090E9b195d8482Ad3CC63dB078534F1b113",
   "usdt0": "0x5FD34090E9b195d8482Ad3CC63dB078534F1b113",
   "wNatStableCoinPoolFeeTierPPM": 3000,
   "stableCoinFXrpPoolFeeTierPPM": 3000,
