@@ -20,7 +20,7 @@
     }
   ],
   "executor": "0x02954e158Be2b477E1C26F31e8AA0c21b378445C",
-  "executorFee": "10_000_000_000_000_000_000",
+  "executorFee": "10000000000000000000",
   "sourceId": "XRP",
   "paymentProofValidityDurationSeconds": 7200,
   "defaultInstructionFee": 500000,
