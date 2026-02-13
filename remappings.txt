@@ -3,3 +3,6 @@
 @uniswap/v3-periphery/=dependencies/@uniswap-v3-periphery-1.4.4/
 flare-periphery/=dependencies/flare-periphery-0.1.38/
 forge-std/=dependencies/forge-std-1.10.0/src/
+@layerzerolabs/oft-evm/=dependencies/@layerzerolabs-oft-evm-4.0.1/
+@layerzerolabs/lz-evm-protocol-v2/=dependencies/@layerzerolabs-lz-evm-protocol-v2-3.0.159/
+@openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.5.0/
