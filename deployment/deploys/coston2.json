@@ -2,76 +2,86 @@
   {
     "name": "DiamondCutFacet",
     "contractName": "DiamondCutFacet.sol",
-    "address": "0x88317934EEdc66D8380BBBE98fC5462D8475845d"
+    "address": "0xbBfDC00D4a230eB2cBf2623f8ca67C23D31E094D"
   },
   {
     "name": "DiamondLoupeFacet",
     "contractName": "DiamondLoupeFacet.sol",
-    "address": "0xB7F5f4dd19bEe3E07b0480Ed2687465B30945451"
+    "address": "0x39Da5ec984c0E5797E0BD24706Ab35F21EB065d1"
   },
   {
     "name": "OwnershipFacet",
     "contractName": "OwnershipFacet.sol",
-    "address": "0xb4CA99C102b648C481Ecff0e37C91a026192464B"
+    "address": "0x615eAdb82F2c3b84Ee4cd7ac5DefdF381d585978"
   },
   {
     "name": "AgentVaultsFacet",
     "contractName": "AgentVaultsFacet.sol",
-    "address": "0x234c89D6A01074E095777E8218a7BFC5E1175d77"
+    "address": "0x9C94d8d63cB56E73accD91BD9490AF9703B6b6f9"
   },
   {
     "name": "ExecutorsFacet",
     "contractName": "ExecutorsFacet.sol",
-    "address": "0x1F042fb178F4d79108C88A229a091cb9eed69cc8"
+    "address": "0x6bEe585497a9CDcD0Ec243bC34383B7313045A58"
   },
   {
     "name": "InstructionFeesFacet",
     "contractName": "InstructionFeesFacet.sol",
-    "address": "0x1a320441632b026043C411f0029e421ebC5C46d6"
+    "address": "0xC5b9F3837CaF0dcE827C1128EFf76294530e8063"
   },
   {
     "name": "InstructionsFacet",
     "contractName": "InstructionsFacet.sol",
-    "address": "0x74dcaa48Cde9813c2De9b1375Eda400dA776D0AF"
+    "address": "0x646597CB2c0690cB288CD64813Db19dC797FC2B8"
   },
   {
     "name": "PaymentProofsFacet",
     "contractName": "PaymentProofsFacet.sol",
-    "address": "0xb52D7777Ec48AC18c29676F247d36546c52F9677"
+    "address": "0x3212C8c04189D0fE38CEe16a46e020a7D4DB39c6"
   },
   {
     "name": "PersonalAccountsFacet",
     "contractName": "PersonalAccountsFacet.sol",
-    "address": "0x7E96e2204849279D617497fBF82C80AA5059d484"
+    "address": "0x2890D6338BECE8B47f5f69Bd948e8bC9EbbCd4Ba"
   },
   {
     "name": "SwapFacet",
     "contractName": "SwapFacet.sol",
-    "address": "0x993B9A665d82bdeB60F9b949334113C670Ab822f"
+    "address": "0xD9422B558523C1d8a8EFdE36Df0FEa3d10450021"
   },
   {
     "name": "TimelockFacet",
     "contractName": "TimelockFacet.sol",
-    "address": "0xd08FAff095bE59960E88CE203798a5E74A5E7745"
+    "address": "0x4c013Ae10D1C097F2bE3050f1BbDEB7143c1c82e"
   },
   {
     "name": "VaultsFacet",
     "contractName": "VaultsFacet.sol",
-    "address": "0x5B41EDbC518e567b3eC54d5c1d34e0E616CA5366"
+    "address": "0x1C56F0c852ea0db76ca329Ab12d5D3BeF1c89B6d"
   },
   {
     "name": "XrplProviderWalletsFacet",
     "contractName": "XrplProviderWalletsFacet.sol",
-    "address": "0x12f4d05c809C277080150108d7A88Eec205eD9E7"
+    "address": "0x88A9F95D04eF2Cb0b8af4767b971C2A5ef2505b8"
+  },
+  {
+    "name": "CustomInstructionsFacet",
+    "contractName": "CustomInstructionsFacet.sol",
+    "address": "0x5Ae243Ec72ee6098EE1a717a6b444f16b111EF6C"
+  },
+  {
+    "name": "MasterAccountControllerInit",
+    "contractName": "MasterAccountControllerInit.sol",
+    "address": "0xF7Dc642Ff9d85c0E3a1351FB752bF85F9f4F5C8F"
   },
   {
     "name": "MasterAccountController",
     "contractName": "MasterAccountController.sol",
-    "address": "0x3ab31E2d943d1E8F47B275605E50Ff107f2F8393"
+    "address": "0x434936d47503353f06750Db1A444DBDC5F0AD37c"
   },
   {
     "name": "PersonalAccountImplementation",
     "contractName": "PersonalAccount.sol",
-    "address": "0xaA9C1aCfE0d8A6Bb864e506f77e2dF6e236d2FC4"
+    "address": "0x99198dD36488d4c6b8Ec5FeB8f79e5a63FF618e5"
   }
 ]
