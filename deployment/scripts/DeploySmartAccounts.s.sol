@@ -9,7 +9,6 @@ import {DiamondArgs} from "../../contracts/diamond/implementation/Diamond.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {IIMasterAccountController} from "../../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
-import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
@@ -32,11 +31,22 @@ import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/Xrp
 // forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
 
 contract DeploySmartAccounts is Script {
+    struct AgentVaultConfig {
+        address agentVaultAddress;
+        uint256 agentVaultId;
+    }
+
+    struct VaultConfig {
+        uint256 vaultId;
+        address vaultAddress;
+        uint8 vaultType;
+    }
+
     struct MasterAccountControllerParams {
         address initialOwner;
         address governance;
-        address[] vaults;
-        uint256[] vaultTypes;
+        VaultConfig[] vaults;
+        AgentVaultConfig[] agentVaults;
         address executor;
         uint256 executorFee;
         bytes32 sourceId;
@@ -99,8 +109,8 @@ contract DeploySmartAccounts is Script {
         string memory config = vm.readFile(configFile);
         params.initialOwner = vm.parseJsonAddress(config, ".initialOwner");
         params.governance = vm.parseJsonAddress(config, ".governance");
-        params.vaults = vm.parseJsonAddressArray(config, ".vaults");
-        params.vaultTypes = vm.parseJsonUintArray(config, ".vaultTypes");
+        params.vaults = abi.decode(vm.parseJson(config, ".vaults"), (VaultConfig[]));
+        params.agentVaults = abi.decode(vm.parseJson(config, ".agentVaults"), (AgentVaultConfig[]));
         params.executor = vm.parseJsonAddress(config, ".executor");
         params.executorFee = vm.parseJsonUint(config, ".executorFee");
         params.sourceId = bytes32(bytes(vm.parseJsonString(config, ".sourceId")));
@@ -127,8 +137,8 @@ contract DeploySmartAccounts is Script {
         personalAccountImpl = new PersonalAccount();
         personalAccountImplAddress = address(personalAccountImpl);
 
-        // bytes32 salt = bytes32(0);
-        bytes32 salt = keccak256(abi.encodePacked("salt", block.timestamp)); // only for testing
+        bytes32 salt = bytes32(0);
+        // bytes32 salt = keccak256(abi.encodePacked("salt", block.timestamp)); // only for testing
         // deploy diamond cut, diamond loupe and ownership facets via EIP-2470 singleton factory using CREATE2
         // same address on all networks
         bytes memory bytecode = abi.encodePacked(
@@ -304,24 +314,24 @@ contract DeploySmartAccounts is Script {
             masterAccountController.addXrplProviderWallets(params.xrplProviderWallets);
 
             console2.log("Adding agent vaults");
-            // get available agent vaults and add them
-            (address[] memory agentVaultAddresses, ) =
-                ContractRegistry.getAssetManagerFXRP().getAvailableAgentsList(0, 10);
-            uint256[] memory agentVaultIds = new uint256[](agentVaultAddresses.length);
-            for (uint256 i = 0; i < agentVaultAddresses.length; i++) {
-                agentVaultIds[i] = i + 1; // agent vault IDs are 1-based
+            uint256[] memory agentVaultIds = new uint256[](params.agentVaults.length);
+            address[] memory agentVaultAddresses = new address[](params.agentVaults.length);
+            for (uint256 i = 0; i < params.agentVaults.length; i++) {
+                agentVaultIds[i] = params.agentVaults[i].agentVaultId;
+                agentVaultAddresses[i] = params.agentVaults[i].agentVaultAddress;
             }
             masterAccountController.addAgentVaults(agentVaultIds, agentVaultAddresses);
 
             console2.log("Adding vaults");
-            assert(params.vaults.length == params.vaultTypes.length);
             uint256[] memory vaultIds = new uint256[](params.vaults.length);
-            uint8[] memory vaultTypes = new uint8[](params.vaultTypes.length);
+            address[] memory vaultAddresses = new address[](params.vaults.length);
+            uint8[] memory vaultTypes = new uint8[](params.vaults.length);
             for (uint256 i = 0; i < params.vaults.length; i++) {
-                vaultIds[i] = i + 1; // vault IDs are 1-based
-                vaultTypes[i] = uint8(params.vaultTypes[i]);
+                vaultIds[i] = params.vaults[i].vaultId;
+                vaultAddresses[i] = params.vaults[i].vaultAddress;
+                vaultTypes[i] = params.vaults[i].vaultType;
             }
-            masterAccountController.addVaults(vaultIds, params.vaults, vaultTypes);
+            masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
 
             console2.log("Setting timelock duration");
             masterAccountController.setTimelockDuration(params.timelockDurationSeconds);
