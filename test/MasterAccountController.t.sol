@@ -638,6 +638,22 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
     }
 
+    function testReserveCollateralRevertAgentVaultIdZero() public {
+        bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 1000, 0);
+        bytes32 transactionId = bytes32("tx1");
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IAgentVaultsFacet.InvalidAgentVault.selector,
+                0
+            )
+        );
+        masterAccountController.reserveCollateral(
+            xrplAddress1,
+            paymentReference,
+            transactionId
+        );
+    }
+
     function testReserveCollateral() public {
         uint16 lots = 2;
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, lots, 1);
@@ -763,6 +779,33 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockVerifyPayment(true);
         _mockLotSize(100);
         vm.expectRevert(IInstructionsFacet.InvalidAmount.selector);
+        masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
+    }
+
+    function testExecuteDepositAfterMintingRevertVaultIdZero() public {
+        uint16 lots = 2;
+        uint256 lotSize = 100;
+        bytes32 paymentReference = _encodeFirelightPaymentReference(0, 0, lots, 1, 0);
+        address predictedAddress1 = masterAccountController.getPersonalAccount(xrplAddress1);
+        _mockCollateralReservationInfo(CollateralReservationInfo.Status.SUCCESSFUL, predictedAddress1, lots * lotSize);
+        bytes32 transactionId = bytes32("tx1");
+        testReserveCollateral();
+        IPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
+        proof.data.responseBody.standardPaymentReference = paymentReference;
+        proof.data.requestBody.transactionId = transactionId;
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.requestBody.transactionId = transactionId;
+        _mockVerifyPayment(true);
+        _mockLotSize(lotSize);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultsFacet.InvalidVaultId.selector,
+                0
+            )
+        );
         masterAccountController.executeDepositAfterMinting(22, proof, xrplAddress1);
     }
 

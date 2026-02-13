@@ -2,6 +2,8 @@
 pragma solidity ^0.8.27;
 
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
+import {IAgentVaultsFacet} from "../../userInterfaces/facets/IAgentVaultsFacet.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 
 // payment reference format (32 bytes):
 // instruction id consists of instruction type (4 bits) and instruction command (4 bits)
@@ -86,14 +88,16 @@ library PaymentReferenceParser {
         require(_value > 0, IInstructionsFacet.ValueZero());
     }
 
-    function getAgentVaultId(bytes32 _paymentReference) internal pure returns (uint256) {
+    function getAgentVaultId(bytes32 _paymentReference) internal pure returns (uint256 _agentVaultId) {
         // bytes 12-13: agent vault id
-        return (uint256(_paymentReference) >> 144) & ((uint256(1) << 16) - 1);
+        _agentVaultId = (uint256(_paymentReference) >> 144) & ((uint256(1) << 16) - 1);
+        require(_agentVaultId > 0, IAgentVaultsFacet.InvalidAgentVault(0));
     }
 
-    function getVaultId(bytes32 _paymentReference) internal pure returns (uint256) {
+    function getVaultId(bytes32 _paymentReference) internal pure returns (uint256 _vaultId) {
         // bytes 14-15: vault id
-        return (uint256(_paymentReference) >> 128) & ((uint256(1) << 16) - 1);
+        _vaultId = (uint256(_paymentReference) >> 128) & ((uint256(1) << 16) - 1);
+        require(_vaultId > 0, IVaultsFacet.InvalidVaultId(0));
     }
 
     function getAddress(bytes32 _paymentReference) internal pure returns (address _address) {
