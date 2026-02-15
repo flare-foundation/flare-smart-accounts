@@ -23,6 +23,7 @@ via_ir = true
 
 [dependencies]
 "@openzeppelin-contracts" = "5.5.0"
+"@openzeppelin-contracts-upgradeable" = "5.5.0"
 forge-std = "1.10.0"
 flare-periphery = "0.1.38"
 "@uniswap-v3-core" = "1.0.1"
