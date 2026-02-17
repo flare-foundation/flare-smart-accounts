@@ -55,4 +55,10 @@ interface IIVault {
         external
         returns (uint256 _shares, uint256 _assetsAfterFee);
 
+    // Upshift
+    function lpTokenAddress()
+        external
+        view
+        returns (address);
+
 }

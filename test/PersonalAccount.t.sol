@@ -391,6 +391,24 @@ contract PersonalAccountTest is Test {
             abi.encode(claimableEpoch, year, month, day)
         );
 
+        vm.mockCall(
+            depositVault,
+            abi.encodeWithSelector(
+                IIVault.lpTokenAddress.selector
+            ),
+            abi.encode(depositVault)
+        );
+
+        vm.mockCall(
+            depositVault,
+            abi.encodeWithSelector(
+                IERC20.approve.selector,
+                depositVault,
+                shares
+            ),
+            abi.encode(true)
+        );
+
         vm.prank(controller);
         vm.expectEmit();
         emit IPersonalAccount.RedeemRequested(

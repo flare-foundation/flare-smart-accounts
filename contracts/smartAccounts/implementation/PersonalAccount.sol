@@ -191,6 +191,9 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
         onlyController nonReentrant
         returns (uint256 _claimableEpoch, uint256 _year, uint256 _month, uint256 _day)
     {
+        address lpToken = IIVault(_vault).lpTokenAddress();
+        IERC20(lpToken).forceApprove(_vault, _shares);
+        emit Approved(lpToken, _vault, _shares);
         (_claimableEpoch, _year, _month, _day) = IIVault(_vault).requestRedeem(
             _shares,
             address(this)

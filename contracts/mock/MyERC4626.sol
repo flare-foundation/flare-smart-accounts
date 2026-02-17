@@ -5,6 +5,7 @@ import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.so
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {DateUtils} from "./DateUtils.sol";
 
 /// @title Vault
@@ -20,6 +21,9 @@ contract MyERC4626 is ERC4626 {
     mapping(address receiverAddr => mapping(uint256 period => uint256 assets)) public pendingWithdrawAssets;
     mapping(address receiverAddr => mapping(uint256 period => uint256 shares)) public pendingWithdrawShares;
     mapping(address receiverAddr => mapping(uint256 period => uint256 timestamp)) public requestTimestamps;
+    mapping(address receiverAddr => mapping(uint256 period => uint256 lag)) public pendingWithdrawLag;
+    mapping (uint256 period => address[] receivers) private uniqueReceivers;
+    mapping (address receiverAddr => mapping(uint256 period => uint256 index)) private receiverIndex;
 
     event Deposit(
         address assetIn,
@@ -61,6 +65,7 @@ contract MyERC4626 is ERC4626 {
     error InvalidPeriod();
     error TooEarly();
     error LagDurationZero();
+    error InvalidReceiver(address receiverAddr, uint256 period);
 
     /// @notice constructor
     /// @param baseAsset_ base asset address - FXRP
@@ -85,6 +90,7 @@ contract MyERC4626 is ERC4626 {
             InvalidPeriod()
         );
         (, _assets, ) = _completeWithdraw(msg.sender, _period);
+        _deleteReceiver(msg.sender, _period);
         emit CompleteWithdraw(msg.sender, _assets, _period);
     }
 
@@ -110,12 +116,18 @@ contract MyERC4626 is ERC4626 {
         public
         returns (uint256 _claimableEpoch, uint256 _year, uint256 _month, uint256 _day)
     {
-        redeem(_shares, _receiver, msg.sender);
+        // msg.sender is owner and receiver is the one who will claim later
+        this.redeem(_shares, _receiver, msg.sender);
         // The time slot (cluster) of the lagged withdrawal
         (_year, _month, _day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
 
         // The withdrawal will be processed at the following epoch
-        _claimableEpoch = DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0);
+        if (lagDuration < PERIOD_DURATION) {
+            // if lag duration is less than the period duration (1 day), claim is pending until the end of lag duration
+            _claimableEpoch = block.timestamp + lagDuration;
+        } else {
+            _claimableEpoch = DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0);
+        }
     }
 
     function claim(
@@ -133,9 +145,36 @@ contract MyERC4626 is ERC4626 {
             TooEarly()
         );
         uint256 period = _getPeriodFromDate(_year, _month, _day);
-        uint256 requestTs;
-        (_shares, _assets, requestTs) = _completeWithdraw(_receiverAddr, period);
+        _requireLagElapsed(_receiverAddr, period);
+        (_shares, _assets, ) = _completeWithdraw(_receiverAddr, period);
+        _deleteReceiver(_receiverAddr, period);
         emit WithdrawalProcessed(_assets, _receiverAddr);
+    }
+
+    function processAllClaimsByDate(
+        uint256 _year,
+        uint256 _month,
+        uint256 _day,
+        uint256 _maxLimit
+    )
+        public
+    {
+        require(
+            block.timestamp >= DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0),
+            TooEarly()
+        );
+        uint256 period = _getPeriodFromDate(_year, _month, _day);
+        uint256 length = uniqueReceivers[period].length;
+        uint256 size = Math.min(_maxLimit, length);
+
+        for (uint256 i = length; i > length - size; i--) {
+            address receiverAddr = uniqueReceivers[period][i - 1];
+            _requireLagElapsed(receiverAddr, period);
+            (uint256 _shares, , ) = _completeWithdraw(receiverAddr, period);
+            uniqueReceivers[period].pop();
+            delete receiverIndex[receiverAddr][period];
+            emit WithdrawalProcessed(_shares, receiverAddr);
+        }
     }
 
     /// @notice Sets the lag duration for withdrawals.
@@ -143,6 +182,15 @@ contract MyERC4626 is ERC4626 {
     function setLagDuration(uint256 _lagDuration) public {
         require(_lagDuration > 0, LagDurationZero());
         lagDuration = _lagDuration;
+    }
+
+    function uniqueReceiversLength(
+        uint256 _period
+    )
+        public view
+        returns (uint256)
+    {
+        return uniqueReceivers[_period].length;
     }
 
     /**
@@ -246,6 +294,31 @@ contract MyERC4626 is ERC4626 {
         _assetsAfterFee = _assetsAmount;
     }
 
+    /**
+     * @notice Returns the current share price.
+     * @return The share price.
+     */
+    function getSharePrice() external view returns (uint256) {
+        uint256 shares = 10 ** decimals(); // 1 share
+        return convertToAssets(shares);
+    }
+
+    /**
+     * @notice Returns the address of the LP token.
+     * @return The address of the LP token.
+     */
+    function lpTokenAddress() external view returns (address) {
+        return address(this);
+    }
+
+    /**
+     * @notice Returns total supply (for testing purposes).
+     * @return The total supply.
+    */
+    function getTotalAssets() external view returns (uint256) {
+        return totalSupply();
+    }
+
     ////////////////////////// internal methods //////////////////////////
     function _withdraw(
         address _caller,
@@ -264,10 +337,16 @@ contract MyERC4626 is ERC4626 {
         (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
         uint256 period = _getPeriodFromDate(year, month, day);
 
+        if (pendingWithdrawAssets[_receiver][period] == 0) {
+            uniqueReceivers[period].push(_receiver);
+            receiverIndex[_receiver][period] = uniqueReceivers[period].length;
+        }
+
         assetsPendingWithdraw += _assets;
         pendingWithdrawAssets[_receiver][period] += _assets;
         pendingWithdrawShares[_receiver][period] += _shares;
         requestTimestamps[_receiver][period] = block.timestamp;
+        pendingWithdrawLag[_receiver][period] = lagDuration;
 
         emit WithdrawRequest(_caller, _receiver, _owner, period, _assets, _shares);
         emit WithdrawalRequested(_shares, _owner, _receiver);
@@ -289,7 +368,46 @@ contract MyERC4626 is ERC4626 {
         delete pendingWithdrawAssets[_receiverAddr][_period];
         delete pendingWithdrawShares[_receiverAddr][_period];
         delete requestTimestamps[_receiverAddr][_period];
+        delete pendingWithdrawLag[_receiverAddr][_period];
         SafeERC20.safeTransfer(IERC20(asset()), _receiverAddr, _assets);
+    }
+
+    function _requireLagElapsed(
+        address _receiverAddr,
+        uint256 _period
+    )
+        internal
+        view
+    {
+        uint256 requestTs = requestTimestamps[_receiverAddr][_period];
+        uint256 lagAtRequest = pendingWithdrawLag[_receiverAddr][_period];
+        if (lagAtRequest < PERIOD_DURATION && lagAtRequest > 0) {
+            require(requestTs != 0, TooEarly());
+            require(block.timestamp >= requestTs + lagAtRequest, TooEarly());
+        }
+    }
+
+    function _deleteReceiver(
+        address _receiverAddr,
+        uint256 _period
+    )
+        internal
+    {
+        uint256 index = receiverIndex[_receiverAddr][_period];
+        require(index != 0, InvalidReceiver(_receiverAddr, _period));
+        uint256 length = uniqueReceivers[_period].length;
+        delete receiverIndex[_receiverAddr][_period];
+        if (index == length) {
+            // remove the last element
+            uniqueReceivers[_period].pop();
+        } else {
+            address lastReceiver = uniqueReceivers[_period][length - 1];
+            // move the last element to the removed position
+            uniqueReceivers[_period][index - 1] = lastReceiver;
+            uniqueReceivers[_period].pop();
+            // update moved receiver's index
+            receiverIndex[lastReceiver][_period] = index;
+        }
     }
 
     function _getPeriodFromDate(
