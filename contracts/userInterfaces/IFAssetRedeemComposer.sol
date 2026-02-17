@@ -100,6 +100,45 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
     event ExecutorDataSet(address indexed executor, uint256 executorFee);
 
     /**
+     * @notice Emitted when default composer fee is updated.
+     * @param defaultComposerFeePPM New default composer fee in PPM.
+     */
+    event DefaultComposerFeeSet(uint256 defaultComposerFeePPM);
+
+    /**
+     * @notice Emitted when srcEid-specific composer fee is set.
+     * @param srcEid OFT source endpoint ID.
+     * @param composerFeePPM Composer fee in PPM for the specified srcEid.
+     */
+    event ComposerFeeSet(uint32 indexed srcEid, uint256 composerFeePPM);
+
+    /**
+     * @notice Emitted when srcEid-specific composer fee override is removed.
+     * @param srcEid OFT source endpoint ID.
+     */
+    event ComposerFeeRemoved(uint32 indexed srcEid);
+
+    /**
+     * @notice Emitted when composer fee recipient is updated.
+     * @param composerFeeRecipient New fee recipient address.
+     */
+    event ComposerFeeRecipientSet(address indexed composerFeeRecipient);
+
+    /**
+     * @notice Emitted when composer fee is collected in fAsset.
+     * @param guid LayerZero message GUID.
+     * @param srcEid Source endpoint ID.
+     * @param composerFeeRecipient Recipient of collected composer fee.
+     * @param composerFee Collected composer fee amount in fAsset units.
+     */
+    event ComposerFeeCollected(
+        bytes32 indexed guid,
+        uint32 indexed srcEid,
+        address indexed composerFeeRecipient,
+        uint256 composerFee
+    );
+
+    /**
      * @notice Reverts when a required address argument is zero.
      */
     error InvalidAddress();
@@ -129,6 +168,27 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @notice Reverts when native transfer fails.
      */
     error NativeTransferFailed();
+
+    /**
+     * @notice Reverts when composer fee PPM is invalid.
+     */
+    error InvalidComposerFeePPM();
+
+    /**
+     * @notice Reverts when composer fee for a srcEid is not set but expected.
+     * @param srcEid OFT source endpoint ID.
+     */
+    error ComposerFeeNotSet(uint32 srcEid);
+
+    /**
+     * @notice Reverts when composer fee recipient address is invalid.
+     */
+    error InvalidComposerFeeRecipient();
+
+    /**
+     * @notice Reverts when array lengths do not match.
+     */
+    error LengthMismatch();
 
     /**
      * @notice Returns trusted endpoint that may call `lzCompose`.
@@ -173,6 +233,18 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
     function redeemerAccountImplementation() external view returns (address);
 
     /**
+     * @notice Returns recipient of collected composer fee.
+     * @return Composer fee recipient address.
+     */
+    function composerFeeRecipient() external view returns (address);
+
+    /**
+     * @notice Returns default composer fee in PPM.
+     * @return Default composer fee in PPM.
+     */
+    function defaultComposerFeePPM() external view returns (uint256);
+
+    /**
      * @notice Returns redeem executor data.
      * @return _executor Executor address used for redeem.
      * @return _executorFee Native fee expected by executor.
@@ -180,6 +252,18 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
     function getExecutorData()
         external view
         returns (address payable _executor, uint256 _executorFee);
+
+    /**
+     * @notice Returns composer fee in PPM for the given OFT source endpoint.
+     * @param _srcEid OFT source endpoint ID.
+     * @return _composerFeePPM Composer fee in PPM.
+     */
+    function getComposerFeePPM(
+        uint32 _srcEid
+    )
+        external
+        view
+        returns (uint256 _composerFeePPM);
 
     /**
      * @notice Returns deterministic redeemer account address for owner.

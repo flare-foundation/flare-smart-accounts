@@ -14,6 +14,7 @@ import {FAssetRedeemerAccountProxy} from "../proxy/FAssetRedeemerAccountProxy.so
 import {IFAssetRedeemComposer} from "../../userInterfaces/IFAssetRedeemComposer.sol";
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {OwnableWithTimelock} from "../../utils/implementation/OwnableWithTimelock.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title FAssetRedeemComposer
@@ -21,6 +22,8 @@ import {OwnableWithTimelock} from "../../utils/implementation/OwnableWithTimeloc
  */
 contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUPSUpgradeable, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    uint256 private constant PPM_DENOMINATOR = 1_000_000;
 
     /// @notice Mapping of redeemer to deterministic redeemer account address.
     mapping(address redeemer => address redeemerAccount) private redeemerToRedeemerAccount;
@@ -39,6 +42,12 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
     address public trustedSourceOApp;
     /// @notice Current beacon implementation for redeemer account proxies.
     address public redeemerAccountImplementation;
+    /// @notice Recipient of composer fee collected in fAsset.
+    address public composerFeeRecipient;
+    /// @notice Default composer fee in PPM.
+    uint256 public defaultComposerFeePPM;
+    /// @notice Optional srcEid-specific composer fee in PPM, stored as fee + 1 to distinguish unset values.
+    mapping(uint32 srcEid => uint256 feePPM) private composerFeesPPM;
     /// @notice The redeem executor.
     address payable private executor;
     /// @notice The native fee expected by the executor for redeem execution.
@@ -60,6 +69,8 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
      * @param _stableCoin Stable coin token - returned in case of a redemption failure.
      * @param _wNat Wrapped native token - returned in case of a redemption failure
      *              if stable coin balance is insufficient.
+     * @param _composerFeeRecipient Recipient of composer fee collected in fAsset.
+     * @param _defaultComposerFeePPM Default composer fee in PPM.
      * @param _redeemerAccountImplementation Beacon implementation for redeemer accounts.
      */
     function initialize(
@@ -69,24 +80,22 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
         IAssetManager _assetManager,
         IERC20 _stableCoin,
         IERC20 _wNat,
+        address _composerFeeRecipient,
+        uint256 _defaultComposerFeePPM,
         address _redeemerAccountImplementation
     )
         external
         initializer
     {
-        require(
-            _initialOwner != address(0) &&
-            _endpointV2.code.length > 0 &&
-            _trustedSourceOApp.code.length > 0 &&
-            address(_assetManager) != address(0) &&
-            address(_stableCoin) != address(0) &&
-            address(_wNat) != address(0),
-            InvalidAddress()
-        );
-        require(
-            _redeemerAccountImplementation.code.length > 0,
-            InvalidRedeemerAccountImplementation()
-        );
+        require(_initialOwner != address(0), InvalidAddress());
+        require(_endpointV2 != address(0), InvalidAddress());
+        require(_trustedSourceOApp != address(0), InvalidAddress());
+        require(address(_assetManager).code.length > 0, InvalidAddress());
+        require(address(_stableCoin).code.length > 0, InvalidAddress());
+        require(address(_wNat).code.length > 0, InvalidAddress());
+        require(_composerFeeRecipient != address(0), InvalidAddress());
+        require(_defaultComposerFeePPM < PPM_DENOMINATOR, InvalidComposerFeePPM());
+        require(_redeemerAccountImplementation.code.length > 0, InvalidRedeemerAccountImplementation());
 
         __Ownable_init(_initialOwner);
 
@@ -94,12 +103,91 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
         trustedSourceOApp = _trustedSourceOApp;
         assetManager = _assetManager;
         fAsset = _assetManager.fAsset();
-        require(address(fAsset) != address(0), InvalidAddress());
+        require(address(fAsset).code.length > 0, InvalidAddress());
         stableCoin = _stableCoin;
         wNat = _wNat;
+        composerFeeRecipient = _composerFeeRecipient;
+        defaultComposerFeePPM = _defaultComposerFeePPM;
         redeemerAccountImplementation = _redeemerAccountImplementation;
 
+        emit ComposerFeeRecipientSet(_composerFeeRecipient);
+        emit DefaultComposerFeeSet(_defaultComposerFeePPM);
         emit RedeemerAccountImplementationSet(redeemerAccountImplementation);
+    }
+
+    /**
+     * @notice Updates default composer fee in PPM.
+     * @param _defaultComposerFeePPM New default composer fee in PPM.
+     */
+    function setDefaultComposerFee(
+        uint256 _defaultComposerFeePPM
+    )
+        external
+        onlyOwnerWithTimelock
+    {
+        require(_defaultComposerFeePPM < PPM_DENOMINATOR, InvalidComposerFeePPM());
+        defaultComposerFeePPM = _defaultComposerFeePPM;
+        emit DefaultComposerFeeSet(_defaultComposerFeePPM);
+    }
+
+    /**
+     * @notice Sets srcEid-specific composer fees in PPM.
+     * @dev Uses fee+1 storage to distinguish unset (0) from an explicit zero fee.
+     * @param _srcEids List of OFT source endpoint IDs.
+     * @param _composerFeesPPM Composer fee values in PPM for corresponding srcEids.
+     */
+    function setComposerFees(
+        uint32[] calldata _srcEids,
+        uint256[] calldata _composerFeesPPM
+    )
+        external
+        onlyOwnerWithTimelock
+    {
+        require(_srcEids.length == _composerFeesPPM.length, LengthMismatch());
+
+        for (uint256 i = 0; i < _srcEids.length; i++) {
+            uint32 srcEid = _srcEids[i];
+            uint256 feePPM = _composerFeesPPM[i];
+            require(feePPM < PPM_DENOMINATOR, InvalidComposerFeePPM());
+            composerFeesPPM[srcEid] = feePPM + 1;
+            emit ComposerFeeSet(srcEid, feePPM);
+        }
+    }
+
+    /**
+     * @notice Removes srcEid-specific composer fee overrides.
+     * @param _srcEids List of OFT source endpoint IDs.
+     */
+    function removeComposerFees(
+        uint32[] calldata _srcEids
+    )
+        external
+        onlyOwnerWithTimelock
+    {
+        for (uint256 i = 0; i < _srcEids.length; i++) {
+            uint32 srcEid = _srcEids[i];
+            require(
+                composerFeesPPM[srcEid] != 0,
+                ComposerFeeNotSet(srcEid)
+            );
+            delete composerFeesPPM[srcEid];
+            emit ComposerFeeRemoved(srcEid);
+        }
+    }
+
+    /**
+     * @notice Updates recipient for collected composer fee.
+     * @param _composerFeeRecipient New recipient address.
+     */
+    function setComposerFeeRecipient(
+        address _composerFeeRecipient
+    )
+        external
+        onlyOwnerWithTimelock
+    {
+        require(_composerFeeRecipient != address(0), InvalidComposerFeeRecipient());
+        composerFeeRecipient = _composerFeeRecipient;
+        emit ComposerFeeRecipientSet(_composerFeeRecipient);
     }
 
     /**
@@ -181,7 +269,7 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
         bytes32 _guid,
         bytes calldata _message,
         address /* _executor */,
-        bytes calldata
+        bytes calldata /* _extraData */
     )
         external payable
         nonReentrant
@@ -189,17 +277,26 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
         require(msg.sender == endpointV2, OnlyEndpointV2());
         require(_from == trustedSourceOApp, InvalidSourceOApp(_from));
 
-        uint256 amountToRedeemUBA = OFTComposeMsgCodec.amountLD(_message);
+        uint32 srcEid = OFTComposeMsgCodec.srcEid(_message);
+        uint256 amountLD = OFTComposeMsgCodec.amountLD(_message);
+        uint256 composerFeePPM = _getComposerFeePPM(srcEid);
+        uint256 composerFee = Math.mulDiv(amountLD, composerFeePPM, PPM_DENOMINATOR);
+        uint256 amountToRedeemAfterFee = amountLD - composerFee;
         RedeemComposeData memory data = abi.decode(OFTComposeMsgCodec.composeMsg(_message), (RedeemComposeData));
         require(data.redeemer != address(0), InvalidAddress());
 
+        if (composerFee > 0) {
+            fAsset.safeTransfer(composerFeeRecipient, composerFee);
+            emit ComposerFeeCollected(_guid, srcEid, composerFeeRecipient, composerFee);
+        }
+
         address redeemerAccount = _getOrCreateRedeemerAccount(data.redeemer);
-        fAsset.safeTransfer(redeemerAccount, amountToRedeemUBA);
-        emit FAssetTransferred(redeemerAccount, amountToRedeemUBA);
+        fAsset.safeTransfer(redeemerAccount, amountToRedeemAfterFee);
+        emit FAssetTransferred(redeemerAccount, amountToRedeemAfterFee);
 
         try IIFAssetRedeemerAccount(redeemerAccount).redeemFAsset{value: msg.value}(
             assetManager,
-            amountToRedeemUBA,
+            amountToRedeemAfterFee,
             data.redeemerUnderlyingAddress,
             executor,
             executorFee
@@ -208,10 +305,10 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
         {
             emit FAssetRedeemed(
                 _guid,
-                OFTComposeMsgCodec.srcEid(_message),
+                srcEid,
                 data.redeemer,
                 redeemerAccount,
-                amountToRedeemUBA,
+                amountToRedeemAfterFee,
                 data.redeemerUnderlyingAddress,
                 executor,
                 executorFee,
@@ -220,12 +317,23 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
         } catch {
             emit FAssetRedeemFailed(
                 _guid,
-                OFTComposeMsgCodec.srcEid(_message),
+                srcEid,
                 data.redeemer,
                 redeemerAccount,
-                amountToRedeemUBA
+                amountToRedeemAfterFee
             );
         }
+    }
+
+    /// @inheritdoc IFAssetRedeemComposer
+    function getComposerFeePPM(
+        uint32 _srcEid
+    )
+        external
+        view
+        returns (uint256 _composerFeePPM)
+    {
+        _composerFeePPM = _getComposerFeePPM(_srcEid);
     }
 
     /// @inheritdoc IBeacon
@@ -323,5 +431,25 @@ contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUP
             type(FAssetRedeemerAccountProxy).creationCode,
             abi.encode(address(this), _redeemer)
         );
+    }
+
+    /**
+     * @notice Retrieves composer fee in PPM for a given srcEid, falling back to default if not set.
+     * @param _srcEid OFT source endpoint ID.
+     * @return _composerFeePPM Composer fee in PPM.
+     */
+    function _getComposerFeePPM(
+        uint32 _srcEid
+    )
+        internal
+        view
+        returns (uint256 _composerFeePPM)
+    {
+        uint256 srcEidFeePlusOne = composerFeesPPM[_srcEid];
+        if (srcEidFeePlusOne > 0) {
+            return srcEidFeePlusOne - 1;
+        }
+
+        return defaultComposerFeePPM;
     }
 }
