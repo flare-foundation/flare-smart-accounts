@@ -40,6 +40,41 @@ if (!isValidNetwork) {
 
 fs.mkdirSync("deployment/deploys", { recursive: true });
 const isMock = process.argv[2] === "mock";
-fs.writeFileSync(`deployment/deploys/${network}${isMock ? "_mock" : ""}.json`, JSON.stringify(contracts, null, 2));
+const filePath = `deployment/deploys/${network}${isMock ? "_mock" : ""}.json`;
+
+let existingContracts: ContractInfo[] = [];
+if (fs.existsSync(filePath)) {
+  const raw: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  if (!Array.isArray(raw)) {
+    throw new Error(`Invalid contract info format in ${filePath}`);
+  }
+  existingContracts = raw.map((item) => {
+    if (
+      typeof item === "object" &&
+      item !== null &&
+      typeof (item as { name?: unknown }).name === "string" &&
+      typeof (item as { contractName?: unknown }).contractName === "string" &&
+      typeof (item as { address?: unknown }).address === "string"
+    ) {
+      return {
+        name: (item as { name: string }).name,
+        contractName: (item as { contractName: string }).contractName,
+        address: (item as { address: string }).address,
+      };
+    }
+    throw new Error(`Invalid contract info item in ${filePath}`);
+  });
+}
+
+for (const deployed of contracts) {
+  const index = existingContracts.findIndex((item) => item.name === deployed.name);
+  if (index >= 0) {
+    existingContracts[index] = deployed;
+  } else {
+    existingContracts.push(deployed);
+  }
+}
+
+fs.writeFileSync(filePath, JSON.stringify(existingContracts, null, 2));
 fs.unlinkSync(outputPath);
-console.log(`Saved deployed addresses to deployment/deploys/${network}${isMock ? "_mock" : ""}.json`);
+console.log(`Saved deployed addresses to ${filePath}`);
