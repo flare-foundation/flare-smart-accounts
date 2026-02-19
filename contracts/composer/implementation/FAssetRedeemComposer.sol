@@ -7,7 +7,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IIFAssetRedeemerAccount} from "../interface/IIFAssetRedeemerAccount.sol";
 import {FAssetRedeemerAccountProxy} from "../proxy/FAssetRedeemerAccountProxy.sol";
@@ -20,7 +20,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  * @title FAssetRedeemComposer
  * @notice LayerZero compose handler that orchestrates deterministic redeemer accounts and f-asset redemption.
  */
-contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUPSUpgradeable, ReentrancyGuard {
+contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUPSUpgradeable, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
 
     uint256 private constant PPM_DENOMINATOR = 1_000_000;
