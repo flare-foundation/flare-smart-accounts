@@ -20,7 +20,12 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
  * @title FAssetRedeemComposer
  * @notice LayerZero compose handler that orchestrates deterministic redeemer accounts and f-asset redemption.
  */
-contract FAssetRedeemComposer is IFAssetRedeemComposer, OwnableWithTimelock, UUPSUpgradeable, ReentrancyGuardTransient {
+contract FAssetRedeemComposer is
+    IFAssetRedeemComposer,
+    OwnableWithTimelock,
+    UUPSUpgradeable,
+    ReentrancyGuardTransient
+{
     using SafeERC20 for IERC20;
 
     uint256 private constant PPM_DENOMINATOR = 1_000_000;
