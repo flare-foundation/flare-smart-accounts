@@ -34,7 +34,7 @@ contract FAssetRedeemComposer is
     mapping(address redeemer => address redeemerAccount) private redeemerToRedeemerAccount;
 
     /// @notice Trusted endpoint allowed to invoke `lzCompose`.
-    address public endpointV2;
+    address public endpoint;
     /// @notice Asset manager used for f-asset redemption.
     IAssetManager public assetManager;
     /// @notice FAsset token.
@@ -68,7 +68,7 @@ contract FAssetRedeemComposer is
     /**
      * @notice Initializes composer proxy state.
      * @param _initialOwner Owner address for administrative operations.
-     * @param _endpointV2 Trusted endpoint allowed to invoke `lzCompose`.
+     * @param _endpoint Trusted endpoint allowed to invoke `lzCompose`.
      * @param _trustedSourceOApp Trusted source OApp address.
      * @param _assetManager Asset manager used for redemption.
      * @param _stableCoin Stable coin token - returned in case of a redemption failure.
@@ -80,7 +80,7 @@ contract FAssetRedeemComposer is
      */
     function initialize(
         address _initialOwner,
-        address _endpointV2,
+        address _endpoint,
         address _trustedSourceOApp,
         IAssetManager _assetManager,
         IERC20 _stableCoin,
@@ -93,7 +93,7 @@ contract FAssetRedeemComposer is
         initializer
     {
         require(_initialOwner != address(0), InvalidAddress());
-        require(_endpointV2 != address(0), InvalidAddress());
+        require(_endpoint != address(0), InvalidAddress());
         require(_trustedSourceOApp != address(0), InvalidAddress());
         require(address(_assetManager).code.length > 0, InvalidAddress());
         require(address(_stableCoin).code.length > 0, InvalidAddress());
@@ -104,7 +104,7 @@ contract FAssetRedeemComposer is
 
         __Ownable_init(_initialOwner);
 
-        endpointV2 = _endpointV2;
+        endpoint = _endpoint;
         trustedSourceOApp = _trustedSourceOApp;
         assetManager = _assetManager;
         fAsset = _assetManager.fAsset();
@@ -279,7 +279,7 @@ contract FAssetRedeemComposer is
         external payable
         nonReentrant
     {
-        require(msg.sender == endpointV2, OnlyEndpointV2());
+        require(msg.sender == endpoint, OnlyEndpoint());
         require(_from == trustedSourceOApp, InvalidSourceOApp(_from));
 
         uint32 srcEid = OFTComposeMsgCodec.srcEid(_message);

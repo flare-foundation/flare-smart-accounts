@@ -144,9 +144,9 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
     error InvalidAddress();
 
     /**
-     * @notice Reverts when caller is not the LayerZero V2 endpoint.
+     * @notice Reverts when caller is not the LayerZero endpoint.
      */
-    error OnlyEndpointV2();
+    error OnlyEndpoint();
 
     /**
      * @notice Reverts when compose message source OApp is unexpected.
@@ -194,7 +194,7 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @notice Returns trusted endpoint that may call `lzCompose`.
      * @return Endpoint address.
      */
-    function endpointV2() external view returns (address);
+    function endpoint() external view returns (address);
 
     /**
      * @notice Returns trusted source OApp.

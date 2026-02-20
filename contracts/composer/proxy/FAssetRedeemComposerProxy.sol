@@ -16,7 +16,7 @@ contract FAssetRedeemComposerProxy is ERC1967Proxy {
      * @notice Deploys proxy and forwards initialization calldata to implementation.
      * @param _implementation FAssetRedeemComposer implementation address.
      * @param _initialOwner Initial owner for composer administrative operations.
-     * @param _endpointV2 Trusted endpoint allowed to invoke compose callbacks.
+     * @param _endpoint Trusted endpoint allowed to invoke compose callbacks.
      * @param _trustedSourceOApp Trusted source OApp address.
      * @param _assetManager Asset manager used for redemption.
      * @param _stableCoin Stable coin token - returned in case of a redemption failure.
@@ -29,7 +29,7 @@ contract FAssetRedeemComposerProxy is ERC1967Proxy {
     constructor(
         address _implementation,
         address _initialOwner,
-        address _endpointV2,
+        address _endpoint,
         address _trustedSourceOApp,
         address _assetManager,
         address _stableCoin,
@@ -43,7 +43,7 @@ contract FAssetRedeemComposerProxy is ERC1967Proxy {
             abi.encodeWithSelector(
                 INITIALIZE_SELECTOR,
                 _initialOwner,
-                _endpointV2,
+                _endpoint,
                 _trustedSourceOApp,
                 _assetManager,
                 _stableCoin,
