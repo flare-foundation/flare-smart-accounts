@@ -23,6 +23,7 @@
     "deploy_personal_account_implementation": "bash deployment/scripts/deploy-personal-account-implementation.sh",
     "deploy_my_erc4626_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast'",
     "diamond_cut": "bash deployment/scripts/execute-diamond-cut.sh",
+    "deploy_composer": "bash deployment/scripts/deploy-composer.sh",
     "---------LINTER---SCRIPTS": "",
     "lint:check": "eslint \"{deployment,scripts}/**/*.ts\"",
     "lint:fix": "eslint \"{deployment,scripts}/**/*.ts\" --fix",
