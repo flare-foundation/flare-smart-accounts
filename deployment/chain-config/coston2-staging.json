@@ -15,7 +15,7 @@
   ],
   "agentVaults": [],
   "executor": "0x715c79A879C2F367912BeA087af2C80f1807f896",
-  "executorFee": 100,
+  "executorFee": 100000000000,
   "sourceId": "testXRP",
   "paymentProofValidityDurationSeconds": 86400,
   "defaultInstructionFee": 1000,

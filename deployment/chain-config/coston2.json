@@ -15,7 +15,7 @@
   ],
   "agentVaults": [],
   "executor": "0x103b384064ae85577127097A7cCadfd6fb13f437",
-  "executorFee": 100,
+  "executorFee": 100000000000,
   "sourceId": "testXRP",
   "paymentProofValidityDurationSeconds": 86400,
   "defaultInstructionFee": 1000,
@@ -37,5 +37,5 @@
   "composerFeeRecipient": "0xC83Ec6a4aFf2099942836860A28C7e248Fabc32C",
   "defaultComposerFeePPM": 10000,
   "composerExecutor": "0x103b384064ae85577127097A7cCadfd6fb13f437",
-  "composerExecutorFee": 100
+  "composerExecutorFee": 100000000000
 }
