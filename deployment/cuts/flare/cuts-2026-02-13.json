@@ -1,0 +1,30 @@
+{
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "AgentVaultsFacet",
+    "ExecutorsFacet",
+    "InstructionFeesFacet",
+    "InstructionsFacet",
+    "PaymentProofsFacet",
+    "PersonalAccountsFacet",
+    "SwapFacet",
+    "TimelockFacet",
+    "VaultsFacet",
+    "XrplProviderWalletsFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "init": {
+    "contract": "MasterAccountControllerInit",
+    "method": "init",
+    "args": [
+      "0x02954e158Be2b477E1C26F31e8AA0c21b378445C",
+      "10000000000000000000",
+      "0x5852500000000000000000000000000000000000000000000000000000000000",
+      "7200",
+      "500000",
+      "0xb03B32e154859A4aabA23cDd4277dA181150911E"
+    ]
+  },
+  "execute": false
+}

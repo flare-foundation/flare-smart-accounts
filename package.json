@@ -1,14 +1,14 @@
 {
-  "name": "xrpcw-contracts",
-  "version": "0.0.1",
-  "description": "Smart contracts implementing XRPL control wallet.",
+  "name": "flare-smart-accounts",
+  "version": "1.0.0",
+  "description": "Smart contracts implementing Flare Smart Accounts.",
   "main": "",
   "repository": {
     "type": "git",
-    "url": "git+https://gitlab.com/flarenetwork/xrpcw-contracts.git"
+    "url": "git+https://gitlab.com/flarenetwork/smart-accounts/flare-smart-accounts.git"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "author": "Flare SC team",
   "license": "MIT",
@@ -16,51 +16,36 @@
   "scripts": {
     "format": "prettier --write .",
     "---------TEST---SCRIPTS": "",
+    "coverage": "forge coverage --report lcov && node scripts/forge-lcov-prune.js && genhtml lcov.info.pruned --branch-coverage --output-dir coverage",
     "---------DEPLOY---SCRIPTS": "",
-    "deploy_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWallet.s.sol:DeployXRPLControlledWallet --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast' | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts",
-    "deploy_mock_contracts_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployXRPLControlledWalletDevMock.s.sol:DeployXRPLControlledWalletDevMock --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast' | tee forge-deploy-output.txt && ts-node deployment/scripts/save-deployed-addresses.ts mock",
-    "deploy_my_erc462_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast'",
-    "---------VERIFIER---SCRIPTS": "",
-    "verify_contracts_coston2": "ts-node deployment/scripts/verify-contracts.ts coston2",
-    "verify_mock_contracts_coston2": "ts-node deployment/scripts/verify-contracts.ts coston2 mock"
+    "deploy_contracts": "bash deployment/scripts/deploy-smart-accounts.sh",
+    "deploy_personal_account_implementation": "bash deployment/scripts/deploy-personal-account-implementation.sh",
+    "deploy_my_erc4626_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast'",
+    "diamond_cut": "bash deployment/scripts/execute-diamond-cut.sh",
+    "---------LINTER---SCRIPTS": "",
+    "verify_contracts": "ts-node deployment/scripts/verify-contracts.ts",
+    "lint": "yarn lint-contracts && yarn lint-test && yarn lint-deployment",
+    "lint-contracts": "yarn solhint \"contracts/**/*.sol\"",
+    "lint-test": "yarn solhint \"test/**/*.sol\"",
+    "lint-deployment": "yarn solhint \"deployment/**/*.sol\"",
+    "slither": "pip3 install slither-analyzer && rm -f ./slither.json && rm -f ./slither_badge.json 2> /dev/null; slither . --json=./slither.json 2> /dev/null || true; node scripts/slither-parse.js ./slither.json",
+    "ts-lint": "npx eslint .",
+    "---------OTHER---SCRIPTS": "",
+    "get-error-selectors": "bash scripts/extract-error-selectors.sh"
   },
-  "dependencies": {
-    "@typescript-eslint/eslint-plugin": "^7.3.1",
-    "@typescript-eslint/parser": "^7.3.1",
-    "dotenv-cli": "^10.0.0",
-    "ethers": "^6.11.1",
-    "hardhat": "^2.22.18",
-    "solhint": "^4.5.2"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@coverage.rocks/genhtml": "^1.16.0",
-    "@gnosis.pm/mock-contract": "^4.0.0",
-    "@nomicfoundation/hardhat-chai-matchers": "^2.0.6",
-    "@nomicfoundation/hardhat-ethers": "^3.0.5",
-    "@nomicfoundation/hardhat-network-helpers": "^1.0.10",
-    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "@nomicfoundation/hardhat-verify": "^2.0.6",
-    "@nomiclabs/hardhat-ethers": "^2.2.3",
-    "@nomiclabs/hardhat-truffle5": "^2.0.7",
-    "@nomiclabs/hardhat-web3": "^2.0.0",
-    "@typechain/ethers-v6": "^0.5.1",
-    "@typechain/hardhat": "^9.1.0",
-    "@typechain/truffle-v5": "^8.0.7",
-    "@typechain/web3-v1": "^6.0.7",
-    "@types/chai": "^4.3.13",
-    "@types/elliptic": "^6.4.18",
-    "@types/mocha": "^10.0.6",
-    "@types/node": "^20.11.29",
-    "elliptic": "^6.5.5",
-    "intercept-stdout": "0.1.2",
-    "pascal-case": "^3.1.2",
+    "@eslint/compat": "^2.0.0",
+    "@eslint/js": "^9.39.0",
+    "dotenv-cli": "^7.0.0",
+    "eslint": "^9.39.0",
     "prettier": "^3.6.2",
     "prettier-plugin-solidity": "^2.1.0",
+    "solhint": "^6.0.1",
     "solidity-coverage": "^0.8.11",
-    "sqlite3": "^5.1.7",
-    "ts-node": "^10.9.2",
-    "typechain": "^8.3.2",
-    "typeorm": "^0.3.20",
-    "typescript": "^5.4.2"
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.48.0",
+    "web3": "^4.0.0"
   }
 }

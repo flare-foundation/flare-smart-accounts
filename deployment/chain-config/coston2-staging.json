@@ -1,0 +1,31 @@
+{
+  "initialOwner": "0x0000000000000000000000000000000000000000",
+  "governance": "0x0000000000000000000000000000000000000000",
+  "vaults": [
+    {
+      "vaultId": 1,
+      "vaultAddress": "0xf9c57F8c9ae3A8EF12F91C298Ca24daf9c42d874",
+      "vaultType": 1
+    },
+    {
+      "vaultId": 2,
+      "vaultAddress": "0xEfd7a680Db05F1dCD86EB5a074897F502C8601A0",
+      "vaultType": 2
+    }
+  ],
+  "agentVaults": [],
+  "executor": "0x715c79A879C2F367912BeA087af2C80f1807f896",
+  "executorFee": 100,
+  "sourceId": "testXRP",
+  "paymentProofValidityDurationSeconds": 86400,
+  "defaultInstructionFee": 1000,
+  "xrplProviderWallets": ["rLb3Qrz2wh4cbMUQYi4iTJBM5ggfbUYw27"],
+  "uniswapV3Router": "0x0000000000000000000000000000000000000000",
+  "usdt0": "0x21709E63fC7F264F329e0826Ea82197694B82775",
+  "wNatStableCoinPoolFeeTierPPM": 3000,
+  "stableCoinFXrpPoolFeeTierPPM": 500,
+  "maxSlippagePPM": 20000,
+  "stableCoinUsdFeedId": "0x01555344542f555344000000000000000000000000",
+  "wNatUsdFeedId": "0x01464c522f55534400000000000000000000000000",
+  "timelockDurationSeconds": 3600
+}

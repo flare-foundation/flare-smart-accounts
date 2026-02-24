@@ -1,0 +1,63 @@
+{
+  "initialOwner": "0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA",
+  "governance": "0xbe653C54DF337F13Fcb726101388F4a4803049F3",
+  "vaults": [
+    {
+      "vaultId": 1,
+      "vaultAddress": "0x4C18Ff3C89632c3Dd62E796c0aFA5c07c4c1B2b3",
+      "vaultType": 1
+    },
+    {
+      "vaultId": 2,
+      "vaultAddress": "0x373D7d201C8134D4a2f7b5c63560da217e3dEA28",
+      "vaultType": 2
+    }
+  ],
+  "agentVaults": [
+    {
+      "agentVaultAddress": "0x09011d2A11A40DB855Cb00B3AA5a0F5F3bd485FD",
+      "agentVaultId": 1
+    }
+  ],
+  "executor": "0x02954e158Be2b477E1C26F31e8AA0c21b378445C",
+  "executorFee": "10000000000000000000",
+  "sourceId": "XRP",
+  "paymentProofValidityDurationSeconds": 7200,
+  "defaultInstructionFee": 500000,
+  "instructionFees": [
+    {
+      "instructionType": 0,
+      "instructionCommand": 0,
+      "instructionId": 0,
+      "fee": 950000
+    },
+    {
+      "instructionType": 0,
+      "instructionCommand": 2,
+      "instructionId": 2,
+      "fee": 950000
+    },
+    {
+      "instructionType": 1,
+      "instructionCommand": 0,
+      "instructionId": 16,
+      "fee": 950000
+    },
+    {
+      "instructionType": 2,
+      "instructionCommand": 0,
+      "instructionId": 32,
+      "fee": 950000
+    }
+
+  ],
+  "xrplProviderWallets": ["rM2LEysS4isvAJkZFfxKDL5z4aTfWcBTXV"],
+  "uniswapV3Router": "0x5FD34090E9b195d8482Ad3CC63dB078534F1b113",
+  "usdt0": "0xe7cd86e13AC4309349F30B3435a9d337750fC82D",
+  "wNatStableCoinPoolFeeTierPPM": 3000,
+  "stableCoinFXrpPoolFeeTierPPM": 3000,
+  "maxSlippagePPM": 5000,
+  "stableCoinUsdFeedId": "0x01555344542f555344000000000000000000000000",
+  "wNatUsdFeedId": "0x01464c522f55534400000000000000000000000000",
+  "timelockDurationSeconds": 3600
+}

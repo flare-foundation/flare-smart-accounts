@@ -1,0 +1,87 @@
+[
+  {
+    "name": "DiamondCutFacet",
+    "contractName": "DiamondCutFacet.sol",
+    "address": "0x6b846FB15EcF9C55cbCc1ae5A88e57d9744ACff1"
+  },
+  {
+    "name": "DiamondLoupeFacet",
+    "contractName": "DiamondLoupeFacet.sol",
+    "address": "0xFa5477DDf6505189662A513b18e0405E80C61d2E"
+  },
+  {
+    "name": "OwnershipFacet",
+    "contractName": "OwnershipFacet.sol",
+    "address": "0xFe013c4adf4Cf390f6A8A725726F38Cf7d5cC849"
+  },
+  {
+    "name": "AgentVaultsFacet",
+    "contractName": "AgentVaultsFacet.sol",
+    "address": "0xfc68d0423b47f5D29202956b5dCF092d41A53Af0"
+  },
+  {
+    "name": "ExecutorsFacet",
+    "contractName": "ExecutorsFacet.sol",
+    "address": "0x9417F1e6b945c50d46fb7Bb7b956BdE4eA591c4A"
+  },
+  {
+    "name": "InstructionFeesFacet",
+    "contractName": "InstructionFeesFacet.sol",
+    "address": "0xa6DB3498577Af2cD92C153a592cDCC4c9086CB43"
+  },
+  {
+    "name": "InstructionsFacet",
+    "contractName": "InstructionsFacet.sol",
+    "address": "0x4B01843fE667F87D47B3e81f914604432593deBd"
+  },
+  {
+    "name": "PaymentProofsFacet",
+    "contractName": "PaymentProofsFacet.sol",
+    "address": "0x1798D347c72796bf0B4dF39c916B3f70007D18a8"
+  },
+  {
+    "name": "PersonalAccountsFacet",
+    "contractName": "PersonalAccountsFacet.sol",
+    "address": "0x3b7Ad878B0a23612181eA010D7E356592F3761Be"
+  },
+  {
+    "name": "SwapFacet",
+    "contractName": "SwapFacet.sol",
+    "address": "0xD3DBCFA2f69085678eaFbf026BbAE9dcAcF15608"
+  },
+  {
+    "name": "TimelockFacet",
+    "contractName": "TimelockFacet.sol",
+    "address": "0xED72f5C74B972B41D2c7c83863a0de0B185CE9BD"
+  },
+  {
+    "name": "VaultsFacet",
+    "contractName": "VaultsFacet.sol",
+    "address": "0xFd4CcCEd492aE7D16d6967260469DAa39BabeF10"
+  },
+  {
+    "name": "XrplProviderWalletsFacet",
+    "contractName": "XrplProviderWalletsFacet.sol",
+    "address": "0x2777a8fE269A2c8fB3C5a714E405eDE8672ca1c1"
+  },
+  {
+    "name": "CustomInstructionsFacet",
+    "contractName": "CustomInstructionsFacet.sol",
+    "address": "0xCD225Cd032052a6515C6Dc899C43675018C7ebEc"
+  },
+  {
+    "name": "MasterAccountControllerInit",
+    "contractName": "MasterAccountControllerInit.sol",
+    "address": "0x7F843ecfc10e5699E6c4D014F34219d1A54Da5c5"
+  },
+  {
+    "name": "MasterAccountController",
+    "contractName": "MasterAccountController.sol",
+    "address": "0x32F662C63c1E24bB59B908249962F00B61C6638f"
+  },
+  {
+    "name": "PersonalAccountImplementation",
+    "contractName": "PersonalAccount.sol",
+    "address": "0x8577D2D50827bCE2EC1dc9Cf9F1199826781D5AF"
+  }
+]
