@@ -1,3 +1,5 @@
-@openzeppelin-contracts/=dependencies/@openzeppelin-contracts-5.2.0/
-flare-periphery/=dependencies/flare-periphery-0.1.36/
+@openzeppelin/contracts/=dependencies/@openzeppelin-contracts-5.5.0/
+@uniswap/v3-core/=dependencies/@uniswap-v3-core-1.0.1/
+@uniswap/v3-periphery/=dependencies/@uniswap-v3-periphery-1.4.4/
+flare-periphery/=dependencies/flare-periphery-0.1.38/
 forge-std/=dependencies/forge-std-1.10.0/src/

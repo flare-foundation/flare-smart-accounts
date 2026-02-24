@@ -1,103 +1,22 @@
-<p align="center">
-  <a href="https://flare.network/" target="blank"><img src="https://content.flare.network/Flare-2.svg" width="400" height="300" alt="Flare Logo" /></a>
+<p align="left">
+  <a href="https://flare.network/" target="blank"><img src="https://content.flare.network/Flare-2.svg" width="410" height="106" alt="Flare Logo" /></a>
 </p>
 
-# Development
+# Flare Smart Accounts (FSA)
 
-## Using Hardhat
+The Flare Smart Accounts is an account abstraction that allows XRPL users to perform actions on the Flare chain without owning any FLR token. Each XRPL address is assigned a unique smart account on the Flare chain, which only it can control. They do so through Payment transactions on the XRPL. The Flare Smart Accounts are especially useful as a way of interacting with the FAssets workflow.
 
-## Using Foundry
+## Overview
 
-### Environment
 
-```bash
-# install Foundryup
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
+## Development and contribution
 
-# install dependencies
-forge soldeer install
+If you want to use Flare Smart Accounts in your project, start on [developer hub - Flare Smart Accounts](https://dev.flare.network/smart-accounts/overview/).
 
-# compile contracts
-forge build
-```
+You can also reach out to us on [discord](https://discord.com/invite/flarenetwork).
 
-### How to run
+If you're interested in contributing, please see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-```bash
-# all forge tests
-forge test
+## Security
 
-# all tests of a test contract
-forge test --mc <contract_name>
-
-# specific test function
-forge test --mt <test_name>
-
-# generate coverage report
-yarn coverage-forge
-```
-
-The default behavior for forge test is to only display a summary of passing and failing tests. To show more information change the verbosity level with the `-v` flag:
-
-- `-vv`: displays logs emitted during tests, including assertion errors (e.g., expected vs. actual values);
-- `-vvv`: shows execution traces for failing tests, in addition to logs;
-- `-vvvv`: displays execution traces for all tests and setup traces for failing tests;
-- `-vvvvv`: provides the most detailed output, showing execution and setup traces for all tests, including storage changes.
-
-## Deployment
-
-### Prerequisites
-
-- Install dependencies:
-  ```bash
-  yarn
-  ```
-- Create a `.env` file in the project root with:
-  ```env
-  <NETWORK>_RPC_URL=
-  DEPLOYER_PRIVATE_KEY=0x...
-  ```
-  See .env.template for an example environment file.
-- Ensure chain config (`deployment/chain-config/<network>.json`) is set up as needed.
-
-### Deploying Contracts
-
-Run the following command to deploy contracts:
-
-```bash
-yarn deploy_contracts_<network>
-```
-
-This will:
-
-- Load environment variables from `.env`
-- Use Forge to deploy contracts with parameters from your config files
-
-#### Example for Coston2
-
-Set `COSTON2_RPC_URL` and `DEPLOYER_PRIVATE_KEY` in your `.env` file.
-
-Check and if needed update config file [`deployment/chain-config/coston2.json`](deployment/chain-config/coston2.json).
-
-Run
-
-```bash
-yarn deploy_contracts_coston2
-```
-
-### Contract Verification
-
-To verify (on Blockscout explorer) all deployed contracts on a supported network run:
-
-```
-yarn verify_contracts_<network>
-```
-
-For example, to verify on coston2:
-
-```
-yarn verify_contracts_coston2
-```
-
-This will automatically verify all contracts listed in the deployment JSON for the selected network.
+If you have found a possible vulnerability please see [SECURITY.md](./SECURITY.md).

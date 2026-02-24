@@ -1,8 +1,9 @@
 import tseslint from "typescript-eslint";
 import { includeIgnoreFile } from "@eslint/compat";
 import path from "node:path";
+import { defineConfig } from 'eslint/config';
 
-export default tseslint.config([
+export default defineConfig([
   tseslint.configs.recommended,
   // linting with type information
   tseslint.configs.recommendedTypeChecked,
