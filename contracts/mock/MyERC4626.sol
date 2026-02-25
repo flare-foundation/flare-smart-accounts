@@ -319,6 +319,22 @@ contract MyERC4626 is ERC4626 {
         return totalSupply();
     }
 
+    /**
+     * @notice Returns the deposit cap for the vault.
+     * @return The deposit cap.
+     */
+    function depositCap() external view returns (uint256) {
+        return 25000000000000;
+    }
+
+    /**
+     * @notice Returns the deposit limit for the vault.
+     * @return The deposit limit.
+     */
+    function depositLimit() external view returns (uint256) {
+        return 25000000000000;
+    }
+
     ////////////////////////// internal methods //////////////////////////
     function _withdraw(
         address _caller,

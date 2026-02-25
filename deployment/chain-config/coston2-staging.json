@@ -4,12 +4,12 @@
   "vaults": [
     {
       "vaultId": 1,
-      "vaultAddress": "0xf9c57F8c9ae3A8EF12F91C298Ca24daf9c42d874",
+      "vaultAddress": "0xF97B2bBdB2f4a561806e5038a503eCA81554634E",
       "vaultType": 1
     },
     {
       "vaultId": 2,
-      "vaultAddress": "0xEfd7a680Db05F1dCD86EB5a074897F502C8601A0",
+      "vaultAddress": "0xd5E27Ec2a7775B4475544BC6026D74910cB68B80",
       "vaultType": 2
     }
   ],
