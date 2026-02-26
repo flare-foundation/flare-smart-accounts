@@ -1045,12 +1045,7 @@ contract FAssetRedeemComposerTest is Test {
         uint32 _srcEid,
         uint256 _amountLD
     ) private pure returns (bytes memory, bytes32) {
-        bytes memory composeMsg = abi.encode(
-            IFAssetRedeemComposer.RedeemComposeData({
-                redeemer: _redeemer,
-                redeemerUnderlyingAddress: _redeemerUnderlying
-            })
-        );
+        bytes memory composeMsg = abi.encode(_redeemer, _redeemerUnderlying);
         bytes memory message = abi.encodePacked(
             uint64(0), // nonce
             _srcEid,

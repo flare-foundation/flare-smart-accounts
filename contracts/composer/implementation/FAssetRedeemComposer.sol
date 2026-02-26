@@ -287,22 +287,24 @@ contract FAssetRedeemComposer is
         uint256 composerFeePPM = _getComposerFeePPM(srcEid);
         uint256 composerFee = Math.mulDiv(amountLD, composerFeePPM, PPM_DENOMINATOR);
         uint256 amountToRedeemAfterFee = amountLD - composerFee;
-        RedeemComposeData memory data = abi.decode(OFTComposeMsgCodec.composeMsg(_message), (RedeemComposeData));
-        require(data.redeemer != address(0), InvalidAddress());
+        (address redeemer, string memory redeemerUnderlyingAddress) = abi.decode(
+            OFTComposeMsgCodec.composeMsg(_message), (address, string)
+        );
+        require(redeemer != address(0), InvalidAddress());
 
         if (composerFee > 0) {
             fAsset.safeTransfer(composerFeeRecipient, composerFee);
             emit ComposerFeeCollected(_guid, srcEid, composerFeeRecipient, composerFee);
         }
 
-        address redeemerAccount = _getOrCreateRedeemerAccount(data.redeemer);
+        address redeemerAccount = _getOrCreateRedeemerAccount(redeemer);
         fAsset.safeTransfer(redeemerAccount, amountToRedeemAfterFee);
         emit FAssetTransferred(redeemerAccount, amountToRedeemAfterFee);
 
         try IIFAssetRedeemerAccount(redeemerAccount).redeemFAsset{value: msg.value}(
             assetManager,
             amountToRedeemAfterFee,
-            data.redeemerUnderlyingAddress,
+            redeemerUnderlyingAddress,
             executor,
             executorFee
         )
@@ -311,10 +313,10 @@ contract FAssetRedeemComposer is
             emit FAssetRedeemed(
                 _guid,
                 srcEid,
-                data.redeemer,
+                redeemer,
                 redeemerAccount,
                 amountToRedeemAfterFee,
-                data.redeemerUnderlyingAddress,
+                redeemerUnderlyingAddress,
                 executor,
                 executorFee,
                 _redeemedAmountUBA
@@ -323,7 +325,7 @@ contract FAssetRedeemComposer is
             emit FAssetRedeemFailed(
                 _guid,
                 srcEid,
-                data.redeemer,
+                redeemer,
                 redeemerAccount,
                 amountToRedeemAfterFee
             );

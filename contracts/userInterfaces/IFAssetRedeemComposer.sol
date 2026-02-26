@@ -14,18 +14,6 @@ import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/in
 interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTimelock {
 
     /**
-     * @notice Decoded compose payload used by `lzCompose`.
-     * @param redeemer EVM address that owns the per-redeemer account.
-     * @param redeemerUnderlyingAddress Underlying-chain redemption address passed to the asset manager.
-     */
-    struct RedeemComposeData {
-        /// @notice EVM address that owns the per-redeemer account.
-        address redeemer;
-        /// @notice Underlying-chain redemption destination passed to the asset manager.
-        string redeemerUnderlyingAddress;
-    }
-
-    /**
      * @notice Emitted when the account beacon implementation is updated.
      * @param implementation New redeemer account implementation address.
      */

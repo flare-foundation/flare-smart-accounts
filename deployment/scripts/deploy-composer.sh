@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: scripts/deploy-composer.sh <network>
-# Example: scripts/deploy-composer.sh coston2
+# Usage: scripts/deploy-composer.sh <network> <onlyImpl:boolean>
+# Example: scripts/deploy-composer.sh coston2 false
+# Example: scripts/deploy-composer.sh coston2 true
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <network>" >&2
+if [[ $# -ne 2 ]]; then
+  echo "Usage: $0 <network> <onlyImpl:boolean>" >&2
   exit 2
 fi
 
 NETWORK="$1"
+ONLY_IMPL="$2"
 
 # Convert network to uppercase and build env var name
 NETWORK_UPPER=$(echo "$NETWORK" | tr '[:lower:]' '[:upper:]')
@@ -37,6 +39,7 @@ fi
 forge script deployment/scripts/DeployComposer.s.sol:DeployComposer \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
+  --sig "run(bool)" "$ONLY_IMPL" \
   --broadcast | tee forge-deploy-output.txt
 
 # Run save script with "composer" arg to save to <network>_composer.json
