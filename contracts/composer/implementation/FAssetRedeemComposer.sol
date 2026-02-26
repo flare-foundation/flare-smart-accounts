@@ -284,8 +284,11 @@ contract FAssetRedeemComposer is
 
         uint32 srcEid = OFTComposeMsgCodec.srcEid(_message);
         uint256 amountLD = OFTComposeMsgCodec.amountLD(_message);
-        uint256 composerFeePPM = _getComposerFeePPM(srcEid);
-        uint256 composerFee = Math.mulDiv(amountLD, composerFeePPM, PPM_DENOMINATOR);
+        uint256 composerFee = Math.mulDiv(
+            amountLD,
+            _getComposerFeePPM(srcEid),
+            PPM_DENOMINATOR
+        );
         uint256 amountToRedeemAfterFee = amountLD - composerFee;
         (address redeemer, string memory redeemerUnderlyingAddress) = abi.decode(
             OFTComposeMsgCodec.composeMsg(_message), (address, string)
