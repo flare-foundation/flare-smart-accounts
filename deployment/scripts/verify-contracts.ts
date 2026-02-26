@@ -64,7 +64,7 @@ contracts.forEach(contract => {
   const verifyCmd = `forge verify-contract \
     --rpc-url ${rpcUrl} \
     --verifier ${verifier} \
-    --verifier-url '${verifierUrl}' \
+    --verifier-url ${verifierUrl} \
     ${address} \
     ${contractPath}:${contractName} \
     --skip-is-verified-check`;
