@@ -7,10 +7,12 @@ import {FAssetRedeemComposer} from "../contracts/composer/implementation/FAssetR
 import {FAssetRedeemerAccount} from "../contracts/composer/implementation/FAssetRedeemerAccount.sol";
 import {FAssetRedeemComposerProxy} from "../contracts/composer/proxy/FAssetRedeemComposerProxy.sol";
 import {IFAssetRedeemComposer} from "../contracts/userInterfaces/IFAssetRedeemComposer.sol";
+import {IOwnableWithTimelock} from "../contracts/userInterfaces/IOwnableWithTimelock.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {RevertingReceiver} from "./utils/RevertingReceiver.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 
 contract FAssetRedeemComposerTest is Test {
     FAssetRedeemComposer private composerImpl;
@@ -991,6 +993,46 @@ contract FAssetRedeemComposerTest is Test {
 
         // Verify the call data was executed (fee was updated)
         assertEq(composer.defaultComposerFeePPM(), 1234);
+    }
+
+    function testUpgradeWithDataAndTimelockRevertOnlyOwner() public {
+        // set timelock to 1 hour
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+
+        // Deploy new implementation
+        FAssetRedeemComposer newImpl = new FAssetRedeemComposer();
+
+        // Prepare some data to call on the new implementation after upgrade
+        bytes memory data = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            1234
+        );
+
+        // Calculate encoded call data
+        bytes memory encodedCall = abi.encodeWithSelector(
+            UUPSUpgradeable.upgradeToAndCall.selector,
+            address(newImpl),
+            data
+        );
+
+        vm.prank(owner);
+        vm.expectEmit();
+        emit IOwnableWithTimelock.CallTimelocked(encodedCall, keccak256(encodedCall), block.timestamp + 1 hours);
+        composer.upgradeToAndCall(address(newImpl), data);
+
+        // Fast forward time by 1 hour to surpass timelock
+        skip(1 hours);
+
+        // Execute the upgrade after timelock
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                address(composer)
+            )
+        );
+        composer.executeTimelockedCall(encodedCall);
     }
 
     function testUpgradeRevertOnlyOwner() public {
