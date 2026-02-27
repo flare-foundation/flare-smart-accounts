@@ -64,9 +64,10 @@ contracts.forEach(contract => {
   const verifyCmd = `forge verify-contract \
     --rpc-url ${rpcUrl} \
     --verifier ${verifier} \
-    --verifier-url '${verifierUrl}' \
+    --verifier-url ${verifierUrl} \
     ${address} \
-    ${contractPath}:${contractName}`;
+    ${contractPath}:${contractName} \
+    --skip-is-verified-check`;
   console.log(`Verifying: ${address} (${contractFile}:${contractName})`);
   try {
     execSync(verifyCmd, { stdio: "inherit" });

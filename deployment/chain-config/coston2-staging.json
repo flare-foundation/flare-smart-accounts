@@ -4,12 +4,12 @@
   "vaults": [
     {
       "vaultId": 1,
-      "vaultAddress": "0xf9c57F8c9ae3A8EF12F91C298Ca24daf9c42d874",
+      "vaultAddress": "0xF97B2bBdB2f4a561806e5038a503eCA81554634E",
       "vaultType": 1
     },
     {
       "vaultId": 2,
-      "vaultAddress": "0xEfd7a680Db05F1dCD86EB5a074897F502C8601A0",
+      "vaultAddress": "0xd5E27Ec2a7775B4475544BC6026D74910cB68B80",
       "vaultType": 2
     }
   ],
@@ -20,11 +20,11 @@
   "paymentProofValidityDurationSeconds": 86400,
   "defaultInstructionFee": 1000,
   "xrplProviderWallets": ["rLb3Qrz2wh4cbMUQYi4iTJBM5ggfbUYw27"],
-  "uniswapV3Router": "0x0000000000000000000000000000000000000000",
+  "uniswapV3Router": "0x252be19B9B4329b764ae980505651A1ec1F6bb02",
   "usdt0": "0x21709E63fC7F264F329e0826Ea82197694B82775",
   "wNatStableCoinPoolFeeTierPPM": 3000,
-  "stableCoinFXrpPoolFeeTierPPM": 500,
-  "maxSlippagePPM": 20000,
+  "stableCoinFXrpPoolFeeTierPPM": 3000,
+  "maxSlippagePPM": 5000,
   "stableCoinUsdFeedId": "0x01555344542f555344000000000000000000000000",
   "wNatUsdFeedId": "0x01464c522f55534400000000000000000000000000",
   "timelockDurationSeconds": 3600
