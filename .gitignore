@@ -14,7 +14,6 @@ dependencies/
 
 # coverage files
 coverage/
-coverage-forge/
 lcov.info
 lcov.info.pruned
 coverage.json
@@ -31,9 +30,12 @@ typechain-web3
 
 # misc
 nul
+null
 .DS_Store
 
 # slither
 slither.json
 
-forge-deploy-output.txt
+deployment/output-internal
+
+error-selectors.txt

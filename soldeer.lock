@@ -1,16 +1,30 @@
 [[dependencies]]
 name = "@openzeppelin-contracts"
-version = "5.2.0"
-url = "https://soldeer-revisions.s3.amazonaws.com/@openzeppelin-contracts/5_2_0_11-01-2025_09:30:20_contracts.zip"
-checksum = "6dbd0440446b2ed16ca25e9f1af08fc0c5c1e73e71fee86ae8a00daa774e3817"
-integrity = "4cb7f3777f67fdf4b7d0e2f94d2f93f198b2e5dce718b7062ac7c2c83e1183bd"
+version = "5.5.0"
+url = "https://soldeer-revisions.s3.amazonaws.com/@openzeppelin-contracts/5_5_0_01-11-2025_09:56:40_contracts.zip"
+checksum = "2ee78837130cf06b456d9ef7ab70753685d9c1c9c2c5b70f24bd4c16695d0337"
+integrity = "da8336cf949f0e0667ae8360af849681e3a3e76d7e61e7a86b1a3414a158aeea"
+
+[[dependencies]]
+name = "@uniswap-v3-core"
+version = "1.0.1"
+url = "https://soldeer-revisions.s3.amazonaws.com/@uniswap-v3-core/1_0_1_22-01-2024_13:19:53_v3-core.zip"
+checksum = "96ad846c29246d5b9844c72239f5b722e6cd16378930c10d4461d98656d506a7"
+integrity = "fc895fca9ed19a0f2e445545d4569b2cbb2fd1c70ec25c64ed83ec252f88aa24"
+
+[[dependencies]]
+name = "@uniswap-v3-periphery"
+version = "1.4.4"
+url = "https://soldeer-revisions.s3.amazonaws.com/@uniswap-v3-periphery/1_4_4_22-01-2024_13:20:51_v3-periphery.zip"
+checksum = "f1ce151585a084bb3ec6fb9cbce4520924d41398c3ce8979169de6f7f70d6a81"
+integrity = "e101a06117b3274cd21a3032fa9a55446e842dc0e0e1b0b25008e094a446c453"
 
 [[dependencies]]
 name = "flare-periphery"
-version = "0.1.36"
-url = "https://soldeer-revisions.s3.amazonaws.com/flare-periphery/0_1_36_12-08-2025_11:31:39_soldeer-flare-periphery.zip"
-checksum = "5445bcf8e2f830e3ed5b50efe73654cfee8be796390fea6266787da9767cf4e9"
-integrity = "3469ca25ef95ad81150a4a8e56f88bece99f38d0951118b32696a0142b27add8"
+version = "0.1.38"
+url = "https://soldeer-revisions.s3.amazonaws.com/flare-periphery/0_1_38_26-09-2025_13:32:05_soldeer-flare-periphery.zip"
+checksum = "7d160edce05a2e93d3f3b8bfb3e7122fbea649496c8c734ef4ee718490c1df3b"
+integrity = "c35a2e55c092519abcacf92a6a7e2f1571c2bef94bdcc2b5e5e616830740bccf"
 
 [[dependencies]]
 name = "forge-std"

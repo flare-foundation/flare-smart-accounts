@@ -1,0 +1,176 @@
+# Prevent duplicate pipelines (MR and BRANCH pipelines, when a MR is opened for the given branch)
+workflow:
+  rules:
+  - if: '$CI_OPEN_MERGE_REQUESTS != null && ($CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "webide")'
+    when: never
+  - when: always
+
+default:
+  tags: [ flarenetwork ]
+
+variables: {}
+
+variables:
+  YARN_CACHE_DIR: .yarn-cache
+
+
+##
+## PARTIALS
+##
+
+.partials:
+  cache-nodejs:
+    key:
+      files: [ yarn.lock ]
+    paths:
+    - $YARN_CACHE_DIR
+    - node_modules/
+    policy: pull
+
+
+##
+## SCANNERS
+##
+
+
+include:
+- template: Jobs/SAST.latest.gitlab-ci.yml
+- template: Jobs/Dependency-Scanning.latest.gitlab-ci.yml
+- template: Jobs/Secret-Detection.latest.gitlab-ci.yml
+
+
+sast:
+  needs: []
+
+dependency_scanning:
+  needs: []
+
+.secret-analyzer:
+  needs: []
+
+
+##
+##
+##
+
+##
+##  BUILD (none)
+##
+build-node-modules:
+  stage: build
+  needs: []
+  image: node:22
+  timeout: 10 minutes
+  script:
+  - yarn install --frozen-lockfile --cache-folder $YARN_CACHE_DIR
+  cache:
+  - key:
+      files: [ yarn.lock ]
+    paths:
+    - $YARN_CACHE_DIR
+    - node_modules/
+    policy: pull-push
+
+
+##
+## LINTERS
+##
+
+lint-test:
+  image: node:22
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - yarn lint-test
+
+lint-contracts:
+  image: node:22
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - yarn lint-contracts
+
+lint-deployment:
+  image: node:22
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - yarn lint-deployment
+
+##
+##  TESTS
+##
+test:
+  timeout: 10 minutes
+  tags: [ flarenetwork-md ]
+  image: timivesel/foundry-custom:latest
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  before_script:
+  - forge soldeer install
+  - forge install --no-git
+  - forge build
+  script:
+  - forge test -vvv
+
+##
+## COVERAGE
+##
+
+coverage:
+  image: timivesel/foundry-custom:latest
+  tags: [ flarenetwork-md ]
+  timeout: 10 minutes
+  before_script:
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  before_script:
+  - forge soldeer install
+  - forge install --no-git
+  - forge build
+  script:
+  - FOUNDRY_PROFILE=coverage forge coverage --report summary --report lcov
+  artifacts:
+    expire_in: 30 days
+    paths:
+    - lcov.info
+
+coverage-reports:
+  image: node:22-alpine
+  timeout: 4 minutes
+  needs:
+  - job: coverage
+    artifacts: true
+  before_script:
+  - echo "https://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories
+  - echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+  - echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories
+  - apk add --no-cache python3 py3-pip lcov 1>/dev/null
+  - apk upgrade --no-cache 1>/dev/null
+  - pip3 install --break-system-packages lcov_cobertura 1>/dev/null
+  script:
+  - node scripts/forge-lcov-prune.js
+  - genhtml lcov.info.pruned --branch-coverage --output-dir coverage --ignore-errors inconsistent
+  - lcov_cobertura lcov.info.pruned --output coverage-cobertura.xml
+  - lcov --summary lcov.info.pruned --rc branch_coverage=1 --ignore-errors inconsistent
+  coverage: '/  lines[\ .:]+\d+\.\d+%/' # https://regex101.com/r/KVj9Dr/1
+  artifacts:
+    expire_in: 30 days
+    paths:
+    - lcov.info.pruned
+    - coverage
+    - coverage-cobertura.xml
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage-cobertura.xml

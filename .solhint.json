@@ -11,12 +11,10 @@
     "check-send-result": "error",
     "compiler-version": ["off", "0.8.20"],
     "const-name-snakecase": "error",
-    "custom-errors": "off",
     "gas-custom-errors": "off",
     "func-name-mixedcase": "error",
     "ordering": "warn",
     "imports-on-top": "error",
-    "mark-callable-contracts": "on",
     "max-line-length": ["error", 119],
     "reason-string": "off",
     "max-states-count": ["error", 20],
@@ -36,8 +34,15 @@
     "visibility-modifier-order": "error",
     "func-visibility": ["error", { "ignoreConstructors": true }],
     "no-global-import": "off",
-    "contract-name-camelcase": "error",
-    "event-name-camelcase": "error",
-    "immutable-vars-naming": ["error", { "immutablesAsConstants": false }]
+    "contract-name-capwords": "error",
+    "event-name-capwords": "error",
+    "immutable-vars-naming": ["error", { "immutablesAsConstants": false }],
+    "use-natspec": "off",
+    "gas-increment-by-one": "off",
+    "gas-strict-inequalities": "off",
+    "gas-indexed-events": "off",
+    "import-path-check": "off",
+    "gas-small-strings": "off",
+    "function-max-lines": "off"
   }
 }

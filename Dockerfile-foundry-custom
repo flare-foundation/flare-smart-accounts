@@ -1,0 +1,32 @@
+# Base: Node.js LTS on Debian, includes npm & core build tools
+
+# Use Debian base for glibc compatibility with Foundry
+FROM node:20-slim
+
+# Install only minimal deps required for Forge tests and scripts
+RUN apt-get update -y \
+ && apt-get install -y --no-install-recommends ca-certificates curl git bash \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install Foundry
+ENV FOUNDRY_DIR=/root/.foundry
+RUN curl -L https://foundry.paradigm.xyz | bash \
+ && /root/.foundry/bin/foundryup --version latest || true \
+ && /root/.foundry/bin/foundryup || true
+ENV PATH="/root/.foundry/bin:${PATH}"
+
+# Verify installations (optional, keeps image functional if commands fail at runtime)
+RUN node --version && npm --version && /root/.foundry/bin/forge --version && /root/.foundry/bin/cast --version
+
+# Pre-install common JS deps used by scripts
+# Note: keep runtime small; installing project deps happens via CI caches
+# Keep image minimal; install project deps (including web3) in CI via yarn install
+
+# Set sensible defaults for Yarn cache location
+ENV YARN_CACHE_DIR=/work/.yarn-cache
+
+# Create working directory
+WORKDIR /work
+
+# Default user remains root for CI convenience; adjust if needed
+# ENTRYPOINT left default; CI will run job scripts
