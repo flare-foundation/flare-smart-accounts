@@ -153,7 +153,6 @@ interface IPersonalAccount {
         uint256 amountOut
     );
 
-
     /**
      * @notice Reverts if the sent value is insufficient for collateral reservation.
      * @param collateralReservationFee The required collateral reservation fee.

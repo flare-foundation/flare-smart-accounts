@@ -47,7 +47,7 @@ library PaymentProofs {
      * @param _xrplAddress The expected XRPL address associated with the payment.
      */
     function verifyPayment(
-        IPayment.Proof memory _proof,
+        IPayment.Proof calldata _proof,
         string memory _xrplAddress
     )
         internal view
@@ -87,6 +87,17 @@ library PaymentProofs {
         // );
     }
 
+    function getState()
+        internal pure
+        returns (State storage _state)
+    {
+        bytes32 position = STATE_POSITION;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            _state.slot := position
+        }
+    }
+
     function _verifyProofData(
         bytes32 _sourceId,
         uint8 _status,
@@ -119,16 +130,5 @@ library PaymentProofs {
             xrplProviderWalletsState.xrplProviderWalletHashes[_receivingAddressHash] != 0,
             IPaymentProofsFacet.InvalidReceivingAddressHash()
         );
-    }
-
-    function getState()
-        internal pure
-        returns (State storage _state)
-    {
-        bytes32 position = STATE_POSITION;
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            _state.slot := position
-        }
     }
 }

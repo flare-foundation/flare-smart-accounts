@@ -189,6 +189,26 @@ interface IInstructionsFacet {
     );
 
     /**
+     * @notice Emitted when a nonce-ignore flag is set for an AA transaction.
+     * @param personalAccount The personal account address.
+     * @param txId The AA transaction ID to ignore nonce for.
+     */
+    event NonceIgnoreSet(
+        address indexed personalAccount,
+        bytes32 indexed txId
+    );
+
+    /**
+     * @notice Emitted when a nonce is manually incremented.
+     * @param personalAccount The personal account address.
+     * @param newNonce The new nonce value after increment.
+     */
+    event NonceIncremented(
+        address indexed personalAccount,
+        uint256 newNonce
+    );
+
+    /**
      * @notice Reverts if the payment amount is invalid.
      * @param requiredAmount The required payment amount.
      */
@@ -277,26 +297,6 @@ interface IInstructionsFacet {
     error InvalidSender(
         address sender,
         address personalAccount
-    );
-
-    /**
-     * @notice Emitted when a nonce-ignore flag is set for an AA transaction.
-     * @param personalAccount The personal account address.
-     * @param txId The AA transaction ID to ignore nonce for.
-     */
-    event NonceIgnoreSet(
-        address indexed personalAccount,
-        bytes32 indexed txId
-    );
-
-    /**
-     * @notice Emitted when a nonce is manually incremented.
-     * @param personalAccount The personal account address.
-     * @param newNonce The new nonce value after increment.
-     */
-    event NonceIncremented(
-        address indexed personalAccount,
-        uint256 newNonce
     );
 
     /**

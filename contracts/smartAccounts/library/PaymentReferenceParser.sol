@@ -105,6 +105,4 @@ library PaymentReferenceParser {
         _address = address(uint160(uint256(_paymentReference) & ((uint256(1) << 160) - 1)));
         require(_address != address(0), IInstructionsFacet.AddressZero());
     }
-
-
 }

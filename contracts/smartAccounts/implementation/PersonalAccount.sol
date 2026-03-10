@@ -248,14 +248,6 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient {
         emit SwapExecuted(_tokenIn, _tokenOut, amountIn, amountOut);
     }
 
-    /// @inheritdoc IPersonalAccount
-    function implementation() external view returns (address) {
-        // controller is the beacon
-        return IBeacon(controllerAddress).implementation();
-    }
-
-    // ========== ACCOUNT ABSTRACTION ==========
-
     /// @inheritdoc IIPersonalAccount
     function executeUserOp(
         IPersonalAccount.Call[] calldata _calls
@@ -271,5 +263,11 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient {
                 revert CallFailed(i, result);
             }
         }
+    }
+
+    /// @inheritdoc IPersonalAccount
+    function implementation() external view returns (address) {
+        // controller is the beacon
+        return IBeacon(controllerAddress).implementation();
     }
 }

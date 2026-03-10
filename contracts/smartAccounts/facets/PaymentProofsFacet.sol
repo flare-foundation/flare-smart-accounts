@@ -5,7 +5,6 @@ import {IIPaymentProofsFacet} from "../interface/IIPaymentProofsFacet.sol";
 import {IPaymentProofsFacet} from "../../userInterfaces/facets/IPaymentProofsFacet.sol";
 import {PaymentProofs} from "../library/PaymentProofs.sol";
 import {FacetBase} from "./FacetBase.sol";
-import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 
 /**
  * @title PaymentProofsFacet

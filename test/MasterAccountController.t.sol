@@ -44,8 +44,6 @@ import {SimpleExample} from "../contracts/mock/SimpleExample.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IXRPPayment} from "../contracts/userInterfaces/IXRPPayment.sol";
 
-import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
-
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
