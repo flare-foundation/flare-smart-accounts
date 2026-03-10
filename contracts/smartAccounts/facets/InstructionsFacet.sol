@@ -205,11 +205,9 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
 
         // execute instruction
-        uint256 instructionType = instructionId >> 4;
-        uint256 instructionCommand = instructionId & 0x0F;
         Instructions.executeInstruction(
-            instructionType,
-            instructionCommand,
+            instructionId >> 4, // instruction type
+            instructionId & 0x0F, // instruction command
             memoData,
             address(personalAccount),
             _proof.data.requestBody.transactionId
