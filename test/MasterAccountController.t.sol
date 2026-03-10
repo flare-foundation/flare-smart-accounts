@@ -67,6 +67,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     MyERC4626 private firelightVault;
     MyERC4626 private upshiftVault;
     MintableERC20 private fxrp;
+    SimpleExample private simpleExample;
     string private xrplProviderWallet;
     bytes32 private xrplProviderWalletHash;
     bytes32 private sourceId;
@@ -206,6 +207,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         xrplAddress1 = "xrplAddress1";
         xrplAddress2 = "xrplAddress2";
+
+        simpleExample = new SimpleExample();
     }
 
     function testInitialization() public {
