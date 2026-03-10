@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
+import {IXRPPayment} from "../../userInterfaces/IXRPPayment.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIInstructionsFacet} from "../interface/IIInstructionsFacet.sol";
 // import is needed for @inheritdoc
@@ -17,6 +18,7 @@ import {Vaults} from "../library/Vaults.sol";
 import {AgentVaults} from "../library/AgentVaults.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
 import {Instructions} from "../library/Instructions.sol";
+import {UserOp} from "../library/UserOp.sol";
 import {PaymentReferenceParser} from "../library/PaymentReferenceParser.sol";
 import {FacetBase} from "./FacetBase.sol";
 
@@ -174,6 +176,47 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
     }
 
     /// @inheritdoc IInstructionsFacet
+    function executeInstruction(
+        IXRPPayment.Proof calldata _proof,
+        string calldata _xrplAddress
+    )
+        external payable
+    {
+        // extract memo data
+        require(_proof.data.responseBody.hasMemoData, NoMemoData());
+        bytes calldata memoData = _proof.data.responseBody.firstMemoData;
+        require(memoData.length > 0, NoMemoData());
+
+        // instruction ID is first byte of memoData
+        uint256 instructionId = uint8(memoData[0]);
+
+        // check instruction fee
+        uint256 instructionFee = InstructionFees.getInstructionFee(instructionId);
+        int256 receivedAmount = _proof.data.responseBody.receivedAmount;
+        require(
+            receivedAmount >= 0 && uint256(receivedAmount) >= instructionFee,
+            InvalidPaymentAmount(instructionFee)
+        );
+
+        // verify payment proof
+        PaymentProofs.verifyPayment(_proof, _xrplAddress);
+
+        // get or create PA
+        IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
+
+        // execute instruction
+        uint256 instructionType = instructionId >> 4;
+        uint256 instructionCommand = instructionId & 0x0F;
+        Instructions.executeInstruction(
+            instructionType,
+            instructionCommand,
+            memoData,
+            address(personalAccount),
+            _proof.data.requestBody.transactionId
+        );
+    }
+
+    /// @inheritdoc IInstructionsFacet
     function isTransactionIdUsed(
         bytes32 _transactionId
     )
@@ -193,5 +236,15 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
     {
         Instructions.State storage state = Instructions.getState();
         return state.collateralReservationIdToTransactionId[_collateralReservationId];
+    }
+
+    /// @inheritdoc IInstructionsFacet
+    function getNonce(
+        address _personalAccount
+    )
+        external view
+        returns (uint256)
+    {
+        return UserOp.getNonce(_personalAccount);
     }
 }

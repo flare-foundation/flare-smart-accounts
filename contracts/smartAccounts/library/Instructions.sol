@@ -6,6 +6,7 @@ import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet
 import {FXrp} from "./FXrp.sol";
 import {Vault} from "./Vault.sol";
 import {Vaults} from "./Vaults.sol";
+import {UserOp} from "./UserOp.sol";
 import {PaymentReferenceParser} from "./PaymentReferenceParser.sol";
 
 library Instructions {
@@ -57,6 +58,26 @@ library Instructions {
             uint256 date = PaymentReferenceParser.getValue(_paymentReference);
             address vault = Vaults.getVaultAddress(_paymentReference);
             Vault.claim(_personalAccount, vault, date);
+        } else {
+            revert IInstructionsFacet.InvalidInstruction(_instructionType, _instructionCommand);
+        }
+    }
+
+    function executeInstruction(
+        uint256 _instructionType,
+        uint256 _instructionCommand,
+        bytes calldata _memoData,
+        address _personalAccount,
+        bytes32 _transactionId
+    )
+        internal
+    {
+        if (_instructionType == 15 && _instructionCommand == 15) { // 0xFF = AA user operation
+            UserOp.execute(_memoData, _personalAccount, _transactionId);
+        } else if (_instructionType == 14 && _instructionCommand == 14) { // 0xEE = ignore nonce
+            UserOp.setIgnoreNonce(_memoData, _personalAccount, _transactionId);
+        } else if (_instructionType == 14 && _instructionCommand == 15) { // 0xEF = increment nonce
+            UserOp.incrementNonce(_personalAccount, _transactionId);
         } else {
             revert IInstructionsFacet.InvalidInstruction(_instructionType, _instructionCommand);
         }

@@ -2,6 +2,7 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
+import {IXRPPayment} from "../IXRPPayment.sol";
 
 /**
  * @title IInstructionsFacet
@@ -174,6 +175,20 @@ interface IInstructionsFacet {
     );
 
     /**
+     * @notice Emitted when an AA user operation is executed.
+     * @param personalAccount The personal account address.
+     * @param nonce The nonce of the user operation.
+     * @param success Whether the execution was successful.
+     * @param returnData The return data from the execution.
+     */
+    event UserOperationExecuted(
+        address indexed personalAccount,
+        uint256 nonce,
+        bool success,
+        bytes returnData
+    );
+
+    /**
      * @notice Reverts if the payment amount is invalid.
      * @param requiredAmount The required payment amount.
      */
@@ -240,6 +255,51 @@ interface IInstructionsFacet {
     error InvalidMinter();
 
     /**
+     * @notice Reverts if the XRP payment has no memo data.
+     */
+    error NoMemoData();
+
+    /**
+     * @notice Reverts if the nonce doesn't match expected value.
+     * @param expected The expected nonce value.
+     * @param actual The actual nonce value provided.
+     */
+    error InvalidNonce(
+        uint256 expected,
+        uint256 actual
+    );
+
+    /**
+     * @notice Reverts if the userOp sender doesn't match the personal account.
+     * @param sender The sender from the PackedUserOperation.
+     * @param personalAccount The expected personal account address.
+     */
+    error InvalidSender(
+        address sender,
+        address personalAccount
+    );
+
+    /**
+     * @notice Emitted when a nonce-ignore flag is set for an AA transaction.
+     * @param personalAccount The personal account address.
+     * @param txId The AA transaction ID to ignore nonce for.
+     */
+    event NonceIgnoreSet(
+        address indexed personalAccount,
+        bytes32 indexed txId
+    );
+
+    /**
+     * @notice Emitted when a nonce is manually incremented.
+     * @param personalAccount The personal account address.
+     * @param newNonce The new nonce value after increment.
+     */
+    event NonceIncremented(
+        address indexed personalAccount,
+        uint256 newNonce
+    );
+
+    /**
      * @notice Reserve collateral for minting operation.
      * @param _xrplAddress The XRPL address requesting the collateral reservation.
      * @param _paymentReference The payment reference associated with the request.
@@ -280,6 +340,17 @@ interface IInstructionsFacet {
         external payable;
 
     /**
+     * @notice Execute an AA user operation from an XRP payment proof.
+     * @param _proof XRP payment proof containing PackedUserOperation in firstMemoData.
+     * @param _xrplAddress The XRPL address requesting execution.
+     */
+    function executeInstruction(
+        IXRPPayment.Proof calldata _proof,
+        string calldata _xrplAddress
+    )
+        external payable;
+
+    /**
      * @notice Returns true if the transaction id has already been used.
      * @param _transactionId The transaction id to check.
      * @return True if used, false otherwise.
@@ -300,4 +371,15 @@ interface IInstructionsFacet {
     )
         external view
         returns (bytes32 _transactionId);
+
+    /**
+     * @notice Returns the current AA nonce for a personal account.
+     * @param _personalAccount The personal account address.
+     * @return The current nonce.
+     */
+    function getNonce(
+        address _personalAccount
+    )
+        external view
+        returns (uint256);
 }

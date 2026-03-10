@@ -3,6 +3,7 @@ pragma solidity >=0.7.6 <0.9;
 
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 
+
 /**
  * @title IIPersonalAccount
  * @notice Internal interface for PersonalAccount contract.
@@ -150,4 +151,13 @@ interface IIPersonalAccount is IPersonalAccount {
     )
         external
         returns (uint256 amountIn, uint256 amountOut);
+
+    /**
+     * @notice Execute a series of calls (user operation).
+     * @param _calls Array of calls to execute.
+     */
+    function executeUserOp(
+        IPersonalAccount.Call[] calldata _calls
+    )
+        external payable;
 }

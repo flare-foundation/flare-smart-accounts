@@ -12,7 +12,7 @@ import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {FtsoV2Interface} from "flare-periphery/src/flare/FtsoV2Interface.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
-import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
+import {IIPersonalAccount} from "../contracts/smartAccounts/interface/IIPersonalAccount.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
 import {MockUniswapV3Router} from "../contracts/mock/MockUniswapV3Router.sol";
@@ -40,7 +40,11 @@ import {SwapFacet} from "../contracts/smartAccounts/facets/SwapFacet.sol";
 import {ITimelockFacet} from "../contracts/userInterfaces/facets/ITimelockFacet.sol";
 import {IITimelockFacet} from "../contracts/smartAccounts/interface/IITimelockFacet.sol";
 import {XrplProviderWalletsFacet} from "../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
+import {SimpleExample} from "../contracts/mock/SimpleExample.sol";
+import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
+import {IXRPPayment} from "../contracts/userInterfaces/IXRPPayment.sol";
 
+import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test, FacetsDeploy {
@@ -51,7 +55,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     IIMasterAccountController private masterAccountController;
     PersonalAccount private personalAccountImpl;
-    PersonalAccountProxy private personalAccountProxy;
     IPersonalAccount private personalAccount1;
     IPersonalAccount private personalAccount2;
 
@@ -2864,6 +2867,216 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(timestamp, allowedAfterTimestamp);
     }
 
+    function testExecuteUserOp() public {
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](2);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 2,
+            data: abi.encodeWithSignature("addValue(uint256)", uint256(1))
+        });
+        calls[1] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+
+        // Build the callData for executeUserOp
+        bytes memory callData = abi.encodeCall(
+            IIPersonalAccount.executeUserOp,
+            (calls)
+        );
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+
+        // Build the PackedUserOperation
+        PackedUserOperation memory packedUserOp = PackedUserOperation({
+            sender: personalAccountAddr,
+            nonce: 0,
+            initCode: "",
+            callData: callData,
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+
+        // Build firstMemoData: [0xFF][walletId][abi.encode(PackedUserOperation)]
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF),        // instruction ID
+            uint8(1),           // wallet ID
+            abi.encode(packedUserOp)
+        );
+
+        // Build IXRPPayment proof
+        IXRPPayment.Proof memory proof;
+        proof.data.sourceId = sourceId;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.responseBody.hasMemoData = true;
+        proof.data.responseBody.firstMemoData = memoData;
+        proof.data.requestBody.transactionId = bytes32("aaTx1");
+
+        address sender = makeAddr("sender");
+        // fund sender so msg.value can be forwarded
+        vm.deal(sender, 1 ether);
+
+        // check SimpleExample initial state
+        assertEq(simpleExample.map(1), 0);
+        assertEq(simpleExample.flag(), false);
+        assertEq(address(simpleExample).balance, 0);
+        assertEq(simpleExample.getAllKeys().length, 0);
+
+        // check nonce before
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+
+        vm.expectEmit();
+        emit IInstructionsFacet.UserOperationExecuted(
+            personalAccountAddr,
+            0,
+            true,
+            ""
+        );
+        vm.prank(sender);
+        masterAccountController.executeInstruction{value: 2}(proof, xrplAddress1);
+
+        // check SimpleExample final state
+        assertEq(simpleExample.map(1), 2);
+        assertEq(simpleExample.flag(), true);
+        assertEq(address(simpleExample).balance, 2);
+        assertEq(simpleExample.getAllKeys().length, 1);
+
+        // check nonce incremented
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+    }
+
+    function testIncrementNonce() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+
+        // Build increment nonce memo: [0xEF][walletId]
+        bytes memory memoData = abi.encodePacked(uint8(0xEF), uint8(1));
+        IXRPPayment.Proof memory proof = _buildXRPPaymentProof(memoData, bytes32("incNonceTx1"));
+
+        vm.expectEmit();
+        emit IInstructionsFacet.NonceIncremented(personalAccountAddr, 1);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+
+        // increment again with different txId
+        proof = _buildXRPPaymentProof(memoData, bytes32("incNonceTx2"));
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 2);
+    }
+
+    function testIncrementNonceRevertReplay() public {
+        bytes memory memoData = abi.encodePacked(uint8(0xEF), uint8(1));
+        IXRPPayment.Proof memory proof = _buildXRPPaymentProof(memoData, bytes32("incNonceTx1"));
+
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        // replay same proof
+        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testIgnoreNonceAndExecute() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        address sender = makeAddr("sender");
+        vm.deal(sender, 1 ether);
+
+        // First: execute an AA op at nonce 0 to advance nonce to 1
+        IPersonalAccount.Call[] memory calls1 = new IPersonalAccount.Call[](1);
+        calls1[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+        bytes32 txId1 = bytes32("aaTx1");
+        IXRPPayment.Proof memory proof1 = _buildAAProof(calls1, personalAccountAddr, 0, txId1);
+        vm.prank(sender);
+        masterAccountController.executeInstruction(proof1, xrplAddress1);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+
+        // Second: create another AA op also at nonce 0 (stale nonce)
+        IPersonalAccount.Call[] memory calls2 = new IPersonalAccount.Call[](1);
+        calls2[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 1,
+            data: abi.encodeWithSignature("addValue(uint256)", uint256(42))
+        });
+        bytes32 txId2 = bytes32("aaTx2");
+        IXRPPayment.Proof memory proof2 = _buildAAProof(calls2, personalAccountAddr, 0, txId2);
+
+        // Should fail: nonce is now 1 but op has nonce 0
+        vm.expectRevert(
+            abi.encodeWithSelector(IInstructionsFacet.InvalidNonce.selector, 1, 0)
+        );
+        vm.prank(sender);
+        masterAccountController.executeInstruction{value: 1}(proof2, xrplAddress1);
+
+        // Set ignore nonce for aaTx2
+        bytes memory ignoreNonceMemo = abi.encodePacked(uint8(0xEE), uint8(1), txId2);
+        IXRPPayment.Proof memory ignoreProof = _buildXRPPaymentProof(ignoreNonceMemo, bytes32("ignoreTx1"));
+        vm.expectEmit();
+        emit IInstructionsFacet.NonceIgnoreSet(personalAccountAddr, txId2);
+        masterAccountController.executeInstruction(ignoreProof, xrplAddress1);
+
+        // Now execute with nonce ignored - should succeed
+        vm.expectEmit();
+        emit IInstructionsFacet.UserOperationExecuted(personalAccountAddr, 0, true, "");
+        vm.prank(sender);
+        masterAccountController.executeInstruction{value: 1}(proof2, xrplAddress1);
+
+        // nonce should NOT have incremented (still 1)
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+        // but the operation executed
+        assertEq(simpleExample.map(42), 1);
+
+        // Replay should fail: txId is now used
+        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        vm.prank(sender);
+        masterAccountController.executeInstruction{value: 1}(proof2, xrplAddress1);
+    }
+
+    function testIgnoreNonceRevertReplay() public {
+        bytes32 txId = bytes32("aaTx1");
+        bytes memory memoData = abi.encodePacked(uint8(0xEE), uint8(1), txId);
+
+        IXRPPayment.Proof memory proof = _buildXRPPaymentProof(memoData, bytes32("ignoreTx1"));
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        // replay same ignore-nonce instruction
+        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
+    function testExecuteUserOpRevertReplayAfterSuccess() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        address sender = makeAddr("sender");
+        vm.deal(sender, 1 ether);
+
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+        bytes32 txId = bytes32("aaTx1");
+        IXRPPayment.Proof memory proof = _buildAAProof(calls, personalAccountAddr, 0, txId);
+
+        vm.prank(sender);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+
+        // replay: txId is used, nonce also mismatches
+        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        vm.prank(sender);
+        masterAccountController.executeInstruction(proof, xrplAddress1);
+    }
+
     //// helper functions ////
     function _mockGetAgentInfo(
         address agentAddress,
@@ -3070,4 +3283,49 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     ) private pure returns (uint256) {
         return (_instructionType << 4) | _instructionCommand;
     }
+
+    function _buildXRPPaymentProof(
+        bytes memory _memoData,
+        bytes32 _transactionId
+    ) private view returns (IXRPPayment.Proof memory proof) {
+        proof.data.sourceId = sourceId;
+        proof.data.responseBody.receivedAmount = int256(defaultInstructionFee);
+        proof.data.responseBody.status = 0;
+        proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
+        proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
+        proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
+        proof.data.responseBody.hasMemoData = true;
+        proof.data.responseBody.firstMemoData = _memoData;
+        proof.data.requestBody.transactionId = _transactionId;
+    }
+
+    function _buildAAProof(
+        IPersonalAccount.Call[] memory _calls,
+        address _personalAccount,
+        uint256 _nonce,
+        bytes32 _transactionId
+    ) private view returns (IXRPPayment.Proof memory) {
+        bytes memory callData = abi.encodeCall(
+            IIPersonalAccount.executeUserOp,
+            (_calls)
+        );
+        PackedUserOperation memory packedUserOp = PackedUserOperation({
+            sender: _personalAccount,
+            nonce: _nonce,
+            initCode: "",
+            callData: callData,
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF),
+            uint8(1),
+            abi.encode(packedUserOp)
+        );
+        return _buildXRPPaymentProof(memoData, _transactionId);
+    }
+
 }

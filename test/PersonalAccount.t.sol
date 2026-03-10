@@ -59,7 +59,10 @@ contract PersonalAccountTest is Test {
 
     function testInitializeRevertAlreadyInitialized() public {
         vm.expectRevert(IPersonalAccount.AlreadyInitialized.selector);
-        personalAccount.initialize(makeAddr("controller"), xrplOwner);
+        personalAccount.initialize(
+            makeAddr("controller"),
+            xrplOwner
+        );
     }
 
     function testInitializeRevertInvalidCBeacon() public {

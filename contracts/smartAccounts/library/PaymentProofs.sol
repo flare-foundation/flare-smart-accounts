@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
+import {IXRPPayment} from "../../userInterfaces/IXRPPayment.sol";
 import {XrplProviderWallets} from "./XrplProviderWallets.sol";
 import {IPaymentProofsFacet} from "../../userInterfaces/facets/IPaymentProofsFacet.sol";
 
@@ -46,36 +47,77 @@ library PaymentProofs {
      * @param _xrplAddress The expected XRPL address associated with the payment.
      */
     function verifyPayment(
-        IPayment.Proof calldata _proof,
+        IPayment.Proof memory _proof,
         string memory _xrplAddress
     )
         internal view
     {
-        State storage state = getState();
-        require(
-            _proof.data.sourceId == state.sourceId,
-            IPaymentProofsFacet.InvalidSourceId()
-        );
-        require(
-            _proof.data.responseBody.status == 0,
-            IPaymentProofsFacet.InvalidTransactionStatus()
-        );
-        require(
-            block.timestamp <= state.paymentProofValidityDurationSeconds + _proof.data.responseBody.blockTimestamp,
-            IPaymentProofsFacet.PaymentProofExpired()
-        );
-        require(
-            _proof.data.responseBody.sourceAddressHash == keccak256(bytes(_xrplAddress)),
-            IPaymentProofsFacet.MismatchingSourceAndXrplAddr()
-        );
-        XrplProviderWallets.State storage xrplProviderWalletsState = XrplProviderWallets.getState();
-        require(
-            xrplProviderWalletsState.xrplProviderWalletHashes[_proof.data.responseBody.receivingAddressHash] != 0,
-            IPaymentProofsFacet.InvalidReceivingAddressHash()
+        _verifyProofData(
+            _proof.data.sourceId,
+            _proof.data.responseBody.status,
+            _proof.data.responseBody.blockTimestamp,
+            _proof.data.responseBody.sourceAddressHash,
+            _proof.data.responseBody.receivingAddressHash,
+            _xrplAddress
         );
         require(
             ContractRegistry.getFdcVerification().verifyPayment(_proof),
             IPaymentProofsFacet.InvalidTransactionProof()
+        );
+    }
+
+    function verifyPayment(
+        IXRPPayment.Proof calldata _proof,
+        string calldata _xrplAddress
+    )
+        internal view
+    {
+        _verifyProofData(
+            _proof.data.sourceId,
+            _proof.data.responseBody.status,
+            _proof.data.responseBody.blockTimestamp,
+            _proof.data.responseBody.sourceAddressHash,
+            _proof.data.responseBody.receivingAddressHash,
+            _xrplAddress
+        );
+        // TODO: FDC verification for IXRPPayment.Proof - pending flare-periphery support
+        // require(
+        //     ContractRegistry.getFdcVerification().verifyXRPPayment(_proof),
+        //     IPaymentProofsFacet.InvalidTransactionProof()
+        // );
+    }
+
+    function _verifyProofData(
+        bytes32 _sourceId,
+        uint8 _status,
+        uint64 _blockTimestamp,
+        bytes32 _sourceAddressHash,
+        bytes32 _receivingAddressHash,
+        string memory _xrplAddress
+    )
+        private view
+    {
+        State storage state = getState();
+        require(
+            _sourceId == state.sourceId,
+            IPaymentProofsFacet.InvalidSourceId()
+        );
+        require(
+            _status == 0,
+            IPaymentProofsFacet.InvalidTransactionStatus()
+        );
+        require(
+            block.timestamp <= state.paymentProofValidityDurationSeconds + _blockTimestamp,
+            IPaymentProofsFacet.PaymentProofExpired()
+        );
+        require(
+            _sourceAddressHash == keccak256(bytes(_xrplAddress)),
+            IPaymentProofsFacet.MismatchingSourceAndXrplAddr()
+        );
+        XrplProviderWallets.State storage xrplProviderWalletsState = XrplProviderWallets.getState();
+        require(
+            xrplProviderWalletsState.xrplProviderWalletHashes[_receivingAddressHash] != 0,
+            IPaymentProofsFacet.InvalidReceivingAddressHash()
         );
     }
 
