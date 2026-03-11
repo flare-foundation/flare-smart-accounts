@@ -13,8 +13,6 @@ library Instructions {
 
     /// @custom:storage-location erc7201:smartAccounts.Instructions.State
     struct State {
-        /// @notice Indicates if transaction has already been executed.
-        mapping(bytes32 transactionId => bool) usedTransactionIds;
         /// @notice Mapping from collateral reservation ID to XRPL transaction ID - used for deposit after minting
         mapping(uint256 collateralReservationId => bytes32 transactionId) collateralReservationIdToTransactionId;
     }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
+import {TransactionIds} from "./TransactionIds.sol";
 
 library UserOp {
 
@@ -10,7 +11,6 @@ library UserOp {
     struct State {
         mapping(address account => uint256 nonce) nonces;
         mapping(bytes32 txId => bool) ignoreNonce;
-        mapping(bytes32 txId => bool) usedTransactionIds;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -30,18 +30,16 @@ library UserOp {
         // validate sender
         require(userOp.sender == _personalAccount, IInstructionsFacet.InvalidSender(userOp.sender, _personalAccount));
 
+        // check txId not already used
+        TransactionIds.requireNotUsed(_transactionId);
+
         State storage state = getState();
 
-        // check txId not already used
-        require(!state.usedTransactionIds[_transactionId], IInstructionsFacet.TransactionAlreadyExecuted());
-
         // validate nonce
-        uint256 expectedNonce = state.nonces[_personalAccount];
-        bool nonceIgnored = false;
-
-        if (userOp.nonce != expectedNonce) {
-            require(state.ignoreNonce[_transactionId], IInstructionsFacet.InvalidNonce(expectedNonce, userOp.nonce));
-            nonceIgnored = true;
+        if (userOp.nonce != state.nonces[_personalAccount]) {
+            require(state.ignoreNonce[_transactionId],
+                IInstructionsFacet.InvalidNonce(state.nonces[_personalAccount], userOp.nonce)
+            );
         }
 
         // execute callData on PA (Diamond is controller, so onlyController is satisfied)
@@ -49,8 +47,8 @@ library UserOp {
 
         // update state only on success (failed ops are retryable with same proof)
         if (success) {
-            state.usedTransactionIds[_transactionId] = true;
-            if (nonceIgnored) {
+            TransactionIds.markUsed(_transactionId);
+            if (state.ignoreNonce[_transactionId]) {
                 state.ignoreNonce[_transactionId] = false;
             } else {
                 ++state.nonces[_personalAccount];
@@ -72,10 +70,11 @@ library UserOp {
     )
         internal
     {
-        State storage state = getState();
-        require(!state.usedTransactionIds[_transactionId], IInstructionsFacet.TransactionAlreadyExecuted());
-        state.usedTransactionIds[_transactionId] = true;
+        require(_memoData.length == 34, IInstructionsFacet.NoMemoData());
+        TransactionIds.requireNotUsed(_transactionId);
+        TransactionIds.markUsed(_transactionId);
         bytes32 txId = bytes32(_memoData[2:34]);
+        State storage state = getState();
         state.ignoreNonce[txId] = true;
         emit IInstructionsFacet.NonceIgnoreSet(_personalAccount, txId);
     }
@@ -86,9 +85,9 @@ library UserOp {
     )
         internal
     {
+        TransactionIds.requireNotUsed(_transactionId);
+        TransactionIds.markUsed(_transactionId);
         State storage state = getState();
-        require(!state.usedTransactionIds[_transactionId], IInstructionsFacet.TransactionAlreadyExecuted());
-        state.usedTransactionIds[_transactionId] = true;
         uint256 newNonce = ++state.nonces[_personalAccount];
         emit IInstructionsFacet.NonceIncremented(_personalAccount, newNonce);
     }

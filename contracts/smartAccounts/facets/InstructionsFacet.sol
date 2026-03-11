@@ -18,6 +18,7 @@ import {Vaults} from "../library/Vaults.sol";
 import {AgentVaults} from "../library/AgentVaults.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
 import {Instructions} from "../library/Instructions.sol";
+import {TransactionIds} from "../library/TransactionIds.sol";
 import {UserOp} from "../library/UserOp.sol";
 import {PaymentReferenceParser} from "../library/PaymentReferenceParser.sol";
 import {FacetBase} from "./FacetBase.sol";
@@ -109,8 +110,8 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         // user should call deposit in that case
         require(amount == reservationInfo.valueUBA, InvalidAmount());
         // mark transaction as used
-        require(!state.usedTransactionIds[transactionId], TransactionAlreadyExecuted());
-        state.usedTransactionIds[transactionId] = true;
+        TransactionIds.requireNotUsed(transactionId);
+        TransactionIds.markUsed(transactionId);
 
         // execute deposit
         address vault = Vaults.getVaultAddress(paymentReference);
@@ -149,10 +150,9 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         PaymentProofs.verifyPayment(_proof, _xrplAddress);
 
         // mark transaction as used
-        Instructions.State storage state = Instructions.getState();
         bytes32 transactionId = _proof.data.requestBody.transactionId;
-        require(!state.usedTransactionIds[transactionId], TransactionAlreadyExecuted());
-        state.usedTransactionIds[transactionId] = true;
+        TransactionIds.requireNotUsed(transactionId);
+        TransactionIds.markUsed(transactionId);
 
         // create or get existing Personal Account for the XRPL address
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
@@ -221,8 +221,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         external view
         returns (bool)
     {
-        Instructions.State storage state = Instructions.getState();
-        return state.usedTransactionIds[_transactionId];
+        return TransactionIds.isUsed(_transactionId);
     }
 
     /// @inheritdoc IInstructionsFacet
