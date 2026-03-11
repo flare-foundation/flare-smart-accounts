@@ -212,6 +212,14 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             address(personalAccount),
             _proof.data.requestBody.transactionId
         );
+
+        // emit event
+        emit MemoInstructionExecuted(
+            address(personalAccount),
+            _proof.data.requestBody.transactionId,
+            _xrplAddress,
+            instructionId
+        );
     }
 
     /// @inheritdoc IInstructionsFacet

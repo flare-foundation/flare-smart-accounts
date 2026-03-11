@@ -209,6 +209,20 @@ interface IInstructionsFacet {
     );
 
     /**
+     * @notice Emitted when an instruction is executed.
+     * @param personalAccount The personal account address.
+     * @param transactionId The transaction ID.
+     * @param xrplOwner The XRPL owner address.
+     * @param instructionId The instruction ID.
+     */
+    event MemoInstructionExecuted(
+        address indexed personalAccount,
+        bytes32 indexed transactionId,
+        string xrplOwner,
+        uint256 instructionId
+    );
+
+    /**
      * @notice Reverts if the payment amount is invalid.
      * @param requiredAmount The required payment amount.
      */
