@@ -32,7 +32,7 @@
     "lint-sol-contracts": "solhint \"contracts/**/*.sol\"",
     "lint-sol-test": "solhint \"test/**/*.sol\"",
     "lint-sol-deployment": "solhint \"deployment/**/*.sol\"",
-    "slither": "pip3 install slither-analyzer && rm -f ./slither.json && rm -f ./slither_badge.json 2> /dev/null; slither . --json=./slither.json 2> /dev/null || true; node scripts/slither-parse.js ./slither.json",
+    "slither": "pip3 install slither-analyzer && rm -f ./slither.json && rm -f ./slither_badge.json 2> /dev/null; slither . --filter-paths \"dependencies|node_modules|mock\" --json=./slither.json 2> /dev/null || true; node scripts/slither-parse.js ./slither.json",
     "---------OTHER---SCRIPTS": "",
     "get-error-selectors": "bash scripts/extract-error-selectors.sh",
     "verify_contracts": "ts-node deployment/scripts/verify-contracts.ts"
