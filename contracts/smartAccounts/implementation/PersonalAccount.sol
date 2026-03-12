@@ -265,6 +265,8 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient {
         }
     }
 
+    receive() external payable {}
+
     /// @inheritdoc IPersonalAccount
     function implementation() external view returns (address) {
         // controller is the beacon

@@ -43,7 +43,7 @@ contract PersonalAccountTest is Test {
             controller, // needs to implement the IBeacon interface
             xrplOwner
         );
-        personalAccount = PersonalAccount(address(personalAccountProxy));
+        personalAccount = PersonalAccount(payable(address(personalAccountProxy)));
 
         depositVault = makeAddr("depositVault");
         fxrp = makeAddr("fxrp");
