@@ -20,6 +20,11 @@ Solidity smart contracts implementing Flare Smart Accounts — a Diamond proxy (
 - `yarn lint` — solhint on contracts, tests, deployment
 - `forge fmt` — format Solidity files (run before lint)
 
+**After every change, run these checks before considering work complete:**
+1. `yarn lint` — ensure no lint errors (warnings are acceptable)
+2. `forge build` — ensure compilation succeeds
+3. `yarn coverage` — ensure all tests pass and coverage report generates
+
 ## Project Structure
 
 ```
@@ -28,7 +33,7 @@ contracts/
     facets/          # Diamond facets (InstructionsFacet, SwapFacet, etc.)
     implementation/  # MasterAccountController, PersonalAccount
     interface/       # Internal interfaces (II* prefix)
-    library/         # Core logic libraries (UserOp, Instructions, TransactionIds, etc.)
+    library/         # Core logic libraries (UserOp, Instructions, etc.)
     proxy/           # PersonalAccountProxy (beacon proxy)
   userInterfaces/    # Public interfaces (I* prefix)
     facets/          # Public facet interfaces
@@ -78,5 +83,5 @@ audit/               # Security audit reports
 - **Instruction flow**: XRPL payment → FDC proof → InstructionsFacet → library routing → PersonalAccount execution
 - **Two proof types**: `IPayment.Proof` (legacy, uses `standardPaymentReference`) and `IXRPPayment.Proof` (AA, uses `firstMemoData`)
 - **AA instructions**: 0xFF (execute UserOp), 0xEE (ignore nonce for txId), 0xEF (increment nonce)
-- **TransactionIds library**: Shared ERC-7201 storage for `usedTransactionIds` across all paths
+- **Transaction ID tracking**: `usedTransactionIds` in `Instructions.State` — shared by both legacy and AA paths
 - **Nonce-on-success**: AA UserOp nonce only increments on successful execution (XRPL txns are irreversible, proofs must be retryable)

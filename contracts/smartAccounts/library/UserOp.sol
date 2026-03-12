@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
-import {TransactionIds} from "./TransactionIds.sol";
+import {Instructions} from "./Instructions.sol";
 
 library UserOp {
 
@@ -30,10 +30,14 @@ library UserOp {
         // validate sender
         require(userOp.sender == _personalAccount, IInstructionsFacet.InvalidSender(userOp.sender, _personalAccount));
 
-        // check txId not already used
-        TransactionIds.requireNotUsed(_transactionId);
-
+        Instructions.State storage instructionsState = Instructions.getState();
         State storage state = getState();
+
+        // check txId not already used
+        require(
+            !instructionsState.usedTransactionIds[_transactionId],
+            IInstructionsFacet.TransactionAlreadyExecuted()
+        );
 
         // validate nonce
         if (userOp.nonce != state.nonces[_personalAccount]) {
@@ -47,7 +51,7 @@ library UserOp {
 
         // update state only on success (failed ops are retryable with same proof)
         if (success) {
-            TransactionIds.markUsed(_transactionId);
+            instructionsState.usedTransactionIds[_transactionId] = true;
             if (state.ignoreNonce[_transactionId]) {
                 state.ignoreNonce[_transactionId] = false;
             } else {
@@ -71,8 +75,12 @@ library UserOp {
         internal
     {
         require(_memoData.length == 34, IInstructionsFacet.NoMemoData());
-        TransactionIds.requireNotUsed(_transactionId);
-        TransactionIds.markUsed(_transactionId);
+        Instructions.State storage instructionsState = Instructions.getState();
+        require(
+            !instructionsState.usedTransactionIds[_transactionId],
+            IInstructionsFacet.TransactionAlreadyExecuted()
+        );
+        instructionsState.usedTransactionIds[_transactionId] = true;
         bytes32 txId = bytes32(_memoData[2:34]);
         State storage state = getState();
         state.ignoreNonce[txId] = true;
@@ -85,8 +93,12 @@ library UserOp {
     )
         internal
     {
-        TransactionIds.requireNotUsed(_transactionId);
-        TransactionIds.markUsed(_transactionId);
+        Instructions.State storage instructionsState = Instructions.getState();
+        require(
+            !instructionsState.usedTransactionIds[_transactionId],
+            IInstructionsFacet.TransactionAlreadyExecuted()
+        );
+        instructionsState.usedTransactionIds[_transactionId] = true;
         State storage state = getState();
         uint256 newNonce = ++state.nonces[_personalAccount];
         emit IInstructionsFacet.NonceIncremented(_personalAccount, newNonce);
