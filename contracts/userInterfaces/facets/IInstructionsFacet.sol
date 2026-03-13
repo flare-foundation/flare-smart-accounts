@@ -215,7 +215,7 @@ interface IInstructionsFacet {
      * @param xrplOwner The XRPL owner address.
      * @param instructionId The instruction ID.
      */
-    event MemoInstructionExecuted(
+    event InstructionExecuted(
         address indexed personalAccount,
         bytes32 indexed transactionId,
         string xrplOwner,

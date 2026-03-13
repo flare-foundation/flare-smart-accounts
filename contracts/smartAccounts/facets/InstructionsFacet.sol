@@ -214,7 +214,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         );
 
         // emit event
-        emit MemoInstructionExecuted(
+        emit InstructionExecuted(
             address(personalAccount),
             _proof.data.requestBody.transactionId,
             _xrplAddress,
