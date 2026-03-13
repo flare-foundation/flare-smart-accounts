@@ -178,14 +178,10 @@ interface IInstructionsFacet {
      * @notice Emitted when an AA user operation is executed.
      * @param personalAccount The personal account address.
      * @param nonce The nonce of the user operation.
-     * @param success Whether the execution was successful.
-     * @param returnData The return data from the execution.
      */
     event UserOperationExecuted(
         address indexed personalAccount,
-        uint256 nonce,
-        bool success,
-        bytes returnData
+        uint256 nonce
     );
 
     /**
@@ -311,6 +307,14 @@ interface IInstructionsFacet {
     error InvalidSender(
         address sender,
         address personalAccount
+    );
+
+    /**
+     * @notice Reverts if the AA user operation call fails.
+     * @param returnData The return data from the failed call.
+     */
+    error CallFailed(
+        bytes returnData
     );
 
     /**

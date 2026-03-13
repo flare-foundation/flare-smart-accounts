@@ -38,6 +38,8 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient {
         controllerAddress = EMPTY_ADDRESS;
     }
 
+    receive() external payable {}
+
     /**
      * Proxyable initialization method. Can be called only once, from the proxy constructor
      * @param _controllerAddress MasterAccountController contract address
@@ -264,8 +266,6 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient {
             }
         }
     }
-
-    receive() external payable {}
 
     /// @inheritdoc IPersonalAccount
     function implementation() external view returns (address) {

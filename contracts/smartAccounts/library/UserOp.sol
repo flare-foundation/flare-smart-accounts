@@ -3,7 +3,6 @@ pragma solidity ^0.8.27;
 
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
-import {Instructions} from "./Instructions.sol";
 
 library UserOp {
 
@@ -30,57 +29,35 @@ library UserOp {
         // validate sender
         require(userOp.sender == _personalAccount, IInstructionsFacet.InvalidSender(userOp.sender, _personalAccount));
 
-        Instructions.State storage instructionsState = Instructions.getState();
         State storage state = getState();
-
-        // check txId not already used
-        require(
-            !instructionsState.usedTransactionIds[_transactionId],
-            IInstructionsFacet.TransactionAlreadyExecuted()
-        );
 
         // validate nonce
         if (userOp.nonce != state.nonces[_personalAccount]) {
             require(state.ignoreNonce[_transactionId],
                 IInstructionsFacet.InvalidNonce(state.nonces[_personalAccount], userOp.nonce)
             );
+            state.ignoreNonce[_transactionId] = false;
+        } else {
+            ++state.nonces[_personalAccount];
         }
 
         // execute callData on PA (Diamond is controller, so onlyController is satisfied)
         (bool success, bytes memory returnData) = _personalAccount.call{value: msg.value}(userOp.callData);
-
-        // update state only on success (failed ops are retryable with same proof)
-        if (success) {
-            instructionsState.usedTransactionIds[_transactionId] = true;
-            if (state.ignoreNonce[_transactionId]) {
-                state.ignoreNonce[_transactionId] = false;
-            } else {
-                ++state.nonces[_personalAccount];
-            }
-        }
+        require(success, IInstructionsFacet.CallFailed(returnData));
 
         emit IInstructionsFacet.UserOperationExecuted(
             _personalAccount,
-            userOp.nonce,
-            success,
-            returnData
+            userOp.nonce
         );
     }
 
     function setIgnoreNonce(
         bytes calldata _memoData,
-        address _personalAccount,
-        bytes32 _transactionId
+        address _personalAccount
     )
         internal
     {
         require(_memoData.length == 34, IInstructionsFacet.NoMemoData());
-        Instructions.State storage instructionsState = Instructions.getState();
-        require(
-            !instructionsState.usedTransactionIds[_transactionId],
-            IInstructionsFacet.TransactionAlreadyExecuted()
-        );
-        instructionsState.usedTransactionIds[_transactionId] = true;
         bytes32 txId = bytes32(_memoData[2:34]);
         State storage state = getState();
         state.ignoreNonce[txId] = true;
@@ -88,17 +65,10 @@ library UserOp {
     }
 
     function incrementNonce(
-        address _personalAccount,
-        bytes32 _transactionId
+        address _personalAccount
     )
         internal
     {
-        Instructions.State storage instructionsState = Instructions.getState();
-        require(
-            !instructionsState.usedTransactionIds[_transactionId],
-            IInstructionsFacet.TransactionAlreadyExecuted()
-        );
-        instructionsState.usedTransactionIds[_transactionId] = true;
         State storage state = getState();
         uint256 newNonce = ++state.nonces[_personalAccount];
         emit IInstructionsFacet.NonceIncremented(_personalAccount, newNonce);

@@ -75,9 +75,9 @@ library Instructions {
         if (_instructionType == 15 && _instructionCommand == 15) { // 0xFF = AA user operation
             UserOp.execute(_memoData, _personalAccount, _transactionId);
         } else if (_instructionType == 14 && _instructionCommand == 14) { // 0xEE = ignore nonce
-            UserOp.setIgnoreNonce(_memoData, _personalAccount, _transactionId);
+            UserOp.setIgnoreNonce(_memoData, _personalAccount);
         } else if (_instructionType == 14 && _instructionCommand == 15) { // 0xEF = increment nonce
-            UserOp.incrementNonce(_personalAccount, _transactionId);
+            UserOp.incrementNonce(_personalAccount);
         } else {
             revert IInstructionsFacet.InvalidInstruction(_instructionType, _instructionCommand);
         }

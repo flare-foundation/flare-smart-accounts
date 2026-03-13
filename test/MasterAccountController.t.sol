@@ -2936,9 +2936,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IInstructionsFacet.UserOperationExecuted(
             personalAccountAddr,
-            0,
-            true,
-            ""
+            0
         );
         vm.prank(sender);
         masterAccountController.executeInstruction{value: 2}(proof, xrplAddress1);
@@ -3028,7 +3026,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         // Now execute with nonce ignored - should succeed
         vm.expectEmit();
-        emit IInstructionsFacet.UserOperationExecuted(personalAccountAddr, 0, true, "");
+        emit IInstructionsFacet.UserOperationExecuted(personalAccountAddr, 0);
         vm.prank(sender);
         masterAccountController.executeInstruction{value: 1}(proof2, xrplAddress1);
 

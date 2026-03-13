@@ -191,15 +191,25 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         uint256 instructionId = uint8(memoData[0]);
 
         // check instruction fee
-        uint256 instructionFee = InstructionFees.getInstructionFee(instructionId);
-        int256 receivedAmount = _proof.data.responseBody.receivedAmount;
-        require(
-            receivedAmount >= 0 && uint256(receivedAmount) >= instructionFee,
-            InvalidPaymentAmount(instructionFee)
-        );
+        {
+            uint256 instructionFee = InstructionFees.getInstructionFee(instructionId);
+            int256 receivedAmount = _proof.data.responseBody.receivedAmount;
+            require(
+                receivedAmount >= 0 && uint256(receivedAmount) >= instructionFee,
+                InvalidPaymentAmount(instructionFee)
+            );
+        }
 
         // verify payment proof
         PaymentProofs.verifyPayment(_proof, _xrplAddress);
+
+        // mark transaction as used
+        bytes32 transactionId = _proof.data.requestBody.transactionId;
+        {
+            Instructions.State storage state = Instructions.getState();
+            require(!state.usedTransactionIds[transactionId], TransactionAlreadyExecuted());
+            state.usedTransactionIds[transactionId] = true;
+        }
 
         // get or create PA
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
@@ -210,13 +220,13 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             instructionId & 0x0F, // instruction command
             memoData,
             address(personalAccount),
-            _proof.data.requestBody.transactionId
+            transactionId
         );
 
         // emit event
         emit InstructionExecuted(
             address(personalAccount),
-            _proof.data.requestBody.transactionId,
+            transactionId,
             _xrplAddress,
             instructionId
         );
