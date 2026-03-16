@@ -1,6 +1,6 @@
 .env
 node_modules
-yarn-error.log
+pnpm-debug.log
 
 ## Test deploys info
 deployment/deploys/scdev.json

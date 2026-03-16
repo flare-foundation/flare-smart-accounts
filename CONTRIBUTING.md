@@ -11,7 +11,7 @@ MUST pass all tests, and MUST be reviewed by at least one other contributor.
 
 ```bash
 # Install packages
-yarn
+pnpm
 
 # install Foundryup
 curl -L https://foundry.paradigm.xyz | bash
@@ -37,7 +37,7 @@ forge test --mc <contract_name>
 forge test --mt <test_name>
 
 # generate coverage report
-yarn coverage
+pnpm coverage
 ```
 
 The default behavior for forge test is to only display a summary of passing and failing tests. To show more information change the verbosity level with the `-v` flag:
@@ -56,10 +56,10 @@ There are currently the following linters included in this repository:
 ### How to run
 ```bash
 # run solhint
-yarn lint-sol
+pnpm lint-sol
 
 # run eslint on TypeScript
-yarn lint:check
+pnpm lint:check
 ```
 
 ## Deployment
@@ -80,7 +80,7 @@ You can also use staging variants by appending `-staging` to any base network (e
 
 - Install dependencies:
   ```bash
-  yarn
+  pnpm
   ```
 - Create a `.env` file in the project root with:
   ```env
@@ -95,7 +95,7 @@ You can also use staging variants by appending `-staging` to any base network (e
 Run the following command to deploy contracts:
 
 ```bash
-yarn deploy_contracts <network> <fullDeploy (true|false)>
+pnpm deploy_contracts <network> <fullDeploy (true|false)>
 ```
 where `<network>` is the target network (e.g., `coston2`), and `<fullDeploy>` indicates whether to perform a full deployment (`true`) or a partial deployment, which means deploying diamond contract with only base facets (DiamondCutFacet, DiamondLoupeFacet, OwnershipFacet) and without executing initialization (`false`).
 
@@ -113,7 +113,7 @@ Check and if needed update config file [`deployment/chain-config/coston2.json`](
 Run
 
 ```bash
-yarn deploy_contracts coston2 true
+pnpm deploy_contracts coston2 true
 ```
 
 ### Contract Verification
@@ -121,14 +121,14 @@ yarn deploy_contracts coston2 true
 To verify (on Blockscout explorer) all deployed contracts on a supported network run:
 
 ```
-yarn verify_contracts <network>
+pnpm verify_contracts <network>
 ```
 This will automatically verify all contracts listed in the deployment JSON for the selected network.
 
 #### Example for Coston2
 
 ```
-yarn verify_contracts coston2
+pnpm verify_contracts coston2
 ```
 
 ### Execute Diamond Cut
@@ -137,7 +137,7 @@ To execute a diamond cut on an existing diamond contract (or to only print execu
 Then run the diamond_cut script with:
 
 ```bash
-yarn diamond_cut <network> <cut-file-name>
+pnpm diamond_cut <network> <cut-file-name>
 ```
 
 where `<network>` is the target network and `<cut-file-name>` is the name of the cut file (e.g., `cut-example`).
