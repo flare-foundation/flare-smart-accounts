@@ -24,7 +24,7 @@ via_ir = true
 [dependencies]
 "@openzeppelin-contracts" = "5.5.0"
 forge-std = "1.10.0"
-flare-periphery = "0.1.38"
+flare-periphery = "0.1.44-alpha.2"
 "@uniswap-v3-core" = "1.0.1"
 "@uniswap-v3-periphery" = "1.4.4"
 

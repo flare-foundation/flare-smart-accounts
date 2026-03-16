@@ -2,7 +2,7 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IXRPPayment} from "../IXRPPayment.sol";
+import {IXRPPayment} from "flare-periphery/src/flare/IXRPPayment.sol";
 
 /**
  * @title IInstructionsFacet

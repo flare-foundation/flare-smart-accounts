@@ -5,7 +5,7 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IXRPPayment} from "../../userInterfaces/IXRPPayment.sol";
+import {IXRPPayment} from "flare-periphery/src/flare/IXRPPayment.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";

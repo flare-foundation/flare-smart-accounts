@@ -42,7 +42,7 @@ import {IITimelockFacet} from "../contracts/smartAccounts/interface/IITimelockFa
 import {XrplProviderWalletsFacet} from "../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 import {SimpleExample} from "../contracts/mock/SimpleExample.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
-import {IXRPPayment} from "../contracts/userInterfaces/IXRPPayment.sol";
+import {IXRPPayment} from "flare-periphery/src/flare/IXRPPayment.sol";
 
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test, FacetsDeploy {
