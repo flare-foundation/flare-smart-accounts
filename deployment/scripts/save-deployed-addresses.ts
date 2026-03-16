@@ -33,7 +33,9 @@ if (network === "unknown") {
 }
 
 const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev"];
-const isValidNetwork = allowedBaseNetworks.includes(network) || (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
+const isValidNetwork =
+  allowedBaseNetworks.includes(network) ||
+  (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
 if (!isValidNetwork) {
   throw new Error(`Invalid network: ${network}`);
 }

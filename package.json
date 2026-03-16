@@ -26,8 +26,8 @@
     "---------LINTER---SCRIPTS": "",
     "lint:check": "eslint \"{deployment,scripts}/**/*.ts\"",
     "lint:fix": "eslint \"{deployment,scripts}/**/*.ts\" --fix",
-    "format:check": "prettier --check .",
-    "format:fix": "prettier --write .",
+    "format:check": "prettier --check \"{deployment,scripts}/**/*.{ts,js}\"",
+    "format:fix": "prettier --write \"{deployment,scripts}/**/*.{ts,js}\"",
     "lint-sol": "pnpm lint-sol-contracts && pnpm lint-sol-test && pnpm lint-sol-deployment",
     "lint-sol-contracts": "solhint \"contracts/**/*.sol\"",
     "lint-sol-test": "solhint \"test/**/*.sol\"",
@@ -37,20 +37,21 @@
     "get-error-selectors": "bash scripts/extract-error-selectors.sh",
     "verify_contracts": "ts-node deployment/scripts/verify-contracts.ts"
   },
-  "dependencies": {},
   "devDependencies": {
     "@coverage.rocks/genhtml": "^1.16.0",
     "@eslint/compat": "^2.0.0",
-    "@eslint/js": "^9.39.0",
+    "@flarenetwork/eslint-config-flare": "^0.0.2",
+    "@flarenetwork/prettier-config-flare": "^0.0.3",
     "dotenv-cli": "^7.0.0",
     "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.6.2",
     "prettier-plugin-solidity": "^2.1.0",
     "solhint": "^6.0.1",
     "solidity-coverage": "^0.8.11",
     "typescript": "^5.0.0",
-    "typescript-eslint": "^8.48.0",
     "web3": "^4.0.0"
   },
+  "prettier": "@flarenetwork/prettier-config-flare",
   "packageManager": "pnpm@10.32.1+sha512.a706938f0e89ac1456b6563eab4edf1d1faf3368d1191fc5c59790e96dc918e4456ab2e67d613de1043d2e8c81f87303e6b40d4ffeca9df15ef1ad567348f2be"
 }

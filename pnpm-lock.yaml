@@ -14,15 +14,21 @@ importers:
       '@eslint/compat':
         specifier: ^2.0.0
         version: 2.0.3(eslint@9.39.4)
-      '@eslint/js':
-        specifier: ^9.39.0
-        version: 9.39.4
+      '@flarenetwork/eslint-config-flare':
+        specifier: ^0.0.2
+        version: 0.0.2(@eslint/compat@2.0.3(eslint@9.39.4))(eslint@9.39.4)(typescript@5.9.3)
+      '@flarenetwork/prettier-config-flare':
+        specifier: ^0.0.3
+        version: 0.0.3(prettier@3.8.1)
       dotenv-cli:
         specifier: ^7.0.0
         version: 7.4.4
       eslint:
         specifier: ^9.39.0
         version: 9.39.4
+      eslint-config-prettier:
+        specifier: ^10.1.8
+        version: 10.1.8(eslint@9.39.4)
       prettier:
         specifier: ^3.6.2
         version: 3.8.1
@@ -38,9 +44,6 @@ importers:
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
-      typescript-eslint:
-        specifier: ^8.48.0
-        version: 8.57.0(eslint@9.39.4)(typescript@5.9.3)
       web3:
         specifier: ^4.0.0
         version: 4.16.0(typescript@5.9.3)(zod@3.25.76)
@@ -191,6 +194,17 @@ packages:
   '@fastify/busboy@2.1.1':
     resolution: {integrity: sha512-vBZP4NlzfOlerQTnba4aqZoMhE/a9HY7HRqoOPaETQcSQuWEIyZMHGfVu6w9wGtGK5fED5qRs2DteVCjOH60sA==}
     engines: {node: '>=14'}
+
+  '@flarenetwork/eslint-config-flare@0.0.2':
+    resolution: {integrity: sha512-oZKdRkii3/TsKJQb5ChDh+S4ghfY5uXtaCBaK12QZOPanasfMBvk5IOXz2Z7ObmfjBxoB+XsjnUGYvnAvuosZw==}
+    peerDependencies:
+      '@eslint/compat': ^2.0.0
+      eslint: ^9.33.0
+
+  '@flarenetwork/prettier-config-flare@0.0.3':
+    resolution: {integrity: sha512-D1H5c3UUKJIfAfUrWQrVGtZcO/CHs3crxPUtX4/X1unbHruktMxp8nK6SVZTQH8EZoE5MVNwbHmKiRUCVswcHw==}
+    peerDependencies:
+      prettier: '>=3.0.0'
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -847,6 +861,12 @@ packages:
     resolution: {integrity: sha512-yhi5S+mNTOuRvyW4gWlg5W1byMaQGWWSYHXsuFZ7GBo7tpyOwi2EdzMP/QWxh9hwkD2m+wDVHJsxhRIj+v/b/A==}
     engines: {node: '>=0.12.0'}
     hasBin: true
+
+  eslint-config-prettier@10.1.8:
+    resolution: {integrity: sha512-82GZUjRS0p/jganf6q1rEO25VSoHH0hKPCTrgillPjdI/3bgBhAE1QzHrHTizjpRvy6pGAvKjDJtk2pF9NDq8w==}
+    hasBin: true
+    peerDependencies:
+      eslint: '>=7.0.0'
 
   eslint-scope@8.4.0:
     resolution: {integrity: sha512-sNXOfKCn74rt8RICKMvJS7XKV/Xk9kA7DyJr8mJik3S7Cwgy3qlkkmyS2uQB3jiJg6VNdZd/pDBJu0nvG2NlTg==}
@@ -2309,6 +2329,21 @@ snapshots:
 
   '@fastify/busboy@2.1.1': {}
 
+  '@flarenetwork/eslint-config-flare@0.0.2(@eslint/compat@2.0.3(eslint@9.39.4))(eslint@9.39.4)(typescript@5.9.3)':
+    dependencies:
+      '@eslint/compat': 2.0.3(eslint@9.39.4)
+      '@eslint/js': 9.39.4
+      eslint: 9.39.4
+      typescript-eslint: 8.57.0(eslint@9.39.4)(typescript@5.9.3)
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
+
+  '@flarenetwork/prettier-config-flare@0.0.3(prettier@3.8.1)':
+    dependencies:
+      prettier: 3.8.1
+      prettier-plugin-solidity: 2.3.0(prettier@3.8.1)
+
   '@humanfs/core@0.19.1': {}
 
   '@humanfs/node@0.16.7':
@@ -2990,6 +3025,10 @@ snapshots:
       optionator: 0.8.3
     optionalDependencies:
       source-map: 0.2.0
+
+  eslint-config-prettier@10.1.8(eslint@9.39.4):
+    dependencies:
+      eslint: 9.39.4
 
   eslint-scope@8.4.0:
     dependencies:

@@ -1,5 +1,5 @@
-import fs from 'fs';
-import Web3, { AbiFunctionFragment, AbiItem } from 'web3';
+import fs from "fs";
+import Web3, { AbiFunctionFragment, AbiItem } from "web3";
 import { DiamondSelectors, type DiamondCut } from "./diamond";
 
 const web3 = new Web3();
@@ -33,7 +33,10 @@ export interface PreparedDiamondCutResult {
 
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-export function prepareDiamondCut(config: CutConfigInput, deployedSelectors: DiamondSelectors): PreparedDiamondCutResult {
+export function prepareDiamondCut(
+  config: CutConfigInput,
+  deployedSelectors: DiamondSelectors
+): PreparedDiamondCutResult {
   // Build a DiamondSelectors object from the facets in the config
   const newSelectorsPossiblyExisting = createNewSelectors(config.facets);
   // Remove any selectors that already exist in the deployed diamond with the same facet address
@@ -79,7 +82,9 @@ function createDeletedSelectors(deployedSelectors: DiamondSelectors, deleteMetho
   return new DiamondSelectors(selectorMap);
 }
 
-export function selectorsFromLoupeData(facets: Array<{ facetAddress: string; functionSelectors: string[] }>): DiamondSelectors {
+export function selectorsFromLoupeData(
+  facets: Array<{ facetAddress: string; functionSelectors: string[] }>
+): DiamondSelectors {
   const m = new Map<string, string>();
   for (const f of facets) {
     for (const sel of f.functionSelectors) {
@@ -110,7 +115,7 @@ export function toSelector(item: string | AbiItem) {
 }
 
 export function loadAbi(contractName: string): AbiItem[] {
-  const raw = fs.readFileSync(`artifacts/${contractName}.sol/${contractName}.json`, 'utf8');
+  const raw = fs.readFileSync(`artifacts/${contractName}.sol/${contractName}.json`, "utf8");
   const parsed = JSON.parse(raw) as { abi: AbiItem[] };
   return parsed.abi;
 }
@@ -118,16 +123,16 @@ export function loadAbi(contractName: string): AbiItem[] {
 export function parseArgs(argv: string[]) {
   const args: Record<string, string> = {};
   for (let i = 2; i < argv.length; i += 2) {
-    args[argv[i].replace(/^--/, '')] = argv[i + 1];
+    args[argv[i].replace(/^--/, "")] = argv[i + 1];
   }
   return args;
 }
 
 export function readFacetsFile(p: string) {
   // line format: address|contractName
-  const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
-  return lines.map(l => {
-    const parts = l.split('|');
+  const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter(Boolean);
+  return lines.map((l) => {
+    const parts = l.split("|");
     if (parts.length !== 2) {
       throw new Error(`Invalid facets line (expected address|contractName): ${l}`);
     }
@@ -138,10 +143,10 @@ export function readFacetsFile(p: string) {
 
 export function readLoupeFile(p: string) {
   // line format: facetAddress|sel1,sel2,sel3
-  const lines = fs.readFileSync(p, 'utf8').split(/\r?\n/).filter(Boolean);
-  return lines.map(l => {
-    const [facetAddress, selectors] = l.split('|');
-    const functionSelectors = (selectors ? selectors.split(',') : []).filter(Boolean);
+  const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter(Boolean);
+  return lines.map((l) => {
+    const [facetAddress, selectors] = l.split("|");
+    const functionSelectors = (selectors ? selectors.split(",") : []).filter(Boolean);
     return { facetAddress, functionSelectors };
   });
 }

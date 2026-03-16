@@ -9,7 +9,9 @@ if (!network) {
 }
 // check if network is valid (supports base networks and any "*-staging")
 const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev"];
-const isValidNetwork = allowedBaseNetworks.includes(network) || (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
+const isValidNetwork =
+  allowedBaseNetworks.includes(network) ||
+  (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
 if (!isValidNetwork) {
   throw new Error(`Invalid network: ${network}`);
 }
@@ -23,7 +25,6 @@ const baseNetwork = network.endsWith("-staging") ? network.replace(/-staging$/, 
 const rpcUrl = `https://${baseNetwork}-api.flare.network/ext/C/rpc`;
 const verifierUrl = `https://${baseNetwork}-explorer.flare.network/api/`;
 const verifier = "blockscout";
-
 
 const raw: unknown = JSON.parse(fs.readFileSync(addressesFilePath, "utf8"));
 if (!Array.isArray(raw)) {
@@ -46,7 +47,7 @@ const contracts = raw.map((item) => {
   throw new Error("Invalid contract info item");
 });
 
-contracts.forEach(contract => {
+contracts.forEach((contract) => {
   const address = contract.address;
   const contractFile = contract.contractName;
   // remove .sol from contractFile for the contract name
