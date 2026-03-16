@@ -205,6 +205,24 @@ interface IInstructionsFacet {
     );
 
     /**
+     * @notice Emitted when direct minting is executed.
+     * @param personalAccount The personal account address.
+     * @param transactionId The XRPL transaction ID.
+     * @param sourceAddress The XRPL source address.
+     * @param amount The total minted amount.
+     * @param executorFee The fee paid to the executor.
+     * @param executor The executor address.
+     */
+    event DirectMintingExecuted(
+        address indexed personalAccount,
+        bytes32 indexed transactionId,
+        string sourceAddress,
+        uint256 amount,
+        uint256 executorFee,
+        address executor
+    );
+
+    /**
      * @notice Emitted when an instruction is executed.
      * @param personalAccount The personal account address.
      * @param transactionId The transaction ID.
@@ -318,6 +336,26 @@ interface IInstructionsFacet {
     );
 
     /**
+     * @notice Reverts if the caller is not the AssetManager.
+     */
+    error OnlyAssetManager();
+
+    /**
+     * @notice Reverts if the minted amount is insufficient to cover the executor fee.
+     * @param amount The minted amount.
+     * @param fee The executor fee.
+     */
+    error InsufficientAmountForFee(
+        uint256 amount,
+        uint256 fee
+    );
+
+    /**
+     * @notice Reverts if the memo data is invalid.
+     */
+    error InvalidMemoData();
+
+    /**
      * @notice Reserve collateral for minting operation.
      * @param _xrplAddress The XRPL address requesting the collateral reservation.
      * @param _paymentReference The payment reference associated with the request.
@@ -365,6 +403,26 @@ interface IInstructionsFacet {
     function executeInstruction(
         IXRPPayment.Proof calldata _proof,
         string calldata _xrplAddress
+    )
+        external payable;
+
+    /**
+     * @notice Called by the AssetManager when FAssets are minted via direct minting.
+     * FAssets are transferred to the MasterAccountController before this call.
+     * @param _transactionId The XRPL transaction ID.
+     * @param _sourceAddress The XRPL source address (minter).
+     * @param _amount The minted FAsset amount.
+     * @param _underlyingTimestamp The XRPL transaction timestamp.
+     * @param _memoData The raw XRPL memo bytes.
+     * @param _executor The executor address.
+     */
+    function mintedFAssets(
+        bytes32 _transactionId,
+        string calldata _sourceAddress,
+        uint256 _amount,
+        uint256 _underlyingTimestamp,
+        bytes calldata _memoData,
+        address payable _executor
     )
         external payable;
 

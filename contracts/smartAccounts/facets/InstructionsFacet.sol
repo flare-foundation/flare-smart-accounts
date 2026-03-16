@@ -2,9 +2,12 @@
 pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
+import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
 import {IXRPPayment} from "../../userInterfaces/IXRPPayment.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIInstructionsFacet} from "../interface/IIInstructionsFacet.sol";
 // import is needed for @inheritdoc
@@ -27,6 +30,7 @@ import {FacetBase} from "./FacetBase.sol";
  * @notice Facet for handling instructions.
  */
 contract InstructionsFacet is IIInstructionsFacet, FacetBase {
+    using SafeERC20 for IERC20;
 
     /// @inheritdoc IInstructionsFacet
     function reserveCollateral(
@@ -229,6 +233,65 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             transactionId,
             _xrplAddress,
             instructionId
+        );
+    }
+
+    /// @inheritdoc IInstructionsFacet
+    function mintedFAssets(
+        bytes32 _transactionId,
+        string calldata _sourceAddress,
+        uint256 _amount,
+        uint256 /* _underlyingTimestamp */,
+        bytes calldata _memoData,
+        address payable _executor
+    )
+        external payable
+    {
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
+        require(msg.sender == address(assetManager), OnlyAssetManager());
+
+        // get executor fee from AssetManager
+        // TODO: uncomment when getDirectMintingExecutorFeeUBA is added to IAssetManager
+        // uint256 executorFee = assetManager.getDirectMintingExecutorFeeUBA();
+        uint256 executorFee = 0;
+        require(_amount >= executorFee, InsufficientAmountForFee(_amount, executorFee));
+
+        // replay protection
+        Instructions.State storage state = Instructions.getState();
+        require(!state.usedTransactionIds[_transactionId], TransactionAlreadyExecuted());
+        state.usedTransactionIds[_transactionId] = true;
+
+        // get or create PA
+        IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress);
+
+        // transfer fAssets
+        {
+        IERC20 fAsset = assetManager.fAsset();
+            if (executorFee > 0) {
+                fAsset.safeTransfer(_executor, executorFee);
+            }
+            uint256 remaining = _amount - executorFee;
+            if (remaining > 0) {
+                fAsset.safeTransfer(address(personalAccount), remaining);
+            }
+        }
+
+        // if memo present, decode and execute AA
+        if (_memoData.length > 0) {
+            require(
+                _memoData.length >= 2 && uint8(_memoData[0]) == 0xFF,
+                InvalidMemoData()
+            );
+            UserOp.execute(_memoData, address(personalAccount), _transactionId);
+        }
+
+        emit DirectMintingExecuted(
+            address(personalAccount),
+            _transactionId,
+            _sourceAddress,
+            _amount,
+            executorFee,
+            _executor
         );
     }
 

@@ -3076,6 +3076,216 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
+    //// DirectMinting tests ////
+
+    function testDirectMintTransferToPA() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 10000;
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        vm.expectEmit();
+        emit IInstructionsFacet.DirectMintingExecuted(
+            personalAccountAddr,
+            bytes32("dmTx1"),
+            xrplAddress1,
+            amount,
+            // TODO: update when getDirectMintingExecutorFeeUBA is enabled
+            0,
+            executor
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx1"),
+            xrplAddress1,
+            amount,
+            0,
+            "",
+            payable(executor)
+        );
+
+        assertEq(fxrp.balanceOf(personalAccountAddr), amount);
+    }
+
+    function testDirectMintRevertOnlyAssetManager() public {
+        vm.expectRevert(IInstructionsFacet.OnlyAssetManager.selector);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx5"),
+            xrplAddress1,
+            1000,
+            0,
+            "",
+            payable(executor)
+        );
+    }
+
+    // TODO: uncomment when getDirectMintingExecutorFeeUBA is enabled
+    // function testDirectMintRevertInsufficientAmountForFee() public {
+    //     uint256 dmFee = 200;
+    //     _mockGetDirectMintingExecutorFeeUBA(dmFee);
+    //     vm.expectRevert(
+    //         abi.encodeWithSelector(
+    //             IInstructionsFacet.InsufficientAmountForFee.selector,
+    //             100,
+    //             dmFee
+    //         )
+    //     );
+    //     vm.prank(assetManagerFxrpMock);
+    //     masterAccountController.mintedFAssets(
+    //         bytes32("dmTx6"),
+    //         xrplAddress1,
+    //         100,
+    //         0,
+    //         "",
+    //         payable(executor)
+    //     );
+    // }
+
+    function testDirectMintRevertTransactionAlreadyExecuted() public {
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount * 2);
+
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx7"),
+            xrplAddress1,
+            amount,
+            0,
+            "",
+            payable(executor)
+        );
+
+        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx7"),
+            xrplAddress1,
+            amount,
+            0,
+            "",
+            payable(executor)
+        );
+    }
+
+    function testDirectMintRevertInvalidMemoData() public {
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        // memo with wrong first byte (not 0xFF)
+        bytes memory memoData = abi.encodePacked(uint8(0x11), uint8(0), uint8(1));
+
+        vm.expectRevert(IInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx8"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(executor)
+        );
+    }
+
+    function testDirectMintRevertShortMemoData() public {
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        // memo too short (1 byte)
+        bytes memory memoData = abi.encodePacked(uint8(0xFF));
+
+        vm.expectRevert(IInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx9"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(executor)
+        );
+    }
+
+    function testDirectMintRevertInvalidUserOp() public {
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        // 0xFF + walletId + something that doesn't decode to PackedUserOperation
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF),
+            uint8(1),
+            bytes("not a valid packed user operation")
+        );
+
+        vm.expectRevert();
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx11"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(executor)
+        );
+    }
+
+    function testDirectMintAAExecuteUserOp() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        // Build AA user op
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+        bytes memory callData = abi.encodeCall(
+            IIPersonalAccount.executeUserOp,
+            (calls)
+        );
+        PackedUserOperation memory packedUserOp = PackedUserOperation({
+            sender: personalAccountAddr,
+            nonce: 0,
+            initCode: "",
+            callData: callData,
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF),
+            uint8(1),
+            abi.encode(packedUserOp)
+        );
+
+        vm.expectEmit();
+        emit IInstructionsFacet.UserOperationExecuted(
+            personalAccountAddr,
+            0
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx10"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(executor)
+        );
+
+        assertEq(simpleExample.flag(), true);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+        assertEq(fxrp.balanceOf(personalAccountAddr), amount);
+    }
+
     //// helper functions ////
     function _mockGetAgentInfo(
         address agentAddress,
@@ -3104,6 +3314,15 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encode(fxrp)
         );
     }
+
+    // TODO: uncomment when getDirectMintingExecutorFeeUBA is enabled
+    // function _mockGetDirectMintingExecutorFeeUBA(uint256 _fee) private {
+    //     vm.mockCall(
+    //         assetManagerFxrpMock,
+    //         abi.encodeWithSignature("getDirectMintingExecutorFeeUBA()"),
+    //         abi.encode(_fee)
+    //     );
+    // }
 
     function _mockGetContractAddressByHash(
         string memory name,
