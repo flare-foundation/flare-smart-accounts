@@ -37,7 +37,7 @@ forge test --mc <contract_name>
 forge test --mt <test_name>
 
 # generate coverage report
-yarn coverage-forge
+yarn coverage
 ```
 
 The default behavior for forge test is to only display a summary of passing and failing tests. To show more information change the verbosity level with the `-v` flag:
@@ -56,10 +56,10 @@ There are currently the following linters included in this repository:
 ### How to run
 ```bash
 # run solhint
-yarn lint
+yarn lint-sol
 
-# run solhint on forge test contracts
-yarn lint-forge
+# run eslint on TypeScript
+yarn lint:check
 ```
 
 ## Deployment

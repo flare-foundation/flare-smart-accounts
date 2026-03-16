@@ -83,7 +83,7 @@ lint-test:
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   script:
-  - yarn lint-test
+  - yarn lint-sol-test
 
 lint-contracts:
   image: node:22
@@ -92,7 +92,7 @@ lint-contracts:
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   script:
-  - yarn lint-contracts
+  - yarn lint-sol-contracts
 
 lint-deployment:
   image: node:22
@@ -101,7 +101,7 @@ lint-deployment:
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   script:
-  - yarn lint-deployment
+  - yarn lint-sol-deployment
 
 ##
 ##  TESTS
