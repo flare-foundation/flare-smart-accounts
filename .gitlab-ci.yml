@@ -8,9 +8,6 @@ workflow:
 default:
   tags: [ flarenetwork ]
 
-variables: {}
-
-
 ##
 ## PARTIALS
 ##
@@ -46,11 +43,7 @@ dependency_scanning:
 
 
 ##
-##
-##
-
-##
-##  BUILD (none)
+##  BUILD
 ##
 build-node-modules:
   stage: build
@@ -101,6 +94,26 @@ lint-deployment:
   script:
   - corepack enable pnpm
   - pnpm lint-sol-deployment
+
+lint-ts:
+  image: node:24
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm lint:check
+
+format-check:
+  image: node:24
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm format:check
 
 ##
 ##  TESTS
