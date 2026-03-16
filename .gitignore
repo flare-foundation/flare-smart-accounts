@@ -39,3 +39,6 @@ slither.json
 deployment/output-internal
 
 error-selectors.txt
+
+# Claude Code
+.claude
