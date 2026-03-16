@@ -11,7 +11,7 @@ MUST pass all tests, and MUST be reviewed by at least one other contributor.
 
 ```bash
 # Install packages
-pnpm
+pnpm install
 
 # install Foundryup
 curl -L https://foundry.paradigm.xyz | bash
@@ -49,9 +49,11 @@ The default behavior for forge test is to only display a summary of passing and 
 
 ## Linting and formatting
 
-There are currently the following linters included in this repository:
+There are currently the following linters and formatters included in this repository:
 
 - `solhint` solidity linter
+- `eslint` TypeScript linter
+- `prettier` code formatter
 
 ### How to run
 ```bash
@@ -60,6 +62,12 @@ pnpm lint-sol
 
 # run eslint on TypeScript
 pnpm lint:check
+
+# check formatting
+pnpm format:check
+
+# fix formatting
+pnpm format:fix
 ```
 
 ## Deployment
@@ -80,7 +88,7 @@ You can also use staging variants by appending `-staging` to any base network (e
 
 - Install dependencies:
   ```bash
-  pnpm
+  pnpm install
   ```
 - Create a `.env` file in the project root with:
   ```env
