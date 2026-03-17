@@ -1,5 +1,4 @@
 const fs = require("fs");
-const { sortBy } = require("lodash");
 
 const priorities = { High: 1, Medium: 2, Low: 3, Informational: 4, Optimization: 5 };
 
@@ -313,7 +312,7 @@ if (!data.success) {
 
 let detectors = (data.results && data.results.detectors) || [];
 detectors = detectors.filter((det) => det.impact in priorities);
-detectors = sortBy(detectors, (det) => [priorities[det.impact], priorities[det.confidence]]);
+detectors.sort((a, b) => (priorities[a.impact] - priorities[b.impact]) || (priorities[a.confidence] - priorities[b.confidence]));
 
 const counts = {};
 
