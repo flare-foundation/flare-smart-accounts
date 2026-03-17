@@ -8,12 +8,6 @@ workflow:
 default:
   tags: [ flarenetwork ]
 
-variables: {}
-
-variables:
-  YARN_CACHE_DIR: .yarn-cache
-
-
 ##
 ## PARTIALS
 ##
@@ -21,9 +15,8 @@ variables:
 .partials:
   cache-nodejs:
     key:
-      files: [ yarn.lock ]
+      files: [ pnpm-lock.yaml ]
     paths:
-    - $YARN_CACHE_DIR
     - node_modules/
     policy: pull
 
@@ -50,24 +43,20 @@ dependency_scanning:
 
 
 ##
-##
-##
-
-##
-##  BUILD (none)
+##  BUILD
 ##
 build-node-modules:
   stage: build
   needs: []
-  image: node:22
+  image: node:24
   timeout: 10 minutes
   script:
-  - yarn install --frozen-lockfile --cache-folder $YARN_CACHE_DIR
+  - corepack enable pnpm
+  - pnpm install --frozen-lockfile
   cache:
   - key:
-      files: [ yarn.lock ]
+      files: [ pnpm-lock.yaml ]
     paths:
-    - $YARN_CACHE_DIR
     - node_modules/
     policy: pull-push
 
@@ -77,31 +66,54 @@ build-node-modules:
 ##
 
 lint-test:
-  image: node:22
+  image: node:24
   needs:
   - job: build-node-modules
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   script:
-  - yarn lint-test
+  - corepack enable pnpm
+  - pnpm lint-sol-test
 
 lint-contracts:
-  image: node:22
+  image: node:24
   needs:
   - job: build-node-modules
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   script:
-  - yarn lint-contracts
+  - corepack enable pnpm
+  - pnpm lint-sol-contracts
 
 lint-deployment:
-  image: node:22
+  image: node:24
   needs:
   - job: build-node-modules
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   script:
-  - yarn lint-deployment
+  - corepack enable pnpm
+  - pnpm lint-sol-deployment
+
+lint-ts:
+  image: node:24
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm lint:check
+
+format-check:
+  image: node:24
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm format:check
 
 ##
 ##  TESTS
@@ -129,7 +141,6 @@ coverage:
   image: timivesel/foundry-custom:latest
   tags: [ flarenetwork-md ]
   timeout: 10 minutes
-  before_script:
   needs:
   - job: build-node-modules
     artifacts: false
@@ -146,7 +157,7 @@ coverage:
     - lcov.info
 
 coverage-reports:
-  image: node:22-alpine
+  image: node:24-alpine
   timeout: 4 minutes
   needs:
   - job: coverage

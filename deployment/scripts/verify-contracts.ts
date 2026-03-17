@@ -1,6 +1,5 @@
-import * as fs from "fs";
+import { readFileSync, globSync } from "fs";
 import { execSync } from "child_process";
-import glob from "glob";
 
 // get network from command line argument (mandatory)
 const network = process.argv[2];
@@ -9,7 +8,9 @@ if (!network) {
 }
 // check if network is valid (supports base networks and any "*-staging")
 const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev"];
-const isValidNetwork = allowedBaseNetworks.includes(network) || (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
+const isValidNetwork =
+  allowedBaseNetworks.includes(network) ||
+  (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
 if (!isValidNetwork) {
   throw new Error(`Invalid network: ${network}`);
 }
@@ -24,8 +25,7 @@ const rpcUrl = `https://${baseNetwork}-api.flare.network/ext/C/rpc`;
 const verifierUrl = `https://${baseNetwork}-explorer.flare.network/api/`;
 const verifier = "blockscout";
 
-
-const raw: unknown = JSON.parse(fs.readFileSync(addressesFilePath, "utf8"));
+const raw: unknown = JSON.parse(readFileSync(addressesFilePath, "utf8"));
 if (!Array.isArray(raw)) {
   throw new Error("Invalid contract info format");
 }
@@ -46,13 +46,13 @@ const contracts = raw.map((item) => {
   throw new Error("Invalid contract info item");
 });
 
-contracts.forEach(contract => {
+contracts.forEach((contract) => {
   const address = contract.address;
   const contractFile = contract.contractName;
   // remove .sol from contractFile for the contract name
   const contractName = contractFile.replace(".sol", "");
   // find the full path of the contract file
-  const matches = glob.sync(`contracts/{smartAccounts,diamond}/**/${contractFile}`);
+  const matches: string[] = globSync(`contracts/{smartAccounts,diamond}/**/${contractFile}`);
   console.log(matches);
   if (matches.length === 0) {
     throw new Error(`Contract file not found: ${contractFile}`);

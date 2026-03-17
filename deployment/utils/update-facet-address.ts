@@ -1,10 +1,10 @@
 // update-facet-address.ts
-import fs from 'fs';
+import fs from "fs";
 
 const [filePath, facetName, facetAddress] = process.argv.slice(2);
 
 if (!filePath || !facetName || !facetAddress) {
-  console.error('Usage: update-facet-address.ts <filePath> <facetName> <facetAddress>');
+  console.error("Usage: update-facet-address.ts <filePath> <facetName> <facetAddress>");
   process.exit(1);
 }
 
@@ -14,8 +14,7 @@ interface ContractEntry {
   address: string;
 }
 
-const data: ContractEntry[] = JSON.parse(fs.readFileSync(filePath, 'utf8')) as ContractEntry[];
-
+const data: ContractEntry[] = JSON.parse(fs.readFileSync(filePath, "utf8")) as ContractEntry[];
 
 let found = false;
 for (const entry of data) {
