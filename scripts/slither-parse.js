@@ -312,7 +312,9 @@ if (!data.success) {
 
 let detectors = (data.results && data.results.detectors) || [];
 detectors = detectors.filter((det) => det.impact in priorities);
-detectors.sort((a, b) => (priorities[a.impact] - priorities[b.impact]) || (priorities[a.confidence] - priorities[b.confidence]));
+detectors.sort(
+  (a, b) => priorities[a.impact] - priorities[b.impact] || priorities[a.confidence] - priorities[b.confidence]
+);
 
 const counts = {};
 
