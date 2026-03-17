@@ -42,5 +42,4 @@ forge script deployment/scripts/DeployComposer.s.sol:DeployComposer \
   --sig "run(bool)" "$ONLY_IMPL" \
   --broadcast | tee forge-deploy-output.txt
 
-# Run save script with "composer" arg to save to <network>_composer.json
-ts-node deployment/scripts/save-deployed-addresses.ts composer
+ts-node deployment/scripts/save-deployed-addresses.ts
