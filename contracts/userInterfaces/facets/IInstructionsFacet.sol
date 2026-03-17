@@ -409,6 +409,11 @@ interface IInstructionsFacet {
     /**
      * @notice Called by the AssetManager when FAssets are minted via direct minting.
      * FAssets are transferred to the MasterAccountController before this call.
+     * Memo routing:
+     * - Empty: fAssets transferred to PA only.
+     * - 32 bytes with instruction ID in {0x01, 0x11, 0x21}: legacy instruction (transfer or deposit).
+     * - First byte 0xFF: AA UserOp execution.
+     * - Anything else: reverts.
      * @param _transactionId The XRPL transaction ID.
      * @param _sourceAddress The XRPL source address (minter).
      * @param _amount The minted FAsset amount.

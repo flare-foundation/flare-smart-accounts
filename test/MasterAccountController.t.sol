@@ -3286,6 +3286,98 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), amount);
     }
 
+    function testDirectMintWithDepositInstruction() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        // bytes32 payment reference: instruction 0x11 (Firelight deposit), value=5000, vaultId=1
+        bytes32 paymentReference = _encodeFirelightPaymentReference(1, 0, 5000, 0, 1);
+        bytes memory memoData = abi.encodePacked(paymentReference);
+
+        vm.expectEmit();
+        emit IInstructionsFacet.Deposited(
+            personalAccountAddr,
+            address(firelightVault),
+            amount,
+            amount // 1:1 initial share:asset
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx20"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(executor)
+        );
+
+        // fAssets should be deposited into vault, not remaining in PA
+        assertEq(firelightVault.balanceOf(personalAccountAddr), amount);
+        assertEq(fxrp.balanceOf(personalAccountAddr), 0);
+        assertEq(fxrp.balanceOf(address(firelightVault)), amount);
+    }
+
+    function testDirectMintWithTransferInstruction() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 3000;
+        address recipient = makeAddr("dmRecipient");
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        // bytes32 payment reference: instruction 0x01 (FXrp transfer), value=3000, recipient
+        bytes32 paymentReference = _encodeFxrpTransferPaymentReference(0, 3000, recipient);
+        bytes memory memoData = abi.encodePacked(paymentReference);
+
+        vm.expectEmit();
+        emit IInstructionsFacet.FXrpTransferred(
+            personalAccountAddr,
+            recipient,
+            amount
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx21"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(executor)
+        );
+
+        // fAssets should be at recipient, not PA
+        assertEq(fxrp.balanceOf(recipient), amount);
+        assertEq(fxrp.balanceOf(personalAccountAddr), 0);
+    }
+
+    function testDirectMintRevertUnsupportedInstruction() public {
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        // bytes32 payment reference: instruction 0x02 (redeem) — not supported via direct minting
+        bytes32 paymentReference = _encodeFxrpPaymentReference(2, 0, 1000, 1);
+        bytes memory memoData = abi.encodePacked(paymentReference);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IInstructionsFacet.InvalidInstruction.selector,
+                0,
+                2
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx22"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(executor)
+        );
+    }
+
     //// helper functions ////
     function _mockGetAgentInfo(
         address agentAddress,
