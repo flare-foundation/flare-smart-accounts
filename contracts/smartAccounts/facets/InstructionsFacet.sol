@@ -276,31 +276,13 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             }
         }
 
-        // if memo present, execute instruction
+        // if memo present, decode and execute AA
         if (_memoData.length > 0) {
-            if (_memoData.length == 32 && uint8(_memoData[0]) != 0xFF) {
-                // legacy instruction via payment reference (only deposit and transfer)
-                bytes32 paymentReference = bytes32(_memoData);
-                uint256 instructionType = PaymentReferenceParser.getInstructionType(paymentReference);
-                uint256 instructionCommand = PaymentReferenceParser.getInstructionCommand(paymentReference);
-                require(
-                    instructionCommand == 1 && instructionType <= 2,
-                    InvalidInstruction(instructionType, instructionCommand)
-                );
-                Instructions.executeInstruction(
-                    instructionType,
-                    instructionCommand,
-                    paymentReference,
-                    personalAccount
-                );
-            } else {
-                // AA user operation
-                require(
-                    _memoData.length >= 2 && uint8(_memoData[0]) == 0xFF,
-                    InvalidMemoData()
-                );
-                UserOp.execute(_memoData, address(personalAccount), _transactionId);
-            }
+            require(
+                _memoData.length >= 2 && uint8(_memoData[0]) == 0xFF,
+                InvalidMemoData()
+            );
+            UserOp.execute(_memoData, address(personalAccount), _transactionId);
         }
 
         emit DirectMintingExecuted(
