@@ -247,26 +247,26 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
     )
         external payable
     {
-        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-        require(msg.sender == address(assetManager), OnlyAssetManager());
-
-        // get executor fee from AssetManager
-        // TODO: uncomment when getDirectMintingExecutorFeeUBA is added to IAssetManager
-        // uint256 executorFee = assetManager.getDirectMintingExecutorFeeUBA();
-        uint256 executorFee = 0;
-        require(_amount >= executorFee, InsufficientAmountForFee(_amount, executorFee));
-
-        // replay protection
-        Instructions.State storage state = Instructions.getState();
-        require(!state.usedTransactionIds[_transactionId], TransactionAlreadyExecuted());
-        state.usedTransactionIds[_transactionId] = true;
-
         // get or create PA
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress);
 
-        // transfer fAssets
         {
-        IERC20 fAsset = assetManager.fAsset();
+            IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
+            require(msg.sender == address(assetManager), OnlyAssetManager());
+
+            // get executor fee from AssetManager
+            // TODO: uncomment when getDirectMintingExecutorFeeUBA is added to IAssetManager
+            // uint256 executorFee = assetManager.getDirectMintingExecutorFeeUBA();
+            uint256 executorFee = 0;
+            require(_amount >= executorFee, InsufficientAmountForFee(_amount, executorFee));
+
+            // replay protection
+            Instructions.State storage state = Instructions.getState();
+            require(!state.usedTransactionIds[_transactionId], TransactionAlreadyExecuted());
+            state.usedTransactionIds[_transactionId] = true;
+
+            // transfer fAssets
+            IERC20 fAsset = assetManager.fAsset();
             if (executorFee > 0) {
                 fAsset.safeTransfer(_executor, executorFee);
             }
@@ -274,25 +274,30 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             if (remaining > 0) {
                 fAsset.safeTransfer(address(personalAccount), remaining);
             }
-        }
 
-        // if memo present, decode and execute AA
-        if (_memoData.length > 0) {
-            require(
-                _memoData.length >= 2 && uint8(_memoData[0]) == 0xFF,
-                InvalidMemoData()
+            emit DirectMintingExecuted(
+                address(personalAccount),
+                _transactionId,
+                _sourceAddress,
+                _amount,
+                executorFee,
+                _executor
             );
-            UserOp.execute(_memoData, address(personalAccount), _transactionId);
         }
 
-        emit DirectMintingExecuted(
-            address(personalAccount),
-            _transactionId,
-            _sourceAddress,
-            _amount,
-            executorFee,
-            _executor
-        );
+        // if memo present, decode and execute AA (or skip if ignoreMemo is set)
+        if (_memoData.length > 0) {
+            UserOp.State storage userOpState = UserOp.getState();
+            if (userOpState.ignoreMemo[_transactionId]) {
+                userOpState.ignoreMemo[_transactionId] = false;
+            } else {
+                require(
+                    _memoData.length >= 2 && uint8(_memoData[0]) == 0xFF,
+                    InvalidMemoData()
+                );
+                UserOp.execute(_memoData, address(personalAccount), _transactionId);
+            }
+        }
     }
 
     /// @inheritdoc IInstructionsFacet

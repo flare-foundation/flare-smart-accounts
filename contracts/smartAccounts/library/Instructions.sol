@@ -78,6 +78,8 @@ library Instructions {
             UserOp.setIgnoreNonce(_memoData, _personalAccount);
         } else if (_instructionType == 14 && _instructionCommand == 15) { // 0xEF = increment nonce
             UserOp.incrementNonce(_personalAccount);
+        } else if (_instructionType == 14 && _instructionCommand == 13) { // 0xED = ignore memo
+            UserOp.setIgnoreMemo(_memoData, _personalAccount);
         } else {
             revert IInstructionsFacet.InvalidInstruction(_instructionType, _instructionCommand);
         }

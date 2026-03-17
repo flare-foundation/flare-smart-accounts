@@ -10,6 +10,7 @@ library UserOp {
     struct State {
         mapping(address account => uint256 nonce) nonces;
         mapping(bytes32 txId => bool) ignoreNonce;
+        mapping(bytes32 txId => bool) ignoreMemo;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -72,6 +73,19 @@ library UserOp {
         State storage state = getState();
         uint256 newNonce = ++state.nonces[_personalAccount];
         emit IInstructionsFacet.NonceIncremented(_personalAccount, newNonce);
+    }
+
+    function setIgnoreMemo(
+        bytes calldata _memoData,
+        address _personalAccount
+    )
+        internal
+    {
+        require(_memoData.length == 34, IInstructionsFacet.NoMemoData());
+        bytes32 txId = bytes32(_memoData[2:34]);
+        State storage state = getState();
+        state.ignoreMemo[txId] = true;
+        emit IInstructionsFacet.MemoIgnoreSet(_personalAccount, txId);
     }
 
     function getNonce(address _sender) internal view returns (uint256) {

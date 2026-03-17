@@ -3286,6 +3286,123 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), amount);
     }
 
+    function testDirectMintIgnoreMemo() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        bytes32 dmTxId = bytes32("dmTxIgnoreMemo1");
+
+        // memo with wrong first byte (not 0xFF) - will cause revert
+        bytes memory badMemo = abi.encodePacked(uint8(0x11), uint8(0), uint8(1));
+
+        // First attempt: mintedFAssets with bad memo reverts
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(IInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            dmTxId,
+            xrplAddress1,
+            amount,
+            0,
+            badMemo,
+            payable(executor)
+        );
+
+        // txId should not be used (reverted)
+        assertFalse(masterAccountController.isTransactionIdUsed(dmTxId));
+
+        // Set ignoreMemo via 0xED AA instruction
+        bytes memory ignoreMemoMemo = abi.encodePacked(uint8(0xED), uint8(1), dmTxId);
+        IXRPPayment.Proof memory ignoreProof = _buildXRPPaymentProof(ignoreMemoMemo, bytes32("ignoreMemoTx1"));
+        vm.expectEmit();
+        emit IInstructionsFacet.MemoIgnoreSet(personalAccountAddr, dmTxId);
+        masterAccountController.executeInstruction(ignoreProof, xrplAddress1);
+
+        // Second attempt: mintedFAssets with same bad memo now succeeds (memo skipped)
+        vm.expectEmit();
+        emit IInstructionsFacet.DirectMintingExecuted(
+            personalAccountAddr,
+            dmTxId,
+            xrplAddress1,
+            amount,
+            0,
+            executor
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            dmTxId,
+            xrplAddress1,
+            amount,
+            0,
+            badMemo,
+            payable(executor)
+        );
+
+        // fAssets transferred to PA, memo was ignored
+        assertEq(fxrp.balanceOf(personalAccountAddr), amount);
+        assertTrue(masterAccountController.isTransactionIdUsed(dmTxId));
+    }
+
+    function testDirectMintIgnoreMemoNotSet() public {
+        uint256 amount = 5000;
+        bytes32 dmTxId = bytes32("dmTxIgnoreMemo2");
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        // memo with wrong first byte, no ignoreMemo flag set
+        bytes memory badMemo = abi.encodePacked(uint8(0x11), uint8(0), uint8(1));
+
+        vm.expectRevert(IInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            dmTxId,
+            xrplAddress1,
+            amount,
+            0,
+            badMemo,
+            payable(executor)
+        );
+    }
+
+    function testDirectMintIgnoreMemoFlagCleared() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        bytes32 dmTxId1 = bytes32("dmTxIgnoreMemo3");
+        bytes32 dmTxId2 = bytes32("dmTxIgnoreMemo4");
+
+        bytes memory badMemo = abi.encodePacked(uint8(0x11), uint8(0), uint8(1));
+
+        // Set ignoreMemo for dmTxId1
+        bytes memory ignoreMemoMemo = abi.encodePacked(uint8(0xED), uint8(1), dmTxId1);
+        IXRPPayment.Proof memory ignoreProof = _buildXRPPaymentProof(ignoreMemoMemo, bytes32("ignoreMemoTx2"));
+        masterAccountController.executeInstruction(ignoreProof, xrplAddress1);
+
+        // Use it: mintedFAssets succeeds with bad memo
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            dmTxId1,
+            xrplAddress1,
+            amount,
+            0,
+            badMemo,
+            payable(executor)
+        );
+        assertEq(fxrp.balanceOf(personalAccountAddr), amount);
+
+        // Flag is cleared — a different txId with bad memo still reverts
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(IInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            dmTxId2,
+            xrplAddress1,
+            amount,
+            0,
+            badMemo,
+            payable(executor)
+        );
+    }
+
     //// helper functions ////
     function _mockGetAgentInfo(
         address agentAddress,

@@ -195,6 +195,16 @@ interface IInstructionsFacet {
     );
 
     /**
+     * @notice Emitted when a memo-ignore flag is set for a direct minting transaction.
+     * @param personalAccount The personal account address.
+     * @param txId The direct minting transaction ID to ignore memo for.
+     */
+    event MemoIgnoreSet(
+        address indexed personalAccount,
+        bytes32 indexed txId
+    );
+
+    /**
      * @notice Emitted when a nonce is manually incremented.
      * @param personalAccount The personal account address.
      * @param newNonce The new nonce value after increment.
