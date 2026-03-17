@@ -335,6 +335,14 @@ contract MyERC4626 is ERC4626 {
         return 25000000000000;
     }
 
+    /**
+     * @notice Returns the withdrawal fee (mock for Upshift vault compatibility).
+     * @return The withdrawal fee in basis points.
+     */
+    function withdrawalFee() external pure returns (uint256) {
+        return 0;
+    }
+
     ////////////////////////// internal methods //////////////////////////
     function _withdraw(
         address _caller,
