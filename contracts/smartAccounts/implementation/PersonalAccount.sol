@@ -5,6 +5,9 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
@@ -18,7 +21,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
  * Supports account abstraction for XRPL-integrated user operations.
  */
-contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient {
+contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient, IERC721Receiver, IERC1155Receiver {
     using SafeERC20 for IERC20;
 
     address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
@@ -271,5 +274,59 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient {
     function implementation() external view returns (address) {
         // controller is the beacon
         return IBeacon(controllerAddress).implementation();
+    }
+
+    /// @inheritdoc IERC721Receiver
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    )
+        external pure
+        returns (bytes4)
+    {
+        return IERC721Receiver.onERC721Received.selector;
+    }
+
+    /// @inheritdoc IERC1155Receiver
+    function onERC1155Received(
+        address,
+        address,
+        uint256,
+        uint256,
+        bytes calldata
+    )
+        external pure
+        returns (bytes4)
+    {
+        return IERC1155Receiver.onERC1155Received.selector;
+    }
+
+    /// @inheritdoc IERC1155Receiver
+    function onERC1155BatchReceived(
+        address,
+        address,
+        uint256[] calldata,
+        uint256[] calldata,
+        bytes calldata
+    )
+        external pure
+        returns (bytes4)
+    {
+        return IERC1155Receiver.onERC1155BatchReceived.selector;
+    }
+
+    /// @inheritdoc IERC165
+    function supportsInterface(
+        bytes4 _interfaceId
+    )
+        external pure
+        returns (bool)
+    {
+        return
+            _interfaceId == type(IERC721Receiver).interfaceId ||
+            _interfaceId == type(IERC1155Receiver).interfaceId ||
+            _interfaceId == type(IERC165).interfaceId;
     }
 }

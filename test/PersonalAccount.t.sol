@@ -12,8 +12,13 @@ import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {FtsoV2Interface} from "flare-periphery/src/flare/FtsoV2Interface.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {MockBeacon} from "../contracts/mock/MockBeacon.sol";
+import {MockERC721} from "../contracts/mock/MockERC721.sol";
+import {MockERC1155} from "../contracts/mock/MockERC1155.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 contract PersonalAccountTest is Test {
@@ -591,6 +596,48 @@ contract PersonalAccountTest is Test {
             3000,
             5000
         );
+    }
+
+    function testReceiveERC721() public {
+        MockERC721 nft = new MockERC721();
+        address minter = makeAddr("minter");
+        nft.mint(minter, 1);
+        vm.prank(minter);
+        nft.safeTransferFrom(minter, address(personalAccount), 1);
+        assertEq(nft.ownerOf(1), address(personalAccount));
+    }
+
+    function testReceiveERC1155() public {
+        MockERC1155 token = new MockERC1155();
+        address minter = makeAddr("minter");
+        token.mint(minter, 1, 10);
+        vm.prank(minter);
+        token.safeTransferFrom(minter, address(personalAccount), 1, 5, "");
+        assertEq(token.balanceOf(address(personalAccount), 1), 5);
+    }
+
+    function testReceiveERC1155Batch() public {
+        MockERC1155 token = new MockERC1155();
+        address minter = makeAddr("minter");
+        token.mint(minter, 1, 10);
+        token.mint(minter, 2, 20);
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = 1;
+        ids[1] = 2;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 5;
+        amounts[1] = 15;
+        vm.prank(minter);
+        token.safeBatchTransferFrom(minter, address(personalAccount), ids, amounts, "");
+        assertEq(token.balanceOf(address(personalAccount), 1), 5);
+        assertEq(token.balanceOf(address(personalAccount), 2), 15);
+    }
+
+    function testSupportsInterface() public view {
+        assertTrue(personalAccount.supportsInterface(type(IERC721Receiver).interfaceId));
+        assertTrue(personalAccount.supportsInterface(type(IERC1155Receiver).interfaceId));
+        assertTrue(personalAccount.supportsInterface(type(IERC165).interfaceId));
+        assertFalse(personalAccount.supportsInterface(bytes4(0xdeadbeef)));
     }
 
     //// helper functions
