@@ -16,7 +16,6 @@ import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/Instruc
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
-import {SwapFacet} from "../../contracts/smartAccounts/facets/SwapFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
@@ -54,7 +53,7 @@ contract FacetsDeploy is Test {
     }
 
     function deploySmartAccountsFacets() internal returns (IDiamond.FacetCut[] memory) {
-        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](10);
+        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](9);
 
         diamondCuts[0] = _buildFacetCut(
             address(new AgentVaultsFacet()), "AgentVaultsFacet", IDiamond.FacetCutAction.Add
@@ -75,15 +74,12 @@ contract FacetsDeploy is Test {
             address(new PersonalAccountsFacet()), "PersonalAccountsFacet", IDiamond.FacetCutAction.Add
         );
         diamondCuts[6] = _buildFacetCut(
-            address(new SwapFacet()), "SwapFacet", IDiamond.FacetCutAction.Add
-        );
-        diamondCuts[7] = _buildFacetCut(
             address(new TimelockFacet()), "TimelockFacet", IDiamond.FacetCutAction.Add
         );
-        diamondCuts[8] = _buildFacetCut(
+        diamondCuts[7] = _buildFacetCut(
             address(new VaultsFacet()), "VaultsFacet", IDiamond.FacetCutAction.Add
         );
-        diamondCuts[9] = _buildFacetCut(
+        diamondCuts[8] = _buildFacetCut(
             address(new XrplProviderWalletsFacet()), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Add
         );
         return diamondCuts;

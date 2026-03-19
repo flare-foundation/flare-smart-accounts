@@ -9,14 +9,11 @@ import {IPaymentVerification} from "flare-periphery/src/flare/IPaymentVerificati
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
-import {FtsoV2Interface} from "flare-periphery/src/flare/FtsoV2Interface.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {IIPersonalAccount} from "../contracts/smartAccounts/interface/IIPersonalAccount.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
-import {MockUniswapV3Router} from "../contracts/mock/MockUniswapV3Router.sol";
-import {UniswapV3} from "../contracts/smartAccounts/library/UniswapV3.sol";
 import {MockSingletonFactory} from "../contracts/mock/MockSingletonFactory.sol";
 import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
 import {IISingletonFactory} from "../contracts/smartAccounts/interface/IISingletonFactory.sol";
@@ -35,8 +32,6 @@ import {IInstructionFeesFacet} from "../contracts/userInterfaces/facets/IInstruc
 import {IXrplProviderWalletsFacet} from "../contracts/userInterfaces/facets/IXrplProviderWalletsFacet.sol";
 import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
 import {IPersonalAccountsFacet} from "../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
-import {ISwapFacet} from "../contracts/userInterfaces/facets/ISwapFacet.sol";
-import {SwapFacet} from "../contracts/smartAccounts/facets/SwapFacet.sol";
 import {ITimelockFacet} from "../contracts/userInterfaces/facets/ITimelockFacet.sol";
 import {IITimelockFacet} from "../contracts/smartAccounts/interface/IITimelockFacet.sol";
 import {XrplProviderWalletsFacet} from "../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
@@ -47,9 +42,6 @@ import {IXRPPayment} from "flare-periphery/src/flare/IXRPPayment.sol";
 // solhint-disable-next-line max-states-count
 contract MasterAccountControllerTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
-    bytes21 private constant FLR_USD_FEED_ID = 0x01464c522f55534400000000000000000000000000;
-    bytes21 private constant USDT_USD_FEED_ID = 0x01555344542f555344000000000000000000000000;
-    bytes21 private constant XRP_USD_FEED_ID = 0x015852502f55534400000000000000000000000000;
 
     IIMasterAccountController private masterAccountController;
     PersonalAccount private personalAccountImpl;
@@ -71,11 +63,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     bytes32 private sourceId;
     uint256 private paymentProofValidityDurationSeconds;
     uint256 private defaultInstructionFee;
-    MockUniswapV3Router private uniswapV3Router;
-    MintableERC20 private usdt0;
-    uint24 private wNatUsdt0PoolFeeTierPPM;
-    uint24 private usdt0FXrpPoolFeeTierPPM;
-    uint24 private maxSlippagePPM;
     address private personalAccountImplementation;
     string private xrplAddress1;
     string private xrplAddress2;
@@ -85,9 +72,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     address private contractRegistryMock;
     address private fdcVerificationMock;
-    MintableERC20 private wNatMock;
-    address private ftsoV2Mock;
-
     function setUp() public {
         mockFactory = new MockSingletonFactory();
         vm.etch(SINGLETON_FACTORY, address(mockFactory).code);
@@ -112,17 +96,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         xrplProviderWalletHash = keccak256(bytes(xrplProviderWallet));
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
         fdcVerificationMock = makeAddr("FDCVerificationMock");
-        wNatMock = new MintableERC20("WFLR", "WFLR", 18);
-        ftsoV2Mock = makeAddr("FtsoV2Mock");
         executorFee = 100;
         sourceId = bytes32("testXRP");
         paymentProofValidityDurationSeconds = 1 days;
         defaultInstructionFee = 1000000; // 1 XRP
-        uniswapV3Router = new MockUniswapV3Router();
-        wNatUsdt0PoolFeeTierPPM = 3000; // 0.3%
-        usdt0 = new MintableERC20("USDT0", "USDT0", 6);
-        usdt0FXrpPoolFeeTierPPM = 500; // 0.05%
-        maxSlippagePPM = 20000; // 2%
         assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
         agent = makeAddr("agent");
         agentInfo.status = AgentInfo.Status.NORMAL;
@@ -169,8 +146,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         _mockGetContractAddressByHash("FdcVerification", fdcVerificationMock);
         _mockGetContractAddressByHash("AssetManagerFXRP", assetManagerFxrpMock);
-        _mockGetContractAddressByHash("WNat", address(wNatMock));
-        _mockGetContractAddressByHash("FtsoV2", ftsoV2Mock);
         _mockGetAgentInfo(agent, agentInfo);
         _mockGetFAsset();
 
@@ -458,12 +433,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 10 // base facets + smart accounts facets
+            3 + 9 // base facets + smart accounts facets
         );
 
-        IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](2);
+        IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](1);
         removeCuts[0] = _buildFacetCut(address(0), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Remove);
-        removeCuts[1] = _buildFacetCut(address(0), "SwapFacet", IDiamond.FacetCutAction.Remove);
         vm.prank(governance);
         masterAccountController.diamondCut(
             removeCuts,
@@ -474,16 +448,12 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory updatedCuts = masterAccountController.facetAddresses();
         assertEq(
             updatedCuts.length,
-            currentCuts.length - 2
+            currentCuts.length - 1
         );
         for (uint256 i = 0; i < updatedCuts.length; i++) {
             assertNotEq(
                 updatedCuts[i],
-                currentCuts[9] // SwapFacet
-            );
-            assertNotEq(
-                updatedCuts[i],
-                currentCuts[12] // XrplProviderWalletsFacet
+                currentCuts[11] // XrplProviderWalletsFacet
             );
         }
     }
@@ -493,17 +463,13 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 10 // base facets + smart accounts facets
+            3 + 9 // base facets + smart accounts facets
         );
 
         // replace facets
-        IDiamond.FacetCut[] memory updateCuts = new IDiamond.FacetCut[](2);
-        address newSwapFacetAddress = address(new SwapFacet());
-        updateCuts[0] = _buildFacetCut(
-            newSwapFacetAddress, "SwapFacet", IDiamond.FacetCutAction.Replace
-        );
+        IDiamond.FacetCut[] memory updateCuts = new IDiamond.FacetCut[](1);
         address newXrplProviderWalletsFacetAddress = address(new XrplProviderWalletsFacet());
-        updateCuts[1] = _buildFacetCut(
+        updateCuts[0] = _buildFacetCut(
             newXrplProviderWalletsFacetAddress, "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Replace
         );
         vm.prank(governance);
@@ -519,11 +485,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             currentCuts.length
         );
         assertEq(
-            finalCuts[9], // SwapFacet
-            newSwapFacetAddress
-        );
-        assertEq(
-            finalCuts[12], // XrplProviderWalletsFacet
+            finalCuts[11], // XrplProviderWalletsFacet
             newXrplProviderWalletsFacetAddress
         );
     }
@@ -2318,160 +2280,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.setPersonalAccountImplementation(address(0));
     }
 
-    function testSetSwapParams() public {
-        vm.prank(governance);
-        vm.expectEmit();
-        emit ISwapFacet.SwapParamsSet(
-            address(uniswapV3Router),
-            address(usdt0),
-            wNatUsdt0PoolFeeTierPPM,
-            usdt0FXrpPoolFeeTierPPM,
-            maxSlippagePPM,
-            USDT_USD_FEED_ID,
-            FLR_USD_FEED_ID
-        );
-        masterAccountController.setSwapParams(
-            address(uniswapV3Router),
-            address(usdt0),
-            wNatUsdt0PoolFeeTierPPM,
-            usdt0FXrpPoolFeeTierPPM,
-            maxSlippagePPM,
-            USDT_USD_FEED_ID,
-            FLR_USD_FEED_ID
-        );
-        (
-            address returnedRouter,
-            address returnedUsdt0,
-            uint24 returnedWnatUsdt0Fee,
-            uint24 returnedUsdt0fxrpFee,
-            uint24 returnedMaxSlippage,
-            bytes21 returnedStableCoinUsdFeedId,
-            bytes21 returnedWNatUsdFeedId
-        ) = masterAccountController.getSwapParams();
-        assertEq(returnedRouter, address(uniswapV3Router));
-        assertEq(returnedUsdt0, address(usdt0));
-        assertEq(returnedWnatUsdt0Fee, wNatUsdt0PoolFeeTierPPM);
-        assertEq(returnedUsdt0fxrpFee, usdt0FXrpPoolFeeTierPPM);
-        assertEq(returnedMaxSlippage, maxSlippagePPM);
-        assertEq(returnedStableCoinUsdFeedId, USDT_USD_FEED_ID);
-        assertEq(returnedWNatUsdFeedId, FLR_USD_FEED_ID);
-    }
-
-    function testSetSwapParamsRevertOnlyOwner() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                NotContractOwner.selector,
-                address(this),
-                governance
-            )
-        );
-        masterAccountController.setSwapParams(
-            makeAddr("router"),
-            makeAddr("usdt0"),
-            500,
-            3000,
-            100,
-            USDT_USD_FEED_ID,
-            FLR_USD_FEED_ID
-        );
-    }
-
-    function testSwapParamsRevertInvalidUniswapV3Router() public {
-        vm.expectRevert(ISwapFacet.InvalidUniswapV3Router.selector);
-        vm.prank(governance);
-        masterAccountController.setSwapParams(
-            address(0),
-            makeAddr("usdt0"),
-            500,
-            3000,
-            100,
-            USDT_USD_FEED_ID,
-            FLR_USD_FEED_ID
-        );
-    }
-
-    function testSwapParamsRevertInvalidPoolFeeTierPPM1() public {
-        vm.expectRevert(ISwapFacet.InvalidPoolFeeTierPPM.selector);
-        vm.prank(governance);
-        masterAccountController.setSwapParams(
-            makeAddr("router"),
-            makeAddr("usdt0"),
-            200,
-            3000,
-            100,
-            USDT_USD_FEED_ID,
-            FLR_USD_FEED_ID
-        );
-    }
-
-    function testSwapParamsRevertInvalidPoolFeeTierPPM2() public {
-        vm.expectRevert(ISwapFacet.InvalidPoolFeeTierPPM.selector);
-        vm.prank(governance);
-        masterAccountController.setSwapParams(
-            makeAddr("router"),
-            makeAddr("usdt0"),
-            500,
-            7000,
-            100,
-            USDT_USD_FEED_ID,
-            FLR_USD_FEED_ID
-        );
-    }
-
-    function testSwapParamsRevertInvalidStableCoin() public {
-        vm.expectRevert(ISwapFacet.InvalidStableCoin.selector);
-        vm.prank(governance);
-        masterAccountController.setSwapParams(
-            makeAddr("router"),
-            address(0),
-            500,
-            3000,
-            100,
-            USDT_USD_FEED_ID,
-            FLR_USD_FEED_ID
-        );
-    }
-
-    function testSwapParamsRevertInvalidMaxSlippagePPM() public {
-        vm.expectRevert(ISwapFacet.InvalidMaxSlippagePPM.selector);
-        vm.prank(governance);
-        masterAccountController.setSwapParams(
-            makeAddr("router"),
-            makeAddr("usdt0"),
-            500,
-            3000,
-            1e6 + 1,
-            USDT_USD_FEED_ID,
-            FLR_USD_FEED_ID
-        );
-    }
-
-    function testSwapParamsRevertInvalidFeedId() public {
-        vm.expectRevert(ISwapFacet.InvalidFeedId.selector);
-        vm.prank(governance);
-        masterAccountController.setSwapParams(
-            makeAddr("router"),
-            makeAddr("usdt0"),
-            500,
-            3000,
-            100,
-            bytes21(0),
-            FLR_USD_FEED_ID
-        );
-
-        vm.expectRevert(ISwapFacet.InvalidFeedId.selector);
-        vm.prank(governance);
-        masterAccountController.setSwapParams(
-            makeAddr("router"),
-            makeAddr("usdt0"),
-            500,
-            3000,
-            100,
-            USDT_USD_FEED_ID,
-            bytes21(0)
-        );
-    }
-
     function testCreatePersonalAccountRevertPersonalAccountNotSuccessfullyDeployed() public {
         MockSingletonFactoryNoDeploy mockFactoryNoDeploy = new MockSingletonFactoryNoDeploy();
         vm.etch(SINGLETON_FACTORY, address(mockFactoryNoDeploy).code);
@@ -2546,196 +2354,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             )
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
-    }
-
-    function testSwapWNatForStableCoin() public {
-        testSetSwapParams();
-        uint256 amountTokenIn = 1e20; // 100 WNat
-        uint256 amountTokenOut = 1e8; // 100 USDT0
-        uint256 wNatPriceInWei = 2e16; // $0.02
-        uint256 usdt0PriceInWei = 1e18; // $1
-        _mockGetFeedsByIdInWei(
-            FLR_USD_FEED_ID,
-            USDT_USD_FEED_ID,
-            wNatPriceInWei,
-            usdt0PriceInWei
-        );
-        uniswapV3Router.setPriceInWei(address(wNatMock), wNatPriceInWei);
-        uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei);
-
-        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        wNatMock.mint(personalAccountAddr, amountTokenIn); // 100 WNat in personal account
-        usdt0.mint(address(uniswapV3Router), amountTokenOut); // 100 USDT0 liquidity in router
-        uint256 amountOut = wNatPriceInWei * amountTokenIn * (10 ** 6) * (1e6 - wNatUsdt0PoolFeeTierPPM) /
-            1e6 / usdt0PriceInWei / (10 ** 18);
-        vm.expectEmit(personalAccountAddr);
-        emit IPersonalAccount.SwapExecuted(
-            address(wNatMock),
-            address(usdt0),
-            amountTokenIn,
-            amountOut
-        );
-        vm.expectEmit();
-        emit ISwapFacet.SwapExecuted(
-            personalAccountAddr,
-            address(wNatMock),
-            address(usdt0),
-            xrplAddress1,
-            amountTokenIn,
-            amountOut
-        );
-        masterAccountController.swapWNatForStableCoin(xrplAddress1);
-        assertEq(
-            wNatMock.balanceOf(personalAccountAddr),
-            0
-        );
-        assertEq(
-            wNatMock.balanceOf(address(uniswapV3Router)),
-            amountTokenIn
-        );
-        assertEq(
-            wNatMock.allowance(personalAccountAddr, address(uniswapV3Router)),
-            0
-        );
-        assertEq(
-            usdt0.balanceOf(personalAccountAddr),
-            amountOut
-        );
-        assertEq(
-            usdt0.balanceOf(address(uniswapV3Router)),
-            amountTokenOut - amountOut
-        );
-    }
-
-    function testSwapWNatForStableCoinRevertTooLittleReceived() public {
-        testSetSwapParams();
-        uint256 amountTokenIn = 1e20; // 100 WNat
-        uint256 amountTokenOut = 1e8; // 100 USDT0
-        uint256 wNatPriceInWei = 2e16; // $0.02
-        uint256 usdt0PriceInWei = 1e18; // $1
-        _mockGetFeedsByIdInWei(
-            FLR_USD_FEED_ID,
-            USDT_USD_FEED_ID,
-            wNatPriceInWei,
-            usdt0PriceInWei
-        );
-        uniswapV3Router.setPriceInWei(address(wNatMock), wNatPriceInWei);
-        // set higher price to cause too little received
-        uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei * 2);
-
-        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        wNatMock.mint(personalAccountAddr, amountTokenIn); // 100 WNat in personal account
-        usdt0.mint(address(uniswapV3Router), amountTokenOut); // 100 USDT0 liquidity in router
-        vm.expectRevert(MockUniswapV3Router.TooLittleReceived.selector);
-        masterAccountController.swapWNatForStableCoin(xrplAddress1);
-    }
-
-    function testSwapWNatForStableCoinRevertSwapDisabled() public {
-        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        vm.expectRevert(UniswapV3.SwapDisabled.selector, personalAccountAddr);
-        masterAccountController.swapWNatForStableCoin(xrplAddress1);
-    }
-
-    function testSwapWNatForStableCoinRevertAmountInZero() public {
-        testSetSwapParams();
-        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        vm.expectRevert(UniswapV3.AmountInZero.selector, personalAccountAddr);
-        masterAccountController.swapWNatForStableCoin(xrplAddress1);
-    }
-
-    function testSwapStableCoinForFAsset() public {
-        testSetSwapParams();
-        uint256 amountTokenIn = 1e8; // 100 USDT0
-        uint256 amountTokenOut = 1e8; // 100 FXRP
-        uint256 usdt0PriceInWei = 1e18; // $1
-        uint256 fassetPriceInWei = 3e18; // $3
-        _mockGetFeedsByIdInWei(
-            USDT_USD_FEED_ID,
-            XRP_USD_FEED_ID,
-            usdt0PriceInWei,
-            fassetPriceInWei
-        );
-        uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei);
-        uniswapV3Router.setPriceInWei(address(fxrp), fassetPriceInWei);
-
-        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        usdt0.mint(personalAccountAddr, amountTokenIn); // 100 USDT0 in personal account
-        fxrp.mint(address(uniswapV3Router), amountTokenOut); // 100 FXRP liquidity in router
-        // decimals are the same for USDT0 and FXRP, so no adjustment needed
-        uint256 amountOut = usdt0PriceInWei * amountTokenIn * (1e6 - usdt0FXrpPoolFeeTierPPM) / 1e6 / fassetPriceInWei;
-        vm.expectEmit(personalAccountAddr);
-        emit IPersonalAccount.SwapExecuted(
-            address(usdt0),
-            address(fxrp),
-            amountTokenIn,
-            amountOut
-        );
-        vm.expectEmit();
-        emit ISwapFacet.SwapExecuted(
-            personalAccountAddr,
-            address(usdt0),
-            address(fxrp),
-            xrplAddress1,
-            amountTokenIn,
-            amountOut
-        );
-        masterAccountController.swapStableCoinForFAsset(xrplAddress1);
-        assertEq(
-            usdt0.balanceOf(personalAccountAddr),
-            0
-        );
-        assertEq(
-            usdt0.balanceOf(address(uniswapV3Router)),
-            amountTokenIn
-        );
-        assertEq(
-            usdt0.allowance(personalAccountAddr, address(uniswapV3Router)),
-            0
-        );
-        assertEq(
-            fxrp.balanceOf(personalAccountAddr),
-            amountOut
-        );
-        assertEq(
-            fxrp.balanceOf(address(uniswapV3Router)),
-            amountTokenOut - amountOut
-        );
-    }
-
-    function testSwapStableCoinForFassetRevertTooLittleReceived() public {
-        testSetSwapParams();
-        uint256 amountTokenIn = 1e8; // 100 USDT0
-        uint256 amountTokenOut = 1e8; // 100 FXRP
-        uint256 usdt0PriceInWei = 1e18; // $1
-        uint256 fassetPriceInWei = 3e18; // $3
-        _mockGetFeedsByIdInWei(
-            USDT_USD_FEED_ID,
-            XRP_USD_FEED_ID,
-            usdt0PriceInWei,
-            fassetPriceInWei
-        );
-        uniswapV3Router.setPriceInWei(address(usdt0), usdt0PriceInWei);
-        // set higher price to cause too little received
-        uniswapV3Router.setPriceInWei(address(fxrp), fassetPriceInWei * 2);
-
-        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        usdt0.mint(personalAccountAddr, amountTokenIn); // 100 USDT0 in personal account
-        fxrp.mint(address(uniswapV3Router), amountTokenOut); // 100 FXRP liquidity in router
-        vm.expectRevert(MockUniswapV3Router.TooLittleReceived.selector);
-        masterAccountController.swapStableCoinForFAsset(xrplAddress1);
-    }
-
-    function testSwapStableCoinForFassetRevertSwapDisabled() public {
-        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        vm.expectRevert(UniswapV3.SwapDisabled.selector, personalAccountAddr);
-        masterAccountController.swapStableCoinForFAsset(xrplAddress1);
-    }
-
-    function testSwapStableCoinForFassetRevertAmountInZero() public {
-        testSetSwapParams();
-        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
-        vm.expectRevert(UniswapV3.AmountInZero.selector, personalAccountAddr);
-        masterAccountController.swapStableCoinForFAsset(xrplAddress1);
     }
 
     function testSetTimelockDuration() public {
@@ -3523,28 +3141,6 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
                 IAssetManager.redeem.selector
             ),
             abi.encode(_amount)
-        );
-    }
-
-    function _mockGetFeedsByIdInWei(
-        bytes32 _tokenInFeedId,
-        bytes32 _tokenOutFeedId,
-        uint256 _priceInWeiTokenIn,
-        uint256 _priceInWeiTokenOut
-    ) private {
-        bytes32[] memory feedIds = new bytes32[](2);
-        feedIds[0] = _tokenInFeedId;
-        feedIds[1] = _tokenOutFeedId;
-        uint256[] memory pricesInWei = new uint256[](2);
-        pricesInWei[0] = _priceInWeiTokenIn;
-        pricesInWei[1] = _priceInWeiTokenOut;
-        vm.mockCall(
-            ftsoV2Mock,
-            abi.encodeWithSelector(
-                FtsoV2Interface.getFeedsByIdInWei.selector,
-                feedIds
-            ),
-            abi.encode(pricesInWei)
         );
     }
 

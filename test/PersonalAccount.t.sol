@@ -9,13 +9,10 @@ import {IIVault} from "../contracts/smartAccounts/interface/IIVault.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AgentInfo.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
-import {FtsoV2Interface} from "flare-periphery/src/flare/FtsoV2Interface.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
-import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import {MockBeacon} from "../contracts/mock/MockBeacon.sol";
 import {MockERC721} from "../contracts/mock/MockERC721.sol";
 import {MockERC1155} from "../contracts/mock/MockERC1155.sol";
@@ -484,118 +481,6 @@ contract PersonalAccountTest is Test {
         );
         assertEq(returnedShares, shares);
         assertEq(returnedAssets, assets);
-    }
-
-    function testExecuteSwapRevertOnlyController() public {
-        vm.expectRevert(IPersonalAccount.OnlyController.selector);
-        personalAccount.executeSwap(
-            address(0),
-            address(0),
-            bytes21(0),
-            address(0),
-            bytes21(0),
-            0,
-            0
-        );
-    }
-
-    function testExecuteSwap() public {
-        address uniswapV3Router = makeAddr("uniswapV3Router");
-        address tokenIn = makeAddr("tokenIn");
-        bytes21 tokenInFeedId = bytes21(keccak256("tokenInFeedId"));
-        address tokenOut = makeAddr("tokenOut");
-        bytes21 tokenOutFeedId = bytes21(keccak256("tokenOutFeedId"));
-        uint256 amountIn = 1000;
-        uint256 amountOut = 950;
-
-        // mock personal account balance of tokenIn
-        vm.mockCall(
-            tokenIn,
-            abi.encodeWithSelector(
-                IERC20.balanceOf.selector,
-                address(personalAccount)
-            ),
-            abi.encode(amountIn)
-        );
-
-        // mock tokenIn decimals
-        vm.mockCall(
-            tokenIn,
-            abi.encodeWithSelector(
-                IERC20Metadata.decimals.selector
-            ),
-            abi.encode(18)
-        );
-
-        // mock tokenOut decimals
-        vm.mockCall(
-            tokenOut,
-            abi.encodeWithSelector(
-                IERC20Metadata.decimals.selector
-            ),
-            abi.encode(6)
-        );
-
-        address ftsoV2 = makeAddr("ftsoV2");
-        // mock get FtsoV2
-        _mockGetContractAddressByHash(
-            "FtsoV2",
-            ftsoV2
-        );
-
-        // mock getFeedsByIdInWei
-        bytes21[] memory feedIds = new bytes21[](2);
-        feedIds[0] = tokenInFeedId;
-        feedIds[1] = tokenOutFeedId;
-        uint256[] memory valuesInWei = new uint256[](2);
-        valuesInWei[0] = 1234; // mock price for tokenIn
-        valuesInWei[1] = 12345; // mock price for tokenOut
-        vm.mockCall(
-            ftsoV2,
-            abi.encodeWithSelector(
-                FtsoV2Interface.getFeedsByIdInWei.selector,
-                feedIds
-            ),
-            abi.encode(valuesInWei)
-        );
-
-        // mock safeIncreaseAllowance
-        vm.mockCall(
-            tokenIn,
-            abi.encodeWithSelector(
-                IERC20.allowance.selector,
-                address(personalAccount),
-                uniswapV3Router
-            ),
-            abi.encode(0)
-        );
-
-        // mock exactInputSingle
-        vm.mockCall(
-            uniswapV3Router,
-            abi.encodeWithSelector(
-                ISwapRouter.exactInputSingle.selector
-            ),
-            abi.encode(amountOut)
-        );
-
-        vm.prank(controller);
-        vm.expectEmit();
-        emit IPersonalAccount.SwapExecuted(
-            tokenIn,
-            tokenOut,
-            amountIn,
-            amountOut
-        );
-        personalAccount.executeSwap(
-            uniswapV3Router,
-            tokenIn,
-            tokenInFeedId,
-            tokenOut,
-            tokenOutFeedId,
-            3000,
-            5000
-        );
     }
 
     function testReceiveERC721() public {

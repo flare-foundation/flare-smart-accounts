@@ -12,7 +12,6 @@ import {IIInstructionFeesFacet} from "./IIInstructionFeesFacet.sol";
 import {IIInstructionsFacet} from "./IIInstructionsFacet.sol";
 import {IIPaymentProofsFacet} from "./IIPaymentProofsFacet.sol";
 import {IIPersonalAccountsFacet} from "./IIPersonalAccountsFacet.sol";
-import {IISwapFacet} from "./IISwapFacet.sol";
 import {IITimelockFacet} from "./IITimelockFacet.sol";
 import {IIVaultsFacet} from "./IIVaultsFacet.sol";
 import {IIXrplProviderWalletsFacet} from "./IIXrplProviderWalletsFacet.sol";
@@ -33,7 +32,6 @@ interface IIMasterAccountController is
     IIInstructionsFacet,
     IIPaymentProofsFacet,
     IIPersonalAccountsFacet,
-    IISwapFacet,
     IITimelockFacet,
     IIVaultsFacet,
     IIXrplProviderWalletsFacet

@@ -21,7 +21,6 @@ import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/Instruc
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
-import {SwapFacet} from "../../contracts/smartAccounts/facets/SwapFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
@@ -53,13 +52,6 @@ contract DeploySmartAccounts is Script {
         uint256 paymentProofValidityDurationSeconds;
         uint256 defaultInstructionFee;
         string[] xrplProviderWallets;
-        address uniswapV3Router;
-        address usdt0;
-        uint24 wNatStableCoinPoolFeeTierPPM;
-        uint24 stableCoinFXrpPoolFeeTierPPM;
-        uint24 maxSlippagePPM;
-        bytes21 stableCoinUsdFeedId;
-        bytes21 wNatUsdFeedId;
         uint256 timelockDurationSeconds;
     }
 
@@ -82,7 +74,6 @@ contract DeploySmartAccounts is Script {
     InstructionsFacet private instructionsFacet;
     PaymentProofsFacet private paymentProofsFacet;
     PersonalAccountsFacet private personalAccountsFacet;
-    SwapFacet private swapFacet;
     TimelockFacet private timelockFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
@@ -117,13 +108,6 @@ contract DeploySmartAccounts is Script {
         params.paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
         params.defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
         params.xrplProviderWallets = vm.parseJsonStringArray(config, ".xrplProviderWallets");
-        params.uniswapV3Router = vm.parseJsonAddress(config, ".uniswapV3Router");
-        params.usdt0 = vm.parseJsonAddress(config, ".usdt0");
-        params.wNatStableCoinPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".wNatStableCoinPoolFeeTierPPM"));
-        params.stableCoinFXrpPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".stableCoinFXrpPoolFeeTierPPM"));
-        params.maxSlippagePPM = uint24(vm.parseJsonUint(config, ".maxSlippagePPM"));
-        params.stableCoinUsdFeedId = bytes21(vm.parseJsonBytes(config, ".stableCoinUsdFeedId"));
-        params.wNatUsdFeedId = bytes21(vm.parseJsonBytes(config, ".wNatUsdFeedId"));
         params.timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
 
         // if initial owner not set in config, use deployer address - for testing purposes
@@ -294,22 +278,6 @@ contract DeploySmartAccounts is Script {
         );
 
         if (_fullDeploy) {
-            // set swap parameters
-            if (params.uniswapV3Router != address(0)) {
-                console2.log("Setting swap parameters");
-                masterAccountController.setSwapParams(
-                    params.uniswapV3Router,
-                    params.usdt0,
-                    params.wNatStableCoinPoolFeeTierPPM,
-                    params.stableCoinFXrpPoolFeeTierPPM,
-                    params.maxSlippagePPM,
-                    params.stableCoinUsdFeedId,
-                    params.wNatUsdFeedId
-                );
-            } else {
-                console2.log("Swap parameters not set, swap is disabled");
-            }
-
             console2.log("Adding XRPL provider wallets");
             masterAccountController.addXrplProviderWallets(params.xrplProviderWallets);
 
@@ -381,22 +349,20 @@ contract DeploySmartAccounts is Script {
         instructionsFacet = new InstructionsFacet();
         paymentProofsFacet = new PaymentProofsFacet();
         personalAccountsFacet = new PersonalAccountsFacet();
-        swapFacet = new SwapFacet();
         timelockFacet = new TimelockFacet();
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
 
-        smartAccountsFacets = new IDiamond.FacetCut[](10);
+        smartAccountsFacets = new IDiamond.FacetCut[](9);
         smartAccountsFacets[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
         smartAccountsFacets[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
         smartAccountsFacets[2] = _addFacet(address(instructionFeesFacet), "InstructionFeesFacet");
         smartAccountsFacets[3] = _addFacet(address(instructionsFacet), "InstructionsFacet");
         smartAccountsFacets[4] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
         smartAccountsFacets[5] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
-        smartAccountsFacets[6] = _addFacet(address(swapFacet), "SwapFacet");
-        smartAccountsFacets[7] = _addFacet(address(timelockFacet), "TimelockFacet");
-        smartAccountsFacets[8] = _addFacet(address(vaultsFacet), "VaultsFacet");
-        smartAccountsFacets[9] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+        smartAccountsFacets[6] = _addFacet(address(timelockFacet), "TimelockFacet");
+        smartAccountsFacets[7] = _addFacet(address(vaultsFacet), "VaultsFacet");
+        smartAccountsFacets[8] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {
@@ -441,13 +407,6 @@ contract DeploySmartAccounts is Script {
                 "DEPLOYED: PersonalAccountsFacet, ",
                 "PersonalAccountsFacet.sol: ",
                 vm.toString(address(personalAccountsFacet))
-            )
-        );
-        console2.log(
-            string.concat(
-                "DEPLOYED: SwapFacet, ",
-                "SwapFacet.sol: ",
-                vm.toString(address(swapFacet))
             )
         );
         console2.log(

@@ -13,7 +13,6 @@ import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
-import {UniswapV3} from "../library/UniswapV3.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
@@ -225,32 +224,6 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuardTransient, IERC721
             address(this)
         );
         emit Claimed(_vault, _year, _month, _day, _shares, _assets);
-    }
-
-    /// @inheritdoc IIPersonalAccount
-    function executeSwap(
-        address _uniswapV3Router,
-        address _tokenIn,
-        bytes21 _tokenInFeedId,
-        address _tokenOut,
-        bytes21 _tokenOutFeedId,
-        uint24 _poolFeeTierPPM,
-        uint24 _maxSlippagePPM
-    )
-        external
-        onlyController nonReentrant
-        returns (uint256 amountIn, uint256 amountOut)
-    {
-        (amountIn, amountOut) = UniswapV3.executeSwap(
-            _uniswapV3Router,
-            _tokenIn,
-            _tokenInFeedId,
-            _tokenOut,
-            _tokenOutFeedId,
-            _poolFeeTierPPM,
-            _maxSlippagePPM
-        );
-        emit SwapExecuted(_tokenIn, _tokenOut, amountIn, amountOut);
     }
 
     /// @inheritdoc IIPersonalAccount

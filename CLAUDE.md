@@ -30,7 +30,7 @@ Solidity smart contracts implementing Flare Smart Accounts — a Diamond proxy (
 ```
 contracts/
   smartAccounts/
-    facets/          # Diamond facets (InstructionsFacet, SwapFacet, etc.)
+    facets/          # Diamond facets (InstructionsFacet, VaultsFacet, etc.)
     implementation/  # MasterAccountController, PersonalAccount
     interface/       # Internal interfaces (II* prefix)
     library/         # Core logic libraries (UserOp, Instructions, etc.)
