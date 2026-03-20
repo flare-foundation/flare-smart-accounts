@@ -234,6 +234,14 @@ contract MyERC4626 is ERC4626 {
         return _getPeriodFromDate(year, month, day);
     }
 
+    /**
+     * @notice Returns the deposit limit for the vault.
+     * @return The deposit limit.
+     */
+    function depositLimit() external view returns (uint256) {
+        return 25000000000000;
+    }
+
     ////////////////////////// upshift specific functions //////////////////////////
     /**
      * @notice Gets the total number of shares to burn at the date specified for a given receiver.
@@ -328,11 +336,26 @@ contract MyERC4626 is ERC4626 {
     }
 
     /**
-     * @notice Returns the deposit limit for the vault.
-     * @return The deposit limit.
+     * @notice Returns the withdrawal fee (mock for Upshift vault compatibility).
+     * @return The withdrawal fee in basis points.
      */
-    function depositLimit() external view returns (uint256) {
-        return 25000000000000;
+    function withdrawalFee() external pure returns (uint256) {
+        return 0;
+    }
+
+    /**
+     * @notice Returns the next withdrawal epoch based on the current timestamp and lag duration.
+     * @return _year The year of the withdrawal epoch.
+     * @return _month The month of the withdrawal epoch.
+     * @return _day The day of the withdrawal epoch.
+     * @return _claimableEpoch The timestamp when the withdrawal can be claimed.
+     */
+    function getWithdrawalEpoch()
+        external view
+        returns (uint256 _year, uint256 _month, uint256 _day, uint256 _claimableEpoch)
+    {
+        (_year, _month, _day) = DateUtils.timestampToDate(block.timestamp + lagDuration);
+        _claimableEpoch = DateUtils.timestampFromDateTime(_year, _month, _day, 0, 0, 0);
     }
 
     ////////////////////////// internal methods //////////////////////////
