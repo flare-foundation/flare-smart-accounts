@@ -9,9 +9,9 @@ library UserOp {
     /// @custom:storage-location erc7201:smartAccounts.UserOp.State
     struct State {
         mapping(address account => uint256 nonce) nonces;
-        mapping(bytes32 txId => bool) ignoreMemo;
+        mapping(address account => mapping(bytes32 txId => bool)) ignoreMemo;
         mapping(address account => address) executor;
-        mapping(bytes32 txId => uint32) replacementFee;
+        mapping(address account => mapping(bytes32 txId => uint32)) replacementFee;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -59,7 +59,7 @@ library UserOp {
         require(_memoData.length == 38, IInstructionsFacet.InvalidMemoData());
         bytes32 targetTxId = bytes32(_memoData[6:38]);
         State storage state = getState();
-        state.ignoreMemo[targetTxId] = true;
+        state.ignoreMemo[_personalAccount][targetTxId] = true;
         emit IInstructionsFacet.IgnoreMemoSet(_personalAccount, targetTxId);
     }
 
@@ -121,7 +121,7 @@ library UserOp {
         bytes32 targetTxId = bytes32(_memoData[6:38]);
         uint32 newFee = uint32(bytes4(_memoData[38:42]));
         State storage state = getState();
-        state.replacementFee[targetTxId] = newFee + 1; // +1 so 0 means "not set"
+        state.replacementFee[_personalAccount][targetTxId] = newFee + 1; // +1 so 0 means "not set"
         emit IInstructionsFacet.ReplacementFeeSet(_personalAccount, targetTxId, newFee);
     }
 
@@ -136,12 +136,13 @@ library UserOp {
     }
 
     function getReplacementFee(
+        address _personalAccount,
         bytes32 _txId
     )
         internal view
         returns (uint32)
     {
-        return getState().replacementFee[_txId];
+        return getState().replacementFee[_personalAccount][_txId];
     }
 
     function getNonce(address _sender) internal view returns (uint256) {

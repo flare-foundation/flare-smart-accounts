@@ -202,7 +202,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
         require(msg.sender == address(assetManager), OnlyAssetManager());
         // get or create PA
-        IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress);
+        address personalAccount = address(PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress));
 
         // determine executor fee, validate memo, check PA executor
         uint256 executorFee;
@@ -211,14 +211,14 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             uint8 instructionId = uint8(_memoData[0]);
             // check PA executor (0xD0/0xD1 bypass to prevent lock-out)
             if (instructionId != 0xD0 && instructionId != 0xD1) {
-                address paExecutor = UserOp.getExecutor(address(personalAccount));
+                address paExecutor = UserOp.getExecutor(personalAccount);
                 if (paExecutor != address(0)) {
                     require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
                 }
             }
             executorFee = uint32(bytes4(_memoData[2:6]));
             if (instructionId == 0xFF) {
-                uint32 storedFee = UserOp.getReplacementFee(_transactionId);
+                uint32 storedFee = UserOp.getReplacementFee(personalAccount, _transactionId);
                 if (storedFee > 0) {
                     executorFee = storedFee - 1;
                 }
@@ -226,7 +226,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         } else {
             // check PA executor for plain direct mint (no memo)
             {
-                address paExecutor = UserOp.getExecutor(address(personalAccount));
+                address paExecutor = UserOp.getExecutor(personalAccount);
                 if (paExecutor != address(0)) {
                     require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
                 }
@@ -251,11 +251,11 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             }
             uint256 remaining = _amount - executorFee;
             if (remaining > 0) {
-                fAsset.safeTransfer(address(personalAccount), remaining);
+                fAsset.safeTransfer(personalAccount, remaining);
             }
 
             emit DirectMintingExecuted(
-                address(personalAccount),
+                personalAccount,
                 _transactionId,
                 _sourceAddress,
                 _amount,
@@ -269,22 +269,22 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             uint8 instructionId = uint8(_memoData[0]);
             if (instructionId == 0xFF) {
                 UserOp.State storage userOpState = UserOp.getState();
-                if (userOpState.ignoreMemo[_transactionId]) {
+                if (userOpState.ignoreMemo[personalAccount][_transactionId]) {
                     // only mint fAssets, do not execute AA instruction from memo
-                    userOpState.ignoreMemo[_transactionId] = false;
+                    userOpState.ignoreMemo[personalAccount][_transactionId] = false;
                 } else {
-                    UserOp.execute(_memoData, address(personalAccount));
+                    UserOp.execute(_memoData, personalAccount);
                 }
             } else if (instructionId == 0xE0) {
-                UserOp.setIgnoreMemo(_memoData, address(personalAccount));
+                UserOp.setIgnoreMemo(_memoData, personalAccount);
             } else if (instructionId == 0xE1) {
-                UserOp.setNonce(_memoData, address(personalAccount));
+                UserOp.setNonce(_memoData, personalAccount);
             } else if (instructionId == 0xE2) {
-                UserOp.setReplacementFee(_memoData, address(personalAccount));
+                UserOp.setReplacementFee(_memoData, personalAccount);
             } else if (instructionId == 0xD0) {
-                UserOp.setExecutor(_memoData, address(personalAccount));
+                UserOp.setExecutor(_memoData, personalAccount);
             } else if (instructionId == 0xD1) {
-                UserOp.removeExecutor(_memoData, address(personalAccount));
+                UserOp.removeExecutor(_memoData, personalAccount);
             } else {
                 revert InvalidInstructionId(instructionId);
             }
