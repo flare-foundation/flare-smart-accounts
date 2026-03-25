@@ -16,6 +16,9 @@ contract DeployMyERC4626 is Script {
             "TESTstXRP",
             "TESTstXRP"
         );
+
+        depositVault.setLagDuration(300);
+
         vm.stopBroadcast();
 
         // Log deployment info for post-processing
