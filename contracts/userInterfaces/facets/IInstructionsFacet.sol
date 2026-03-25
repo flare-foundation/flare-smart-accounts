@@ -2,7 +2,6 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IXRPPayment} from "flare-periphery/src/flare/IXRPPayment.sol";
 
 /**
  * @title IInstructionsFacet
@@ -185,33 +184,53 @@ interface IInstructionsFacet {
     );
 
     /**
-     * @notice Emitted when a nonce-ignore flag is set for an AA transaction.
+     * @notice Emitted when ignoreMemo flag is set for a target transaction.
      * @param personalAccount The personal account address.
-     * @param txId The AA transaction ID to ignore nonce for.
+     * @param targetTxId The target transaction ID to ignore memo for.
      */
-    event NonceIgnoreSet(
+    event IgnoreMemoSet(
         address indexed personalAccount,
-        bytes32 indexed txId
+        bytes32 indexed targetTxId
     );
 
     /**
-     * @notice Emitted when a memo-ignore flag is set for a direct minting transaction.
+     * @notice Emitted when a personal account's nonce is increased.
      * @param personalAccount The personal account address.
-     * @param txId The direct minting transaction ID to ignore memo for.
+     * @param newNonce The new nonce value.
      */
-    event MemoIgnoreSet(
-        address indexed personalAccount,
-        bytes32 indexed txId
-    );
-
-    /**
-     * @notice Emitted when a nonce is manually incremented.
-     * @param personalAccount The personal account address.
-     * @param newNonce The new nonce value after increment.
-     */
-    event NonceIncremented(
+    event NonceIncreased(
         address indexed personalAccount,
         uint256 newNonce
+    );
+
+    /**
+     * @notice Emitted when a PA executor is set.
+     * @param personalAccount The personal account address.
+     * @param executor The executor address.
+     */
+    event ExecutorSet(
+        address indexed personalAccount,
+        address indexed executor
+    );
+
+    /**
+     * @notice Emitted when a PA executor is removed.
+     * @param personalAccount The personal account address.
+     */
+    event ExecutorRemoved(
+        address indexed personalAccount
+    );
+
+    /**
+     * @notice Emitted when a replacement fee is set for a stuck transaction.
+     * @param personalAccount The personal account address.
+     * @param targetTxId The target transaction ID.
+     * @param newFee The replacement fee.
+     */
+    event ReplacementFeeSet(
+        address indexed personalAccount,
+        bytes32 indexed targetTxId,
+        uint32 newFee
     );
 
     /**
@@ -230,20 +249,6 @@ interface IInstructionsFacet {
         uint256 amount,
         uint256 executorFee,
         address executor
-    );
-
-    /**
-     * @notice Emitted when an instruction is executed.
-     * @param personalAccount The personal account address.
-     * @param transactionId The transaction ID.
-     * @param xrplOwner The XRPL owner address.
-     * @param instructionId The instruction ID.
-     */
-    event InstructionExecuted(
-        address indexed personalAccount,
-        bytes32 indexed transactionId,
-        string xrplOwner,
-        uint256 instructionId
     );
 
     /**
@@ -361,9 +366,37 @@ interface IInstructionsFacet {
     );
 
     /**
+     * @notice Reverts if the executor doesn't match the PA's executor.
+     * @param expected The expected executor address.
+     * @param actual The actual executor address.
+     */
+    error WrongExecutor(
+        address expected,
+        address actual
+    );
+
+    /**
      * @notice Reverts if the memo data is invalid.
      */
     error InvalidMemoData();
+
+    /**
+     * @notice Reverts if the memo instruction ID is not supported.
+     * @param instructionId The unsupported instruction ID.
+     */
+    error InvalidInstructionId(
+        uint8 instructionId
+    );
+
+    /**
+     * @notice Reverts if the new nonce is invalid.
+     * @param currentNonce The current nonce value.
+     * @param newNonce The requested new nonce value.
+     */
+    error InvalidNonceIncrease(
+        uint256 currentNonce,
+        uint256 newNonce
+    );
 
     /**
      * @notice Reserve collateral for minting operation.
@@ -401,17 +434,6 @@ interface IInstructionsFacet {
      */
     function executeInstruction(
         IPayment.Proof calldata _proof,
-        string calldata _xrplAddress
-    )
-        external payable;
-
-    /**
-     * @notice Execute an AA user operation from an XRP payment proof.
-     * @param _proof XRP payment proof containing PackedUserOperation in firstMemoData.
-     * @param _xrplAddress The XRPL address requesting execution.
-     */
-    function executeInstruction(
-        IXRPPayment.Proof calldata _proof,
         string calldata _xrplAddress
     )
         external payable;
@@ -468,4 +490,15 @@ interface IInstructionsFacet {
     )
         external view
         returns (uint256);
+
+    /**
+     * @notice Returns the executor for a personal account.
+     * @param _personalAccount The personal account address.
+     * @return The executor address (address(0) if not set).
+     */
+    function getExecutor(
+        address _personalAccount
+    )
+        external view
+        returns (address);
 }

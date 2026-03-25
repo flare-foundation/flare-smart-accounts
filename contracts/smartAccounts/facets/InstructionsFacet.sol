@@ -5,7 +5,6 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {CollateralReservationInfo} from "flare-periphery/src/flare/data/CollateralReservationInfo.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IXRPPayment} from "flare-periphery/src/flare/IXRPPayment.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
@@ -22,6 +21,7 @@ import {AgentVaults} from "../library/AgentVaults.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
 import {Instructions} from "../library/Instructions.sol";
 import {UserOp} from "../library/UserOp.sol";
+import {Pause} from "../library/Pause.sol";
 import {PaymentReferenceParser} from "../library/PaymentReferenceParser.sol";
 import {FacetBase} from "./FacetBase.sol";
 
@@ -32,6 +32,11 @@ import {FacetBase} from "./FacetBase.sol";
 contract InstructionsFacet is IIInstructionsFacet, FacetBase {
     using SafeERC20 for IERC20;
 
+    modifier notPaused {
+        Pause.checkNotPaused();
+        _;
+    }
+
     /// @inheritdoc IInstructionsFacet
     function reserveCollateral(
         string calldata _xrplAddress,
@@ -39,6 +44,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         bytes32 _transactionId
     )
         external payable
+        notPaused
         returns (uint256 _collateralReservationId)
     {
         // check instruction id
@@ -75,6 +81,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         string calldata _xrplAddress
     )
         external
+        notPaused
     {
         bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
 
@@ -136,6 +143,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         string calldata _xrplAddress
     )
         external payable
+        notPaused
     {
         bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
         uint256 instructionType = PaymentReferenceParser.getInstructionType(paymentReference);
@@ -180,63 +188,6 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
     }
 
     /// @inheritdoc IInstructionsFacet
-    function executeInstruction(
-        IXRPPayment.Proof calldata _proof,
-        string calldata _xrplAddress
-    )
-        external payable
-    {
-        // extract memo data
-        require(_proof.data.responseBody.hasMemoData, NoMemoData());
-        bytes calldata memoData = _proof.data.responseBody.firstMemoData;
-        require(memoData.length > 0, NoMemoData());
-
-        // instruction ID is first byte of memoData
-        uint256 instructionId = uint8(memoData[0]);
-
-        // check instruction fee
-        {
-            uint256 instructionFee = InstructionFees.getInstructionFee(instructionId);
-            int256 receivedAmount = _proof.data.responseBody.receivedAmount;
-            require(
-                receivedAmount >= 0 && uint256(receivedAmount) >= instructionFee,
-                InvalidPaymentAmount(instructionFee)
-            );
-        }
-
-        // verify payment proof
-        PaymentProofs.verifyPayment(_proof, _xrplAddress);
-
-        // mark transaction as used
-        bytes32 transactionId = _proof.data.requestBody.transactionId;
-        {
-            Instructions.State storage state = Instructions.getState();
-            require(!state.usedTransactionIds[transactionId], TransactionAlreadyExecuted());
-            state.usedTransactionIds[transactionId] = true;
-        }
-
-        // get or create PA
-        IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
-
-        // execute instruction
-        Instructions.executeInstruction(
-            instructionId >> 4, // instruction type
-            instructionId & 0x0F, // instruction command
-            memoData,
-            address(personalAccount),
-            transactionId
-        );
-
-        // emit event
-        emit InstructionExecuted(
-            address(personalAccount),
-            transactionId,
-            _xrplAddress,
-            instructionId
-        );
-    }
-
-    /// @inheritdoc IInstructionsFacet
     function mintedFAssets(
         bytes32 _transactionId,
         string calldata _sourceAddress,
@@ -246,18 +197,46 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         address payable _executor
     )
         external payable
+        notPaused
     {
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
+        require(msg.sender == address(assetManager), OnlyAssetManager());
         // get or create PA
         IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress);
 
-        {
-            IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-            require(msg.sender == address(assetManager), OnlyAssetManager());
-
-            // get executor fee from AssetManager
+        // determine executor fee, validate memo, check PA executor
+        uint256 executorFee;
+        if (_memoData.length > 0) {
+            require(_memoData.length >= 6, InvalidMemoData());
+            uint8 instructionId = uint8(_memoData[0]);
+            // check PA executor (0xD0/0xD1 bypass to prevent lock-out)
+            if (instructionId != 0xD0 && instructionId != 0xD1) {
+                address paExecutor = UserOp.getExecutor(address(personalAccount));
+                if (paExecutor != address(0)) {
+                    require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
+                }
+            }
+            executorFee = uint32(bytes4(_memoData[2:6]));
+            if (instructionId == 0xFF) {
+                uint32 storedFee = UserOp.getReplacementFee(_transactionId);
+                if (storedFee > 0) {
+                    executorFee = storedFee - 1;
+                }
+            }
+        } else {
+            // check PA executor for plain direct mint (no memo)
+            {
+                address paExecutor = UserOp.getExecutor(address(personalAccount));
+                if (paExecutor != address(0)) {
+                    require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
+                }
+            }
+            // no memo — only direct mint, use default executor fee
             // TODO: uncomment when getDirectMintingExecutorFeeUBA is added to IAssetManager
-            // uint256 executorFee = assetManager.getDirectMintingExecutorFeeUBA();
-            uint256 executorFee = 0;
+            // executorFee = assetManager.getDirectMintingExecutorFeeUBA();
+        }
+
+        {
             require(_amount >= executorFee, InsufficientAmountForFee(_amount, executorFee));
 
             // replay protection
@@ -285,17 +264,29 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             );
         }
 
-        // if memo present, decode and execute AA (or skip if ignoreMemo is set)
+        // if memo present, execute AA instruction
         if (_memoData.length > 0) {
-            UserOp.State storage userOpState = UserOp.getState();
-            if (userOpState.ignoreMemo[_transactionId]) {
-                userOpState.ignoreMemo[_transactionId] = false;
+            uint8 instructionId = uint8(_memoData[0]);
+            if (instructionId == 0xFF) {
+                UserOp.State storage userOpState = UserOp.getState();
+                if (userOpState.ignoreMemo[_transactionId]) {
+                    // only mint fAssets, do not execute AA instruction from memo
+                    userOpState.ignoreMemo[_transactionId] = false;
+                } else {
+                    UserOp.execute(_memoData, address(personalAccount));
+                }
+            } else if (instructionId == 0xE0) {
+                UserOp.setIgnoreMemo(_memoData, address(personalAccount));
+            } else if (instructionId == 0xE1) {
+                UserOp.setNonce(_memoData, address(personalAccount));
+            } else if (instructionId == 0xE2) {
+                UserOp.setReplacementFee(_memoData, address(personalAccount));
+            } else if (instructionId == 0xD0) {
+                UserOp.setExecutor(_memoData, address(personalAccount));
+            } else if (instructionId == 0xD1) {
+                UserOp.removeExecutor(_memoData, address(personalAccount));
             } else {
-                require(
-                    _memoData.length >= 2 && uint8(_memoData[0]) == 0xFF,
-                    InvalidMemoData()
-                );
-                UserOp.execute(_memoData, address(personalAccount), _transactionId);
+                revert InvalidInstructionId(instructionId);
             }
         }
     }
@@ -320,6 +311,16 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
     {
         Instructions.State storage state = Instructions.getState();
         return state.collateralReservationIdToTransactionId[_collateralReservationId];
+    }
+
+    /// @inheritdoc IInstructionsFacet
+    function getExecutor(
+        address _personalAccount
+    )
+        external view
+        returns (address)
+    {
+        return UserOp.getExecutor(_personalAccount);
     }
 
     /// @inheritdoc IInstructionsFacet

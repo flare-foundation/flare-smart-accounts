@@ -9,8 +9,9 @@ library UserOp {
     /// @custom:storage-location erc7201:smartAccounts.UserOp.State
     struct State {
         mapping(address account => uint256 nonce) nonces;
-        mapping(bytes32 txId => bool) ignoreNonce;
         mapping(bytes32 txId => bool) ignoreMemo;
+        mapping(address account => address) executor;
+        mapping(bytes32 txId => uint32) replacementFee;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -19,13 +20,12 @@ library UserOp {
 
     function execute(
         bytes calldata _memoData,
-        address _personalAccount,
-        bytes32 _transactionId
+        address _personalAccount
     )
         internal
     {
-        // decode PackedUserOperation from memoData (skip byte 0 = instruction ID, byte 1 = wallet ID)
-        PackedUserOperation memory userOp = abi.decode(_memoData[2:], (PackedUserOperation));
+        // decode PackedUserOperation from memoData (skip 6-byte header: instructionId + walletId + uint32 fee)
+        PackedUserOperation memory userOp = abi.decode(_memoData[6:], (PackedUserOperation));
 
         // validate sender
         require(userOp.sender == _personalAccount, IInstructionsFacet.InvalidSender(userOp.sender, _personalAccount));
@@ -33,14 +33,11 @@ library UserOp {
         State storage state = getState();
 
         // validate nonce
-        if (userOp.nonce != state.nonces[_personalAccount]) {
-            require(state.ignoreNonce[_transactionId],
-                IInstructionsFacet.InvalidNonce(state.nonces[_personalAccount], userOp.nonce)
-            );
-            state.ignoreNonce[_transactionId] = false;
-        } else {
-            ++state.nonces[_personalAccount];
-        }
+        require(
+            userOp.nonce == state.nonces[_personalAccount],
+            IInstructionsFacet.InvalidNonce(state.nonces[_personalAccount], userOp.nonce)
+        );
+        ++state.nonces[_personalAccount];
 
         // execute callData on PA (Diamond is controller, so onlyController is satisfied)
         (bool success, bytes memory returnData) = _personalAccount.call{value: msg.value}(userOp.callData);
@@ -52,40 +49,99 @@ library UserOp {
         );
     }
 
-    function setIgnoreNonce(
-        bytes calldata _memoData,
-        address _personalAccount
-    )
-        internal
-    {
-        require(_memoData.length == 34, IInstructionsFacet.NoMemoData());
-        bytes32 txId = bytes32(_memoData[2:34]);
-        State storage state = getState();
-        state.ignoreNonce[txId] = true;
-        emit IInstructionsFacet.NonceIgnoreSet(_personalAccount, txId);
-    }
-
-    function incrementNonce(
-        address _personalAccount
-    )
-        internal
-    {
-        State storage state = getState();
-        uint256 newNonce = ++state.nonces[_personalAccount];
-        emit IInstructionsFacet.NonceIncremented(_personalAccount, newNonce);
-    }
-
     function setIgnoreMemo(
         bytes calldata _memoData,
         address _personalAccount
     )
         internal
     {
-        require(_memoData.length == 34, IInstructionsFacet.NoMemoData());
-        bytes32 txId = bytes32(_memoData[2:34]);
+        // memo format: [0xE0][walletId:uint8][fee:uint32][targetTxId:bytes32] = 38 bytes
+        require(_memoData.length == 38, IInstructionsFacet.InvalidMemoData());
+        bytes32 targetTxId = bytes32(_memoData[6:38]);
         State storage state = getState();
-        state.ignoreMemo[txId] = true;
-        emit IInstructionsFacet.MemoIgnoreSet(_personalAccount, txId);
+        state.ignoreMemo[targetTxId] = true;
+        emit IInstructionsFacet.IgnoreMemoSet(_personalAccount, targetTxId);
+    }
+
+    function setNonce(
+        bytes calldata _memoData,
+        address _personalAccount
+    )
+        internal
+    {
+        // memo format: [0xE1][walletId:uint8][fee:uint32][newNonce:uint256] = 38 bytes
+        require(_memoData.length == 38, IInstructionsFacet.InvalidMemoData());
+        uint256 newNonce = uint256(bytes32(_memoData[6:38]));
+        State storage state = getState();
+        uint256 currentNonce = state.nonces[_personalAccount];
+        require(
+            newNonce > currentNonce && newNonce - currentNonce <= type(uint32).max,
+            IInstructionsFacet.InvalidNonceIncrease(currentNonce, newNonce)
+        );
+        state.nonces[_personalAccount] = newNonce;
+        emit IInstructionsFacet.NonceIncreased(_personalAccount, newNonce);
+    }
+
+    function setExecutor(
+        bytes calldata _memoData,
+        address _personalAccount
+    )
+        internal
+    {
+        // memo format: [0xD0][walletId:uint8][fee:uint32][executor:address] = 26 bytes
+        require(_memoData.length == 26, IInstructionsFacet.InvalidMemoData());
+        address newExecutor = address(bytes20(_memoData[6:26]));
+        require(newExecutor != address(0), IInstructionsFacet.AddressZero());
+        State storage state = getState();
+        state.executor[_personalAccount] = newExecutor;
+        emit IInstructionsFacet.ExecutorSet(_personalAccount, newExecutor);
+    }
+
+    function removeExecutor(
+        bytes calldata _memoData,
+        address _personalAccount
+    )
+        internal
+    {
+        // memo format: [0xD1][walletId:uint8][fee:uint32] = 6 bytes
+        require(_memoData.length == 6, IInstructionsFacet.InvalidMemoData());
+        State storage state = getState();
+        state.executor[_personalAccount] = address(0);
+        emit IInstructionsFacet.ExecutorRemoved(_personalAccount);
+    }
+
+    function setReplacementFee(
+        bytes calldata _memoData,
+        address _personalAccount
+    )
+        internal
+    {
+        // memo format: [0xE2][walletId:uint8][fee:uint32][targetTxId:bytes32][newFee:uint32] = 42 bytes
+        require(_memoData.length == 42, IInstructionsFacet.InvalidMemoData());
+        bytes32 targetTxId = bytes32(_memoData[6:38]);
+        uint32 newFee = uint32(bytes4(_memoData[38:42]));
+        State storage state = getState();
+        state.replacementFee[targetTxId] = newFee + 1; // +1 so 0 means "not set"
+        emit IInstructionsFacet.ReplacementFeeSet(_personalAccount, targetTxId, newFee);
+    }
+
+    function getExecutor(
+        address _personalAccount
+    )
+        internal view
+        returns (address)
+    {
+        State storage state = getState();
+        return state.executor[_personalAccount];
+    }
+
+    function getReplacementFee(
+        bytes32 _txId
+    )
+        internal view
+        returns (uint32)
+    {
+        return getState().replacementFee[_txId];
     }
 
     function getNonce(address _sender) internal view returns (uint256) {

@@ -3,7 +3,6 @@ pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
-import {IXRPPayment} from "flare-periphery/src/flare/IXRPPayment.sol";
 import {XrplProviderWallets} from "./XrplProviderWallets.sol";
 import {IPaymentProofsFacet} from "../../userInterfaces/facets/IPaymentProofsFacet.sol";
 
@@ -64,27 +63,6 @@ library PaymentProofs {
             ContractRegistry.getFdcVerification().verifyPayment(_proof),
             IPaymentProofsFacet.InvalidTransactionProof()
         );
-    }
-
-    function verifyPayment(
-        IXRPPayment.Proof calldata _proof,
-        string calldata _xrplAddress
-    )
-        internal view
-    {
-        _verifyProofData(
-            _proof.data.sourceId,
-            _proof.data.responseBody.status,
-            _proof.data.responseBody.blockTimestamp,
-            _proof.data.responseBody.sourceAddressHash,
-            _proof.data.responseBody.receivingAddressHash,
-            _xrplAddress
-        );
-        // TODO: FDC verification for IXRPPayment.Proof - pending flare-periphery support
-        // require(
-        //     ContractRegistry.getFdcVerification().verifyXRPPayment(_proof),
-        //     IPaymentProofsFacet.InvalidTransactionProof()
-        // );
     }
 
     function getState()

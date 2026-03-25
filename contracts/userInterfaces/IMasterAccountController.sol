@@ -14,6 +14,7 @@ import {IPaymentProofsFacet} from "./facets/IPaymentProofsFacet.sol";
 import {IPersonalAccountsFacet} from "./facets/IPersonalAccountsFacet.sol";
 import {ITimelockFacet} from "./facets/ITimelockFacet.sol";
 import {IVaultsFacet} from "./facets/IVaultsFacet.sol";
+import {IPauseFacet} from "./facets/IPauseFacet.sol";
 import {IXrplProviderWalletsFacet} from "./facets/IXrplProviderWalletsFacet.sol";
 
 /**
@@ -30,6 +31,7 @@ interface IMasterAccountController is
     IExecutorsFacet,
     IInstructionFeesFacet,
     IInstructionsFacet,
+    IPauseFacet,
     IPaymentProofsFacet,
     IPersonalAccountsFacet,
     ITimelockFacet,
