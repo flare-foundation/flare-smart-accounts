@@ -10,30 +10,6 @@ import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 interface IIPauseFacet is IPauseFacet {
 
     /**
-     * @notice Emitted when a pauser is added.
-     * @param account The pauser address.
-     */
-    event PauserAdded(address indexed account);
-
-    /**
-     * @notice Emitted when a pauser is removed.
-     * @param account The pauser address.
-     */
-    event PauserRemoved(address indexed account);
-
-    /**
-     * @notice Emitted when an unpauser is added.
-     * @param account The unpauser address.
-     */
-    event UnpauserAdded(address indexed account);
-
-    /**
-     * @notice Emitted when an unpauser is removed.
-     * @param account The unpauser address.
-     */
-    event UnpauserRemoved(address indexed account);
-
-    /**
      * @notice Add pausers. Only callable by owner.
      * @param _pausers The addresses to add as pausers.
      */

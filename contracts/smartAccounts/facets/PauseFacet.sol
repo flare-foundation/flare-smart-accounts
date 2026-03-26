@@ -18,15 +18,15 @@ contract PauseFacet is IIPauseFacet, FacetBase {
 
     /// @inheritdoc IPauseFacet
     function pause() external {
-        Pause.checkPauser(msg.sender);
-        Pause.pause();
+        require(Pause.isPauser(msg.sender), NotPauser(msg.sender));
+        Pause.getState().paused = true;
         emit Paused(msg.sender);
     }
 
     /// @inheritdoc IPauseFacet
     function unpause() external {
-        Pause.checkUnpauser(msg.sender);
-        Pause.unpause();
+        require(Pause.isUnpauser(msg.sender), NotUnpauser(msg.sender));
+        Pause.getState().paused = false;
         emit Unpaused(msg.sender);
     }
 
@@ -37,8 +37,10 @@ contract PauseFacet is IIPauseFacet, FacetBase {
         external
         onlyOwnerWithTimelock
     {
+        Pause.State storage state = Pause.getState();
         for (uint256 i = 0; i < _pausers.length; i++) {
-            Pause.addPauser(_pausers[i]);
+            require(state.pausers.add(_pausers[i]), PauserAlreadyAdded(_pausers[i]));
+            emit PauserAdded(_pausers[i]);
         }
     }
 
@@ -49,8 +51,10 @@ contract PauseFacet is IIPauseFacet, FacetBase {
         external
         onlyOwnerWithTimelock
     {
+        Pause.State storage state = Pause.getState();
         for (uint256 i = 0; i < _pausers.length; i++) {
-            Pause.removePauser(_pausers[i]);
+            require(state.pausers.remove(_pausers[i]), NotPauser(_pausers[i]));
+            emit PauserRemoved(_pausers[i]);
         }
     }
 
@@ -61,8 +65,10 @@ contract PauseFacet is IIPauseFacet, FacetBase {
         external
         onlyOwnerWithTimelock
     {
+        Pause.State storage state = Pause.getState();
         for (uint256 i = 0; i < _unpausers.length; i++) {
-            Pause.addUnpauser(_unpausers[i]);
+            require(state.unpausers.add(_unpausers[i]), UnpauserAlreadyAdded(_unpausers[i]));
+            emit UnpauserAdded(_unpausers[i]);
         }
     }
 
@@ -73,8 +79,10 @@ contract PauseFacet is IIPauseFacet, FacetBase {
         external
         onlyOwnerWithTimelock
     {
+        Pause.State storage state = Pause.getState();
         for (uint256 i = 0; i < _unpausers.length; i++) {
-            Pause.removeUnpauser(_unpausers[i]);
+            require(state.unpausers.remove(_unpausers[i]), NotUnpauser(_unpausers[i]));
+            emit UnpauserRemoved(_unpausers[i]);
         }
     }
 
@@ -93,7 +101,7 @@ contract PauseFacet is IIPauseFacet, FacetBase {
         external view
         returns (bool)
     {
-        return Pause.getState().pausers.contains(_account);
+        return Pause.isPauser(_account);
     }
 
     /// @inheritdoc IPauseFacet
@@ -103,7 +111,7 @@ contract PauseFacet is IIPauseFacet, FacetBase {
         external view
         returns (bool)
     {
-        return Pause.getState().unpausers.contains(_account);
+        return Pause.isUnpauser(_account);
     }
 
     /// @inheritdoc IPauseFacet
@@ -111,7 +119,7 @@ contract PauseFacet is IIPauseFacet, FacetBase {
         external view
         returns (address[] memory)
     {
-        return Pause.getPausers();
+        return Pause.getState().pausers.values();
     }
 
     /// @inheritdoc IPauseFacet
@@ -119,6 +127,6 @@ contract PauseFacet is IIPauseFacet, FacetBase {
         external view
         returns (address[] memory)
     {
-        return Pause.getUnpausers();
+        return Pause.getState().unpausers.values();
     }
 }

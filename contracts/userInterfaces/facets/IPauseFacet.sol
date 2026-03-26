@@ -20,6 +20,30 @@ interface IPauseFacet {
     event Unpaused(address indexed account);
 
     /**
+     * @notice Emitted when a pauser is added.
+     * @param account The pauser address.
+     */
+    event PauserAdded(address indexed account);
+
+    /**
+     * @notice Emitted when a pauser is removed.
+     * @param account The pauser address.
+     */
+    event PauserRemoved(address indexed account);
+
+    /**
+     * @notice Emitted when an unpauser is added.
+     * @param account The unpauser address.
+     */
+    event UnpauserAdded(address indexed account);
+
+    /**
+     * @notice Emitted when an unpauser is removed.
+     * @param account The unpauser address.
+     */
+    event UnpauserRemoved(address indexed account);
+
+    /**
      * @notice Reverts if the contract is paused.
      */
     error IsPaused();
@@ -35,6 +59,18 @@ interface IPauseFacet {
      * @param account The caller address.
      */
     error NotUnpauser(address account);
+
+    /**
+     * @notice Reverts if the address is already a pauser.
+     * @param account The address.
+     */
+    error PauserAlreadyAdded(address account);
+
+    /**
+     * @notice Reverts if the address is already an unpauser.
+     * @param account The address.
+     */
+    error UnpauserAlreadyAdded(address account);
 
     /**
      * @notice Pause the contract. Only callable by pausers.
