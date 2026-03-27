@@ -6,6 +6,7 @@ import {PersonalAccount} from "../contracts/smartAccounts/implementation/Persona
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 import {IIVault} from "../contracts/smartAccounts/interface/IIVault.sol";
+import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AgentInfo.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
@@ -216,7 +217,7 @@ contract PersonalAccountTest is Test {
     function testDepositRevertOnlyController() public {
         vm.expectRevert(IPersonalAccount.OnlyController.selector);
         personalAccount.deposit(
-            1,
+            IVaultsFacet.VaultType.Firelight,
             depositVault,
             100
         );
@@ -228,7 +229,7 @@ contract PersonalAccountTest is Test {
         vm.prank(controller);
         vm.expectRevert(IPersonalAccount.ApprovalFailed.selector);
         personalAccount.deposit(
-            1,
+            IVaultsFacet.VaultType.Firelight,
             depositVault,
             0
         );
@@ -262,7 +263,7 @@ contract PersonalAccountTest is Test {
             shares
         );
         uint256 returnedShares = personalAccount.deposit(
-            1,
+            IVaultsFacet.VaultType.Firelight,
             depositVault,
             assets
         );
@@ -297,7 +298,7 @@ contract PersonalAccountTest is Test {
             shares
         );
         uint256 returnedShares = personalAccount.deposit(
-            2,
+            IVaultsFacet.VaultType.Upshift,
             depositVault,
             assets
         );

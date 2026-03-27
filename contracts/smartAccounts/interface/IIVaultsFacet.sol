@@ -18,7 +18,7 @@ interface IIVaultsFacet is IVaultsFacet {
     function addVaults(
         uint256[] calldata _vaultIds,
         address[] calldata _vaultAddresses,
-        uint8[] calldata _vaultTypes
+        VaultType[] calldata _vaultTypes
     )
         external;
 }

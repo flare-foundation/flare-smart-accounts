@@ -2,6 +2,7 @@
 pragma solidity >=0.7.6 <0.9;
 
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 
 
 /**
@@ -55,13 +56,13 @@ interface IIPersonalAccount is IPersonalAccount {
 
     /**
      * @notice Deposit assets into the vault.
-     * @param _vaultType The type of the vault (1: Firelight, 2: Upshift).
+     * @param _vaultType The type of the vault.
      * @param _vault Vault address.
      * @param _assets The amount of assets to deposit.
      * @return _shares The received shares.
      */
     function deposit(
-        uint256 _vaultType,
+        IVaultsFacet.VaultType _vaultType,
         address _vault,
         uint256 _assets
     )

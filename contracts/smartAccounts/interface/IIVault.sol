@@ -56,6 +56,15 @@ interface IIVault {
         returns (uint256 _shares, uint256 _assetsAfterFee);
 
     // Upshift
+    function previewRedemption(
+        uint256 _shares,
+        bool _isInstant
+    )
+        external
+        view
+        returns (uint256 _assetsAmount, uint256 _assetsAfterFee);
+
+    // Upshift
     function lpTokenAddress()
         external
         view

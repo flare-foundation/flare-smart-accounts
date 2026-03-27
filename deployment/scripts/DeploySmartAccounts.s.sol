@@ -10,6 +10,7 @@ import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISing
 import {IIMasterAccountController} from "../../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
+import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
@@ -38,7 +39,7 @@ contract DeploySmartAccounts is Script {
     struct VaultConfig {
         uint256 vaultId;
         address vaultAddress;
-        uint8 vaultType;
+        IVaultsFacet.VaultType vaultType;
     }
 
     struct MasterAccountControllerParams {
@@ -293,7 +294,7 @@ contract DeploySmartAccounts is Script {
             console2.log("Adding vaults");
             uint256[] memory vaultIds = new uint256[](params.vaults.length);
             address[] memory vaultAddresses = new address[](params.vaults.length);
-            uint8[] memory vaultTypes = new uint8[](params.vaults.length);
+            IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](params.vaults.length);
             for (uint256 i = 0; i < params.vaults.length; i++) {
                 vaultIds[i] = params.vaults[i].vaultId;
                 vaultAddresses[i] = params.vaults[i].vaultAddress;

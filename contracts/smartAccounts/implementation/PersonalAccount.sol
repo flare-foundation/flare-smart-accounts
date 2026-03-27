@@ -13,6 +13,7 @@ import {IERC1363Receiver} from "@openzeppelin/contracts/interfaces/IERC1363Recei
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -141,7 +142,7 @@ contract PersonalAccount is
 
     /// @inheritdoc IIPersonalAccount
     function deposit(
-        uint256 _vaultType,
+        IVaultsFacet.VaultType _vaultType,
         address _vault,
         uint256 _assets
     )
@@ -149,12 +150,15 @@ contract PersonalAccount is
         onlyController nonReentrant
         returns (uint256 _shares)
     {
-        assert(_vaultType == 1 || _vaultType == 2); // 1: Firelight, 2: Upshift
+        assert(
+            _vaultType == IVaultsFacet.VaultType.Firelight ||
+            _vaultType == IVaultsFacet.VaultType.Upshift
+        );
         IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
         require(fxrp.approve(_vault, _assets), ApprovalFailed());
         emit Approved(address(fxrp), _vault, _assets);
 
-        if (_vaultType == 1) {
+        if (_vaultType == IVaultsFacet.VaultType.Firelight) {
             _shares = IIVault(_vault).deposit(_assets, address(this));
         } else {
             _shares = IIVault(_vault).deposit(address(fxrp), _assets, address(this));

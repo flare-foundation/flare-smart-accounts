@@ -21,6 +21,7 @@ import {AgentVaults} from "../library/AgentVaults.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
 import {Instructions} from "../library/Instructions.sol";
 import {UserOp} from "../library/UserOp.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {Pause} from "../library/Pause.sol";
 import {PaymentReferenceParser} from "../library/PaymentReferenceParser.sol";
 import {FacetBase} from "./FacetBase.sol";
@@ -125,7 +126,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
 
         // execute deposit
         address vault = Vaults.getVaultAddress(paymentReference);
-        Vault.deposit(personalAccount, instructionType, vault, amount); // instructionType == vaultType
+        Vault.deposit(personalAccount, IVaultsFacet.VaultType(instructionType), vault, amount);
 
         // emit event
         emit InstructionExecuted(

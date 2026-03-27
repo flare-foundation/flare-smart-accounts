@@ -19,6 +19,7 @@ import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/Person
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
 import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
+import {PersonalAccountReaderFacet} from "../../contracts/smartAccounts/facets/PersonalAccountReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 contract FacetsDeploy is Test {
@@ -54,7 +55,7 @@ contract FacetsDeploy is Test {
     }
 
     function deploySmartAccountsFacets() internal returns (IDiamond.FacetCut[] memory) {
-        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](10);
+        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](11);
 
         diamondCuts[0] = _buildFacetCut(
             address(new AgentVaultsFacet()), "AgentVaultsFacet", IDiamond.FacetCutAction.Add
@@ -85,6 +86,9 @@ contract FacetsDeploy is Test {
         );
         diamondCuts[9] = _buildFacetCut(
             address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[10] = _buildFacetCut(
+            address(new PersonalAccountReaderFacet()), "PersonalAccountReaderFacet", IDiamond.FacetCutAction.Add
         );
         return diamondCuts;
     }

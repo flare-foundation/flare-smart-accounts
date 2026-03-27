@@ -37,6 +37,7 @@ import {IITimelockFacet} from "../contracts/smartAccounts/interface/IITimelockFa
 import {XrplProviderWalletsFacet} from "../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 import {SimpleExample} from "../contracts/mock/SimpleExample.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
+import {IPersonalAccountReaderFacet} from "../contracts/userInterfaces/facets/IPersonalAccountReaderFacet.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 
 // solhint-disable-next-line max-states-count
@@ -57,6 +58,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     MyERC4626 private firelightVault;
     MyERC4626 private upshiftVault;
     MintableERC20 private fxrp;
+    MintableERC20 private wnat;
     SimpleExample private simpleExample;
     string private xrplProviderWallet;
     bytes32 private xrplProviderWalletHash;
@@ -80,6 +82,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         initialOwner = makeAddr("initialOwner");
         executor = makeAddr("executor");
         fxrp = new MintableERC20("F-XRPL", "fXRP", 6);
+        wnat = new MintableERC20("WFLR", "WFLR", 18);
         firelightVault = new MyERC4626(
             IERC20(address(fxrp)),
             "Firelight Vault",
@@ -146,6 +149,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         _mockGetContractAddressByHash("FdcVerification", fdcVerificationMock);
         _mockGetContractAddressByHash("AssetManagerFXRP", assetManagerFxrpMock);
+        _mockGetContractAddressByHash("WNat", address(wnat));
         _mockGetAgentInfo(agent, agentInfo);
         _mockGetFAsset();
 
@@ -168,13 +172,13 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // add vaults
         uint256[] memory vaultIds = new uint256[](2);
         address[] memory vaultAddresses = new address[](2);
-        uint8[] memory vaultTypes = new uint8[](2);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](2);
         vaultIds[0] = 1;
         vaultIds[1] = 4;
         vaultAddresses[0] = address(firelightVault);
         vaultAddresses[1] = address(upshiftVault);
-        vaultTypes[0] = 1;
-        vaultTypes[1] = 2;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
+        vaultTypes[1] = IVaultsFacet.VaultType.Upshift;
         vm.prank(governance);
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
 
@@ -433,7 +437,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 10 // base facets + smart accounts facets
+            3 + 11 // base facets + smart accounts facets
         );
 
         IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](1);
@@ -463,7 +467,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 10 // base facets + smart accounts facets
+            3 + 11 // base facets + smart accounts facets
         );
 
         // replace facets
@@ -2084,13 +2088,13 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddVaults() public {
         uint256[] memory vaultIds = new uint256[](2);
         address[] memory vaultAddresses = new address[](2);
-        uint8[] memory vaultTypes = new uint8[](2);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](2);
         vaultIds[0] = 2;
         vaultIds[1] = 3;
         vaultAddresses[0] = makeAddr("vault2");
         vaultAddresses[1] = makeAddr("vault3");
-        vaultTypes[0] = 1;
-        vaultTypes[1] = 2;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
+        vaultTypes[1] = IVaultsFacet.VaultType.Upshift;
 
         vm.expectEmit();
         emit IVaultsFacet.VaultAdded(vaultIds[0], vaultAddresses[0], vaultTypes[0]);
@@ -2099,7 +2103,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(governance);
         masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
 
-        (uint256[] memory returnedIds, address[] memory addrs, uint8[] memory types) =
+        (uint256[] memory returnedIds, address[] memory addrs, IVaultsFacet.VaultType[] memory types) =
             masterAccountController.getVaults();
         assertEq(returnedIds.length, 4);
         assertEq(returnedIds[0], 1);
@@ -2110,19 +2114,19 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(addrs[1], address(upshiftVault));
         assertEq(addrs[2], vaultAddresses[0]);
         assertEq(addrs[3], vaultAddresses[1]);
-        assertEq(types[0], 1);
-        assertEq(types[1], 2);
-        assertEq(types[2], vaultTypes[0]);
-        assertEq(types[3], vaultTypes[1]);
+        _assertEqVaultType(types[0], IVaultsFacet.VaultType.Firelight);
+        _assertEqVaultType(types[1], IVaultsFacet.VaultType.Upshift);
+        _assertEqVaultType(types[2], vaultTypes[0]);
+        _assertEqVaultType(types[3], vaultTypes[1]);
     }
 
     function testAddVaultsRevertOnlyOwner() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](1);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](1);
         vaultIds[0] = 2;
         vaultAddresses[0] = makeAddr("vault2");
-        vaultTypes[0] = 1;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -2137,10 +2141,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddVaultsRevertInvalidVaultType() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](1);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](1);
         vaultIds[0] = 2;
         vaultAddresses[0] = makeAddr("vault2");
-        vaultTypes[0] = 0; // invalid
+        vaultTypes[0] = IVaultsFacet.VaultType.None; // invalid
 
         vm.prank(governance);
         vm.expectRevert(
@@ -2155,11 +2159,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddVaultsRevertLengthsMismatch() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](2);
-        uint8[] memory vaultTypes = new uint8[](1);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](1);
         vaultIds[0] = 2;
         vaultAddresses[0] = makeAddr("vault2");
         vaultAddresses[1] = makeAddr("vault3");
-        vaultTypes[0] = 1;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
 
         vm.prank(governance);
         vm.expectRevert(IVaultsFacet.VaultsLengthsMismatch.selector);
@@ -2169,11 +2173,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddVaultsRevertLengthsMismatch2() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](2);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](2);
         vaultIds[0] = 2;
         vaultAddresses[0] = makeAddr("vault2");
-        vaultTypes[0] = 1;
-        vaultTypes[1] = 2;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
+        vaultTypes[1] = IVaultsFacet.VaultType.Upshift;
 
         vm.prank(governance);
         vm.expectRevert(IVaultsFacet.VaultsLengthsMismatch.selector);
@@ -2183,10 +2187,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddVaultsRevertVaultIdZero() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](1);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](1);
         vaultIds[0] = 0; // invalid
         vaultAddresses[0] = makeAddr("vault2");
-        vaultTypes[0] = 1;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
 
         vm.prank(governance);
         vm.expectRevert(
@@ -2201,10 +2205,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddVaultsRevertVaultIdAlreadyAdded() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](1);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](1);
         vaultIds[0] = 1; // already added
         vaultAddresses[0] = makeAddr("vault2");
-        vaultTypes[0] = 1;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
 
         vm.prank(governance);
         vm.expectRevert(
@@ -2219,10 +2223,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddVaultsRevertVaultAddressZero() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](1);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](1);
         vaultIds[0] = 2;
         vaultAddresses[0] = address(0); // invalid
-        vaultTypes[0] = 1;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
 
         vm.prank(governance);
         vm.expectRevert(
@@ -2237,10 +2241,10 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testAddVaultsRevertVaultAddressAlreadyAdded() public {
         uint256[] memory vaultIds = new uint256[](1);
         address[] memory vaultAddresses = new address[](1);
-        uint8[] memory vaultTypes = new uint8[](1);
+        IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](1);
         vaultIds[0] = 2;
         vaultAddresses[0] = address(upshiftVault); // already added
-        vaultTypes[0] = 1;
+        vaultTypes[0] = IVaultsFacet.VaultType.Firelight;
 
         vm.prank(governance);
         vm.expectRevert(
@@ -3537,7 +3541,185 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), amount);
     }
 
+    //// reader tests ////
+
+    function testGetBalancesEmpty() public {
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+        IPersonalAccountReaderFacet.AccountBalances memory balances =
+            masterAccountController.getBalances(pa);
+
+        assertEq(balances.natBalance, 0);
+        assertEq(balances.wNatBalance, 0);
+        assertEq(balances.fXrpBalance, 0);
+        assertEq(balances.vaults.length, 2);
+        assertEq(balances.vaults[0].vaultId, 1);
+        assertEq(balances.vaults[0].shares, 0);
+        assertEq(balances.vaults[0].assets, 0);
+        assertEq(balances.vaults[1].vaultId, 4);
+        assertEq(balances.vaults[1].shares, 0);
+        assertEq(balances.vaults[1].assets, 0);
+    }
+
+    function testGetBalancesWithNat() public {
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+        vm.deal(pa, 5 ether);
+
+        IPersonalAccountReaderFacet.AccountBalances memory balances =
+            masterAccountController.getBalances(pa);
+        assertEq(balances.natBalance, 5 ether);
+    }
+
+    function testGetBalancesWithFxrp() public {
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+        fxrp.mint(pa, 500);
+
+        IPersonalAccountReaderFacet.AccountBalances memory balances =
+            masterAccountController.getBalances(pa);
+        assertEq(balances.fXrpBalance, 500);
+    }
+
+    function testGetBalancesWithFirelightDeposit() public {
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 depositAmount = 1000;
+
+        fxrp.mint(pa, depositAmount);
+        vm.startPrank(pa);
+        fxrp.approve(address(firelightVault), depositAmount);
+        firelightVault.deposit(depositAmount, pa);
+        vm.stopPrank();
+
+        IPersonalAccountReaderFacet.AccountBalances memory balances =
+            masterAccountController.getBalances(pa);
+        assertEq(balances.vaults[0].vaultId, 1);
+        assertEq(balances.vaults[0].vaultAddress, address(firelightVault));
+        _assertEqVaultType(balances.vaults[0].vaultType, IVaultsFacet.VaultType.Firelight);
+        assertEq(balances.vaults[0].shares, depositAmount);
+        assertEq(balances.vaults[0].assets, depositAmount);
+    }
+
+    function testGetBalancesWithUpshiftDeposit() public {
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 depositAmount = 2000;
+
+        fxrp.mint(pa, depositAmount);
+        vm.startPrank(pa);
+        fxrp.approve(address(upshiftVault), depositAmount);
+        upshiftVault.deposit(depositAmount, pa);
+        vm.stopPrank();
+
+        IPersonalAccountReaderFacet.AccountBalances memory balances =
+            masterAccountController.getBalances(pa);
+        assertEq(balances.vaults[1].vaultId, 4);
+        assertEq(balances.vaults[1].vaultAddress, address(upshiftVault));
+        _assertEqVaultType(balances.vaults[1].vaultType, IVaultsFacet.VaultType.Upshift);
+        assertEq(balances.vaults[1].shares, depositAmount);
+        assertEq(balances.vaults[1].assets, depositAmount);
+    }
+
+    function testGetBalancesByXrplAddress() public {
+        // trigger PA creation
+        fxrp.mint(address(masterAccountController), 1);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("xrplAddrTx"),
+            xrplAddress1,
+            1,
+            0,
+            "",
+            payable(executor)
+        );
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+        vm.deal(pa, 2 ether);
+        fxrp.mint(pa, 300);
+
+        IPersonalAccountReaderFacet.AccountBalances memory balances =
+            masterAccountController.getBalances(xrplAddress1);
+        assertEq(balances.natBalance, 2 ether);
+        assertEq(balances.fXrpBalance, 301); // 1 from creation mint + 300 minted directly
+        assertEq(balances.vaults.length, 2);
+    }
+
+    function testGetBalancesUndeployedPA() public {
+        // PA not yet deployed — compute address via CREATE2 and check pre-funded balance
+        string memory newXrplAddr = "xrplUndeployed";
+        address expectedPA = masterAccountController.getPersonalAccount(newXrplAddr);
+
+        // send fXRP to the computed address before PA exists
+        fxrp.mint(expectedPA, 777);
+
+        IPersonalAccountReaderFacet.AccountBalances memory balances =
+            masterAccountController.getBalances(newXrplAddr);
+        assertEq(balances.natBalance, 0);
+        assertEq(balances.wNatBalance, 0);
+        assertEq(balances.fXrpBalance, 777);
+        assertEq(balances.vaults[0].shares, 0);
+        assertEq(balances.vaults[1].shares, 0);
+    }
+
+    function testReaderAgentVaults() public {
+        IPersonalAccountReaderFacet.AgentVaultInfo[] memory agentVaults =
+            masterAccountController.agentVaults();
+        assertEq(agentVaults.length, 1);
+        assertEq(agentVaults[0].agentVaultId, 1);
+        assertEq(agentVaults[0].agentVaultAddress, agent);
+    }
+
+    function testReaderVaults() public {
+        IPersonalAccountReaderFacet.VaultInfo[] memory vaults =
+            masterAccountController.vaults();
+        assertEq(vaults.length, 2);
+        assertEq(vaults[0].vaultId, 1);
+        assertEq(vaults[0].vaultAddress, address(firelightVault));
+        _assertEqVaultType(vaults[0].vaultType, IVaultsFacet.VaultType.Firelight);
+        assertEq(vaults[1].vaultId, 4);
+        assertEq(vaults[1].vaultAddress, address(upshiftVault));
+        _assertEqVaultType(vaults[1].vaultType, IVaultsFacet.VaultType.Upshift);
+    }
+
+    function testIsSmartAccountTrue() public {
+        // trigger PA creation via mintedFAssets
+        uint256 amount = 1000;
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("isSmartTx"),
+            xrplAddress1,
+            amount,
+            0,
+            "",
+            payable(executor)
+        );
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+
+        (bool isSA, string memory owner) = masterAccountController.isSmartAccount(pa);
+        assertTrue(isSA);
+        assertEq(owner, xrplAddress1);
+    }
+
+    function testIsSmartAccountFalseEOA() public {
+        address eoa = makeAddr("regularEOA");
+        (bool isSA, string memory owner) = masterAccountController.isSmartAccount(eoa);
+        assertFalse(isSA);
+        assertEq(bytes(owner).length, 0);
+    }
+
+    function testIsSmartAccountFalseContract() public {
+        (bool isSA, string memory owner) = masterAccountController.isSmartAccount(address(firelightVault));
+        assertFalse(isSA);
+        assertEq(bytes(owner).length, 0);
+    }
+
     //// helper functions ////
+
+    function _assertEqVaultType(
+        IVaultsFacet.VaultType _a,
+        IVaultsFacet.VaultType _b
+    )
+        private
+    {
+        assertEq(uint8(_a), uint8(_b));
+    }
+
     function _mockGetAgentInfo(
         address agentAddress,
         AgentInfo.Info memory info

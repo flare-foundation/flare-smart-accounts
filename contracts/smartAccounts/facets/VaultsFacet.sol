@@ -17,7 +17,7 @@ contract VaultsFacet is IIVaultsFacet, FacetBase {
     function addVaults(
         uint256[] calldata _vaultIds,
         address[] calldata _vaultAddresses,
-        uint8[] calldata _vaultTypes
+        VaultType[] calldata _vaultTypes
     )
         external
         onlyOwnerWithTimelock
@@ -30,8 +30,11 @@ contract VaultsFacet is IIVaultsFacet, FacetBase {
             require(vaultId > 0, VaultIdZero(i));
             Vaults.VaultInfo storage vaultInfo = state.vaultIdToVaultInfo[vaultId];
             require(vaultInfo.vaultAddress == address(0), VaultIdAlreadyAdded(vaultId));
-            uint8 vaultType = _vaultTypes[i];
-            require(vaultType == 1 || vaultType == 2, InvalidVaultType(vaultType));
+            VaultType vaultType = _vaultTypes[i];
+            require(
+                vaultType == VaultType.Firelight || vaultType == VaultType.Upshift,
+                InvalidVaultType(vaultType)
+            );
             address vaultAddress = _vaultAddresses[i];
             require(vaultAddress != address(0), VaultAddressZero(i));
             require(
@@ -49,12 +52,16 @@ contract VaultsFacet is IIVaultsFacet, FacetBase {
     /// @inheritdoc IVaultsFacet
     function getVaults()
         external view
-        returns (uint256[] memory _vaultIds, address[] memory _vaultAddresses, uint8[] memory _vaultTypes)
+        returns (
+            uint256[] memory _vaultIds,
+            address[] memory _vaultAddresses,
+            VaultType[] memory _vaultTypes
+        )
     {
         Vaults.State storage state = Vaults.getState();
         _vaultIds = state.vaultIds;
         _vaultAddresses = new address[](_vaultIds.length);
-        _vaultTypes = new uint8[](_vaultIds.length);
+        _vaultTypes = new VaultType[](_vaultIds.length);
         for (uint256 i = 0; i < _vaultIds.length; i++) {
             Vaults.VaultInfo memory vaultInfo = state.vaultIdToVaultInfo[_vaultIds[i]];
             _vaultAddresses[i] = vaultInfo.vaultAddress;
