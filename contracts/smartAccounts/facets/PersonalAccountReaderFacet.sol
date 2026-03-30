@@ -23,12 +23,12 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
 
     /// @inheritdoc IPersonalAccountReaderFacet
     function getBalances(
-        address _personalAccount
+        address _account
     )
         external view
         returns (AccountBalances memory _balances)
     {
-        _balances = _getBalances(_personalAccount);
+        _balances = _getBalances(_account);
     }
 
     /// @inheritdoc IPersonalAccountReaderFacet
@@ -103,14 +103,14 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
     }
 
     function _getBalances(
-        address _personalAccount
+        address _account
     )
         internal view
         returns (AccountBalances memory _balances)
     {
-        _balances.natBalance = _personalAccount.balance;
-        _balances.wNatBalance = IERC20(address(ContractRegistry.getWNat())).balanceOf(_personalAccount);
-        _balances.fXrpBalance = ContractRegistry.getAssetManagerFXRP().fAsset().balanceOf(_personalAccount);
+        _balances.natBalance = _account.balance;
+        _balances.wNatBalance = IERC20(address(ContractRegistry.getWNat())).balanceOf(_account);
+        _balances.fXrpBalance = ContractRegistry.getAssetManagerFXRP().fAsset().balanceOf(_account);
 
         Vaults.State storage vaultState = Vaults.getState();
         uint256[] memory vaultIds = vaultState.vaultIds;
@@ -124,7 +124,7 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
 
             if (info.vaultType == IVaultsFacet.VaultType.Firelight) {
                 // Firelight: vault is the ERC20 share token
-                _balances.vaults[i].shares = IERC20(info.vaultAddress).balanceOf(_personalAccount);
+                _balances.vaults[i].shares = IERC20(info.vaultAddress).balanceOf(_account);
                 if (_balances.vaults[i].shares > 0) {
                     _balances.vaults[i].assets =
                         IERC4626(info.vaultAddress).convertToAssets(_balances.vaults[i].shares);
@@ -132,7 +132,7 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
             } else if (info.vaultType == IVaultsFacet.VaultType.Upshift) {
                 // Upshift: shares are in a separate LP token
                 _balances.vaults[i].shares =
-                    IERC20(IIVault(info.vaultAddress).lpTokenAddress()).balanceOf(_personalAccount);
+                    IERC20(IIVault(info.vaultAddress).lpTokenAddress()).balanceOf(_account);
                 if (_balances.vaults[i].shares > 0) {
                     (_balances.vaults[i].assets, ) =
                         IIVault(info.vaultAddress).previewRedemption(_balances.vaults[i].shares, false);

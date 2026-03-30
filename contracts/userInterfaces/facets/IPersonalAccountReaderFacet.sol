@@ -42,12 +42,12 @@ interface IPersonalAccountReaderFacet {
     error UnsupportedVaultType(IVaultsFacet.VaultType vaultType);
 
     /**
-     * @notice Get all balances for a personal account address.
-     * @param _personalAccount The personal account address.
+     * @notice Get all balances for an account.
+     * @param _account The address.
      * @return _balances The account balances (NAT, WNAT, FXRP, vault balances).
      */
     function getBalances(
-        address _personalAccount
+        address _account
     )
         external view
         returns (AccountBalances memory _balances);
