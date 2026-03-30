@@ -4,9 +4,9 @@ pragma solidity ^0.8.27;
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
 
-library UserOp {
+library MemoInstructions {
 
-    /// @custom:storage-location erc7201:smartAccounts.UserOp.State
+    /// @custom:storage-location erc7201:smartAccounts.MemoInstructions.State
     struct State {
         mapping(address account => uint256 nonce) nonces;
         mapping(address account => mapping(bytes32 txId => bool)) ignoreMemo;
@@ -15,7 +15,7 @@ library UserOp {
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
-        abi.encode(uint256(keccak256("smartAccounts.UserOp.State")) - 1)) & ~bytes32(uint256(0xff)
+        abi.encode(uint256(keccak256("smartAccounts.MemoInstructions.State")) - 1)) & ~bytes32(uint256(0xff)
     );
 
     function execute(

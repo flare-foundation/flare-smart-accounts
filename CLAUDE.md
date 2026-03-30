@@ -33,7 +33,7 @@ contracts/
     facets/          # Diamond facets (InstructionsFacet, VaultsFacet, etc.)
     implementation/  # MasterAccountController, PersonalAccount
     interface/       # Internal interfaces (II* prefix)
-    library/         # Core logic libraries (UserOp, Instructions, etc.)
+    library/         # Core logic libraries (MemoInstructions, Instructions, Pause, etc.)
     proxy/           # PersonalAccountProxy (beacon proxy)
   userInterfaces/    # Public interfaces (I* prefix)
     facets/          # Public facet interfaces
@@ -81,7 +81,8 @@ audit/               # Security audit reports
 - **Diamond pattern**: MasterAccountController is the Diamond. Facets are added/replaced via DiamondCut with timelock.
 - **PersonalAccount**: Beacon proxy deployed per XRPL address via CREATE2. Controller is the Diamond.
 - **Instruction flow**: XRPL payment → FDC proof → InstructionsFacet → library routing → PersonalAccount execution
-- **Two proof types**: `IPayment.Proof` (legacy, uses `standardPaymentReference`) and `IXRPPayment.Proof` (AA, uses `firstMemoData`)
-- **AA instructions**: 0xFF (execute UserOp), 0xEE (ignore nonce for txId), 0xEF (increment nonce)
-- **Transaction ID tracking**: `usedTransactionIds` in `Instructions.State` — shared by both legacy and AA paths
-- **Nonce-on-success**: AA UserOp nonce only increments on successful execution (XRPL txns are irreversible, proofs must be retryable)
+- **Instruction paths**: Legacy via `IPayment.Proof` (`standardPaymentReference`), memo-based via `mintedFAssets()` (direct minting with XRPL memo data)
+- **Memo instructions**: 0xFF (execute UserOp), 0xE0 (ignore memo), 0xE1 (increase nonce), 0xE2 (replace fee), 0xD0 (set executor), 0xD1 (remove executor)
+- **Transaction ID tracking**: `usedTransactionIds` in `Instructions.State` — shared by both legacy and memo paths
+- **Nonce-on-success**: Memo instruction nonce only increments on successful execution (XRPL txns are irreversible, proofs must be retryable)
+- **Pausing**: `PauseFacet` with separate pauser/unpauser roles. `notPaused` modifier on InstructionsFacet state-modifying functions

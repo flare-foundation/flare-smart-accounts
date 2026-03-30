@@ -20,7 +20,7 @@ import {Vaults} from "../library/Vaults.sol";
 import {AgentVaults} from "../library/AgentVaults.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
 import {Instructions} from "../library/Instructions.sol";
-import {UserOp} from "../library/UserOp.sol";
+import {MemoInstructions} from "../library/MemoInstructions.sol";
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {Pause} from "../library/Pause.sol";
 import {PaymentReferenceParser} from "../library/PaymentReferenceParser.sol";
@@ -206,10 +206,10 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         address personalAccount = address(PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress));
 
         // check ignoreMemo first — before any memo validation
-        // allows recovery from malformed memos (length < 6, bad instruction ID, malformed userOp, ...)
+        // allows recovery from malformed memos (length < 6, bad instruction ID, malformed UserOp, ...)
         bool memoIgnored;
         if (_memoData.length > 0) {
-            UserOp.State storage userOpState = UserOp.getState();
+            MemoInstructions.State storage userOpState = MemoInstructions.getState();
             if (userOpState.ignoreMemo[personalAccount][_transactionId]) {
                 userOpState.ignoreMemo[personalAccount][_transactionId] = false;
                 memoIgnored = true;
@@ -220,7 +220,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         bool bypassesExecutorCheck = !memoIgnored && _memoData.length > 0 &&
             (uint8(_memoData[0]) == 0xD0 || uint8(_memoData[0]) == 0xD1);
         if (!bypassesExecutorCheck) {
-            address paExecutor = UserOp.getExecutor(personalAccount);
+            address paExecutor = MemoInstructions.getExecutor(personalAccount);
             if (paExecutor != address(0)) {
                 require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
             }
@@ -236,7 +236,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             executorFee = assetManager.getDirectMintingExecutorFeeUBA();
         }
         // check fee override (applies to all instruction IDs)
-        uint32 feeOverride = UserOp.getReplacementFee(personalAccount, _transactionId);
+        uint32 feeOverride = MemoInstructions.getReplacementFee(personalAccount, _transactionId);
         if (feeOverride > 0) {
             executorFee = feeOverride - 1;
         }
@@ -246,21 +246,21 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
             _sourceAddress, _amount, _executor, executorFee
         );
 
-        // if memo present and not ignored, execute AA instruction
+        // if memo present and not ignored, execute memo instruction
         if (!memoIgnored && _memoData.length > 0) {
             uint8 instructionId = uint8(_memoData[0]);
             if (instructionId == 0xFF) {
-                UserOp.execute(_memoData, personalAccount);
+                MemoInstructions.execute(_memoData, personalAccount);
             } else if (instructionId == 0xE0) {
-                UserOp.setIgnoreMemo(_memoData, personalAccount);
+                MemoInstructions.setIgnoreMemo(_memoData, personalAccount);
             } else if (instructionId == 0xE1) {
-                UserOp.setNonce(_memoData, personalAccount);
+                MemoInstructions.setNonce(_memoData, personalAccount);
             } else if (instructionId == 0xE2) {
-                UserOp.setReplacementFee(_memoData, personalAccount);
+                MemoInstructions.setReplacementFee(_memoData, personalAccount);
             } else if (instructionId == 0xD0) {
-                UserOp.setExecutor(_memoData, personalAccount);
+                MemoInstructions.setExecutor(_memoData, personalAccount);
             } else if (instructionId == 0xD1) {
-                UserOp.removeExecutor(_memoData, personalAccount);
+                MemoInstructions.removeExecutor(_memoData, personalAccount);
             } else {
                 revert InvalidInstructionId(instructionId);
             }
@@ -296,7 +296,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         external view
         returns (address)
     {
-        return UserOp.getExecutor(_personalAccount);
+        return MemoInstructions.getExecutor(_personalAccount);
     }
 
     /// @inheritdoc IInstructionsFacet
@@ -306,7 +306,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         external view
         returns (uint256)
     {
-        return UserOp.getNonce(_personalAccount);
+        return MemoInstructions.getNonce(_personalAccount);
     }
 
     function _mintFAssets(

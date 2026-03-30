@@ -24,6 +24,8 @@ import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentPr
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
+import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
+import {PersonalAccountReaderFacet} from "../../contracts/smartAccounts/facets/PersonalAccountReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 // solhint-disable no-console
@@ -76,6 +78,8 @@ contract DeploySmartAccounts is Script {
     PaymentProofsFacet private paymentProofsFacet;
     PersonalAccountsFacet private personalAccountsFacet;
     TimelockFacet private timelockFacet;
+    PauseFacet private pauseFacet;
+    PersonalAccountReaderFacet private personalAccountReaderFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
@@ -351,19 +355,23 @@ contract DeploySmartAccounts is Script {
         paymentProofsFacet = new PaymentProofsFacet();
         personalAccountsFacet = new PersonalAccountsFacet();
         timelockFacet = new TimelockFacet();
+        pauseFacet = new PauseFacet();
+        personalAccountReaderFacet = new PersonalAccountReaderFacet();
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
 
-        smartAccountsFacets = new IDiamond.FacetCut[](9);
+        smartAccountsFacets = new IDiamond.FacetCut[](11);
         smartAccountsFacets[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
         smartAccountsFacets[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
         smartAccountsFacets[2] = _addFacet(address(instructionFeesFacet), "InstructionFeesFacet");
         smartAccountsFacets[3] = _addFacet(address(instructionsFacet), "InstructionsFacet");
-        smartAccountsFacets[4] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
-        smartAccountsFacets[5] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
-        smartAccountsFacets[6] = _addFacet(address(timelockFacet), "TimelockFacet");
-        smartAccountsFacets[7] = _addFacet(address(vaultsFacet), "VaultsFacet");
-        smartAccountsFacets[8] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+        smartAccountsFacets[4] = _addFacet(address(pauseFacet), "PauseFacet");
+        smartAccountsFacets[5] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
+        smartAccountsFacets[6] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
+        smartAccountsFacets[7] = _addFacet(address(personalAccountReaderFacet), "PersonalAccountReaderFacet");
+        smartAccountsFacets[8] = _addFacet(address(timelockFacet), "TimelockFacet");
+        smartAccountsFacets[9] = _addFacet(address(vaultsFacet), "VaultsFacet");
+        smartAccountsFacets[10] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {

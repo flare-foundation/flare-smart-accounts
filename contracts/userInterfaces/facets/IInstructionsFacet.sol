@@ -174,9 +174,9 @@ interface IInstructionsFacet {
     );
 
     /**
-     * @notice Emitted when an AA user operation is executed.
+     * @notice Emitted when a memo user operation is executed.
      * @param personalAccount The personal account address.
-     * @param nonce The nonce of the user operation.
+     * @param nonce The nonce of the memo instruction.
      */
     event UserOperationExecuted(
         address indexed personalAccount,
@@ -343,7 +343,7 @@ interface IInstructionsFacet {
     );
 
     /**
-     * @notice Reverts if the AA user operation call fails.
+     * @notice Reverts if the memo instruction call fails.
      * @param returnData The return data from the failed call.
      */
     error CallFailed(
@@ -481,7 +481,7 @@ interface IInstructionsFacet {
         returns (bytes32 _transactionId);
 
     /**
-     * @notice Returns the current AA nonce for a personal account.
+     * @notice Returns the current memo instruction nonce for a personal account.
      * @param _personalAccount The personal account address.
      * @return The current nonce.
      */

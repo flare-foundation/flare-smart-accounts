@@ -2656,7 +2656,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         fxrp.mint(address(masterAccountController), amount);
 
-        // Build AA user op
+        // Build memo instruction user op
         IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
         calls[0] = IPersonalAccount.Call({
             target: address(simpleExample),
