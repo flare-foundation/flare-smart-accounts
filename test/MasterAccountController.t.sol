@@ -152,6 +152,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         _mockGetContractAddressByHash("WNat", address(wnat));
         _mockGetAgentInfo(agent, agentInfo);
         _mockGetFAsset();
+        _mockGetDirectMintingExecutorFeeUBA(0);
 
         // add xrpl provider wallets
         string[] memory xrplProviderWallets = new string[](1);
@@ -2504,8 +2505,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             bytes32("dmTx1"),
             xrplAddress1,
             amount,
-            // TODO: update when getDirectMintingExecutorFeeUBA is enabled
-            0,
+            0, // default executor fee mocked to 0
             executor
         );
         vm.prank(assetManagerFxrpMock);
@@ -2533,27 +2533,27 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
     }
 
-    // TODO: uncomment when getDirectMintingExecutorFeeUBA is enabled
-    // function testDirectMintRevertInsufficientAmountForFee() public {
-    //     uint256 dmFee = 200;
-    //     _mockGetDirectMintingExecutorFeeUBA(dmFee);
-    //     vm.expectRevert(
-    //         abi.encodeWithSelector(
-    //             IInstructionsFacet.InsufficientAmountForFee.selector,
-    //             100,
-    //             dmFee
-    //         )
-    //     );
-    //     vm.prank(assetManagerFxrpMock);
-    //     masterAccountController.mintedFAssets(
-    //         bytes32("dmTx6"),
-    //         xrplAddress1,
-    //         100,
-    //         0,
-    //         "",
-    //         payable(executor)
-    //     );
-    // }
+    function testDirectMintRevertInsufficientAmountForFee() public {
+        uint256 dmFee = 200;
+        _mockGetDirectMintingExecutorFeeUBA(dmFee);
+        fxrp.mint(address(masterAccountController), 100);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IInstructionsFacet.InsufficientAmountForFee.selector,
+                100,
+                dmFee
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTx6"),
+            xrplAddress1,
+            100,
+            0,
+            "",
+            payable(executor)
+        );
+    }
 
     function testDirectMintRevertTransactionAlreadyExecuted() public {
         uint256 amount = 5000;
@@ -3376,6 +3376,141 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(personalAccountAddr), amount * 2);
     }
 
+    function testDirectMintIgnoreMemoMalformedMemo() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        bytes32 stuckTxId = bytes32("malformedTx1");
+        bytes32 unstickTxId = bytes32("unstickMalformed1");
+
+        // Step 1: send 0xE0 to set ignoreMemo for stuckTxId
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory unstickMemo = abi.encodePacked(
+            uint8(0xE0),
+            uint8(1),
+            uint32(0),
+            stuckTxId
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            unstickTxId,
+            xrplAddress1,
+            amount,
+            0,
+            unstickMemo,
+            payable(executor)
+        );
+
+        // Step 2: submit the stuck tx with malformed memo (only 3 bytes, < 6)
+        // without ignoreMemo this would revert with InvalidMemoData
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory malformedMemo = abi.encodePacked(uint8(0xFF), uint8(1), uint8(0));
+
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            stuckTxId,
+            xrplAddress1,
+            amount,
+            0,
+            malformedMemo,
+            payable(executor)
+        );
+
+        // FAssets minted to PA, memo ignored
+        assertEq(fxrp.balanceOf(personalAccountAddr), amount * 2);
+        // nonce unchanged (no UserOp executed)
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+    }
+
+    function testDirectMintReplaceFeeNonFFInstruction() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        uint32 unstickFee = 50;
+        uint32 newFee = 200;
+        bytes32 targetTxId = bytes32("nonFFTarget1");
+
+        // Step 1: set replacement fee for targetTxId
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory replaceMemo = abi.encodePacked(
+            uint8(0xE2),
+            uint8(1),
+            unstickFee,
+            targetTxId,
+            newFee
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("replaceFeeNonFF"),
+            xrplAddress1,
+            amount,
+            0,
+            replaceMemo,
+            payable(executor)
+        );
+
+        // Step 2: submit 0xE1 (increaseNonce) with low fee in memo — override should apply
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory nonceMemo = abi.encodePacked(
+            uint8(0xE1),
+            uint8(1),
+            uint32(10), // low fee in memo, overridden by replacement fee
+            abi.encode(uint256(5))
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            targetTxId,
+            xrplAddress1,
+            amount,
+            0,
+            nonceMemo,
+            payable(executor)
+        );
+
+        // executor gets unstickFee (50) from first tx + replacement fee (200) from second tx
+        assertEq(fxrp.balanceOf(executor), unstickFee + newFee);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 5);
+    }
+
+    // Test that 0xFF instruction with empty callData doesn't revert
+    // and still applies fee (different than default) and nonce increase
+    function testDirectMintAAEmptyCallData() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        uint32 fee = 150;
+
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF),
+            uint8(1),
+            fee,
+            abi.encode(PackedUserOperation({
+                sender: personalAccountAddr,
+                nonce: 0,
+                initCode: "",
+                callData: "", // empty — no-op
+                accountGasLimits: 0,
+                preVerificationGas: 0,
+                gasFees: 0,
+                paymasterAndData: "",
+                signature: ""
+            }))
+        );
+
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("emptyCallDataTx"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(executor)
+        );
+
+        // custom fee applied, nonce incremented
+        assertEq(fxrp.balanceOf(executor), fee);
+        assertEq(fxrp.balanceOf(personalAccountAddr), amount - fee);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+    }
+
     //// pause tests ////
 
     function testPause() public {
@@ -3748,14 +3883,17 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
     }
 
-    // TODO: uncomment when getDirectMintingExecutorFeeUBA is enabled
-    // function _mockGetDirectMintingExecutorFeeUBA(uint256 _fee) private {
-    //     vm.mockCall(
-    //         assetManagerFxrpMock,
-    //         abi.encodeWithSignature("getDirectMintingExecutorFeeUBA()"),
-    //         abi.encode(_fee)
-    //     );
-    // }
+    function _mockGetDirectMintingExecutorFeeUBA(
+        uint256 _fee
+    )
+        private
+    {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSignature("getDirectMintingExecutorFeeUBA()"),
+            abi.encode(_fee)
+        );
+    }
 
     function _mockGetContractAddressByHash(
         string memory name,

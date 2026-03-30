@@ -24,7 +24,7 @@ via_ir = true
 [dependencies]
 "@openzeppelin-contracts" = "5.5.0"
 forge-std = "1.10.0"
-flare-periphery = "0.1.44-alpha.2"
+flare-periphery = "0.1.44-alpha.3"
 
 
 [soldeer]

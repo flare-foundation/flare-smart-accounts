@@ -205,77 +205,52 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         // get or create PA
         address personalAccount = address(PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress));
 
-        // determine executor fee, validate memo, check PA executor
+        // check ignoreMemo first — before any memo validation
+        // allows recovery from malformed memos (length < 6, bad instruction ID, malformed userOp, ...)
+        bool memoIgnored;
+        if (_memoData.length > 0) {
+            UserOp.State storage userOpState = UserOp.getState();
+            if (userOpState.ignoreMemo[personalAccount][_transactionId]) {
+                userOpState.ignoreMemo[personalAccount][_transactionId] = false;
+                memoIgnored = true;
+            }
+        }
+
+        // check PA executor (0xD0/0xD1 bypass to prevent lock-out)
+        bool bypassesExecutorCheck = !memoIgnored && _memoData.length > 0 &&
+            (uint8(_memoData[0]) == 0xD0 || uint8(_memoData[0]) == 0xD1);
+        if (!bypassesExecutorCheck) {
+            address paExecutor = UserOp.getExecutor(personalAccount);
+            if (paExecutor != address(0)) {
+                require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
+            }
+        }
+
+        // determine executor fee
         uint256 executorFee;
-        if (_memoData.length > 0) {
+        if (!memoIgnored && _memoData.length > 0) {
             require(_memoData.length >= 6, InvalidMemoData());
-            uint8 instructionId = uint8(_memoData[0]);
-            // check PA executor (0xD0/0xD1 bypass to prevent lock-out)
-            if (instructionId != 0xD0 && instructionId != 0xD1) {
-                address paExecutor = UserOp.getExecutor(personalAccount);
-                if (paExecutor != address(0)) {
-                    require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
-                }
-            }
             executorFee = uint32(bytes4(_memoData[2:6]));
-            if (instructionId == 0xFF) {
-                uint32 storedFee = UserOp.getReplacementFee(personalAccount, _transactionId);
-                if (storedFee > 0) {
-                    executorFee = storedFee - 1;
-                }
-            }
         } else {
-            // check PA executor for plain direct mint (no memo)
-            {
-                address paExecutor = UserOp.getExecutor(personalAccount);
-                if (paExecutor != address(0)) {
-                    require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
-                }
-            }
-            // no memo — only direct mint, use default executor fee
-            // TODO: uncomment when getDirectMintingExecutorFeeUBA is added to IAssetManager
-            // executorFee = assetManager.getDirectMintingExecutorFeeUBA();
+            // no memo or memo ignored — use default fee
+            executorFee = assetManager.getDirectMintingExecutorFeeUBA();
+        }
+        // check fee override (applies to all instruction IDs)
+        uint32 feeOverride = UserOp.getReplacementFee(personalAccount, _transactionId);
+        if (feeOverride > 0) {
+            executorFee = feeOverride - 1;
         }
 
-        {
-            require(_amount >= executorFee, InsufficientAmountForFee(_amount, executorFee));
+        _mintFAssets(
+            personalAccount, _transactionId,
+            _sourceAddress, _amount, _executor, executorFee
+        );
 
-            // replay protection
-            Instructions.State storage state = Instructions.getState();
-            require(!state.usedTransactionIds[_transactionId], TransactionAlreadyExecuted());
-            state.usedTransactionIds[_transactionId] = true;
-
-            // transfer fAssets
-            IERC20 fAsset = assetManager.fAsset();
-            if (executorFee > 0) {
-                fAsset.safeTransfer(_executor, executorFee);
-            }
-            uint256 remaining = _amount - executorFee;
-            if (remaining > 0) {
-                fAsset.safeTransfer(personalAccount, remaining);
-            }
-
-            emit DirectMintingExecuted(
-                personalAccount,
-                _transactionId,
-                _sourceAddress,
-                _amount,
-                executorFee,
-                _executor
-            );
-        }
-
-        // if memo present, execute AA instruction
-        if (_memoData.length > 0) {
+        // if memo present and not ignored, execute AA instruction
+        if (!memoIgnored && _memoData.length > 0) {
             uint8 instructionId = uint8(_memoData[0]);
             if (instructionId == 0xFF) {
-                UserOp.State storage userOpState = UserOp.getState();
-                if (userOpState.ignoreMemo[personalAccount][_transactionId]) {
-                    // only mint fAssets, do not execute AA instruction from memo
-                    userOpState.ignoreMemo[personalAccount][_transactionId] = false;
-                } else {
-                    UserOp.execute(_memoData, personalAccount);
-                }
+                UserOp.execute(_memoData, personalAccount);
             } else if (instructionId == 0xE0) {
                 UserOp.setIgnoreMemo(_memoData, personalAccount);
             } else if (instructionId == 0xE1) {
@@ -333,4 +308,42 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
     {
         return UserOp.getNonce(_personalAccount);
     }
+
+    function _mintFAssets(
+        address _personalAccount,
+        bytes32 _transactionId,
+        string calldata _sourceAddress,
+        uint256 _amount,
+        address payable _executor,
+        uint256 _executorFee
+    )
+        private
+    {
+        require(_amount >= _executorFee, InsufficientAmountForFee(_amount, _executorFee));
+
+        // replay protection
+        Instructions.State storage state = Instructions.getState();
+        require(!state.usedTransactionIds[_transactionId], TransactionAlreadyExecuted());
+        state.usedTransactionIds[_transactionId] = true;
+
+        // transfer fAssets
+        IERC20 fAsset = ContractRegistry.getAssetManagerFXRP().fAsset();
+        if (_executorFee > 0) {
+            fAsset.safeTransfer(_executor, _executorFee);
+        }
+        uint256 remaining = _amount - _executorFee;
+        if (remaining > 0) {
+            fAsset.safeTransfer(_personalAccount, remaining);
+        }
+
+        emit DirectMintingExecuted(
+            _personalAccount,
+            _transactionId,
+            _sourceAddress,
+            _amount,
+            _executorFee,
+            _executor
+        );
+    }
+
 }
