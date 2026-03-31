@@ -51,13 +51,27 @@ library PaymentProofs {
     )
         internal view
     {
-        _verifyProofData(
-            _proof.data.sourceId,
-            _proof.data.responseBody.status,
-            _proof.data.responseBody.blockTimestamp,
-            _proof.data.responseBody.sourceAddressHash,
-            _proof.data.responseBody.receivingAddressHash,
-            _xrplAddress
+        State storage state = getState();
+        require(
+            _proof.data.sourceId == state.sourceId,
+            IPaymentProofsFacet.InvalidSourceId()
+        );
+        require(
+            _proof.data.responseBody.status == 0,
+            IPaymentProofsFacet.InvalidTransactionStatus()
+        );
+        require(
+            block.timestamp <= state.paymentProofValidityDurationSeconds + _proof.data.responseBody.blockTimestamp,
+            IPaymentProofsFacet.PaymentProofExpired()
+        );
+        require(
+            _proof.data.responseBody.sourceAddressHash == keccak256(bytes(_xrplAddress)),
+            IPaymentProofsFacet.MismatchingSourceAndXrplAddr()
+        );
+        XrplProviderWallets.State storage xrplProviderWalletsState = XrplProviderWallets.getState();
+        require(
+            xrplProviderWalletsState.xrplProviderWalletHashes[_proof.data.responseBody.receivingAddressHash] != 0,
+            IPaymentProofsFacet.InvalidReceivingAddressHash()
         );
         require(
             ContractRegistry.getFdcVerification().verifyPayment(_proof),
@@ -74,39 +88,5 @@ library PaymentProofs {
         assembly {
             _state.slot := position
         }
-    }
-
-    function _verifyProofData(
-        bytes32 _sourceId,
-        uint8 _status,
-        uint64 _blockTimestamp,
-        bytes32 _sourceAddressHash,
-        bytes32 _receivingAddressHash,
-        string memory _xrplAddress
-    )
-        private view
-    {
-        State storage state = getState();
-        require(
-            _sourceId == state.sourceId,
-            IPaymentProofsFacet.InvalidSourceId()
-        );
-        require(
-            _status == 0,
-            IPaymentProofsFacet.InvalidTransactionStatus()
-        );
-        require(
-            block.timestamp <= state.paymentProofValidityDurationSeconds + _blockTimestamp,
-            IPaymentProofsFacet.PaymentProofExpired()
-        );
-        require(
-            _sourceAddressHash == keccak256(bytes(_xrplAddress)),
-            IPaymentProofsFacet.MismatchingSourceAndXrplAddr()
-        );
-        XrplProviderWallets.State storage xrplProviderWalletsState = XrplProviderWallets.getState();
-        require(
-            xrplProviderWalletsState.xrplProviderWalletHashes[_receivingAddressHash] != 0,
-            IPaymentProofsFacet.InvalidReceivingAddressHash()
-        );
     }
 }
