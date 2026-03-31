@@ -2588,7 +2588,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(address(masterAccountController), amount);
 
         // memo with unsupported instruction ID (6 bytes to pass length check)
-        bytes memory memoData = abi.encodePacked(uint8(0x11), uint8(0), uint32(0));
+        bytes memory memoData = abi.encodePacked(uint8(0x11), uint8(0), uint64(0));
 
         vm.expectRevert(
             abi.encodeWithSelector(IInstructionsFacet.InvalidInstructionId.selector, uint8(0x11))
@@ -2633,7 +2633,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory memoData = abi.encodePacked(
             uint8(0xFF),
             uint8(1),
-            uint32(0),
+            uint64(0),
             bytes("not a valid packed user operation")
         );
 
@@ -2652,7 +2652,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testDirectMintAAExecuteUserOp() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         uint256 amount = 5000;
-        uint32 fee = 100;
+        uint64 fee = 100;
 
         fxrp.mint(address(masterAccountController), amount);
 
@@ -2713,7 +2713,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(address(masterAccountController), amount);
 
         // memo with unsupported instruction ID (6 bytes to pass length check)
-        bytes memory badMemo = abi.encodePacked(uint8(0x11), uint8(0), uint32(0));
+        bytes memory badMemo = abi.encodePacked(uint8(0x11), uint8(0), uint64(0));
 
         vm.expectRevert(
             abi.encodeWithSelector(IInstructionsFacet.InvalidInstructionId.selector, uint8(0x11))
@@ -2732,7 +2732,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testDirectMintIgnoreMemo() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         uint256 amount = 5000;
-        uint32 fee = 50;
+        uint64 fee = 50;
         bytes32 stuckTxId = bytes32("stuckTx1");
         bytes32 unstickTxId = bytes32("unstickTx1");
 
@@ -2763,7 +2763,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory badMemo = abi.encodePacked(
             uint8(0xFF),
             uint8(1),
-            uint32(0),
+            uint64(0),
             abi.encode(PackedUserOperation({
                 sender: personalAccountAddr,
                 nonce: 0,
@@ -2797,7 +2797,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testDirectMintIncreaseNonce() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         uint256 amount = 5000;
-        uint32 fee = 50;
+        uint64 fee = 50;
         uint256 newNonce = 5;
 
         fxrp.mint(address(masterAccountController), amount);
@@ -2844,7 +2844,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory execMemo = abi.encodePacked(
             uint8(0xFF),
             uint8(1),
-            uint32(0),
+            uint64(0),
             abi.encode(PackedUserOperation({
                 sender: personalAccountAddr,
                 nonce: 0,
@@ -2873,7 +2873,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory memoData = abi.encodePacked(
             uint8(0xE1),
             uint8(1),
-            uint32(0),
+            uint64(0),
             abi.encode(uint256(0))
         );
 
@@ -2900,7 +2900,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory memoData = abi.encodePacked(
             uint8(0xE1),
             uint8(1),
-            uint32(0),
+            uint64(0),
             abi.encode(newNonce)
         );
 
@@ -2927,7 +2927,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory nonceMemo = abi.encodePacked(
             uint8(0xE1),
             uint8(1),
-            uint32(0),
+            uint64(0),
             abi.encode(uint256(5))
         );
         vm.prank(assetManagerFxrpMock);
@@ -2956,7 +2956,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory execMemo = abi.encodePacked(
             uint8(0xFF),
             uint8(1),
-            uint32(0),
+            uint64(0),
             abi.encode(PackedUserOperation({
                 sender: personalAccountAddr,
                 nonce: 5,
@@ -2993,7 +2993,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory memoData = abi.encodePacked(
             uint8(0xD0),
             uint8(1),
-            uint32(0),
+            uint64(0),
             newExecutor
         );
 
@@ -3025,7 +3025,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             xrplAddress1,
             amount,
             0,
-            abi.encodePacked(uint8(0xD0), uint8(1), uint32(0), newExecutor),
+            abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), newExecutor),
             payable(executor)
         );
         assertEq(masterAccountController.getExecutor(personalAccountAddr), newExecutor);
@@ -3040,7 +3040,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             xrplAddress1,
             amount,
             0,
-            abi.encodePacked(uint8(0xD1), uint8(1), uint32(0)),
+            abi.encodePacked(uint8(0xD1), uint8(1), uint64(0)),
             payable(executor)
         );
 
@@ -3061,7 +3061,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             xrplAddress1,
             amount,
             0,
-            abi.encodePacked(uint8(0xD0), uint8(1), uint32(0), paExecutor),
+            abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), paExecutor),
             payable(executor)
         );
 
@@ -3076,7 +3076,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory memoData = abi.encodePacked(
             uint8(0xFF),
             uint8(1),
-            uint32(0),
+            uint64(0),
             abi.encode(PackedUserOperation({
                 sender: personalAccountAddr,
                 nonce: 0,
@@ -3118,7 +3118,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             xrplAddress1,
             amount,
             0,
-            abi.encodePacked(uint8(0xD0), uint8(1), uint32(0), paExecutor),
+            abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), paExecutor),
             payable(executor)
         );
 
@@ -3152,7 +3152,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             xrplAddress1,
             amount,
             0,
-            abi.encodePacked(uint8(0xD0), uint8(1), uint32(0), paExecutor),
+            abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), paExecutor),
             payable(executor)
         );
 
@@ -3164,7 +3164,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             xrplAddress1,
             amount,
             0,
-            abi.encodePacked(uint8(0xD1), uint8(1), uint32(0)),
+            abi.encodePacked(uint8(0xD1), uint8(1), uint64(0)),
             payable(otherExecutor)
         );
 
@@ -3179,7 +3179,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory memoData = abi.encodePacked(
             uint8(0xD0),
             uint8(1),
-            uint32(0),
+            uint64(0),
             address(0)
         );
 
@@ -3198,8 +3198,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testDirectMintReplaceFee() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         uint256 amount = 5000;
-        uint32 originalFee = 10;
-        uint32 newFee = 200;
+        uint64 originalFee = 10;
+        uint64 newFee = 200;
         bytes32 stuckTxId = bytes32("stuckFeeTx1");
 
         // Step 1: send 0xE2 to set replacement fee for stuckTxId
@@ -3207,7 +3207,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory replaceMemo = abi.encodePacked(
             uint8(0xE2),
             uint8(1),
-            uint32(50), // fee for this unstick tx
+            uint64(50), // fee for this unstick tx
             stuckTxId,
             newFee
         );
@@ -3268,7 +3268,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testDirectMintReplaceFeeNoReplacement() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         uint256 amount = 5000;
-        uint32 fee = 100;
+        uint64 fee = 100;
 
         // submit 0xFF without any replacement fee set — uses memo fee
         fxrp.mint(address(masterAccountController), amount);
@@ -3319,9 +3319,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory memoData = abi.encodePacked(
             uint8(0xE2),
             uint8(1),
-            uint32(0),
+            uint64(0),
             stuckTxId,
-            uint32(0)
+            uint64(0)
         );
 
         vm.expectEmit();
@@ -3347,7 +3347,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory execMemo = abi.encodePacked(
             uint8(0xFF),
             uint8(1),
-            uint32(100), // original fee in memo
+            uint64(100), // original fee in memo
             abi.encode(PackedUserOperation({
                 sender: personalAccountAddr,
                 nonce: 0,
@@ -3387,7 +3387,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory unstickMemo = abi.encodePacked(
             uint8(0xE0),
             uint8(1),
-            uint32(0),
+            uint64(0),
             stuckTxId
         );
         vm.prank(assetManagerFxrpMock);
@@ -3424,8 +3424,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testDirectMintReplaceFeeNonFFInstruction() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         uint256 amount = 5000;
-        uint32 unstickFee = 50;
-        uint32 newFee = 200;
+        uint64 unstickFee = 50;
+        uint64 newFee = 200;
         bytes32 targetTxId = bytes32("nonFFTarget1");
 
         // Step 1: set replacement fee for targetTxId
@@ -3452,7 +3452,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory nonceMemo = abi.encodePacked(
             uint8(0xE1),
             uint8(1),
-            uint32(10), // low fee in memo, overridden by replacement fee
+            uint64(10), // low fee in memo, overridden by replacement fee
             abi.encode(uint256(5))
         );
         vm.prank(assetManagerFxrpMock);
@@ -3475,7 +3475,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testDirectMintAAEmptyCallData() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         uint256 amount = 5000;
-        uint32 fee = 150;
+        uint64 fee = 150;
 
         fxrp.mint(address(masterAccountController), amount);
         bytes memory memoData = abi.encodePacked(

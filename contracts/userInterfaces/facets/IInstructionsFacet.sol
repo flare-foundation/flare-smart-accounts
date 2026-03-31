@@ -230,7 +230,7 @@ interface IInstructionsFacet {
     event ReplacementFeeSet(
         address indexed personalAccount,
         bytes32 indexed targetTxId,
-        uint32 newFee
+        uint64 newFee
     );
 
     /**

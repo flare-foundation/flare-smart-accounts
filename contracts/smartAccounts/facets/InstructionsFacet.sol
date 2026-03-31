@@ -229,14 +229,14 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         // determine executor fee
         uint256 executorFee;
         if (!memoIgnored && _memoData.length > 0) {
-            require(_memoData.length >= 6, InvalidMemoData());
-            executorFee = uint32(bytes4(_memoData[2:6]));
+            require(_memoData.length >= 10, InvalidMemoData());
+            executorFee = uint64(bytes8(_memoData[2:10]));
         } else {
             // no memo or memo ignored — use default fee
             executorFee = assetManager.getDirectMintingExecutorFeeUBA();
         }
         // check fee override (applies to all instruction IDs)
-        uint32 feeOverride = MemoInstructions.getReplacementFee(personalAccount, _transactionId);
+        uint64 feeOverride = MemoInstructions.getReplacementFee(personalAccount, _transactionId);
         if (feeOverride > 0) {
             executorFee = feeOverride - 1;
         }

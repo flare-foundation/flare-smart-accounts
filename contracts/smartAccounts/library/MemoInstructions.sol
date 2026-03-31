@@ -11,7 +11,7 @@ library MemoInstructions {
         mapping(address account => uint256 nonce) nonces;
         mapping(address account => mapping(bytes32 txId => bool)) ignoreMemo;
         mapping(address account => address) executor;
-        mapping(address account => mapping(bytes32 txId => uint32)) replacementFee;
+        mapping(address account => mapping(bytes32 txId => uint64)) replacementFee;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -24,8 +24,8 @@ library MemoInstructions {
     )
         internal
     {
-        // decode PackedUserOperation from memoData (skip 6-byte header: instructionId + walletId + uint32 fee)
-        PackedUserOperation memory userOp = abi.decode(_memoData[6:], (PackedUserOperation));
+        // decode PackedUserOperation from memoData (skip 10-byte header: instructionId + walletId + uint64 fee)
+        PackedUserOperation memory userOp = abi.decode(_memoData[10:], (PackedUserOperation));
 
         // validate sender
         require(userOp.sender == _personalAccount, IInstructionsFacet.InvalidSender(userOp.sender, _personalAccount));
@@ -55,9 +55,9 @@ library MemoInstructions {
     )
         internal
     {
-        // memo format: [0xE0][walletId:uint8][fee:uint32][targetTxId:bytes32] = 38 bytes
-        require(_memoData.length == 38, IInstructionsFacet.InvalidMemoData());
-        bytes32 targetTxId = bytes32(_memoData[6:38]);
+        // memo format: [0xE0][walletId:uint8][fee:uint64][targetTxId:bytes32] = 42 bytes
+        require(_memoData.length == 42, IInstructionsFacet.InvalidMemoData());
+        bytes32 targetTxId = bytes32(_memoData[10:42]);
         State storage state = getState();
         state.ignoreMemo[_personalAccount][targetTxId] = true;
         emit IInstructionsFacet.IgnoreMemoSet(_personalAccount, targetTxId);
@@ -69,9 +69,9 @@ library MemoInstructions {
     )
         internal
     {
-        // memo format: [0xE1][walletId:uint8][fee:uint32][newNonce:uint256] = 38 bytes
-        require(_memoData.length == 38, IInstructionsFacet.InvalidMemoData());
-        uint256 newNonce = uint256(bytes32(_memoData[6:38]));
+        // memo format: [0xE1][walletId:uint8][fee:uint64][newNonce:uint256] = 42 bytes
+        require(_memoData.length == 42, IInstructionsFacet.InvalidMemoData());
+        uint256 newNonce = uint256(bytes32(_memoData[10:42]));
         State storage state = getState();
         uint256 currentNonce = state.nonces[_personalAccount];
         require(
@@ -88,9 +88,9 @@ library MemoInstructions {
     )
         internal
     {
-        // memo format: [0xD0][walletId:uint8][fee:uint32][executor:address] = 26 bytes
-        require(_memoData.length == 26, IInstructionsFacet.InvalidMemoData());
-        address newExecutor = address(bytes20(_memoData[6:26]));
+        // memo format: [0xD0][walletId:uint8][fee:uint64][executor:address] = 30 bytes
+        require(_memoData.length == 30, IInstructionsFacet.InvalidMemoData());
+        address newExecutor = address(bytes20(_memoData[10:30]));
         require(newExecutor != address(0), IInstructionsFacet.AddressZero());
         State storage state = getState();
         state.executor[_personalAccount] = newExecutor;
@@ -103,8 +103,8 @@ library MemoInstructions {
     )
         internal
     {
-        // memo format: [0xD1][walletId:uint8][fee:uint32] = 6 bytes
-        require(_memoData.length == 6, IInstructionsFacet.InvalidMemoData());
+        // memo format: [0xD1][walletId:uint8][fee:uint64] = 10 bytes
+        require(_memoData.length == 10, IInstructionsFacet.InvalidMemoData());
         State storage state = getState();
         state.executor[_personalAccount] = address(0);
         emit IInstructionsFacet.ExecutorRemoved(_personalAccount);
@@ -116,10 +116,10 @@ library MemoInstructions {
     )
         internal
     {
-        // memo format: [0xE2][walletId:uint8][fee:uint32][targetTxId:bytes32][newFee:uint32] = 42 bytes
-        require(_memoData.length == 42, IInstructionsFacet.InvalidMemoData());
-        bytes32 targetTxId = bytes32(_memoData[6:38]);
-        uint32 newFee = uint32(bytes4(_memoData[38:42]));
+        // memo format: [0xE2][walletId:uint8][fee:uint64][targetTxId:bytes32][newFee:uint64] = 50 bytes
+        require(_memoData.length == 50, IInstructionsFacet.InvalidMemoData());
+        bytes32 targetTxId = bytes32(_memoData[10:42]);
+        uint64 newFee = uint64(bytes8(_memoData[42:50]));
         State storage state = getState();
         state.replacementFee[_personalAccount][targetTxId] = newFee + 1; // +1 so 0 means "not set"
         emit IInstructionsFacet.ReplacementFeeSet(_personalAccount, targetTxId, newFee);
@@ -140,7 +140,7 @@ library MemoInstructions {
         bytes32 _txId
     )
         internal view
-        returns (uint32)
+        returns (uint64)
     {
         return getState().replacementFee[_personalAccount][_txId];
     }
