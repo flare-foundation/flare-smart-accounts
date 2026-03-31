@@ -17,8 +17,7 @@ contract DeployComposer is Script {
         address wNat;
         address composerFeeRecipient;
         uint256 defaultComposerFeePPM;
-        address executor;
-        uint256 executorFee;
+        address payable executor;
         uint256 timelockDurationSeconds;
     }
 
@@ -63,8 +62,7 @@ contract DeployComposer is Script {
             params.wNat = vm.parseJsonAddress(config, ".wNat");
             params.composerFeeRecipient = vm.parseJsonAddress(config, ".composerFeeRecipient");
             params.defaultComposerFeePPM = vm.parseJsonUint(config, ".defaultComposerFeePPM");
-            params.executor = vm.parseJsonAddress(config, ".composerExecutor");
-            params.executorFee = vm.parseJsonUint(config, ".composerExecutorFee");
+            params.executor = payable(vm.parseJsonAddress(config, ".composerExecutor"));
             params.timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
 
             // 2. Deploy Redeemer Account Implementation
@@ -82,22 +80,17 @@ contract DeployComposer is Script {
                 params.wNat,
                 params.composerFeeRecipient,
                 params.defaultComposerFeePPM,
+                params.executor,
                 address(redeemerAccountImpl)
             );
 
             composer = FAssetRedeemComposer(address(composerProxy));
 
-            // 4. Set Executor Data if provided
-            if (params.executor != address(0)) {
-                console2.log("Setting Executor Data...");
-                composer.setExecutorData(payable(params.executor), params.executorFee);
-            }
-
-            // 5. Set Timelock Duration
+            // 4. Set Timelock Duration
             console2.log("Setting timelock duration...");
             composer.setTimelockDuration(params.timelockDurationSeconds);
 
-            // 6. Transfer ownership to governance
+            // 5. Transfer ownership to governance
             if (params.governance != address(0) && params.governance != deployer) {
                 console2.log("Transferring ownership to governance...");
                 composer.transferOwnership(params.governance);

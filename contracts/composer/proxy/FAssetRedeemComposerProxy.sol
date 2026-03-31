@@ -9,7 +9,7 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
  */
 contract FAssetRedeemComposerProxy is ERC1967Proxy {
     bytes4 private constant INITIALIZE_SELECTOR = bytes4(
-        keccak256("initialize(address,address,address,address,address,address,address,uint256,address)")
+        keccak256("initialize(address,address,address,address,address,address,address,uint256,address,address)")
     );
 
     /**
@@ -24,6 +24,7 @@ contract FAssetRedeemComposerProxy is ERC1967Proxy {
      *              if stable coin balance is insufficient.
      * @param _composerFeeRecipient Recipient of composer fee collected in f-asset.
      * @param _defaultComposerFeePPM Default composer fee in PPM.
+     * @param _defaultExecutor Default executor address used for redemption execution.
      * @param _redeemerAccountImplementation Beacon implementation for redeemer accounts.
      */
     constructor(
@@ -36,6 +37,7 @@ contract FAssetRedeemComposerProxy is ERC1967Proxy {
         address _wNat,
         address _composerFeeRecipient,
         uint256 _defaultComposerFeePPM,
+        address payable _defaultExecutor,
         address _redeemerAccountImplementation
     )
         ERC1967Proxy(
@@ -50,6 +52,7 @@ contract FAssetRedeemComposerProxy is ERC1967Proxy {
                 _wNat,
                 _composerFeeRecipient,
                 _defaultComposerFeePPM,
+                _defaultExecutor,
                 _redeemerAccountImplementation
             )
         )

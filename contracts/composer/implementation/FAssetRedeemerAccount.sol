@@ -61,17 +61,22 @@ contract FAssetRedeemerAccount is IIFAssetRedeemerAccount {
         IAssetManager _assetManager,
         uint256 _amountLD,
         string calldata _redeemerUnderlyingAddress,
-        address payable _executor,
-        uint256 _executorFee
+        bool _redeemWithTag,
+        uint64 _destinationTag,
+        address payable _executor
     )
         external payable
         onlyComposer
         returns (uint256 _redeemedAmountUBA)
     {
-        require(msg.value >= _executorFee, ExecutorFeeNotCovered(msg.value, _executorFee));
-        uint256 lotSize = _assetManager.lotSize();
-        uint256 lots = _amountLD / lotSize;
-        _redeemedAmountUBA = _assetManager.redeem{value: msg.value}(lots, _redeemerUnderlyingAddress, _executor);
+        require(!_redeemWithTag || _assetManager.redeemWithTagSupported(), RedeemWithTagNotSupported(_destinationTag));
+        if (_redeemWithTag) {
+            _redeemedAmountUBA = _assetManager.redeemWithTag{value: msg.value}
+                (_amountLD, _redeemerUnderlyingAddress, _executor, _destinationTag);
+        } else {
+            _redeemedAmountUBA = _assetManager.redeemAmount{value: msg.value}
+                (_amountLD, _redeemerUnderlyingAddress, _executor);
+        }
     }
 
     /// @inheritdoc IIFAssetRedeemerAccount

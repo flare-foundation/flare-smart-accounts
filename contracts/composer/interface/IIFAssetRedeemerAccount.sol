@@ -16,16 +16,18 @@ interface IIFAssetRedeemerAccount is IFAssetRedeemerAccount {
      * @param _assetManager Asset manager contract.
      * @param _amountToRedeemUBA Amount to redeem in UBA.
      * @param _redeemerUnderlyingAddress Underlying-chain destination for redemption.
+     * @param _redeemWithTag Indicates whether to call `redeemWithTag` or `redeemAmount` on the asset manager.
+     * @param _destinationTag Destination tag for redemption, only used if `_redeemWithTag` is true.
      * @param _executor Executor used by the asset manager redemption flow.
-     * @param _executorFee Executor fee for the redemption.
      * @return _redeemedAmountUBA Redeemed amount reported by asset manager.
      */
     function redeemFAsset(
         IAssetManager _assetManager,
         uint256 _amountToRedeemUBA,
         string calldata _redeemerUnderlyingAddress,
-        address payable _executor,
-        uint256 _executorFee
+        bool _redeemWithTag,
+        uint64 _destinationTag,
+        address payable _executor
     )
         external payable
         returns (uint256 _redeemedAmountUBA);

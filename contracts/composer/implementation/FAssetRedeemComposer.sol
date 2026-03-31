@@ -53,10 +53,8 @@ contract FAssetRedeemComposer is
     uint256 public defaultComposerFeePPM;
     /// @notice Optional srcEid-specific composer fee in PPM, stored as fee + 1 to distinguish unset values.
     mapping(uint32 srcEid => uint256 feePPM) private composerFeesPPM;
-    /// @notice The redeem executor.
-    address payable private executor;
-    /// @notice The native fee expected by the executor for redeem execution.
-    uint256 private executorFee;
+    /// @notice The default executor address used for redemption execution if not specified in the compose message.
+    address payable public defaultExecutor;
 
     /**
      * @notice Disables initializers on implementation contract.
@@ -76,6 +74,7 @@ contract FAssetRedeemComposer is
      *              if stable coin balance is insufficient.
      * @param _composerFeeRecipient Recipient of composer fee collected in fAsset.
      * @param _defaultComposerFeePPM Default composer fee in PPM.
+     * @param _defaultExecutor Default executor address used for redemption execution.
      * @param _redeemerAccountImplementation Beacon implementation for redeemer accounts.
      */
     function initialize(
@@ -87,6 +86,7 @@ contract FAssetRedeemComposer is
         IERC20 _wNat,
         address _composerFeeRecipient,
         uint256 _defaultComposerFeePPM,
+        address payable _defaultExecutor,
         address _redeemerAccountImplementation
     )
         external
@@ -100,6 +100,7 @@ contract FAssetRedeemComposer is
         require(address(_wNat).code.length > 0, InvalidAddress());
         require(_composerFeeRecipient != address(0), InvalidAddress());
         require(_defaultComposerFeePPM < PPM_DENOMINATOR, InvalidComposerFeePPM());
+        require(_defaultExecutor != address(0), InvalidAddress());
         require(_redeemerAccountImplementation.code.length > 0, InvalidRedeemerAccountImplementation());
 
         __Ownable_init(_initialOwner);
@@ -113,10 +114,12 @@ contract FAssetRedeemComposer is
         wNat = _wNat;
         composerFeeRecipient = _composerFeeRecipient;
         defaultComposerFeePPM = _defaultComposerFeePPM;
+        defaultExecutor = _defaultExecutor;
         redeemerAccountImplementation = _redeemerAccountImplementation;
 
         emit ComposerFeeRecipientSet(_composerFeeRecipient);
         emit DefaultComposerFeeSet(_defaultComposerFeePPM);
+        emit DefaultExecutorSet(_defaultExecutor);
         emit RedeemerAccountImplementationSet(redeemerAccountImplementation);
     }
 
@@ -214,21 +217,18 @@ contract FAssetRedeemComposer is
     }
 
     /**
-     * @notice Updates executor data used for redemption execution.
-     * @param _executor New executor address.
-     * @param _executorFee New expected fee for executor.
+     * @notice Updates default executor used for redemption execution.
+     * @param _executor New default executor address.
      */
-    function setExecutorData(
-        address payable _executor,
-        uint256 _executorFee
+    function setDefaultExecutor(
+        address payable _executor
     )
         external
         onlyOwnerWithTimelock
     {
-        require(_executor != address(0) || _executorFee == 0, InvalidExecutorData());
-        executor = _executor;
-        executorFee = _executorFee;
-        emit ExecutorDataSet(_executor, _executorFee);
+        require(_executor != address(0), InvalidAddress());
+        defaultExecutor = _executor;
+        emit DefaultExecutorSet(_executor);
     }
 
     /**
@@ -290,47 +290,54 @@ contract FAssetRedeemComposer is
             PPM_DENOMINATOR
         );
         uint256 amountToRedeemAfterFee = amountLD - composerFee;
-        (address redeemer, string memory redeemerUnderlyingAddress) = abi.decode(
-            OFTComposeMsgCodec.composeMsg(_message), (address, string)
+        RedeemComposeMessage memory redeemComposeMessage = abi.decode(
+            OFTComposeMsgCodec.composeMsg(_message), (RedeemComposeMessage)
         );
-        require(redeemer != address(0), InvalidAddress());
+        require(redeemComposeMessage.redeemer != address(0), InvalidAddress());
 
         if (composerFee > 0) {
             fAsset.safeTransfer(composerFeeRecipient, composerFee);
             emit ComposerFeeCollected(_guid, srcEid, composerFeeRecipient, composerFee);
         }
 
-        address redeemerAccount = _getOrCreateRedeemerAccount(redeemer);
+        address redeemerAccount = _getOrCreateRedeemerAccount(redeemComposeMessage.redeemer);
         fAsset.safeTransfer(redeemerAccount, amountToRedeemAfterFee);
         emit FAssetTransferred(redeemerAccount, amountToRedeemAfterFee);
+
+        address payable executor = redeemComposeMessage.executor != address(0) ?
+            redeemComposeMessage.executor : defaultExecutor;
 
         try IIFAssetRedeemerAccount(redeemerAccount).redeemFAsset{value: msg.value}(
             assetManager,
             amountToRedeemAfterFee,
-            redeemerUnderlyingAddress,
-            executor,
-            executorFee
+            redeemComposeMessage.redeemerUnderlyingAddress,
+            redeemComposeMessage.redeemWithTag,
+            redeemComposeMessage.destinationTag,
+            executor
         )
             returns (uint256 _redeemedAmountUBA)
         {
             emit FAssetRedeemed(
                 _guid,
                 srcEid,
-                redeemer,
+                redeemComposeMessage.redeemer,
                 redeemerAccount,
                 amountToRedeemAfterFee,
-                redeemerUnderlyingAddress,
+                redeemComposeMessage.redeemerUnderlyingAddress,
+                redeemComposeMessage.redeemWithTag,
+                redeemComposeMessage.destinationTag,
                 executor,
-                executorFee,
+                msg.value,
                 _redeemedAmountUBA
             );
         } catch {
             emit FAssetRedeemFailed(
                 _guid,
                 srcEid,
-                redeemer,
+                redeemComposeMessage.redeemer,
                 redeemerAccount,
-                amountToRedeemAfterFee
+                amountToRedeemAfterFee,
+                msg.value
             );
         }
     }
@@ -352,15 +359,6 @@ contract FAssetRedeemComposer is
         returns (address)
     {
         return redeemerAccountImplementation;
-    }
-
-    /// @inheritdoc IFAssetRedeemComposer
-    function getExecutorData()
-        external view
-        returns (address payable _executor, uint256 _executorFee)
-    {
-        _executor = executor;
-        _executorFee = executorFee;
     }
 
     /// @inheritdoc IFAssetRedeemComposer

@@ -36,6 +36,5 @@
   "wNat": "0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273",
   "composerFeeRecipient": "0xC83Ec6a4aFf2099942836860A28C7e248Fabc32C",
   "defaultComposerFeePPM": 1000,
-  "composerExecutor": "0x103b384064ae85577127097A7cCadfd6fb13f437",
-  "composerExecutorFee": 100000000000
+  "composerExecutor": "0x103b384064ae85577127097A7cCadfd6fb13f437"
 }

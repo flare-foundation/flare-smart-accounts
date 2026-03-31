@@ -39,10 +39,8 @@ interface IFAssetRedeemerAccount {
     error AlreadyInitialized();
 
     /**
-     * @notice Reverts when provided native value does not cover executor fee.
-     * @param sent Native value sent with redemption call.
-     * @param required Required executor fee.
+     * @notice Reverts when redeem with tag is attempted on asset manager that does not support it.
+     * @param tag Tag provided for redemption.
      */
-    error ExecutorFeeNotCovered(uint256 sent, uint256 required);
-
+    error RedeemWithTagNotSupported(uint64 tag);
 }

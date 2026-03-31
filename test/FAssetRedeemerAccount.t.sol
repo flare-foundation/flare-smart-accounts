@@ -6,6 +6,7 @@ import {FAssetRedeemerAccount} from "../contracts/composer/implementation/FAsset
 import {FAssetRedeemerAccountProxy} from "../contracts/composer/proxy/FAssetRedeemerAccountProxy.sol";
 import {IFAssetRedeemerAccount} from "../contracts/userInterfaces/IFAssetRedeemerAccount.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
+import {IRedeemExtended} from "flare-periphery/src/flare/IRedeemExtended.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockBeacon} from "./utils/MockBeacon.sol";
 import {UninitializedProxy} from "./utils/UninitializedProxy.sol";
@@ -87,28 +88,102 @@ contract FAssetRedeemerAccountTest is Test {
         account.setMaxAllowances(IERC20(fAsset), IERC20(stableCoin), IERC20(wNat));
     }
 
-    function testRedeemFAsset() public {
+    function testRedeemFAssetWithRedeemAmount() public {
         uint256 amountLD = 1000;
         string memory redeemerUnderlying = "rExample";
         address payable executor = payable(makeAddr("executor"));
-        uint256 executorFee = 1 ether;
+        uint256 nativeValue = 1 ether;
 
-        _mockAssetManagerLotSize(1);
-        _mockAssetManagerRedeem(amountLD);
+        _mockAssetManagerRedeemAmount(amountLD);
 
-        // Fund composer (beacon) to pay executor fee
-        vm.deal(address(beacon), executorFee);
+        vm.deal(address(beacon), nativeValue);
 
         vm.prank(address(beacon));
-        uint256 redeemed = account.redeemFAsset{value: executorFee}(
+        uint256 redeemed = account.redeemFAsset{value: nativeValue}(
             IAssetManager(assetManager),
             amountLD,
             redeemerUnderlying,
-            executor,
-            executorFee
+            false,
+            0,
+            executor
         );
 
         assertEq(redeemed, amountLD);
+    }
+
+    function testRedeemFAssetWithRedeemAmountIgnoresTag() public {
+        uint256 amountLD = 1000;
+        string memory redeemerUnderlying = "rExample";
+        address payable executor = payable(makeAddr("executor"));
+        uint256 nativeValue = 1 ether;
+        uint64 destinationTag = 99999;
+
+        _mockAssetManagerRedeemAmount(amountLD);
+
+        vm.deal(address(beacon), nativeValue);
+
+        vm.prank(address(beacon));
+        uint256 redeemed = account.redeemFAsset{value: nativeValue}(
+            IAssetManager(assetManager),
+            amountLD,
+            redeemerUnderlying,
+            false,
+            destinationTag,
+            executor
+        );
+
+        assertEq(redeemed, amountLD);
+    }
+
+    function testRedeemFAssetWithRedeemWithTag() public {
+        uint256 amountLD = 1000;
+        string memory redeemerUnderlying = "rExample";
+        address payable executor = payable(makeAddr("executor"));
+        uint256 nativeValue = 1 ether;
+        uint64 destinationTag = 12345;
+
+        _mockRedeemWithTagSupported(true);
+        _mockAssetManagerRedeemWithTag(amountLD);
+
+        vm.deal(address(beacon), nativeValue);
+
+        vm.prank(address(beacon));
+        uint256 redeemed = account.redeemFAsset{value: nativeValue}(
+            IAssetManager(assetManager),
+            amountLD,
+            redeemerUnderlying,
+            true,
+            destinationTag,
+            executor
+        );
+
+        assertEq(redeemed, amountLD);
+    }
+
+    function testRedeemFAssetRevertRedeemWithTagNotSupported() public {
+        uint256 nativeValue = 1 ether;
+        uint64 destinationTag = 12345;
+
+        _mockRedeemWithTagSupported(false);
+
+        vm.deal(address(beacon), nativeValue);
+        vm.prank(address(beacon));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IFAssetRedeemerAccount.RedeemWithTagNotSupported.selector,
+                destinationTag
+            )
+        );
+
+        account.redeemFAsset{value: nativeValue}(
+            IAssetManager(assetManager),
+            1000,
+            "rExample",
+            true,
+            destinationTag,
+            payable(makeAddr("executor"))
+        );
     }
 
     function testRedeemFAssetRevertComposerOnly() public {
@@ -117,37 +192,9 @@ contract FAssetRedeemerAccountTest is Test {
             IAssetManager(assetManager),
             1000,
             "rExample",
-            payable(address(0)),
-            0
-        );
-    }
-
-    function testRedeemFAssetRevertExecutorFeeNotCovered() public {
-        uint256 amountLD = 1000;
-        string memory redeemerUnderlying = "rExample";
-        address payable executor = payable(makeAddr("executor"));
-        uint256 executorFee = 1 ether;
-        uint256 sentValue = 0.5 ether;
-
-        // No need to mock asset manager as it reverts before call
-
-        vm.deal(address(beacon), executorFee);
-        vm.prank(address(beacon));
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IFAssetRedeemerAccount.ExecutorFeeNotCovered.selector,
-                sentValue,
-                executorFee
-            )
-        );
-
-        account.redeemFAsset{value: sentValue}(
-            IAssetManager(assetManager),
-            amountLD,
-            redeemerUnderlying,
-            executor,
-            executorFee
+            false,
+            0,
+            payable(address(0))
         );
     }
 
@@ -161,19 +208,27 @@ contract FAssetRedeemerAccountTest is Test {
         );
     }
 
-    function _mockAssetManagerLotSize(uint256 _size) private {
+    function _mockAssetManagerRedeemAmount(uint256 _result) private {
         vm.mockCall(
             assetManager,
-            abi.encodeWithSelector(IAssetManager.lotSize.selector),
-            abi.encode(_size)
+            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
+            abi.encode(_result)
         );
     }
 
-    function _mockAssetManagerRedeem(uint256 _result) private {
+    function _mockAssetManagerRedeemWithTag(uint256 _result) private {
         vm.mockCall(
             assetManager,
-            abi.encodeWithSelector(IAssetManager.redeem.selector),
+            abi.encodeWithSelector(IRedeemExtended.redeemWithTag.selector),
             abi.encode(_result)
+        );
+    }
+
+    function _mockRedeemWithTagSupported(bool _supported) private {
+        vm.mockCall(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.redeemWithTagSupported.selector),
+            abi.encode(_supported)
         );
     }
 }

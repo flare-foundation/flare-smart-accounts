@@ -14,6 +14,33 @@ import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/in
 interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTimelock {
 
     /**
+     * @notice Struct representing the LZ compose message for f-asset redemption.
+     */
+    struct RedeemComposeMessage {
+        /**
+         * @notice EVM address that owns the per-redeemer account.
+         */
+        address redeemer;
+        /**
+         * @notice Underlying-chain redemption destination passed to the asset manager.
+         */
+        string redeemerUnderlyingAddress;
+        /**
+         * @notice Indicates whether to call `redeemWithTag` or `redeemAmount` on the asset manager.
+         * If true, asset manager must support it (checks `redeemWithTagSupported` - enabled only for XRP).
+         */
+        bool redeemWithTag;
+        /**
+         * @notice Destination tag. Only used if `redeemWithTag` is true.
+         */
+        uint64 destinationTag;
+        /**
+         * @notice Executor address used for redemption. If zero, default executor is used.
+         */
+        address payable executor;
+    }
+
+    /**
      * @notice Emitted when the account beacon implementation is updated.
      * @param implementation New redeemer account implementation address.
      */
@@ -27,6 +54,8 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @param redeemerAccount Deterministic redeemer account address.
      * @param amountToRedeemUBA Amount to redeem in UBA.
      * @param redeemerUnderlyingAddress Underlying destination address for redeem.
+     * @param redeemWithTag Indicates whether `redeemWithTag` or `redeemAmount` was called on the asset manager.
+     * @param destinationTag Destination tag used for redeem, if applicable.
      * @param executor Executor address used for redeem.
      * @param executorFee Executor fee passed with compose message.
      * @param redeemedAmountUBA Amount redeemed in UBA reported by asset manager.
@@ -38,6 +67,8 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
         address redeemerAccount,
         uint256 amountToRedeemUBA,
         string redeemerUnderlyingAddress,
+        bool redeemWithTag,
+        uint64 destinationTag,
         address executor,
         uint256 executorFee,
         uint256 redeemedAmountUBA
@@ -50,13 +81,15 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @param redeemer Redeemer account owner address.
      * @param redeemerAccount Deterministic redeemer account address.
      * @param amountToRedeemUBA Amount to redeem in UBA.
+     * @param executorFee Executor fee passed with compose message.
      */
     event FAssetRedeemFailed(
         bytes32 indexed guid,
         uint32 indexed srcEid,
         address indexed redeemer,
         address redeemerAccount,
-        uint256 amountToRedeemUBA
+        uint256 amountToRedeemUBA,
+        uint256 executorFee
     );
 
     /**
@@ -81,11 +114,10 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
     event NativeTransferred(address indexed to, uint256 amount);
 
     /**
-     * @notice Emitted when redeem executor data is updated.
+     * @notice Emitted when default executor is set.
      * @param executor Executor address used for redemption.
-     * @param executorFee Native fee expected by executor.
      */
-    event ExecutorDataSet(address indexed executor, uint256 executorFee);
+    event DefaultExecutorSet(address executor);
 
     /**
      * @notice Emitted when default composer fee is updated.
@@ -146,11 +178,6 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @notice Reverts when redeemer account implementation address has no code.
      */
     error InvalidRedeemerAccountImplementation();
-
-    /**
-     * @notice Reverts when executor data is invalid.
-     */
-    error InvalidExecutorData();
 
     /**
      * @notice Reverts when native transfer fails.
@@ -233,13 +260,10 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
     function defaultComposerFeePPM() external view returns (uint256);
 
     /**
-     * @notice Returns redeem executor data.
-     * @return _executor Executor address used for redeem.
-     * @return _executorFee Native fee expected by executor.
+     * @notice Returns default executor address used for redemption execution.
+     * @return Default executor address.
      */
-    function getExecutorData()
-        external view
-        returns (address payable _executor, uint256 _executorFee);
+    function defaultExecutor() external view returns (address payable);
 
     /**
      * @notice Returns composer fee in PPM for the given OFT source endpoint.
