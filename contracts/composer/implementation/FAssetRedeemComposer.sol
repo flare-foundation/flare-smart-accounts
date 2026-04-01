@@ -2,6 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
+import {IWNat} from "flare-periphery/src/flare/IWNat.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
@@ -249,25 +250,6 @@ contract FAssetRedeemComposer is
         emit FAssetTransferred(_to, _amount);
     }
 
-    /**
-     * @notice Transfers native tokens held by composer to a target address.
-     * @dev Recovery function for funds stuck on composer when compose flow fails.
-     * @param _to Recipient address.
-     * @param _amount Amount of native tokens to transfer.
-     */
-    function transferNative(
-        address _to,
-        uint256 _amount
-    )
-        external
-        onlyOwnerWithTimelock
-    {
-        require(_to != address(0), InvalidAddress());
-        (bool success, ) = _to.call{value: _amount}("");
-        require(success, NativeTransferFailed());
-        emit NativeTransferred(_to, _amount);
-    }
-
     /// @inheritdoc ILayerZeroComposer
     function lzCompose(
         address _from,
@@ -331,6 +313,12 @@ contract FAssetRedeemComposer is
                 _redeemedAmountUBA
             );
         } catch {
+            if (msg.value > 0) {
+                // wrap native tokens and deposit to redeemer account in case of failure
+                //slither-disable-next-line arbitrary-send-eth
+                IWNat(address(wNat)).depositTo{value: msg.value}(redeemerAccount);
+            }
+
             emit FAssetRedeemFailed(
                 _guid,
                 srcEid,
@@ -346,8 +334,7 @@ contract FAssetRedeemComposer is
     function getComposerFeePPM(
         uint32 _srcEid
     )
-        external
-        view
+        external view
         returns (uint256 _composerFeePPM)
     {
         _composerFeePPM = _getComposerFeePPM(_srcEid);
@@ -370,10 +357,44 @@ contract FAssetRedeemComposer is
     {
         _redeemerAccount = redeemerToRedeemerAccount[_redeemer];
         if (_redeemerAccount == address(0)) {
-            bytes memory bytecode = _generateRedeemerAccountBytecode(_redeemer);
-            _redeemerAccount = Create2.computeAddress(bytes32(0), keccak256(bytecode));
+            _redeemerAccount = _calculateRedeemerAccountAddress(_redeemer);
         }
     }
+
+    /// @inheritdoc IFAssetRedeemComposer
+    function isRedeemerAccount(
+        address _address
+    )
+        external view
+        returns (bool _isRedeemerAccount, address _owner)
+    {
+        if (_address.code.length == 0) {
+            return (false, address(0));
+        }
+
+        try IIFAssetRedeemerAccount(_address).owner() returns (address _redeemer) {
+            // verify _address is matching redeemer account by checking deterministic address calculation
+            if (_address == _calculateRedeemerAccountAddress(_redeemer)) {
+                return (true, _redeemer);
+            }
+        } catch {
+            // not a redeemer account if call fails
+        }
+        return (false, address(0));
+    }
+
+    /// @inheritdoc IFAssetRedeemComposer
+    function getBalances(
+        address _account
+    )
+        external view
+        returns (AccountBalances memory _balances)
+    {
+        _balances.fAsset = TokenBalance(address(fAsset), fAsset.balanceOf(_account));
+        _balances.stableCoin = TokenBalance(address(stableCoin), stableCoin.balanceOf(_account));
+        _balances.wNat = TokenBalance(address(wNat), wNat.balanceOf(_account));
+    }
+
 
     /**
      * @inheritdoc UUPSUpgradeable
@@ -431,8 +452,7 @@ contract FAssetRedeemComposer is
     function _generateRedeemerAccountBytecode(
         address _redeemer
     )
-        internal
-        view
+        internal view
         returns (bytes memory)
     {
         return abi.encodePacked(
@@ -449,8 +469,7 @@ contract FAssetRedeemComposer is
     function _getComposerFeePPM(
         uint32 _srcEid
     )
-        internal
-        view
+        internal view
         returns (uint256 _composerFeePPM)
     {
         uint256 srcEidFeePlusOne = composerFeesPPM[_srcEid];
@@ -459,5 +478,20 @@ contract FAssetRedeemComposer is
         }
 
         return defaultComposerFeePPM;
+    }
+
+    /**
+     * @notice Calculates the deterministic redeemer account address for a given redeemer.
+     * @param _redeemer Redeemer account owner address.
+     * @return _redeemerAccount Calculated redeemer account address.
+     */
+    function _calculateRedeemerAccountAddress(
+        address _redeemer
+    )
+        internal view
+        returns (address _redeemerAccount)
+    {
+        bytes memory bytecode = _generateRedeemerAccountBytecode(_redeemer);
+        _redeemerAccount = Create2.computeAddress(bytes32(0), keccak256(bytecode));
     }
 }

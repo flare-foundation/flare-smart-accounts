@@ -12,7 +12,6 @@ import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IRedeemExtended} from "flare-periphery/src/flare/IRedeemExtended.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {RevertingReceiver} from "./utils/RevertingReceiver.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 
 contract FAssetRedeemComposerTest is Test {
@@ -522,46 +521,6 @@ contract FAssetRedeemComposerTest is Test {
         composer.transferFAsset(makeAddr("to"), 100);
     }
 
-    // --- transferNative ---
-
-    function testRecoverNative() public {
-        uint256 amount = 1 ether;
-        address to = makeAddr("to");
-        vm.deal(address(composer), amount);
-
-        vm.prank(owner);
-        vm.expectEmit();
-        emit IFAssetRedeemComposer.NativeTransferred(to, amount);
-        composer.transferNative(to, amount);
-
-        assertEq(to.balance, amount);
-    }
-
-    function testTransferNativeRevertInvalidAddress() public {
-        vm.prank(owner);
-        vm.expectRevert(IFAssetRedeemComposer.InvalidAddress.selector);
-        composer.transferNative(address(0), 100);
-    }
-
-    function testTransferNativeRevertFailed() public {
-        vm.deal(address(composer), 1 ether);
-        RevertingReceiver receiver = new RevertingReceiver();
-
-        vm.prank(owner);
-        vm.expectRevert(IFAssetRedeemComposer.NativeTransferFailed.selector);
-        composer.transferNative(address(receiver), 1 ether);
-    }
-
-    function testTransferNativeRevertOnlyOwner() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedAccount.selector,
-                address(this)
-            )
-        );
-        composer.transferNative(makeAddr("to"), 100);
-    }
-
     // --- lzCompose ---
 
     function testLzComposeSuccess() public {
@@ -938,7 +897,7 @@ contract FAssetRedeemComposerTest is Test {
         string memory redeemerUnderlying = "rExample";
         uint32 srcEid = 1;
         uint256 amountLD = 1000;
-        uint64 destinationTag = 99999;
+        uint256 destinationTag = 99999;
         uint256 composerFee = amountLD * defaultComposerFeePPM / 1_000_000;
         uint256 amountToRedeem = amountLD - composerFee;
         uint256 nativeValue = 0.1 ether;
@@ -997,7 +956,7 @@ contract FAssetRedeemComposerTest is Test {
         string memory redeemerUnderlying = "rExample";
         uint32 srcEid = 1;
         uint256 amountLD = 1000;
-        uint64 destinationTag = 12345;
+        uint256 destinationTag = 12345;
         uint256 composerFee = amountLD * defaultComposerFeePPM / 1_000_000;
         uint256 amountToRedeem = amountLD - composerFee;
         uint256 nativeValue = 0.1 ether;
@@ -1058,7 +1017,7 @@ contract FAssetRedeemComposerTest is Test {
         string memory redeemerUnderlying = "rExample";
         uint32 srcEid = 1;
         uint256 amountLD = 1000;
-        uint64 destinationTag = 12345;
+        uint256 destinationTag = 12345;
         uint256 composerFee = amountLD * defaultComposerFeePPM / 1_000_000;
         uint256 amountToRedeem = amountLD - composerFee;
 
@@ -1254,6 +1213,216 @@ contract FAssetRedeemComposerTest is Test {
         composer.upgradeToAndCall(address(newImpl), "");
     }
 
+    // --- lzCompose wraps native on failure ---
+
+    function testLzComposeFailedWrapsNativeToRedeemerAccount() public {
+        address redeemer = makeAddr("redeemer");
+        string memory redeemerUnderlying = "rExample";
+        uint32 srcEid = 1;
+        uint256 amountLD = 1000;
+        uint256 fee = amountLD * defaultComposerFeePPM / 1_000_000;
+        uint256 amountToRedeem = amountLD - fee;
+        uint256 nativeValue = 0.5 ether;
+
+        (bytes memory message, bytes32 guid) = _encodeMessage(redeemer, redeemerUnderlying, srcEid, amountLD);
+
+        address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
+
+        _mockSafeTransfer(fAsset, composerFeeRecipient, fee);
+        _mockSafeTransfer(fAsset, redeemerAccount, amountToRedeem);
+        _mockForceApprove(fAsset, true);
+        _mockForceApprove(stableCoin, true);
+        _mockForceApprove(wNat, true);
+
+        // Make AssetManager.redeem revert
+        vm.mockCallRevert(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
+            "Redeem failed"
+        );
+
+        // Mock wNat.depositTo to accept the native value
+        vm.mockCall(
+            wNat,
+            nativeValue,
+            abi.encodeWithSignature("depositTo(address)", redeemerAccount),
+            ""
+        );
+
+        vm.deal(endpoint, nativeValue);
+        vm.prank(endpoint);
+        vm.expectEmit();
+        emit IFAssetRedeemComposer.FAssetRedeemFailed(
+            guid,
+            srcEid,
+            redeemer,
+            redeemerAccount,
+            amountToRedeem,
+            nativeValue
+        );
+
+        composer.lzCompose{value: nativeValue}(
+            trustedSourceOApp,
+            guid,
+            message,
+            address(0),
+            ""
+        );
+    }
+
+    function testLzComposeFailedNoNativeNoWrap() public {
+        address redeemer = makeAddr("redeemer");
+        string memory redeemerUnderlying = "rExample";
+        uint32 srcEid = 1;
+        uint256 amountLD = 1000;
+        uint256 fee = amountLD * defaultComposerFeePPM / 1_000_000;
+        uint256 amountToRedeem = amountLD - fee;
+
+        (bytes memory message, bytes32 guid) = _encodeMessage(redeemer, redeemerUnderlying, srcEid, amountLD);
+
+        address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
+
+        _mockSafeTransfer(fAsset, composerFeeRecipient, fee);
+        _mockSafeTransfer(fAsset, redeemerAccount, amountToRedeem);
+        _mockForceApprove(fAsset, true);
+        _mockForceApprove(stableCoin, true);
+        _mockForceApprove(wNat, true);
+
+        // Make AssetManager.redeem revert
+        vm.mockCallRevert(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
+            "Redeem failed"
+        );
+
+        // No native value sent — depositTo should NOT be called
+        vm.prank(endpoint);
+        vm.expectEmit();
+        emit IFAssetRedeemComposer.FAssetRedeemFailed(
+            guid,
+            srcEid,
+            redeemer,
+            redeemerAccount,
+            amountToRedeem,
+            0
+        );
+
+        composer.lzCompose(
+            trustedSourceOApp,
+            guid,
+            message,
+            address(0),
+            ""
+        );
+    }
+
+    // --- isRedeemerAccount ---
+
+    function testIsRedeemerAccount() public {
+        // First create a redeemer account via lzCompose
+        address redeemer = makeAddr("redeemer");
+        string memory redeemerUnderlying = "rExample";
+        uint32 srcEid = 1;
+        uint256 amountLD = 1000;
+        uint256 fee = amountLD * defaultComposerFeePPM / 1_000_000;
+        uint256 amountToRedeem = amountLD - fee;
+
+        (bytes memory message, ) = _encodeMessage(redeemer, redeemerUnderlying, srcEid, amountLD);
+
+        address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
+
+        _mockSafeTransfer(fAsset, composerFeeRecipient, fee);
+        _mockSafeTransfer(fAsset, redeemerAccount, amountToRedeem);
+        _mockForceApprove(fAsset, true);
+        _mockForceApprove(stableCoin, true);
+        _mockForceApprove(wNat, true);
+        vm.mockCall(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
+            abi.encode(amountToRedeem)
+        );
+
+        vm.prank(endpoint);
+        composer.lzCompose(trustedSourceOApp, keccak256("guid"), message, address(0), "");
+
+        // Now check isRedeemerAccount
+        (bool isAccount, address accountOwner) = composer.isRedeemerAccount(redeemerAccount);
+        assertTrue(isAccount);
+        assertEq(accountOwner, redeemer);
+    }
+
+    function testIsRedeemerAccountFalseForEOA() public {
+        (bool isAccount, address accountOwner) = composer.isRedeemerAccount(makeAddr("random"));
+        assertFalse(isAccount);
+        assertEq(accountOwner, address(0));
+    }
+
+    function testIsRedeemerAccountFalseForUnrelatedContract() public view {
+        (bool isAccount, address accountOwner) = composer.isRedeemerAccount(address(composerImpl));
+        assertFalse(isAccount);
+        assertEq(accountOwner, address(0));
+    }
+
+    // --- getBalances ---
+
+    function testGetBalances() public {
+        address account = makeAddr("account");
+        uint256 fAssetBal = 100;
+        uint256 stableCoinBal = 200;
+        uint256 wNatBal = 300;
+
+        vm.mockCall(
+            fAsset,
+            abi.encodeWithSelector(IERC20.balanceOf.selector, account),
+            abi.encode(fAssetBal)
+        );
+        vm.mockCall(
+            stableCoin,
+            abi.encodeWithSelector(IERC20.balanceOf.selector, account),
+            abi.encode(stableCoinBal)
+        );
+        vm.mockCall(
+            wNat,
+            abi.encodeWithSelector(IERC20.balanceOf.selector, account),
+            abi.encode(wNatBal)
+        );
+
+        IFAssetRedeemComposer.AccountBalances memory balances = composer.getBalances(account);
+
+        assertEq(balances.fAsset.token, fAsset);
+        assertEq(balances.fAsset.balance, fAssetBal);
+        assertEq(balances.stableCoin.token, stableCoin);
+        assertEq(balances.stableCoin.balance, stableCoinBal);
+        assertEq(balances.wNat.token, wNat);
+        assertEq(balances.wNat.balance, wNatBal);
+    }
+
+    function testGetBalancesZero() public {
+        address account = makeAddr("account");
+
+        vm.mockCall(
+            fAsset,
+            abi.encodeWithSelector(IERC20.balanceOf.selector, account),
+            abi.encode(uint256(0))
+        );
+        vm.mockCall(
+            stableCoin,
+            abi.encodeWithSelector(IERC20.balanceOf.selector, account),
+            abi.encode(uint256(0))
+        );
+        vm.mockCall(
+            wNat,
+            abi.encodeWithSelector(IERC20.balanceOf.selector, account),
+            abi.encode(uint256(0))
+        );
+
+        IFAssetRedeemComposer.AccountBalances memory balances = composer.getBalances(account);
+
+        assertEq(balances.fAsset.balance, 0);
+        assertEq(balances.stableCoin.balance, 0);
+        assertEq(balances.wNat.balance, 0);
+    }
+
     // --- Helpers ---
 
     function _mockAssetManagerFAsset() private {
@@ -1297,7 +1466,7 @@ contract FAssetRedeemComposerTest is Test {
         address _redeemer,
         string memory _redeemerUnderlying,
         bool _redeemWithTag,
-        uint64 _destinationTag,
+        uint256 _destinationTag,
         address payable _executor,
         uint32 _srcEid,
         uint256 _amountLD

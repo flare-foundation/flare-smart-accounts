@@ -17,27 +17,40 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @notice Struct representing the LZ compose message for f-asset redemption.
      */
     struct RedeemComposeMessage {
-        /**
-         * @notice EVM address that owns the per-redeemer account.
-         */
+        /// @notice EVM address that owns the per-redeemer account.
         address redeemer;
-        /**
-         * @notice Underlying-chain redemption destination passed to the asset manager.
-         */
+        /// @notice Underlying-chain redemption destination passed to the asset manager.
         string redeemerUnderlyingAddress;
-        /**
-         * @notice Indicates whether to call `redeemWithTag` or `redeemAmount` on the asset manager.
-         * If true, asset manager must support it (checks `redeemWithTagSupported` - enabled only for XRP).
-         */
+        /// @notice Indicates whether to call `redeemWithTag` or `redeemAmount` on the asset manager.
+        /// If true, asset manager must support it (checks `redeemWithTagSupported` - enabled only for XRP).
         bool redeemWithTag;
-        /**
-         * @notice Destination tag. Only used if `redeemWithTag` is true.
-         */
-        uint64 destinationTag;
-        /**
-         * @notice Executor address used for redemption. If zero, default executor is used.
-         */
+        /// @notice Destination tag. Only used if `redeemWithTag` is true.
+        /// Only for XRP; it must fit in 32 bits for now.
+        uint256 destinationTag;
+        /// @notice Executor address used for redemption. If zero, default executor is used.
         address payable executor;
+    }
+
+    /**
+     * @notice Token address and balance pair.
+     */
+    struct TokenBalance {
+        /// @notice Token address.
+        address token;
+        /// @notice Token balance.
+        uint256 balance;
+    }
+
+    /**
+     * @notice Struct representing the balances of a redeemer account.
+     */
+    struct AccountBalances {
+        /// @notice f-asset token and balance.
+        TokenBalance fAsset;
+        /// @notice Stable coin token and balance.
+        TokenBalance stableCoin;
+        /// @notice Wrapped native token and balance.
+        TokenBalance wNat;
     }
 
     /**
@@ -68,7 +81,7 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
         uint256 amountToRedeemUBA,
         string redeemerUnderlyingAddress,
         bool redeemWithTag,
-        uint64 destinationTag,
+        uint256 destinationTag,
         address executor,
         uint256 executorFee,
         uint256 redeemedAmountUBA
@@ -81,7 +94,7 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @param redeemer Redeemer account owner address.
      * @param redeemerAccount Deterministic redeemer account address.
      * @param amountToRedeemUBA Amount to redeem in UBA.
-     * @param executorFee Executor fee passed with compose message.
+     * @param wrappedAmount Amount of wrapped native tokens deposited to redeemer account in case of failure.
      */
     event FAssetRedeemFailed(
         bytes32 indexed guid,
@@ -89,7 +102,7 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
         address indexed redeemer,
         address redeemerAccount,
         uint256 amountToRedeemUBA,
-        uint256 executorFee
+        uint256 wrappedAmount
     );
 
     /**
@@ -105,13 +118,6 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @param amount Amount transferred.
      */
     event FAssetTransferred(address indexed to, uint256 amount);
-
-    /**
-     * @notice Emitted when owner manually transfers native funds from composer.
-     * @param to Recipient account.
-     * @param amount Amount transferred.
-     */
-    event NativeTransferred(address indexed to, uint256 amount);
 
     /**
      * @notice Emitted when default executor is set.
@@ -178,11 +184,6 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @notice Reverts when redeemer account implementation address has no code.
      */
     error InvalidRedeemerAccountImplementation();
-
-    /**
-     * @notice Reverts when native transfer fails.
-     */
-    error NativeTransferFailed();
 
     /**
      * @notice Reverts when composer fee PPM is invalid.
@@ -287,4 +288,27 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
     )
         external view
         returns (address);
+
+    /**
+     * @notice Checks if the given account is the deterministic redeemer account for its owner.
+     * @param _address The Flare address to check.
+     * @return _isRedeemerAccount True if the address is a redeemer account, false otherwise.
+     * @return _owner Redeemer account owner address if it is a redeemer account, zero address otherwise.
+     */
+    function isRedeemerAccount(
+        address _address
+    )
+        external view
+        returns (bool _isRedeemerAccount, address _owner);
+
+    /**
+     * @notice Returns the balances of an account for f-asset, stable coin, and wrapped native token.
+     * @param _account The address (can be a redeemer account or any other address) for which to retrieve balances.
+     * @return _balances The account balances.
+     */
+    function getBalances(
+        address _account
+    )
+        external view
+        returns (AccountBalances memory _balances);
 }

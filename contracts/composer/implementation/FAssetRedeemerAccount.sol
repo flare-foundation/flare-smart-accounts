@@ -62,14 +62,14 @@ contract FAssetRedeemerAccount is IIFAssetRedeemerAccount {
         uint256 _amountLD,
         string calldata _redeemerUnderlyingAddress,
         bool _redeemWithTag,
-        uint64 _destinationTag,
+        uint256 _destinationTag,
         address payable _executor
     )
         external payable
         onlyComposer
         returns (uint256 _redeemedAmountUBA)
     {
-        require(!_redeemWithTag || _assetManager.redeemWithTagSupported(), RedeemWithTagNotSupported(_destinationTag));
+        require(!_redeemWithTag || _assetManager.redeemWithTagSupported(), RedeemWithTagNotSupported());
         if (_redeemWithTag) {
             _redeemedAmountUBA = _assetManager.redeemWithTag{value: msg.value}
                 (_amountLD, _redeemerUnderlyingAddress, _executor, _destinationTag);
@@ -77,6 +77,15 @@ contract FAssetRedeemerAccount is IIFAssetRedeemerAccount {
             _redeemedAmountUBA = _assetManager.redeemAmount{value: msg.value}
                 (_amountLD, _redeemerUnderlyingAddress, _executor);
         }
+        emit FAssetRedeemed(
+            _amountLD,
+            _redeemerUnderlyingAddress,
+            _redeemWithTag,
+            _destinationTag,
+            _executor,
+            msg.value,
+            _redeemedAmountUBA
+        );
     }
 
     /// @inheritdoc IIFAssetRedeemerAccount

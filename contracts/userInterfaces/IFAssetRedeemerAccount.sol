@@ -10,6 +10,26 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 interface IFAssetRedeemerAccount {
 
     /**
+     * @notice Emitted when a redeem call succeeds.
+     * @param amountToRedeemUBA Amount to redeem in UBA.
+     * @param redeemerUnderlyingAddress Underlying destination address for redeem.
+     * @param redeemWithTag Indicates whether `redeemWithTag` or `redeemAmount` was called on the asset manager.
+     * @param destinationTag Destination tag used for redeem, if applicable.
+     * @param executor Executor address used for redeem.
+     * @param executorFee Executor fee passed with compose message.
+     * @param redeemedAmountUBA Amount redeemed in UBA reported by asset manager.
+     */
+    event FAssetRedeemed(
+        uint256 amountToRedeemUBA,
+        string redeemerUnderlyingAddress,
+        bool redeemWithTag,
+        uint256 destinationTag,
+        address executor,
+        uint256 executorFee,
+        uint256 redeemedAmountUBA
+    );
+
+    /**
      * @notice Emitted when allowances are set to max from account to owner.
      * @param owner Owner of redeemer account.
      * @param fAsset FAsset token.
@@ -40,7 +60,18 @@ interface IFAssetRedeemerAccount {
 
     /**
      * @notice Reverts when redeem with tag is attempted on asset manager that does not support it.
-     * @param tag Tag provided for redemption.
      */
-    error RedeemWithTagNotSupported(uint64 tag);
+    error RedeemWithTagNotSupported();
+
+    /**
+     * @notice Returns the owner of the redeemer account.
+     * @return The address of the owner.
+     */
+    function owner() external view returns (address);
+
+    /**
+     * @notice Returns the composer associated with the redeemer account.
+     * @return The address of the composer.
+     */
+    function composer() external view returns (address);
 }

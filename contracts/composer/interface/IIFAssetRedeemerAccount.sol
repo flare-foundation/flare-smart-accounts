@@ -18,6 +18,7 @@ interface IIFAssetRedeemerAccount is IFAssetRedeemerAccount {
      * @param _redeemerUnderlyingAddress Underlying-chain destination for redemption.
      * @param _redeemWithTag Indicates whether to call `redeemWithTag` or `redeemAmount` on the asset manager.
      * @param _destinationTag Destination tag for redemption, only used if `_redeemWithTag` is true.
+     *                        Only for XRP; it must fit in 32 bits for now.
      * @param _executor Executor used by the asset manager redemption flow.
      * @return _redeemedAmountUBA Redeemed amount reported by asset manager.
      */
@@ -26,7 +27,7 @@ interface IIFAssetRedeemerAccount is IFAssetRedeemerAccount {
         uint256 _amountToRedeemUBA,
         string calldata _redeemerUnderlyingAddress,
         bool _redeemWithTag,
-        uint64 _destinationTag,
+        uint256 _destinationTag,
         address payable _executor
     )
         external payable

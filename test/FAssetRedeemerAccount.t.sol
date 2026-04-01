@@ -99,6 +99,16 @@ contract FAssetRedeemerAccountTest is Test {
         vm.deal(address(beacon), nativeValue);
 
         vm.prank(address(beacon));
+        vm.expectEmit();
+        emit IFAssetRedeemerAccount.FAssetRedeemed(
+            amountLD,
+            redeemerUnderlying,
+            false,
+            0,
+            executor,
+            nativeValue,
+            amountLD
+        );
         uint256 redeemed = account.redeemFAsset{value: nativeValue}(
             IAssetManager(assetManager),
             amountLD,
@@ -116,13 +126,23 @@ contract FAssetRedeemerAccountTest is Test {
         string memory redeemerUnderlying = "rExample";
         address payable executor = payable(makeAddr("executor"));
         uint256 nativeValue = 1 ether;
-        uint64 destinationTag = 99999;
+        uint256 destinationTag = 99999;
 
         _mockAssetManagerRedeemAmount(amountLD);
 
         vm.deal(address(beacon), nativeValue);
 
         vm.prank(address(beacon));
+        vm.expectEmit();
+        emit IFAssetRedeemerAccount.FAssetRedeemed(
+            amountLD,
+            redeemerUnderlying,
+            false,
+            destinationTag,
+            executor,
+            nativeValue,
+            amountLD
+        );
         uint256 redeemed = account.redeemFAsset{value: nativeValue}(
             IAssetManager(assetManager),
             amountLD,
@@ -140,7 +160,7 @@ contract FAssetRedeemerAccountTest is Test {
         string memory redeemerUnderlying = "rExample";
         address payable executor = payable(makeAddr("executor"));
         uint256 nativeValue = 1 ether;
-        uint64 destinationTag = 12345;
+        uint256 destinationTag = 12345;
 
         _mockRedeemWithTagSupported(true);
         _mockAssetManagerRedeemWithTag(amountLD);
@@ -148,6 +168,16 @@ contract FAssetRedeemerAccountTest is Test {
         vm.deal(address(beacon), nativeValue);
 
         vm.prank(address(beacon));
+        vm.expectEmit();
+        emit IFAssetRedeemerAccount.FAssetRedeemed(
+            amountLD,
+            redeemerUnderlying,
+            true,
+            destinationTag,
+            executor,
+            nativeValue,
+            amountLD
+        );
         uint256 redeemed = account.redeemFAsset{value: nativeValue}(
             IAssetManager(assetManager),
             amountLD,
@@ -162,7 +192,7 @@ contract FAssetRedeemerAccountTest is Test {
 
     function testRedeemFAssetRevertRedeemWithTagNotSupported() public {
         uint256 nativeValue = 1 ether;
-        uint64 destinationTag = 12345;
+        uint256 destinationTag = 12345;
 
         _mockRedeemWithTagSupported(false);
 
