@@ -109,8 +109,10 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
         returns (AccountBalances memory _balances)
     {
         _balances.natBalance = _account.balance;
-        _balances.wNatBalance = IERC20(address(ContractRegistry.getWNat())).balanceOf(_account);
-        _balances.fXrpBalance = ContractRegistry.getAssetManagerFXRP().fAsset().balanceOf(_account);
+        address wNat = address(ContractRegistry.getWNat());
+        _balances.wNat = TokenBalance(wNat, IERC20(wNat).balanceOf(_account));
+        IERC20 fXrp = ContractRegistry.getAssetManagerFXRP().fAsset();
+        _balances.fXrp = TokenBalance(address(fXrp), fXrp.balanceOf(_account));
 
         Vaults.State storage vaultState = Vaults.getState();
         uint256[] memory vaultIds = vaultState.vaultIds;

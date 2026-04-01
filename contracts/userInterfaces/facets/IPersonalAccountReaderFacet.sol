@@ -9,29 +9,65 @@ import {IVaultsFacet} from "./IVaultsFacet.sol";
  */
 interface IPersonalAccountReaderFacet {
 
+    /**
+     * @notice Token address and balance pair.
+     */
+    struct TokenBalance {
+        /// @notice Token address.
+        address token;
+        /// @notice Token balance.
+        uint256 balance;
+    }
+
+    /**
+     * @notice Vault balance with share and asset amounts.
+     */
     struct VaultBalance {
+        /// @notice Vault ID.
         uint256 vaultId;
+        /// @notice Vault address.
         address vaultAddress;
+        /// @notice Vault type.
         IVaultsFacet.VaultType vaultType;
+        /// @notice Number of shares held.
         uint256 shares;
+        /// @notice Equivalent asset value of the shares.
         uint256 assets;
     }
 
+    /**
+     * @notice Aggregated account balances.
+     */
     struct AccountBalances {
+        /// @notice Native token balance.
         uint256 natBalance;
-        uint256 wNatBalance;
-        uint256 fXrpBalance;
+        /// @notice Wrapped native token balance.
+        TokenBalance wNat;
+        /// @notice FAsset (fXRP) balance.
+        TokenBalance fXrp;
+        /// @notice Vault balances.
         VaultBalance[] vaults;
     }
 
+    /**
+     * @notice Agent vault information.
+     */
     struct AgentVaultInfo {
+        /// @notice Agent vault ID.
         uint256 agentVaultId;
+        /// @notice Agent vault address.
         address agentVaultAddress;
     }
 
+    /**
+     * @notice Vault information.
+     */
     struct VaultInfo {
+        /// @notice Vault ID.
         uint256 vaultId;
+        /// @notice Vault address.
         address vaultAddress;
+        /// @notice Vault type.
         IVaultsFacet.VaultType vaultType;
     }
 

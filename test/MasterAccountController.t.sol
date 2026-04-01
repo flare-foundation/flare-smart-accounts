@@ -3684,8 +3684,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             masterAccountController.getBalances(pa);
 
         assertEq(balances.natBalance, 0);
-        assertEq(balances.wNatBalance, 0);
-        assertEq(balances.fXrpBalance, 0);
+        assertEq(balances.wNat.balance, 0);
+        assertEq(balances.fXrp.balance, 0);
         assertEq(balances.vaults.length, 2);
         assertEq(balances.vaults[0].vaultId, 1);
         assertEq(balances.vaults[0].shares, 0);
@@ -3710,7 +3710,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         IPersonalAccountReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(pa);
-        assertEq(balances.fXrpBalance, 500);
+        assertEq(balances.fXrp.balance, 500);
     }
 
     function testGetBalancesWithFirelightDeposit() public {
@@ -3770,7 +3770,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         IPersonalAccountReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(xrplAddress1);
         assertEq(balances.natBalance, 2 ether);
-        assertEq(balances.fXrpBalance, 301); // 1 from creation mint + 300 minted directly
+        assertEq(balances.fXrp.balance, 301); // 1 from creation mint + 300 minted directly
         assertEq(balances.vaults.length, 2);
     }
 
@@ -3785,8 +3785,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         IPersonalAccountReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(newXrplAddr);
         assertEq(balances.natBalance, 0);
-        assertEq(balances.wNatBalance, 0);
-        assertEq(balances.fXrpBalance, 777);
+        assertEq(balances.wNat.balance, 0);
+        assertEq(balances.fXrp.balance, 777);
         assertEq(balances.vaults[0].shares, 0);
         assertEq(balances.vaults[1].shares, 0);
     }
