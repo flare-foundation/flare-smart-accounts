@@ -357,7 +357,8 @@ contract FAssetRedeemComposer is
     {
         _redeemerAccount = redeemerToRedeemerAccount[_redeemer];
         if (_redeemerAccount == address(0)) {
-            _redeemerAccount = _calculateRedeemerAccountAddress(_redeemer);
+            bytes memory bytecode = _generateRedeemerAccountBytecode(_redeemer);
+            _redeemerAccount = Create2.computeAddress(bytes32(0), keccak256(bytecode));
         }
     }
 
@@ -373,8 +374,8 @@ contract FAssetRedeemComposer is
         }
 
         try IIFAssetRedeemerAccount(_address).owner() returns (address _redeemer) {
-            // verify _address is matching redeemer account by checking deterministic address calculation
-            if (_address == _calculateRedeemerAccountAddress(_redeemer)) {
+            // verify _address is matching redeemer account
+            if (_address == redeemerToRedeemerAccount[_redeemer]) {
                 return (true, _redeemer);
             }
         } catch {
@@ -478,20 +479,5 @@ contract FAssetRedeemComposer is
         }
 
         return defaultComposerFeePPM;
-    }
-
-    /**
-     * @notice Calculates the deterministic redeemer account address for a given redeemer.
-     * @param _redeemer Redeemer account owner address.
-     * @return _redeemerAccount Calculated redeemer account address.
-     */
-    function _calculateRedeemerAccountAddress(
-        address _redeemer
-    )
-        internal view
-        returns (address _redeemerAccount)
-    {
-        bytes memory bytecode = _generateRedeemerAccountBytecode(_redeemer);
-        _redeemerAccount = Create2.computeAddress(bytes32(0), keccak256(bytecode));
     }
 }
