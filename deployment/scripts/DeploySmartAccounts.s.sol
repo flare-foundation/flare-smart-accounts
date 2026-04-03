@@ -20,6 +20,7 @@ import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaults
 import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
+import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
@@ -32,6 +33,7 @@ import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/Xrp
 // solhint-disable-next-line max-line-length
 // forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
 
+// solhint-disable-next-line max-states-count
 contract DeploySmartAccounts is Script {
     struct AgentVaultConfig {
         address agentVaultAddress;
@@ -75,6 +77,7 @@ contract DeploySmartAccounts is Script {
     ExecutorsFacet private executorsFacet;
     InstructionFeesFacet private instructionFeesFacet;
     InstructionsFacet private instructionsFacet;
+    MemoInstructionsFacet private memoInstructionsFacet;
     PaymentProofsFacet private paymentProofsFacet;
     PersonalAccountsFacet private personalAccountsFacet;
     TimelockFacet private timelockFacet;
@@ -352,6 +355,7 @@ contract DeploySmartAccounts is Script {
         executorsFacet = new ExecutorsFacet();
         instructionFeesFacet = new InstructionFeesFacet();
         instructionsFacet = new InstructionsFacet();
+        memoInstructionsFacet = new MemoInstructionsFacet();
         paymentProofsFacet = new PaymentProofsFacet();
         personalAccountsFacet = new PersonalAccountsFacet();
         timelockFacet = new TimelockFacet();
@@ -360,18 +364,21 @@ contract DeploySmartAccounts is Script {
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
 
-        smartAccountsFacets = new IDiamond.FacetCut[](11);
+        smartAccountsFacets = new IDiamond.FacetCut[](12);
+        // v1.0.0 facets (keep original order)
         smartAccountsFacets[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
         smartAccountsFacets[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
         smartAccountsFacets[2] = _addFacet(address(instructionFeesFacet), "InstructionFeesFacet");
         smartAccountsFacets[3] = _addFacet(address(instructionsFacet), "InstructionsFacet");
-        smartAccountsFacets[4] = _addFacet(address(pauseFacet), "PauseFacet");
-        smartAccountsFacets[5] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
-        smartAccountsFacets[6] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
-        smartAccountsFacets[7] = _addFacet(address(personalAccountReaderFacet), "PersonalAccountReaderFacet");
-        smartAccountsFacets[8] = _addFacet(address(timelockFacet), "TimelockFacet");
-        smartAccountsFacets[9] = _addFacet(address(vaultsFacet), "VaultsFacet");
-        smartAccountsFacets[10] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+        smartAccountsFacets[4] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
+        smartAccountsFacets[5] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
+        smartAccountsFacets[6] = _addFacet(address(timelockFacet), "TimelockFacet");
+        smartAccountsFacets[7] = _addFacet(address(vaultsFacet), "VaultsFacet");
+        smartAccountsFacets[8] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+        // new facets (append at end)
+        smartAccountsFacets[9] = _addFacet(address(memoInstructionsFacet), "MemoInstructionsFacet");
+        smartAccountsFacets[10] = _addFacet(address(pauseFacet), "PauseFacet");
+        smartAccountsFacets[11] = _addFacet(address(personalAccountReaderFacet), "PersonalAccountReaderFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {

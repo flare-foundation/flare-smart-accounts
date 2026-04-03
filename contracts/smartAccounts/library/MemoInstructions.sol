@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
-import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
+import {IMemoInstructionsFacet} from "../../userInterfaces/facets/IMemoInstructionsFacet.sol";
 
 library MemoInstructions {
 
@@ -28,22 +28,25 @@ library MemoInstructions {
         PackedUserOperation memory userOp = abi.decode(_memoData[10:], (PackedUserOperation));
 
         // validate sender
-        require(userOp.sender == _personalAccount, IInstructionsFacet.InvalidSender(userOp.sender, _personalAccount));
+        require(
+            userOp.sender == _personalAccount,
+            IMemoInstructionsFacet.InvalidSender(userOp.sender, _personalAccount)
+        );
 
         State storage state = getState();
 
         // validate nonce
         require(
             userOp.nonce == state.nonces[_personalAccount],
-            IInstructionsFacet.InvalidNonce(state.nonces[_personalAccount], userOp.nonce)
+            IMemoInstructionsFacet.InvalidNonce(state.nonces[_personalAccount], userOp.nonce)
         );
         ++state.nonces[_personalAccount];
 
         // execute callData on PA (Diamond is controller, so onlyController is satisfied)
         (bool success, bytes memory returnData) = _personalAccount.call{value: msg.value}(userOp.callData);
-        require(success, IInstructionsFacet.CallFailed(returnData));
+        require(success, IMemoInstructionsFacet.CallFailed(returnData));
 
-        emit IInstructionsFacet.UserOperationExecuted(
+        emit IMemoInstructionsFacet.UserOperationExecuted(
             _personalAccount,
             userOp.nonce
         );
@@ -56,11 +59,11 @@ library MemoInstructions {
         internal
     {
         // memo format: [0xE0][walletId:uint8][fee:uint64][targetTxId:bytes32] = 42 bytes
-        require(_memoData.length == 42, IInstructionsFacet.InvalidMemoData());
+        require(_memoData.length == 42, IMemoInstructionsFacet.InvalidMemoData());
         bytes32 targetTxId = bytes32(_memoData[10:42]);
         State storage state = getState();
         state.ignoreMemo[_personalAccount][targetTxId] = true;
-        emit IInstructionsFacet.IgnoreMemoSet(_personalAccount, targetTxId);
+        emit IMemoInstructionsFacet.IgnoreMemoSet(_personalAccount, targetTxId);
     }
 
     function setNonce(
@@ -70,16 +73,16 @@ library MemoInstructions {
         internal
     {
         // memo format: [0xE1][walletId:uint8][fee:uint64][newNonce:uint256] = 42 bytes
-        require(_memoData.length == 42, IInstructionsFacet.InvalidMemoData());
+        require(_memoData.length == 42, IMemoInstructionsFacet.InvalidMemoData());
         uint256 newNonce = uint256(bytes32(_memoData[10:42]));
         State storage state = getState();
         uint256 currentNonce = state.nonces[_personalAccount];
         require(
             newNonce > currentNonce && newNonce - currentNonce <= type(uint32).max,
-            IInstructionsFacet.InvalidNonceIncrease(currentNonce, newNonce)
+            IMemoInstructionsFacet.InvalidNonceIncrease(currentNonce, newNonce)
         );
         state.nonces[_personalAccount] = newNonce;
-        emit IInstructionsFacet.NonceIncreased(_personalAccount, newNonce);
+        emit IMemoInstructionsFacet.NonceIncreased(_personalAccount, newNonce);
     }
 
     function setExecutor(
@@ -89,12 +92,12 @@ library MemoInstructions {
         internal
     {
         // memo format: [0xD0][walletId:uint8][fee:uint64][executor:address] = 30 bytes
-        require(_memoData.length == 30, IInstructionsFacet.InvalidMemoData());
+        require(_memoData.length == 30, IMemoInstructionsFacet.InvalidMemoData());
         address newExecutor = address(bytes20(_memoData[10:30]));
-        require(newExecutor != address(0), IInstructionsFacet.AddressZero());
+        require(newExecutor != address(0), IMemoInstructionsFacet.AddressZero());
         State storage state = getState();
         state.executor[_personalAccount] = newExecutor;
-        emit IInstructionsFacet.ExecutorSet(_personalAccount, newExecutor);
+        emit IMemoInstructionsFacet.ExecutorSet(_personalAccount, newExecutor);
     }
 
     function removeExecutor(
@@ -104,10 +107,10 @@ library MemoInstructions {
         internal
     {
         // memo format: [0xD1][walletId:uint8][fee:uint64] = 10 bytes
-        require(_memoData.length == 10, IInstructionsFacet.InvalidMemoData());
+        require(_memoData.length == 10, IMemoInstructionsFacet.InvalidMemoData());
         State storage state = getState();
         state.executor[_personalAccount] = address(0);
-        emit IInstructionsFacet.ExecutorRemoved(_personalAccount);
+        emit IMemoInstructionsFacet.ExecutorRemoved(_personalAccount);
     }
 
     function setReplacementFee(
@@ -117,12 +120,12 @@ library MemoInstructions {
         internal
     {
         // memo format: [0xE2][walletId:uint8][fee:uint64][targetTxId:bytes32][newFee:uint64] = 50 bytes
-        require(_memoData.length == 50, IInstructionsFacet.InvalidMemoData());
+        require(_memoData.length == 50, IMemoInstructionsFacet.InvalidMemoData());
         bytes32 targetTxId = bytes32(_memoData[10:42]);
         uint64 newFee = uint64(bytes8(_memoData[42:50]));
         State storage state = getState();
         state.replacementFee[_personalAccount][targetTxId] = newFee + 1; // +1 so 0 means "not set"
-        emit IInstructionsFacet.ReplacementFeeSet(_personalAccount, targetTxId, newFee);
+        emit IMemoInstructionsFacet.ReplacementFeeSet(_personalAccount, targetTxId, newFee);
     }
 
     function getExecutor(

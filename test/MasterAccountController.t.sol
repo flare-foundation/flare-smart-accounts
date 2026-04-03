@@ -25,6 +25,7 @@ import {DiamondArgs} from "../contracts/diamond/implementation/Diamond.sol";
 import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
 import {MasterAccountControllerInit} from "../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {IInstructionsFacet} from "../contracts/userInterfaces/facets/IInstructionsFacet.sol";
+import {IMemoInstructionsFacet} from "../contracts/userInterfaces/facets/IMemoInstructionsFacet.sol";
 import {IAgentVaultsFacet} from "../contracts/userInterfaces/facets/IAgentVaultsFacet.sol";
 import {IPaymentProofsFacet} from "../contracts/userInterfaces/facets/IPaymentProofsFacet.sol";
 import {IExecutorsFacet} from "../contracts/userInterfaces/facets/IExecutorsFacet.sol";
@@ -438,7 +439,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 11 // base facets + smart accounts facets
+            3 + 12 // base facets + smart accounts facets
         );
 
         IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](1);
@@ -468,7 +469,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 11 // base facets + smart accounts facets
+            3 + 12 // base facets + smart accounts facets
         );
 
         // replace facets
@@ -601,7 +602,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     function testReserveCollateralRevertValueZero() public {
         bytes32 paymentReference = _encodeFxrpPaymentReference(0, 0, 0, 1); // value 0
         bytes32 transactionId = bytes32("tx1");
-        vm.expectRevert(IInstructionsFacet.ValueZero.selector);
+        vm.expectRevert(IMemoInstructionsFacet.ValueZero.selector);
         masterAccountController.reserveCollateral(
             xrplAddress1,
             paymentReference,
@@ -885,7 +886,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.receivingAddressHash = xrplProviderWalletHash;
         proof.data.requestBody.transactionId = transactionId;
 
-        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        vm.expectRevert(IMemoInstructionsFacet.TransactionAlreadyExecuted.selector);
         masterAccountController.executeDepositAfterMinting(23, proof, xrplAddress1);
     }
 
@@ -996,7 +997,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(predictedAddress1, 2 * defaultInstructionFee);
         masterAccountController.executeInstruction(proof, xrplAddress1);
 
-        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        vm.expectRevert(IMemoInstructionsFacet.TransactionAlreadyExecuted.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -1184,7 +1185,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.requestBody.transactionId = bytes32("tx1");
         _mockVerifyPayment(true);
 
-        vm.expectRevert(IInstructionsFacet.AddressZero.selector);
+        vm.expectRevert(IMemoInstructionsFacet.AddressZero.selector);
         masterAccountController.executeInstruction(proof, xrplAddress1);
     }
 
@@ -2500,7 +2501,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(address(masterAccountController), amount);
 
         vm.expectEmit();
-        emit IInstructionsFacet.DirectMintingExecuted(
+        emit IMemoInstructionsFacet.DirectMintingExecuted(
             personalAccountAddr,
             bytes32("dmTx1"),
             xrplAddress1,
@@ -2522,7 +2523,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testDirectMintRevertOnlyAssetManager() public {
-        vm.expectRevert(IInstructionsFacet.OnlyAssetManager.selector);
+        vm.expectRevert(IMemoInstructionsFacet.OnlyAssetManager.selector);
         masterAccountController.mintedFAssets(
             bytes32("dmTx5"),
             xrplAddress1,
@@ -2539,7 +2540,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(address(masterAccountController), 100);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IInstructionsFacet.InsufficientAmountForFee.selector,
+                IMemoInstructionsFacet.InsufficientAmountForFee.selector,
                 100,
                 dmFee
             )
@@ -2570,7 +2571,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             payable(executor)
         );
 
-        vm.expectRevert(IInstructionsFacet.TransactionAlreadyExecuted.selector);
+        vm.expectRevert(IMemoInstructionsFacet.TransactionAlreadyExecuted.selector);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             bytes32("dmTx7"),
@@ -2591,7 +2592,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory memoData = abi.encodePacked(uint8(0x11), uint8(0), uint64(0));
 
         vm.expectRevert(
-            abi.encodeWithSelector(IInstructionsFacet.InvalidInstructionId.selector, uint8(0x11))
+            abi.encodeWithSelector(IMemoInstructionsFacet.InvalidInstructionId.selector, uint8(0x11))
         );
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
@@ -2612,7 +2613,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // memo too short (1 byte)
         bytes memory memoData = abi.encodePacked(uint8(0xFF));
 
-        vm.expectRevert(IInstructionsFacet.InvalidMemoData.selector);
+        vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             bytes32("dmTx9"),
@@ -2686,7 +2687,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectEmit();
-        emit IInstructionsFacet.UserOperationExecuted(
+        emit IMemoInstructionsFacet.UserOperationExecuted(
             personalAccountAddr,
             0
         );
@@ -2716,7 +2717,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory badMemo = abi.encodePacked(uint8(0x11), uint8(0), uint64(0));
 
         vm.expectRevert(
-            abi.encodeWithSelector(IInstructionsFacet.InvalidInstructionId.selector, uint8(0x11))
+            abi.encodeWithSelector(IMemoInstructionsFacet.InvalidInstructionId.selector, uint8(0x11))
         );
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
@@ -2746,7 +2747,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectEmit();
-        emit IInstructionsFacet.IgnoreMemoSet(personalAccountAddr, stuckTxId);
+        emit IMemoInstructionsFacet.IgnoreMemoSet(personalAccountAddr, stuckTxId);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             unstickTxId,
@@ -2809,7 +2810,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectEmit();
-        emit IInstructionsFacet.NonceIncreased(personalAccountAddr, newNonce);
+        emit IMemoInstructionsFacet.NonceIncreased(personalAccountAddr, newNonce);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             bytes32("increaseNonceTx1"),
@@ -2878,7 +2879,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectRevert(
-            abi.encodeWithSelector(IInstructionsFacet.InvalidNonceIncrease.selector, 1, 0)
+            abi.encodeWithSelector(IMemoInstructionsFacet.InvalidNonceIncrease.selector, 1, 0)
         );
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
@@ -2905,7 +2906,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectRevert(
-            abi.encodeWithSelector(IInstructionsFacet.InvalidNonceIncrease.selector, 0, newNonce)
+            abi.encodeWithSelector(IMemoInstructionsFacet.InvalidNonceIncrease.selector, 0, newNonce)
         );
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
@@ -2998,7 +2999,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectEmit();
-        emit IInstructionsFacet.ExecutorSet(personalAccountAddr, newExecutor);
+        emit IMemoInstructionsFacet.ExecutorSet(personalAccountAddr, newExecutor);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             bytes32("setExecTx1"),
@@ -3033,7 +3034,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // remove executor
         fxrp.mint(address(masterAccountController), amount);
         vm.expectEmit();
-        emit IInstructionsFacet.ExecutorRemoved(personalAccountAddr);
+        emit IMemoInstructionsFacet.ExecutorRemoved(personalAccountAddr);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             bytes32("rmExecTx1"),
@@ -3091,7 +3092,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectRevert(
-            abi.encodeWithSelector(IInstructionsFacet.WrongExecutor.selector, paExecutor, wrongExecutor)
+            abi.encodeWithSelector(IMemoInstructionsFacet.WrongExecutor.selector, paExecutor, wrongExecutor)
         );
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
@@ -3125,7 +3126,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // plain direct mint with wrong executor
         fxrp.mint(address(masterAccountController), amount);
         vm.expectRevert(
-            abi.encodeWithSelector(IInstructionsFacet.WrongExecutor.selector, paExecutor, wrongExecutor)
+            abi.encodeWithSelector(IMemoInstructionsFacet.WrongExecutor.selector, paExecutor, wrongExecutor)
         );
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
@@ -3183,7 +3184,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             address(0)
         );
 
-        vm.expectRevert(IInstructionsFacet.AddressZero.selector);
+        vm.expectRevert(IMemoInstructionsFacet.AddressZero.selector);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             bytes32("setExecTx6"),
@@ -3213,7 +3214,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectEmit();
-        emit IInstructionsFacet.ReplacementFeeSet(personalAccountAddr, stuckTxId, newFee);
+        emit IMemoInstructionsFacet.ReplacementFeeSet(personalAccountAddr, stuckTxId, newFee);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             bytes32("replaceTx1"),
@@ -3325,7 +3326,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.expectEmit();
-        emit IInstructionsFacet.ReplacementFeeSet(personalAccountAddr, stuckTxId, 0);
+        emit IMemoInstructionsFacet.ReplacementFeeSet(personalAccountAddr, stuckTxId, 0);
         vm.prank(assetManagerFxrpMock);
         masterAccountController.mintedFAssets(
             bytes32("replaceTx2"),

@@ -14,6 +14,7 @@ import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaults
 import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
+import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
@@ -55,8 +56,9 @@ contract FacetsDeploy is Test {
     }
 
     function deploySmartAccountsFacets() internal returns (IDiamond.FacetCut[] memory) {
-        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](11);
+        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](12);
 
+        // v1.0.0 facets (keep original order)
         diamondCuts[0] = _buildFacetCut(
             address(new AgentVaultsFacet()), "AgentVaultsFacet", IDiamond.FacetCutAction.Add
         );
@@ -84,10 +86,14 @@ contract FacetsDeploy is Test {
         diamondCuts[8] = _buildFacetCut(
             address(new XrplProviderWalletsFacet()), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Add
         );
+        // new facets (append at end)
         diamondCuts[9] = _buildFacetCut(
-            address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add
+            address(new MemoInstructionsFacet()), "MemoInstructionsFacet", IDiamond.FacetCutAction.Add
         );
         diamondCuts[10] = _buildFacetCut(
+            address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[11] = _buildFacetCut(
             address(new PersonalAccountReaderFacet()), "PersonalAccountReaderFacet", IDiamond.FacetCutAction.Add
         );
         return diamondCuts;
