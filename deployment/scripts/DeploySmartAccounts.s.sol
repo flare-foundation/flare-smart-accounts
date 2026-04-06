@@ -26,7 +26,7 @@ import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/Person
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
 import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
-import {PersonalAccountReaderFacet} from "../../contracts/smartAccounts/facets/PersonalAccountReaderFacet.sol";
+import {ReaderFacet} from "../../contracts/smartAccounts/facets/ReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 // solhint-disable no-console
@@ -82,7 +82,7 @@ contract DeploySmartAccounts is Script {
     PersonalAccountsFacet private personalAccountsFacet;
     TimelockFacet private timelockFacet;
     PauseFacet private pauseFacet;
-    PersonalAccountReaderFacet private personalAccountReaderFacet;
+    ReaderFacet private readerFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
@@ -360,7 +360,7 @@ contract DeploySmartAccounts is Script {
         personalAccountsFacet = new PersonalAccountsFacet();
         timelockFacet = new TimelockFacet();
         pauseFacet = new PauseFacet();
-        personalAccountReaderFacet = new PersonalAccountReaderFacet();
+        readerFacet = new ReaderFacet();
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
 
@@ -378,7 +378,7 @@ contract DeploySmartAccounts is Script {
         // new facets (append at end)
         smartAccountsFacets[9] = _addFacet(address(memoInstructionsFacet), "MemoInstructionsFacet");
         smartAccountsFacets[10] = _addFacet(address(pauseFacet), "PauseFacet");
-        smartAccountsFacets[11] = _addFacet(address(personalAccountReaderFacet), "PersonalAccountReaderFacet");
+        smartAccountsFacets[11] = _addFacet(address(readerFacet), "ReaderFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {

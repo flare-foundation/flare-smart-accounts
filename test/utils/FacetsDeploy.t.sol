@@ -20,7 +20,7 @@ import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/Person
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
 import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
-import {PersonalAccountReaderFacet} from "../../contracts/smartAccounts/facets/PersonalAccountReaderFacet.sol";
+import {ReaderFacet} from "../../contracts/smartAccounts/facets/ReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 contract FacetsDeploy is Test {
@@ -94,7 +94,7 @@ contract FacetsDeploy is Test {
             address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add
         );
         diamondCuts[11] = _buildFacetCut(
-            address(new PersonalAccountReaderFacet()), "PersonalAccountReaderFacet", IDiamond.FacetCutAction.Add
+            address(new ReaderFacet()), "ReaderFacet", IDiamond.FacetCutAction.Add
         );
         return diamondCuts;
     }

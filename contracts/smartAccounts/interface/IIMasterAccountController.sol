@@ -14,7 +14,7 @@ import {IIMemoInstructionsFacet} from "./IIMemoInstructionsFacet.sol";
 import {IIPauseFacet} from "./IIPauseFacet.sol";
 import {IIPaymentProofsFacet} from "./IIPaymentProofsFacet.sol";
 import {IIPersonalAccountsFacet} from "./IIPersonalAccountsFacet.sol";
-import {IIPersonalAccountReaderFacet} from "./IIPersonalAccountReaderFacet.sol";
+import {IIReaderFacet} from "./IIReaderFacet.sol";
 import {IITimelockFacet} from "./IITimelockFacet.sol";
 import {IIVaultsFacet} from "./IIVaultsFacet.sol";
 import {IIXrplProviderWalletsFacet} from "./IIXrplProviderWalletsFacet.sol";
@@ -37,7 +37,7 @@ interface IIMasterAccountController is
     IIPauseFacet,
     IIPaymentProofsFacet,
     IIPersonalAccountsFacet,
-    IIPersonalAccountReaderFacet,
+    IIReaderFacet,
     IITimelockFacet,
     IIVaultsFacet,
     IIXrplProviderWalletsFacet

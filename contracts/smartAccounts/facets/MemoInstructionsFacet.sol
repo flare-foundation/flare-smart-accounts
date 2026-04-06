@@ -28,6 +28,9 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
     }
 
     /// @inheritdoc IMemoInstructionsFacet
+    /// @dev _executor is always msg.sender of the direct minting call to the AssetManager.
+    /// XRPL transactions to smart accounts must NOT use destination tags — using a tag
+    /// allows front-running via tag purchase on the direct minting facet.
     function mintedFAssets(
         bytes32 _transactionId,
         string calldata _sourceAddress,
@@ -50,7 +53,7 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         if (_memoData.length > 0) {
             MemoInstructions.State storage memoState = MemoInstructions.getState();
             if (memoState.ignoreMemo[personalAccount][_transactionId]) {
-                memoState.ignoreMemo[personalAccount][_transactionId] = false;
+                delete memoState.ignoreMemo[personalAccount][_transactionId];
                 memoIgnored = true;
             }
         }
@@ -78,9 +81,10 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         uint64 feeOverride = MemoInstructions.getReplacementFee(personalAccount, _transactionId);
         if (feeOverride > 0) {
             executorFee = feeOverride - 1;
+            delete MemoInstructions.getState().replacementFee[personalAccount][_transactionId];
         }
 
-        _mintFAssets(
+        _distributeFAssets(
             personalAccount, _transactionId,
             _sourceAddress, _amount, _executor, executorFee
         );
@@ -137,7 +141,7 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         return MemoInstructions.getNonce(_personalAccount);
     }
 
-    function _mintFAssets(
+    function _distributeFAssets(
         address _personalAccount,
         bytes32 _transactionId,
         string calldata _sourceAddress,

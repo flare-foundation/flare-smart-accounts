@@ -38,7 +38,7 @@ import {IITimelockFacet} from "../contracts/smartAccounts/interface/IITimelockFa
 import {XrplProviderWalletsFacet} from "../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 import {SimpleExample} from "../contracts/mock/SimpleExample.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
-import {IPersonalAccountReaderFacet} from "../contracts/userInterfaces/facets/IPersonalAccountReaderFacet.sol";
+import {IReaderFacet} from "../contracts/userInterfaces/facets/IReaderFacet.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 
 // solhint-disable-next-line max-states-count
@@ -3681,7 +3681,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testGetBalancesEmpty() public {
         address pa = masterAccountController.getPersonalAccount(xrplAddress1);
-        IPersonalAccountReaderFacet.AccountBalances memory balances =
+        IReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(pa);
 
         assertEq(balances.natBalance, 0);
@@ -3700,7 +3700,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address pa = masterAccountController.getPersonalAccount(xrplAddress1);
         vm.deal(pa, 5 ether);
 
-        IPersonalAccountReaderFacet.AccountBalances memory balances =
+        IReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(pa);
         assertEq(balances.natBalance, 5 ether);
     }
@@ -3709,7 +3709,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address pa = masterAccountController.getPersonalAccount(xrplAddress1);
         fxrp.mint(pa, 500);
 
-        IPersonalAccountReaderFacet.AccountBalances memory balances =
+        IReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(pa);
         assertEq(balances.fXrp.balance, 500);
     }
@@ -3724,7 +3724,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         firelightVault.deposit(depositAmount, pa);
         vm.stopPrank();
 
-        IPersonalAccountReaderFacet.AccountBalances memory balances =
+        IReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(pa);
         assertEq(balances.vaults[0].vaultId, 1);
         assertEq(balances.vaults[0].vaultAddress, address(firelightVault));
@@ -3743,7 +3743,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         upshiftVault.deposit(depositAmount, pa);
         vm.stopPrank();
 
-        IPersonalAccountReaderFacet.AccountBalances memory balances =
+        IReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(pa);
         assertEq(balances.vaults[1].vaultId, 4);
         assertEq(balances.vaults[1].vaultAddress, address(upshiftVault));
@@ -3768,7 +3768,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.deal(pa, 2 ether);
         fxrp.mint(pa, 300);
 
-        IPersonalAccountReaderFacet.AccountBalances memory balances =
+        IReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(xrplAddress1);
         assertEq(balances.natBalance, 2 ether);
         assertEq(balances.fXrp.balance, 301); // 1 from creation mint + 300 minted directly
@@ -3783,7 +3783,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // send fXRP to the computed address before PA exists
         fxrp.mint(expectedPA, 777);
 
-        IPersonalAccountReaderFacet.AccountBalances memory balances =
+        IReaderFacet.AccountBalances memory balances =
             masterAccountController.getBalances(newXrplAddr);
         assertEq(balances.natBalance, 0);
         assertEq(balances.wNat.balance, 0);
@@ -3793,7 +3793,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testReaderAgentVaults() public {
-        IPersonalAccountReaderFacet.AgentVaultInfo[] memory agentVaults =
+        IReaderFacet.AgentVaultDetails[] memory agentVaults =
             masterAccountController.agentVaults();
         assertEq(agentVaults.length, 1);
         assertEq(agentVaults[0].agentVaultId, 1);
@@ -3801,7 +3801,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testReaderVaults() public {
-        IPersonalAccountReaderFacet.VaultInfo[] memory vaults =
+        IReaderFacet.VaultDetails[] memory vaults =
             masterAccountController.vaults();
         assertEq(vaults.length, 2);
         assertEq(vaults[0].vaultId, 1);

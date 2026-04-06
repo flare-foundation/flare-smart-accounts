@@ -4,10 +4,10 @@ pragma solidity ^0.8.27;
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {IIPersonalAccountReaderFacet} from "../interface/IIPersonalAccountReaderFacet.sol";
+import {IIReaderFacet} from "../interface/IIReaderFacet.sol";
 // import is needed for @inheritdoc
 // solhint-disable-next-line no-unused-import
-import {IPersonalAccountReaderFacet} from "../../userInterfaces/facets/IPersonalAccountReaderFacet.sol";
+import {IReaderFacet} from "../../userInterfaces/facets/IReaderFacet.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {IIVault} from "../interface/IIVault.sol";
@@ -16,12 +16,12 @@ import {AgentVaults} from "../library/AgentVaults.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
 
 /**
- * @title PersonalAccountReaderFacet
+ * @title ReaderFacet
  * @notice Read-only facet that aggregates balance and account data.
  */
-contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
+contract ReaderFacet is IIReaderFacet {
 
-    /// @inheritdoc IPersonalAccountReaderFacet
+    /// @inheritdoc IReaderFacet
     function getBalances(
         address _account
     )
@@ -31,7 +31,7 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
         _balances = _getBalances(_account);
     }
 
-    /// @inheritdoc IPersonalAccountReaderFacet
+    /// @inheritdoc IReaderFacet
     function getBalances(
         string calldata _xrplOwner
     )
@@ -46,33 +46,33 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
         _balances = _getBalances(personalAccount);
     }
 
-    /// @inheritdoc IPersonalAccountReaderFacet
+    /// @inheritdoc IReaderFacet
     function agentVaults()
         external view
-        returns (AgentVaultInfo[] memory _agentVaults)
+        returns (AgentVaultDetails[] memory _agentVaults)
     {
         AgentVaults.State storage state = AgentVaults.getState();
         uint256[] memory ids = state.agentVaultIds;
-        _agentVaults = new AgentVaultInfo[](ids.length);
+        _agentVaults = new AgentVaultDetails[](ids.length);
         for (uint256 i = 0; i < ids.length; i++) {
-            _agentVaults[i] = AgentVaultInfo({
+            _agentVaults[i] = AgentVaultDetails({
                 agentVaultId: ids[i],
                 agentVaultAddress: state.agentVaultIdToAgentVaultAddress[ids[i]]
             });
         }
     }
 
-    /// @inheritdoc IPersonalAccountReaderFacet
+    /// @inheritdoc IReaderFacet
     function vaults()
         external view
-        returns (VaultInfo[] memory _vaults)
+        returns (VaultDetails[] memory _vaults)
     {
         Vaults.State storage state = Vaults.getState();
         uint256[] memory ids = state.vaultIds;
-        _vaults = new VaultInfo[](ids.length);
+        _vaults = new VaultDetails[](ids.length);
         for (uint256 i = 0; i < ids.length; i++) {
             Vaults.VaultInfo memory info = state.vaultIdToVaultInfo[ids[i]];
-            _vaults[i] = VaultInfo({
+            _vaults[i] = VaultDetails({
                 vaultId: ids[i],
                 vaultAddress: info.vaultAddress,
                 vaultType: info.vaultType
@@ -80,7 +80,7 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
         }
     }
 
-    /// @inheritdoc IPersonalAccountReaderFacet
+    /// @inheritdoc IReaderFacet
     function isSmartAccount(
         address _address
     )
@@ -140,7 +140,7 @@ contract PersonalAccountReaderFacet is IIPersonalAccountReaderFacet {
                         IIVault(info.vaultAddress).previewRedemption(_balances.vaults[i].shares, false);
                 }
             } else {
-                revert UnsupportedVaultType(info.vaultType);
+                assert(false); // unsupported vault type — should never happen
             }
         }
     }

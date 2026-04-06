@@ -14,7 +14,7 @@
     "DiamondLoupeFacet",
     "MemoInstructionsFacet",
     "PauseFacet",
-    "PersonalAccountReaderFacet"
+    "ReaderFacet"
   ],
   "deleteAllOldMethods": false,
   "deleteSelectorSigs": [],

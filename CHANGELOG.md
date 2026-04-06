@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `MemoInstructions` library with ERC-7201 namespaced storage.
   - `executeUserOp(Call[])` on `PersonalAccount` — generic multi-call for account abstraction.
   - `PauseFacet` with separate pauser/unpauser roles (`EnumerableSet.AddressSet`), `onlyOwnerWithTimelock` on role management.
-  - `PersonalAccountReaderFacet` — read-only facet for balance aggregation, vault/agent vault listing, and `isSmartAccount` check.
+  - `ReaderFacet` — read-only facet for balance aggregation, vault/agent vault listing, and `isSmartAccount` check.
   - Token receiver support on `PersonalAccount`: `ERC721Holder`, `ERC1155Holder`, `IERC1363Receiver`.
   - `receive() external payable` on `PersonalAccount`.
   - `previewRedemption` to `IIVault` (Upshift vault interface).

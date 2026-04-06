@@ -4,10 +4,10 @@ pragma solidity >=0.8.4 <0.9;
 import {IVaultsFacet} from "./IVaultsFacet.sol";
 
 /**
- * @title IPersonalAccountReaderFacet
- * @notice Interface for the PersonalAccountReaderFacet contract.
+ * @title IReaderFacet
+ * @notice Interface for the ReaderFacet contract.
  */
-interface IPersonalAccountReaderFacet {
+interface IReaderFacet {
 
     /**
      * @notice Token address and balance pair.
@@ -52,7 +52,7 @@ interface IPersonalAccountReaderFacet {
     /**
      * @notice Agent vault information.
      */
-    struct AgentVaultInfo {
+    struct AgentVaultDetails {
         /// @notice Agent vault ID.
         uint256 agentVaultId;
         /// @notice Agent vault address.
@@ -62,7 +62,7 @@ interface IPersonalAccountReaderFacet {
     /**
      * @notice Vault information.
      */
-    struct VaultInfo {
+    struct VaultDetails {
         /// @notice Vault ID.
         uint256 vaultId;
         /// @notice Vault address.
@@ -105,7 +105,7 @@ interface IPersonalAccountReaderFacet {
      */
     function agentVaults()
         external view
-        returns (AgentVaultInfo[] memory _agentVaults);
+        returns (AgentVaultDetails[] memory _agentVaults);
 
     /**
      * @notice Get all registered vaults.
@@ -113,7 +113,7 @@ interface IPersonalAccountReaderFacet {
      */
     function vaults()
         external view
-        returns (VaultInfo[] memory _vaults);
+        returns (VaultDetails[] memory _vaults);
 
     /**
      * @notice Check if a Flare address is a smart account (personal account).
