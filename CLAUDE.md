@@ -16,14 +16,14 @@ Solidity smart contracts implementing Flare Smart Accounts — a Diamond proxy (
 - `forge build` — compile contracts
 - `forge test` — run all tests
 - `forge test -vvv --match-test testName` — run specific test with traces
-- `yarn coverage` — coverage report (lcov + genhtml)
-- `yarn lint` — solhint on contracts, tests, deployment
-- `forge fmt` — format Solidity files (run before lint)
+- `pnpm coverage` — coverage report (lcov + genhtml)
+- `pnpm lint-sol` — solhint on contracts, tests, deployment
+- `pnpm format:check` — check Prettier formatting
 
 **After every change, run these checks before considering work complete:**
-1. `yarn lint` — ensure no lint errors (warnings are acceptable)
+1. `pnpm lint-sol` — ensure no lint errors (warnings are acceptable)
 2. `forge build` — ensure compilation succeeds
-3. `yarn coverage` — ensure all tests pass and coverage report generates
+3. `pnpm coverage` — ensure all tests pass and coverage report generates
 
 ## Project Structure
 
@@ -69,7 +69,22 @@ audit/               # Security audit reports
 - `onlyOwner` / `onlyOwnerWithTimelock` on admin facet functions
 
 ### Commits
-- Short commit messages, no co-authored-by lines
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). No co-authored-by lines.
+
+| Type | When to use |
+| ---- | ----------- |
+| `feat` | Adding new features or functionality |
+| `fix` | Fixing a bug |
+| `refactor` | Restructuring code without changing behavior |
+| `test` | Adding or updating tests |
+| `docs` | Documentation changes |
+| `chore` | Maintenance tasks (dependencies, tooling, etc.) |
+| `ci` | CI/CD pipeline changes |
+| `chore(release)` | Creating a release |
+| `chore(deploy)` | Updating deploy parameters and scripts |
+
+`fix`, `feat`, and `refactor` modify production/audit-scoped code. `chore` and `test` should not modify audit-scoped files.
 
 ### Testing
 - Tests in `test/` using forge-std `Test`

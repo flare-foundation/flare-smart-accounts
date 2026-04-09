@@ -156,23 +156,3 @@ The script will read the `execute` flag from cut JSON file to determine whether 
 
 #### Note on Internal Output Files
 Intermediate files generated during diamond cut deployment are written to the `deployment/output-internal/` directory. These files are for internal use only and are not considered essential output or deployment artifacts. You generally do not need to track or use these files unless you are debugging or developing deployment scripts.
-
-## Review scope and audits
-
-When reviewing the code, either as part of a bug bounty program, audit competition, or regular code review, please consider the following scope.
-
-### In scope
-
-```
-contracts/composer/**/*
-contracts/smartAccounts/**/*
-contracts/userInterfaces/**/*
-contracts/utils/**/*
-```
-
-### Out of scope
-
-```
-contracts/diamond/**/*
-contracts/mock/**/*
-```
