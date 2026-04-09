@@ -140,7 +140,7 @@ pnpm verify_contracts coston2
 ```
 
 ### Execute Diamond Cut
-To execute a diamond cut on an existing diamond contract (or to only print execute transaction data), first create the cut file (see [cut-example.json](deployment/cuts/cut-example.json)) and put it in the `deployment/cuts/<network>` folder.
+To execute a diamond cut on an existing diamond contract (or to only print execute transaction data), first create the cut file (see [cut-example.json](deployment/cuts/coston2/cut-example.json)) and put it in the `deployment/cuts/<network>` folder.
 
 Then run the diamond_cut script with:
 
@@ -156,3 +156,23 @@ The script will read the `execute` flag from cut JSON file to determine whether 
 
 #### Note on Internal Output Files
 Intermediate files generated during diamond cut deployment are written to the `deployment/output-internal/` directory. These files are for internal use only and are not considered essential output or deployment artifacts. You generally do not need to track or use these files unless you are debugging or developing deployment scripts.
+
+## Review scope and audits
+
+When reviewing the code, either as part of a bug bounty program, audit competition, or regular code review, please consider the following scope.
+
+### In scope
+
+```
+contracts/composer/**/*
+contracts/smartAccounts/**/*
+contracts/userInterfaces/**/*
+contracts/utils/**/*
+```
+
+### Out of scope
+
+```
+contracts/diamond/**/*
+contracts/mock/**/*
+```
