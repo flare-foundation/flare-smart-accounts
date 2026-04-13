@@ -29,6 +29,8 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
         uint256 destinationTag;
         /// @notice Executor address used for redemption. If zero, default executor is used.
         address payable executor;
+        /// @notice Executor fee (in wei) to be paid to the executor for executing the redeem on Flare.
+        uint256 executorFee;
     }
 
     /**
@@ -72,6 +74,7 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @param executor Executor address used for redeem.
      * @param executorFee Executor fee passed with compose message.
      * @param redeemedAmountUBA Amount redeemed in UBA reported by asset manager.
+     * @param wrappedAmount Amount of wrapped native tokens deposited to redeemer account.
      */
     event FAssetRedeemed(
         bytes32 indexed guid,
@@ -84,7 +87,8 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
         uint256 destinationTag,
         address executor,
         uint256 executorFee,
-        uint256 redeemedAmountUBA
+        uint256 redeemedAmountUBA,
+        uint256 wrappedAmount
     );
 
     /**
@@ -168,6 +172,11 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
      * @notice Reverts when a required address argument is zero.
      */
     error InvalidAddress();
+
+    /**
+    * @notice Reverts when the provided executor fee is insufficient for redemption execution.
+    */
+    error InsufficientExecutorFee(uint256 providedFee, uint256 requiredFee);
 
     /**
      * @notice Reverts when caller is not the LayerZero endpoint.

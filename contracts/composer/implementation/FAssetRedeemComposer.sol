@@ -232,24 +232,6 @@ contract FAssetRedeemComposer is
         emit DefaultExecutorSet(_executor);
     }
 
-    /**
-     * @notice Transfers f-assets held by composer to a target address.
-     * @dev Recovery function for funds stuck on composer when compose flow fails or is not invoked.
-     * @param _to Recipient address.
-     * @param _amount Amount of f-asset to transfer.
-     */
-    function transferFAsset(
-        address _to,
-        uint256 _amount
-    )
-        external
-        onlyOwnerWithTimelock
-    {
-        require(_to != address(0), InvalidAddress());
-        fAsset.safeTransfer(_to, _amount);
-        emit FAssetTransferred(_to, _amount);
-    }
-
     /// @inheritdoc ILayerZeroComposer
     function lzCompose(
         address _from,
@@ -276,6 +258,10 @@ contract FAssetRedeemComposer is
             OFTComposeMsgCodec.composeMsg(_message), (RedeemComposeMessage)
         );
         require(redeemComposeMessage.redeemer != address(0), InvalidAddress());
+        require(
+            msg.value >= redeemComposeMessage.executorFee,
+            InsufficientExecutorFee(msg.value, redeemComposeMessage.executorFee)
+        );
 
         if (composerFee > 0) {
             fAsset.safeTransfer(composerFeeRecipient, composerFee);
@@ -289,7 +275,7 @@ contract FAssetRedeemComposer is
         address payable executor = redeemComposeMessage.executor != address(0) ?
             redeemComposeMessage.executor : defaultExecutor;
 
-        try IIFAssetRedeemerAccount(redeemerAccount).redeemFAsset{value: msg.value}(
+        try IIFAssetRedeemerAccount(redeemerAccount).redeemFAsset{value: redeemComposeMessage.executorFee}(
             assetManager,
             amountToRedeemAfterFee,
             redeemComposeMessage.redeemerUnderlyingAddress,
@@ -299,6 +285,14 @@ contract FAssetRedeemComposer is
         )
             returns (uint256 _redeemedAmountUBA)
         {
+            uint256 excessAmount = 0;
+            if (msg.value > redeemComposeMessage.executorFee) {
+                // wrap excess native tokens and deposit to redeemer account
+                //slither-disable-next-line arbitrary-send-eth
+                excessAmount = msg.value - redeemComposeMessage.executorFee;
+                IWNat(address(wNat)).depositTo{value: excessAmount}(redeemerAccount);
+            }
+
             emit FAssetRedeemed(
                 _guid,
                 srcEid,
@@ -309,8 +303,9 @@ contract FAssetRedeemComposer is
                 redeemComposeMessage.redeemWithTag,
                 redeemComposeMessage.destinationTag,
                 executor,
-                msg.value,
-                _redeemedAmountUBA
+                redeemComposeMessage.executorFee,
+                _redeemedAmountUBA,
+                excessAmount
             );
         } catch {
             if (msg.value > 0) {

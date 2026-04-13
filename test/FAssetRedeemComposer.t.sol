@@ -491,36 +491,6 @@ contract FAssetRedeemComposerTest is Test {
         composer.setDefaultExecutor(payable(makeAddr("executor")));
     }
 
-    // --- transferFAsset ---
-
-    function testTransferFAsset() public {
-        uint256 amount = 100;
-        address to = makeAddr("to");
-
-        _mockSafeTransfer(fAsset, to, amount);
-
-        vm.prank(owner);
-        vm.expectEmit();
-        emit IFAssetRedeemComposer.FAssetTransferred(to, amount);
-        composer.transferFAsset(to, amount);
-    }
-
-    function testTransferFAssetRevertInvalidAddress() public {
-        vm.prank(owner);
-        vm.expectRevert(IFAssetRedeemComposer.InvalidAddress.selector);
-        composer.transferFAsset(address(0), 100);
-    }
-
-    function testTransferFAssetRevertOnlyOwner() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                Ownable.OwnableUnauthorizedAccount.selector,
-                address(this)
-            )
-        );
-        composer.transferFAsset(makeAddr("to"), 100);
-    }
-
     // --- lzCompose ---
 
     function testLzComposeSuccess() public {
@@ -532,7 +502,9 @@ contract FAssetRedeemComposerTest is Test {
         uint256 amountToRedeem = amountLD - composerFee;
         uint256 nativeValue = 0.1 ether;
 
-        (bytes memory message, bytes32 guid) = _encodeMessage(redeemer, redeemerUnderlying, srcEid, amountLD);
+        (bytes memory message, bytes32 guid) = _encodeMessageFull(
+            redeemer, redeemerUnderlying, false, 0, payable(address(0)), nativeValue, srcEid, amountLD
+        );
 
         address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
 
@@ -583,7 +555,8 @@ contract FAssetRedeemComposerTest is Test {
             0,
             defaultExecutor,
             nativeValue,
-            amountToRedeem // result
+            amountToRedeem, // result
+            0 // wrappedAmount (no excess)
         );
 
         composer.lzCompose{value: nativeValue}(
@@ -613,7 +586,9 @@ contract FAssetRedeemComposerTest is Test {
         uint256 amountToRedeem = amountLD - composerFee;
         uint256 nativeValue = 0.1 ether;
 
-        (bytes memory message, bytes32 guid) = _encodeMessage(redeemer, redeemerUnderlying, srcEid, amountLD);
+        (bytes memory message, bytes32 guid) = _encodeMessageFull(
+            redeemer, redeemerUnderlying, false, 0, payable(address(0)), nativeValue, srcEid, amountLD
+        );
 
         address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
 
@@ -664,7 +639,8 @@ contract FAssetRedeemComposerTest is Test {
             0,
             defaultExecutor,
             nativeValue,
-            amountToRedeem // result
+            amountToRedeem, // result
+            0 // wrappedAmount (no excess)
         );
 
         composer.lzCompose{value: nativeValue}(
@@ -719,7 +695,8 @@ contract FAssetRedeemComposerTest is Test {
             0,
             defaultExecutor,
             0,
-            amountToRedeem
+            amountToRedeem,
+            0 // wrappedAmount
         );
 
         composer.lzCompose(
@@ -904,7 +881,7 @@ contract FAssetRedeemComposerTest is Test {
 
         // redeemWithTag = false, but destinationTag != 0
         (bytes memory message, bytes32 guid) = _encodeMessageFull(
-            redeemer, redeemerUnderlying, false, destinationTag, payable(address(0)), srcEid, amountLD
+            redeemer, redeemerUnderlying, false, destinationTag, payable(address(0)), nativeValue, srcEid, amountLD
         );
 
         address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
@@ -937,7 +914,8 @@ contract FAssetRedeemComposerTest is Test {
             destinationTag,
             defaultExecutor,
             nativeValue,
-            amountToRedeem
+            amountToRedeem,
+            0 // wrappedAmount (no excess)
         );
 
         composer.lzCompose{value: nativeValue}(
@@ -962,7 +940,7 @@ contract FAssetRedeemComposerTest is Test {
         uint256 nativeValue = 0.1 ether;
 
         (bytes memory message, bytes32 guid) = _encodeMessageFull(
-            redeemer, redeemerUnderlying, true, destinationTag, payable(address(0)), srcEid, amountLD
+            redeemer, redeemerUnderlying, true, destinationTag, payable(address(0)), nativeValue, srcEid, amountLD
         );
 
         address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
@@ -1000,7 +978,8 @@ contract FAssetRedeemComposerTest is Test {
             destinationTag,
             defaultExecutor,
             nativeValue,
-            amountToRedeem
+            amountToRedeem,
+            0 // wrappedAmount (no excess)
         );
 
         composer.lzCompose{value: nativeValue}(
@@ -1022,7 +1001,7 @@ contract FAssetRedeemComposerTest is Test {
         uint256 amountToRedeem = amountLD - composerFee;
 
         (bytes memory message, bytes32 guid) = _encodeMessageFull(
-            redeemer, redeemerUnderlying, true, destinationTag, payable(address(0)), srcEid, amountLD
+            redeemer, redeemerUnderlying, true, destinationTag, payable(address(0)), 0, srcEid, amountLD
         );
 
         address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
@@ -1073,7 +1052,7 @@ contract FAssetRedeemComposerTest is Test {
         uint256 customExecutorFee = 0.5 ether;
 
         (bytes memory message, bytes32 guid) = _encodeMessageFull(
-            redeemer, redeemerUnderlying, false, 0, customExecutor, srcEid, amountLD
+            redeemer, redeemerUnderlying, false, 0, customExecutor, customExecutorFee, srcEid, amountLD
         );
 
         address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
@@ -1106,7 +1085,8 @@ contract FAssetRedeemComposerTest is Test {
             0,
             customExecutor,
             customExecutorFee,
-            amountToRedeem
+            amountToRedeem,
+            0 // wrappedAmount (no excess)
         );
 
         composer.lzCompose{value: customExecutorFee}(
@@ -1224,7 +1204,9 @@ contract FAssetRedeemComposerTest is Test {
         uint256 amountToRedeem = amountLD - fee;
         uint256 nativeValue = 0.5 ether;
 
-        (bytes memory message, bytes32 guid) = _encodeMessage(redeemer, redeemerUnderlying, srcEid, amountLD);
+        (bytes memory message, bytes32 guid) = _encodeMessageFull(
+            redeemer, redeemerUnderlying, false, 0, payable(address(0)), nativeValue, srcEid, amountLD
+        );
 
         address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
 
@@ -1241,7 +1223,7 @@ contract FAssetRedeemComposerTest is Test {
             "Redeem failed"
         );
 
-        // Mock wNat.depositTo to accept the native value
+        // Mock wNat.depositTo to accept the executor fee on failure
         vm.mockCall(
             wNat,
             nativeValue,
@@ -1305,6 +1287,214 @@ contract FAssetRedeemComposerTest is Test {
             redeemerAccount,
             amountToRedeem,
             0
+        );
+
+        composer.lzCompose(
+            trustedSourceOApp,
+            guid,
+            message,
+            address(0),
+            ""
+        );
+    }
+
+    // --- lzCompose executor fee validation ---
+
+    function testLzComposeRevertInsufficientExecutorFee() public {
+        address redeemer = makeAddr("redeemer");
+        string memory redeemerUnderlying = "rExample";
+        uint32 srcEid = 1;
+        uint256 amountLD = 1000;
+        uint256 executorFee = 0.5 ether;
+
+        (bytes memory message, bytes32 guid) = _encodeMessageFull(
+            redeemer, redeemerUnderlying, false, 0, payable(address(0)), executorFee, srcEid, amountLD
+        );
+
+        // Send less than executorFee
+        uint256 insufficientValue = 0.1 ether;
+        vm.deal(endpoint, insufficientValue);
+        vm.prank(endpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IFAssetRedeemComposer.InsufficientExecutorFee.selector,
+                insufficientValue,
+                executorFee
+            )
+        );
+        composer.lzCompose{value: insufficientValue}(
+            trustedSourceOApp,
+            guid,
+            message,
+            address(0),
+            ""
+        );
+    }
+
+    function testLzComposeSuccessExcessNativeWrapped() public {
+        address redeemer = makeAddr("redeemer");
+        string memory redeemerUnderlying = "rExample";
+        uint32 srcEid = 1;
+        uint256 amountLD = 1000;
+        uint256 composerFee = amountLD * defaultComposerFeePPM / 1_000_000;
+        uint256 amountToRedeem = amountLD - composerFee;
+        uint256 executorFee = 0.1 ether;
+        uint256 nativeValue = 0.5 ether;
+        uint256 excess = nativeValue - executorFee;
+
+        (bytes memory message, bytes32 guid) = _encodeMessageFull(
+            redeemer, redeemerUnderlying, false, 0, payable(address(0)), executorFee, srcEid, amountLD
+        );
+
+        address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
+
+        _mockSafeTransfer(fAsset, composerFeeRecipient, composerFee);
+        _mockSafeTransfer(fAsset, redeemerAccount, amountToRedeem);
+        _mockForceApprove(fAsset, true);
+        _mockForceApprove(stableCoin, true);
+        _mockForceApprove(wNat, true);
+
+        vm.mockCall(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
+            abi.encode(amountToRedeem)
+        );
+
+        // Mock wNat.depositTo for the excess amount
+        vm.mockCall(
+            wNat,
+            excess,
+            abi.encodeWithSignature("depositTo(address)", redeemerAccount),
+            ""
+        );
+
+        vm.deal(endpoint, nativeValue);
+        vm.prank(endpoint);
+
+        vm.expectEmit();
+        emit IFAssetRedeemComposer.FAssetRedeemed(
+            guid,
+            srcEid,
+            redeemer,
+            redeemerAccount,
+            amountToRedeem,
+            redeemerUnderlying,
+            false,
+            0,
+            defaultExecutor,
+            executorFee,
+            amountToRedeem,
+            excess // wrappedAmount
+        );
+
+        composer.lzCompose{value: nativeValue}(
+            trustedSourceOApp,
+            guid,
+            message,
+            address(0),
+            ""
+        );
+    }
+
+    function testLzComposeFailedExcessAndExecutorFeeWrapped() public {
+        address redeemer = makeAddr("redeemer");
+        string memory redeemerUnderlying = "rExample";
+        uint32 srcEid = 1;
+        uint256 amountLD = 1000;
+        uint256 fee = amountLD * defaultComposerFeePPM / 1_000_000;
+        uint256 amountToRedeem = amountLD - fee;
+        uint256 executorFee = 0.2 ether;
+        uint256 nativeValue = 0.5 ether;
+
+        (bytes memory message, bytes32 guid) = _encodeMessageFull(
+            redeemer, redeemerUnderlying, false, 0, payable(address(0)), executorFee, srcEid, amountLD
+        );
+
+        address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
+
+        _mockSafeTransfer(fAsset, composerFeeRecipient, fee);
+        _mockSafeTransfer(fAsset, redeemerAccount, amountToRedeem);
+        _mockForceApprove(fAsset, true);
+        _mockForceApprove(stableCoin, true);
+        _mockForceApprove(wNat, true);
+
+        vm.mockCallRevert(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
+            "Redeem failed"
+        );
+
+        // Mock wNat.depositTo for full msg.value wrapping (single call in catch)
+        vm.mockCall(
+            wNat,
+            nativeValue,
+            abi.encodeWithSignature("depositTo(address)", redeemerAccount),
+            ""
+        );
+
+        vm.deal(endpoint, nativeValue);
+        vm.prank(endpoint);
+
+        vm.expectEmit();
+        emit IFAssetRedeemComposer.FAssetRedeemFailed(
+            guid,
+            srcEid,
+            redeemer,
+            redeemerAccount,
+            amountToRedeem,
+            nativeValue // wrappedAmount is full msg.value on failure
+        );
+
+        composer.lzCompose{value: nativeValue}(
+            trustedSourceOApp,
+            guid,
+            message,
+            address(0),
+            ""
+        );
+    }
+
+    function testLzComposeSuccessZeroExecutorFeeNoExcessWrap() public {
+        address redeemer = makeAddr("redeemer");
+        string memory redeemerUnderlying = "rExample";
+        uint32 srcEid = 1;
+        uint256 amountLD = 1000;
+        uint256 composerFee = amountLD * defaultComposerFeePPM / 1_000_000;
+        uint256 amountToRedeem = amountLD - composerFee;
+
+        // executorFee = 0, msg.value = 0 — no wrapping should occur
+        (bytes memory message, bytes32 guid) = _encodeMessage(redeemer, redeemerUnderlying, srcEid, amountLD);
+
+        address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
+
+        _mockSafeTransfer(fAsset, composerFeeRecipient, composerFee);
+        _mockSafeTransfer(fAsset, redeemerAccount, amountToRedeem);
+        _mockForceApprove(fAsset, true);
+        _mockForceApprove(stableCoin, true);
+        _mockForceApprove(wNat, true);
+
+        vm.mockCall(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
+            abi.encode(amountToRedeem)
+        );
+
+        vm.prank(endpoint);
+
+        vm.expectEmit();
+        emit IFAssetRedeemComposer.FAssetRedeemed(
+            guid,
+            srcEid,
+            redeemer,
+            redeemerAccount,
+            amountToRedeem,
+            redeemerUnderlying,
+            false,
+            0,
+            defaultExecutor,
+            0,
+            amountToRedeem,
+            0 // wrappedAmount
         );
 
         composer.lzCompose(
@@ -1459,7 +1649,7 @@ contract FAssetRedeemComposerTest is Test {
         uint32 _srcEid,
         uint256 _amountLD
     ) private pure returns (bytes memory, bytes32) {
-        return _encodeMessageFull(_redeemer, _redeemerUnderlying, false, 0, payable(address(0)), _srcEid, _amountLD);
+        return _encodeMessageFull(_redeemer, _redeemerUnderlying, false, 0, payable(address(0)), 0, _srcEid, _amountLD);
     }
 
     function _encodeMessageFull(
@@ -1468,6 +1658,7 @@ contract FAssetRedeemComposerTest is Test {
         bool _redeemWithTag,
         uint256 _destinationTag,
         address payable _executor,
+        uint256 _executorFee,
         uint32 _srcEid,
         uint256 _amountLD
     ) private pure returns (bytes memory, bytes32) {
@@ -1476,7 +1667,8 @@ contract FAssetRedeemComposerTest is Test {
             redeemerUnderlyingAddress: _redeemerUnderlying,
             redeemWithTag: _redeemWithTag,
             destinationTag: _destinationTag,
-            executor: _executor
+            executor: _executor,
+            executorFee: _executorFee
         });
         bytes memory composeMsg = abi.encode(redeemMsg);
         bytes memory message = abi.encodePacked(
