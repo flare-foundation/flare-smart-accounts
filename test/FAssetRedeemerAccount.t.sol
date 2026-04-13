@@ -7,6 +7,9 @@ import {FAssetRedeemerAccountProxy} from "../contracts/composer/proxy/FAssetRede
 import {IFAssetRedeemerAccount} from "../contracts/userInterfaces/IFAssetRedeemerAccount.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IRedeemExtended} from "flare-periphery/src/flare/IRedeemExtended.sol";
+import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
+import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
+import {IFAssetRedeemComposer} from "../contracts/userInterfaces/IFAssetRedeemComposer.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockBeacon} from "./utils/MockBeacon.sol";
 import {UninitializedProxy} from "./utils/UninitializedProxy.sol";
@@ -228,6 +231,102 @@ contract FAssetRedeemerAccountTest is Test {
         );
     }
 
+    // --- redemptionPaymentDefault ---
+
+    function testRedemptionPaymentDefaultSuccess() public {
+        uint256 requestId = 42;
+        IReferencedPaymentNonexistence.Proof memory proof;
+
+        _mockComposerAssetManager();
+        vm.mockCall(
+            assetManager,
+            abi.encodeWithSelector(IAssetManager.redemptionPaymentDefault.selector, proof, requestId),
+            ""
+        );
+
+        vm.prank(owner);
+        vm.expectEmit();
+        emit IFAssetRedeemerAccount.RedemptionPaymentDefaulted(requestId);
+        account.redemptionPaymentDefault(proof, requestId);
+    }
+
+    function testRedemptionPaymentDefaultRevertOwnerOnly() public {
+        IReferencedPaymentNonexistence.Proof memory proof;
+
+        // composer is not owner
+        vm.prank(address(beacon));
+        vm.expectRevert(IFAssetRedeemerAccount.OwnerOnly.selector);
+        account.redemptionPaymentDefault(proof, 1);
+
+        // a random EOA is not owner
+        vm.prank(makeAddr("intruder"));
+        vm.expectRevert(IFAssetRedeemerAccount.OwnerOnly.selector);
+        account.redemptionPaymentDefault(proof, 1);
+    }
+
+    function testRedemptionPaymentDefaultBubblesAssetManagerRevert() public {
+        IReferencedPaymentNonexistence.Proof memory proof;
+
+        _mockComposerAssetManager();
+        vm.mockCallRevert(
+            assetManager,
+            abi.encodeWithSelector(IAssetManager.redemptionPaymentDefault.selector),
+            "AM revert"
+        );
+
+        vm.prank(owner);
+        vm.expectRevert("AM revert");
+        account.redemptionPaymentDefault(proof, 1);
+    }
+
+    // --- xrpRedemptionPaymentDefault ---
+
+    function testXrpRedemptionPaymentDefaultSuccess() public {
+        uint256 requestId = 99;
+        IXRPPaymentNonexistence.Proof memory proof;
+
+        _mockComposerAssetManager();
+        vm.mockCall(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.xrpRedemptionPaymentDefault.selector, proof, requestId),
+            ""
+        );
+
+        vm.prank(owner);
+        vm.expectEmit();
+        emit IFAssetRedeemerAccount.XrpRedemptionPaymentDefaulted(requestId);
+        account.xrpRedemptionPaymentDefault(proof, requestId);
+    }
+
+    function testXrpRedemptionPaymentDefaultRevertOwnerOnly() public {
+        IXRPPaymentNonexistence.Proof memory proof;
+
+        // composer is not owner
+        vm.prank(address(beacon));
+        vm.expectRevert(IFAssetRedeemerAccount.OwnerOnly.selector);
+        account.xrpRedemptionPaymentDefault(proof, 1);
+
+        // a random EOA is not owner
+        vm.prank(makeAddr("intruder"));
+        vm.expectRevert(IFAssetRedeemerAccount.OwnerOnly.selector);
+        account.xrpRedemptionPaymentDefault(proof, 1);
+    }
+
+    function testXrpRedemptionPaymentDefaultBubblesAssetManagerRevert() public {
+        IXRPPaymentNonexistence.Proof memory proof;
+
+        _mockComposerAssetManager();
+        vm.mockCallRevert(
+            assetManager,
+            abi.encodeWithSelector(IRedeemExtended.xrpRedemptionPaymentDefault.selector),
+            "AM revert"
+        );
+
+        vm.prank(owner);
+        vm.expectRevert("AM revert");
+        account.xrpRedemptionPaymentDefault(proof, 1);
+    }
+
     // Helpers
 
     function _mockForceApprove(address _token) private {
@@ -251,6 +350,14 @@ contract FAssetRedeemerAccountTest is Test {
             assetManager,
             abi.encodeWithSelector(IRedeemExtended.redeemWithTag.selector),
             abi.encode(_result)
+        );
+    }
+
+    function _mockComposerAssetManager() private {
+        vm.mockCall(
+            address(beacon),
+            abi.encodeWithSelector(IFAssetRedeemComposer.assetManager.selector),
+            abi.encode(assetManager)
         );
     }
 

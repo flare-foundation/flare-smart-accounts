@@ -2,6 +2,8 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
+import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
 
 /**
  * @title IFAssetRedeemerAccount
@@ -44,6 +46,18 @@ interface IFAssetRedeemerAccount {
     );
 
     /**
+     * @notice Emitted when the owner triggers `redemptionPaymentDefault` on the asset manager.
+     * @param redemptionRequestId Redemption request id passed to the asset manager.
+     */
+    event RedemptionPaymentDefaulted(uint256 indexed redemptionRequestId);
+
+    /**
+     * @notice Emitted when the owner triggers `xrpRedemptionPaymentDefault` on the asset manager.
+     * @param redemptionRequestId Redemption request id passed to the asset manager.
+     */
+    event XrpRedemptionPaymentDefaulted(uint256 indexed redemptionRequestId);
+
+    /**
      * @notice Reverts when a required address is zero.
      */
     error InvalidAddress();
@@ -54,6 +68,11 @@ interface IFAssetRedeemerAccount {
     error ComposerOnly();
 
     /**
+     * @notice Reverts when caller is not the account owner.
+     */
+    error OwnerOnly();
+
+    /**
      * @notice Reverts when initialize is called more than once.
      */
     error AlreadyInitialized();
@@ -62,6 +81,32 @@ interface IFAssetRedeemerAccount {
      * @notice Reverts when redeem with tag is attempted on asset manager that does not support it.
      */
     error RedeemWithTagNotSupported();
+
+    /**
+     * @notice Triggers `redemptionPaymentDefault` on the asset manager for a redemption initiated
+     *         by this account. Can only be called by the account owner.
+     * @dev Asset manager is read from the composer; reverts bubble up to the caller.
+     * @param _proof Proof of non-payment with correct payment reference on the underlying chain.
+     * @param _redemptionRequestId Id of an existing redemption request initiated by this account.
+     */
+    function redemptionPaymentDefault(
+        IReferencedPaymentNonexistence.Proof calldata _proof,
+        uint256 _redemptionRequestId
+    )
+        external;
+
+    /**
+     * @notice Triggers XRP-specific variant of `redemptionPaymentDefault`.
+     *         Can only be called by the account owner.
+     * @dev Asset manager is read from the composer; reverts bubble up to the caller.
+     * @param _proof Proof of non-payment on the XRP chain.
+     * @param _redemptionRequestId Id of an existing redemption request initiated by this account.
+     */
+    function xrpRedemptionPaymentDefault(
+        IXRPPaymentNonexistence.Proof calldata _proof,
+        uint256 _redemptionRequestId
+    )
+        external;
 
     /**
      * @notice Returns the owner of the redeemer account.

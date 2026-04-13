@@ -4,7 +4,11 @@ pragma solidity ^0.8.27;
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
+import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
 import {IIFAssetRedeemerAccount} from "../interface/IIFAssetRedeemerAccount.sol";
+import {IFAssetRedeemerAccount} from "../../userInterfaces/IFAssetRedeemerAccount.sol";
+import {IFAssetRedeemComposer} from "../../userInterfaces/IFAssetRedeemComposer.sol";
 
 /**
  * @title FAssetRedeemerAccount
@@ -26,6 +30,14 @@ contract FAssetRedeemerAccount is IIFAssetRedeemerAccount {
      */
     modifier onlyComposer() {
         require(msg.sender == composer, ComposerOnly());
+        _;
+    }
+
+    /**
+     * @notice Restricts function access to the account owner.
+     */
+    modifier onlyOwner() {
+        require(msg.sender == owner, OwnerOnly());
         _;
     }
 
@@ -86,6 +98,32 @@ contract FAssetRedeemerAccount is IIFAssetRedeemerAccount {
             msg.value,
             _redeemedAmountUBA
         );
+    }
+
+    /// @inheritdoc IFAssetRedeemerAccount
+    function redemptionPaymentDefault(
+        IReferencedPaymentNonexistence.Proof calldata _proof,
+        uint256 _redemptionRequestId
+    )
+        external
+        onlyOwner
+    {
+        IAssetManager assetManager = IFAssetRedeemComposer(composer).assetManager();
+        assetManager.redemptionPaymentDefault(_proof, _redemptionRequestId);
+        emit RedemptionPaymentDefaulted(_redemptionRequestId);
+    }
+
+    /// @inheritdoc IFAssetRedeemerAccount
+    function xrpRedemptionPaymentDefault(
+        IXRPPaymentNonexistence.Proof calldata _proof,
+        uint256 _redemptionRequestId
+    )
+        external
+        onlyOwner
+    {
+        IAssetManager assetManager = IFAssetRedeemComposer(composer).assetManager();
+        assetManager.xrpRedemptionPaymentDefault(_proof, _redemptionRequestId);
+        emit XrpRedemptionPaymentDefaulted(_redemptionRequestId);
     }
 
     /// @inheritdoc IIFAssetRedeemerAccount
