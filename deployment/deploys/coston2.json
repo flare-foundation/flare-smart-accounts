@@ -87,16 +87,16 @@
   {
     "name": "FAssetRedeemerAccountImplementation",
     "contractName": "FAssetRedeemerAccount.sol",
-    "address": "0xda840BCc68d9775A70BDdC2a62eF0779FB1D7098"
+    "address": "0xB9E7b8284dd23104512A216187EDa94537d394Df"
   },
   {
     "name": "FAssetRedeemComposerImplementation",
     "contractName": "FAssetRedeemComposer.sol",
-    "address": "0xE861d70480761e08C1A1aD3FE810B0F929545ecD"
+    "address": "0xF6701DaB49A26b1634692b71bEBeF1D6445E4B2c"
   },
   {
     "name": "FAssetRedeemComposer",
     "contractName": "FAssetRedeemComposerProxy.sol",
-    "address": "0x80c5ebBD65b4857CA2f917EAB1e9F83bcC947c52"
+    "address": "0xa10569DFb38FE7Be211aCe4E4A566Cea387023b0"
   }
 ]
