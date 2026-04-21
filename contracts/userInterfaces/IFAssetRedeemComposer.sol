@@ -10,6 +10,11 @@ import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/in
 /**
  * @title IFAssetRedeemComposer
  * @notice User interface for the LayerZero compose-based FAsset redeem orchestrator.
+ * @dev Integration requirement for source-chain callers: `lzCompose` enforces
+ * `msg.value >= RedeemComposeMessage.executorFee`; `send` does not. Callers must therefore
+ * configure the `lzComposeOption` with a compose value of at least `executorFee`, or the
+ * LayerZero executor may be under-incentivized to deliver `lzCompose` with the intended
+ * `msg.value`, leaving the message unexecuted.
  */
 interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTimelock {
 
@@ -30,6 +35,10 @@ interface IFAssetRedeemComposer is ILayerZeroComposer, IBeacon, IOwnableWithTime
         /// @notice Executor address used for redemption. If zero, default executor is used.
         address payable executor;
         /// @notice Executor fee (in wei) to be paid to the executor for executing the redeem on Flare.
+        /// @dev `lzCompose` enforces `msg.value >= executorFee`; `send` does not. Callers must
+        /// therefore configure the `lzComposeOption` with a compose value of at least `executorFee`,
+        /// or the LayerZero executor may be under-incentivized to deliver `lzCompose` with the
+        /// intended `msg.value`, leaving the message unexecuted.
         uint256 executorFee;
     }
 
