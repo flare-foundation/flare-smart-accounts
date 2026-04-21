@@ -86,7 +86,7 @@ contract DeploySmartAccounts is Script {
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
-    function run(bool _fullDeploy) external {
+    function run(bool _fullDeploy, bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
@@ -96,10 +96,17 @@ contract DeploySmartAccounts is Script {
 
         if (chainId == 14) {
             network = "flare";
+        } else if (chainId == 19) {
+            network = "songbird";
+        } else if (chainId == 16) {
+            network = "coston";
         } else if (chainId == 114) {
             network = "coston2";
         } else {
             network = "scdev";
+        }
+        if (_staging) {
+            network = string.concat(network, "-staging");
         }
         configFile = string.concat(configFile, network, ".json");
         console2.log(string.concat("NETWORK: ", network));

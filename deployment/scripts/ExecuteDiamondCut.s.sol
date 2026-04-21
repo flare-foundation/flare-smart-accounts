@@ -21,7 +21,8 @@ contract ExecuteDiamondCut is Script {
     string private configFileName;
 
     function run(
-        string calldata _configFileName
+        string calldata _configFileName,
+        bool _staging
     )
         external
     {
@@ -39,6 +40,9 @@ contract ExecuteDiamondCut is Script {
             network = "coston2";
         } else {
             network = "scdev";
+        }
+        if (_staging) {
+            network = string.concat(network, "-staging");
         }
         deployedContractsFile = string.concat(deployedContractsFile, network, ".json");
         console2.log(string.concat("NETWORK: ", network));
@@ -348,39 +352,6 @@ contract ExecuteDiamondCut is Script {
         revert("unlinked or missing artifact and no fallback");
     }
 
-    function _logCutData(
-        address _diamond,
-        IDiamond.FacetCut[] memory _cuts,
-        address _initAddr,
-        bytes memory _initData
-    )
-        internal view
-    {
-        console2.log("---- DIAMOND CUT DATA: ----");
-        console2.log("diamond address:", _diamond);
-        console2.log("number of cuts:", _cuts.length);
-        for (uint256 i = 0; i < _cuts.length; i++) {
-            console2.log(string(abi.encodePacked("cuts[", vm.toString(i), "]:")));
-            console2.log("  facetAddress:", _cuts[i].facetAddress);
-            console2.log("  action:", _actionName(_cuts[i].action));
-            console2.log("  functionSelectors:");
-            for (uint256 j = 0; j < _cuts[i].functionSelectors.length; j++) {
-                console2.log(string(
-                    abi.encodePacked(
-                        "    [", vm.toString(j), "]: 0x", _toHex(_cuts[i].functionSelectors[j])
-                    )
-                ));
-            }
-        }
-        console2.log("init data:");
-        console2.log("  init address:", _initAddr);
-        console2.log(string(abi.encodePacked("  init calldata: 0x", _toHexBytes(_initData))));
-        bytes memory callData = abi.encodeWithSelector(
-            IDiamondCut.diamondCut.selector, _cuts, _initAddr, _initData
-        );
-        console2.log(string(abi.encodePacked("diamondCut calldata: 0x", _toHexBytes(callData))));
-    }
-
     function _deployedCodeMatches(
         address _addr,
         string memory _artifactPath
@@ -413,6 +384,39 @@ contract ExecuteDiamondCut is Script {
             }
         }
         return address(0);
+    }
+
+    function _logCutData(
+        address _diamond,
+        IDiamond.FacetCut[] memory _cuts,
+        address _initAddr,
+        bytes memory _initData
+    )
+        internal pure
+    {
+        console2.log("---- DIAMOND CUT DATA: ----");
+        console2.log("diamond address:", _diamond);
+        console2.log("number of cuts:", _cuts.length);
+        for (uint256 i = 0; i < _cuts.length; i++) {
+            console2.log(string(abi.encodePacked("cuts[", vm.toString(i), "]:")));
+            console2.log("  facetAddress:", _cuts[i].facetAddress);
+            console2.log("  action:", _actionName(_cuts[i].action));
+            console2.log("  functionSelectors:");
+            for (uint256 j = 0; j < _cuts[i].functionSelectors.length; j++) {
+                console2.log(string(
+                    abi.encodePacked(
+                        "    [", vm.toString(j), "]: 0x", _toHex(_cuts[i].functionSelectors[j])
+                    )
+                ));
+            }
+        }
+        console2.log("init data:");
+        console2.log("  init address:", _initAddr);
+        console2.log(string(abi.encodePacked("  init calldata: 0x", _toHexBytes(_initData))));
+        bytes memory callData = abi.encodeWithSelector(
+            IDiamondCut.diamondCut.selector, _cuts, _initAddr, _initData
+        );
+        console2.log(string(abi.encodePacked("diamondCut calldata: 0x", _toHexBytes(callData))));
     }
 
     function _actionName(

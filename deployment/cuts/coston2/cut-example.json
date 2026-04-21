@@ -14,7 +14,8 @@
     "DiamondLoupeFacet",
     "MemoInstructionsFacet",
     "PauseFacet",
-    "ReaderFacet"
+    "ReaderFacet",
+    "DiamondCutFacet"
   ],
   "deleteAllOldMethods": false,
   "deleteSelectorSigs": [],
