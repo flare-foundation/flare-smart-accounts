@@ -61,7 +61,11 @@ function main() {
   let initAddress = "0x0000000000000000000000000000000000000000";
   let initCalldata = "0x";
   if (cfg.init) {
-    initAddress = a["init-address"];
+    const initAddrArg = a["init-address"];
+    if (!initAddrArg) {
+      throw new Error("--init-address is required when config has an init block");
+    }
+    initAddress = initAddrArg;
     const init = cfg.init;
     if (typeof init.calldata === "string" && init.calldata.length > 0 && init.calldata !== "0x") {
       initCalldata = init.calldata;

@@ -105,6 +105,16 @@ lint-ts:
   - corepack enable pnpm
   - pnpm lint:check
 
+typecheck:
+  image: node:24
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm typecheck
+
 format-check:
   image: node:24
   needs:

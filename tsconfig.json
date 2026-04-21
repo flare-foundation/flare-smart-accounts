@@ -7,10 +7,8 @@
     "strict": true,
     "skipLibCheck": true,
     "isolatedModules": true,
-    "verbatimModuleSyntax": true,
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "outDir": "dist"
+    "exactOptionalPropertyTypes": true
   },
   "include": [
     "./deployment",
