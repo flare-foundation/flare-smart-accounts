@@ -1193,6 +1193,200 @@ contract FAssetRedeemComposerTest is Test {
         composer.upgradeToAndCall(address(newImpl), "");
     }
 
+    // --- OwnableWithTimelock: setTimelockDuration ---
+
+    function testTimelockDurationInitiallyZero() public view {
+        assertEq(composer.getTimelockDurationSeconds(), 0);
+    }
+
+    function testSetTimelockDurationDirectExecutionWhenZero() public {
+        vm.prank(owner);
+        vm.expectEmit();
+        emit IOwnableWithTimelock.TimelockDurationSet(2 hours);
+        composer.setTimelockDuration(2 hours);
+
+        assertEq(composer.getTimelockDurationSeconds(), 2 hours);
+    }
+
+    function testSetTimelockDurationRevertTooLong() public {
+        vm.prank(owner);
+        vm.expectRevert(IOwnableWithTimelock.TimelockDurationTooLong.selector);
+        composer.setTimelockDuration(7 days + 1);
+    }
+
+    function testSetTimelockDurationRevertNonOwner() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        composer.setTimelockDuration(1 hours);
+    }
+
+    function testSetTimelockDurationQueuedOnceActive() public {
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+
+        bytes memory encodedCall = abi.encodeWithSelector(
+            IOwnableWithTimelock.setTimelockDuration.selector,
+            30 minutes
+        );
+
+        vm.prank(owner);
+        vm.expectEmit();
+        emit IOwnableWithTimelock.CallTimelocked(
+            encodedCall, keccak256(encodedCall), block.timestamp + 1 hours
+        );
+        composer.setTimelockDuration(30 minutes);
+
+        assertEq(composer.getTimelockDurationSeconds(), 1 hours);
+        assertEq(
+            composer.getExecuteTimelockedCallTimestamp(encodedCall),
+            block.timestamp + 1 hours
+        );
+    }
+
+    // --- OwnableWithTimelock: cancelTimelockedCall ---
+
+    function testCancelTimelockedCall() public {
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+
+        bytes memory encodedCall = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            2000
+        );
+
+        vm.prank(owner);
+        composer.setDefaultComposerFee(2000);
+
+        vm.prank(owner);
+        vm.expectEmit();
+        emit IOwnableWithTimelock.TimelockedCallCanceled(keccak256(encodedCall));
+        composer.cancelTimelockedCall(encodedCall);
+
+        vm.expectRevert(IOwnableWithTimelock.TimelockInvalidSelector.selector);
+        composer.getExecuteTimelockedCallTimestamp(encodedCall);
+    }
+
+    function testCancelTimelockedCallRevertNonOwner() public {
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+
+        bytes memory encodedCall = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            2000
+        );
+
+        vm.prank(owner);
+        composer.setDefaultComposerFee(2000);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        composer.cancelTimelockedCall(encodedCall);
+    }
+
+    function testCancelTimelockedCallRevertInvalidSelector() public {
+        bytes memory encodedCall = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            2000
+        );
+
+        vm.prank(owner);
+        vm.expectRevert(IOwnableWithTimelock.TimelockInvalidSelector.selector);
+        composer.cancelTimelockedCall(encodedCall);
+    }
+
+    // --- OwnableWithTimelock: getExecuteTimelockedCallTimestamp ---
+
+    function testGetExecuteTimelockedCallTimestampRevertInvalidSelector() public {
+        bytes memory encodedCall = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            2000
+        );
+
+        vm.expectRevert(IOwnableWithTimelock.TimelockInvalidSelector.selector);
+        composer.getExecuteTimelockedCallTimestamp(encodedCall);
+    }
+
+    // --- OwnableWithTimelock: executeTimelockedCall ---
+
+    function testExecuteTimelockedCallRevertInvalidSelector() public {
+        bytes memory encodedCall = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            2000
+        );
+
+        vm.expectRevert(IOwnableWithTimelock.TimelockInvalidSelector.selector);
+        composer.executeTimelockedCall(encodedCall);
+    }
+
+    function testExecuteTimelockedCallRevertNotAllowedYet() public {
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+
+        bytes memory encodedCall = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            2000
+        );
+
+        vm.prank(owner);
+        composer.setDefaultComposerFee(2000);
+
+        vm.expectRevert(IOwnableWithTimelock.TimelockNotAllowedYet.selector);
+        composer.executeTimelockedCall(encodedCall);
+    }
+
+    function testExecuteTimelockedCallSucceedsAfterDelay() public {
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+
+        bytes memory encodedCall = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            2000
+        );
+
+        vm.prank(owner);
+        composer.setDefaultComposerFee(2000);
+
+        skip(1 hours);
+
+        vm.expectEmit();
+        emit IFAssetRedeemComposer.DefaultComposerFeeSet(2000);
+        vm.expectEmit();
+        emit IOwnableWithTimelock.TimelockedCallExecuted(keccak256(encodedCall));
+        composer.executeTimelockedCall(encodedCall);
+
+        assertEq(composer.defaultComposerFeePPM(), 2000);
+
+        vm.expectRevert(IOwnableWithTimelock.TimelockInvalidSelector.selector);
+        composer.getExecuteTimelockedCallTimestamp(encodedCall);
+    }
+
+    function testExecuteTimelockedCallBubblesInnerRevert() public {
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+
+        uint256 invalidFee = 1_000_000;
+        bytes memory encodedCall = abi.encodeWithSelector(
+            FAssetRedeemComposer.setDefaultComposerFee.selector,
+            invalidFee
+        );
+
+        vm.prank(owner);
+        composer.setDefaultComposerFee(invalidFee);
+
+        skip(1 hours);
+
+        vm.expectRevert(IFAssetRedeemComposer.InvalidComposerFeePPM.selector);
+        composer.executeTimelockedCall(encodedCall);
+    }
+
     // --- lzCompose wraps native on failure ---
 
     function testLzComposeFailedWrapsNativeToRedeemerAccount() public {
