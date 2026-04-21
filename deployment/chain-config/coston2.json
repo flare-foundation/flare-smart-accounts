@@ -1,6 +1,6 @@
 {
   "initialOwner": "0x0000000000000000000000000000000000000000",
-  "governance": "0x0000000000000000000000000000000000000000",
+  "governance": "0xC83Ec6a4aFf2099942836860A28C7e248Fabc32C",
   "vaults": [
     {
       "vaultId": 1,
@@ -15,7 +15,7 @@
   ],
   "agentVaults": [],
   "executor": "0x103b384064ae85577127097A7cCadfd6fb13f437",
-  "executorFee": 100,
+  "executorFee": 100000000000,
   "sourceId": "testXRP",
   "paymentProofValidityDurationSeconds": 86400,
   "defaultInstructionFee": 1000,
@@ -27,5 +27,14 @@
   "maxSlippagePPM": 5000,
   "stableCoinUsdFeedId": "0x01555344542f555344000000000000000000000000",
   "wNatUsdFeedId": "0x01464c522f55534400000000000000000000000000",
-  "timelockDurationSeconds": 3600
+  "timelockDurationSeconds": 3600,
+
+  "endpoint": "0x6EDCE65403992e310A62460808c4b910D972f10f",
+  "trustedSourceOApp": "0xCd3d2127935Ae82Af54Fc31cCD9D3440dbF46639",
+  "assetManager": "0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA",
+  "stableCoin": "0x21709E63fC7F264F329e0826Ea82197694B82775",
+  "wNat": "0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273",
+  "composerFeeRecipient": "0xC83Ec6a4aFf2099942836860A28C7e248Fabc32C",
+  "defaultComposerFeePPM": 1000,
+  "composerExecutor": "0x103b384064ae85577127097A7cCadfd6fb13f437"
 }
