@@ -5,19 +5,28 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {ERC721Holder} from "@openzeppelin/contracts/token/ERC721/utils/ERC721Holder.sol";
+import {ERC1155Holder} from "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
+import {IERC1363Receiver} from "@openzeppelin/contracts/interfaces/IERC1363Receiver.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
-import {UniswapV3} from "../library/UniswapV3.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title PersonalAccount contract
  * @notice Account controlled by MasterAccountController contract. It corresponds to an XRPL address.
+ * Supports account abstraction for XRPL-integrated user operations.
  */
-contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
+contract PersonalAccount is
+    IIPersonalAccount, ReentrancyGuardTransient,
+    ERC721Holder, ERC1155Holder, IERC1363Receiver
+{
     using SafeERC20 for IERC20;
 
     address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
@@ -36,6 +45,8 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
         // ensure the implementation contract itself cannot be initialized/used
         controllerAddress = EMPTY_ADDRESS;
     }
+
+    receive() external payable {}
 
     /**
      * Proxyable initialization method. Can be called only once, from the proxy constructor
@@ -131,7 +142,7 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
 
     /// @inheritdoc IIPersonalAccount
     function deposit(
-        uint256 _vaultType,
+        IVaultsFacet.VaultType _vaultType,
         address _vault,
         uint256 _assets
     )
@@ -139,12 +150,15 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
         onlyController nonReentrant
         returns (uint256 _shares)
     {
-        assert(_vaultType == 1 || _vaultType == 2); // 1: Firelight, 2: Upshift
+        assert(
+            _vaultType == IVaultsFacet.VaultType.Firelight ||
+            _vaultType == IVaultsFacet.VaultType.Upshift
+        );
         IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
         require(fxrp.approve(_vault, _assets), ApprovalFailed());
         emit Approved(address(fxrp), _vault, _assets);
 
-        if (_vaultType == 1) {
+        if (_vaultType == IVaultsFacet.VaultType.Firelight) {
             _shares = IIVault(_vault).deposit(_assets, address(this));
         } else {
             _shares = IIVault(_vault).deposit(address(fxrp), _assets, address(this));
@@ -222,34 +236,52 @@ contract PersonalAccount is IIPersonalAccount, ReentrancyGuard {
     }
 
     /// @inheritdoc IIPersonalAccount
-    function executeSwap(
-        address _uniswapV3Router,
-        address _tokenIn,
-        bytes21 _tokenInFeedId,
-        address _tokenOut,
-        bytes21 _tokenOutFeedId,
-        uint24 _poolFeeTierPPM,
-        uint24 _maxSlippagePPM
+    function executeUserOp(
+        IPersonalAccount.Call[] calldata _calls
     )
-        external
+        external payable
         onlyController nonReentrant
-        returns (uint256 amountIn, uint256 amountOut)
     {
-        (amountIn, amountOut) = UniswapV3.executeSwap(
-            _uniswapV3Router,
-            _tokenIn,
-            _tokenInFeedId,
-            _tokenOut,
-            _tokenOutFeedId,
-            _poolFeeTierPPM,
-            _maxSlippagePPM
-        );
-        emit SwapExecuted(_tokenIn, _tokenOut, amountIn, amountOut);
+        for (uint256 i = 0; i < _calls.length; i++) {
+            (bool success, bytes memory result) = _calls[i].target.call{
+                value: _calls[i].value
+            }(_calls[i].data);
+            if (!success) {
+                revert CallFailed(i, result);
+            }
+        }
     }
 
     /// @inheritdoc IPersonalAccount
     function implementation() external view returns (address) {
         // controller is the beacon
         return IBeacon(controllerAddress).implementation();
+    }
+
+    /// @inheritdoc IERC1363Receiver
+    function onTransferReceived(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    )
+        external pure
+        returns (bytes4)
+    {
+        return IERC1363Receiver.onTransferReceived.selector;
+    }
+
+    /// @inheritdoc IERC165
+    function supportsInterface(
+        bytes4 _interfaceId
+    )
+        public view
+        override(ERC1155Holder)
+        returns (bool)
+    {
+        return
+            _interfaceId == type(IERC721Receiver).interfaceId ||
+            _interfaceId == type(IERC1363Receiver).interfaceId ||
+            super.supportsInterface(_interfaceId); // ERC1155Holder covers IERC1155Receiver and IERC165
     }
 }

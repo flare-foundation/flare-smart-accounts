@@ -14,11 +14,13 @@ import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaults
 import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
+import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
-import {SwapFacet} from "../../contracts/smartAccounts/facets/SwapFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
+import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
+import {ReaderFacet} from "../../contracts/smartAccounts/facets/ReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 contract FacetsDeploy is Test {
@@ -54,8 +56,9 @@ contract FacetsDeploy is Test {
     }
 
     function deploySmartAccountsFacets() internal returns (IDiamond.FacetCut[] memory) {
-        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](10);
+        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](12);
 
+        // v1.0.0 facets (keep original order)
         diamondCuts[0] = _buildFacetCut(
             address(new AgentVaultsFacet()), "AgentVaultsFacet", IDiamond.FacetCutAction.Add
         );
@@ -75,16 +78,23 @@ contract FacetsDeploy is Test {
             address(new PersonalAccountsFacet()), "PersonalAccountsFacet", IDiamond.FacetCutAction.Add
         );
         diamondCuts[6] = _buildFacetCut(
-            address(new SwapFacet()), "SwapFacet", IDiamond.FacetCutAction.Add
-        );
-        diamondCuts[7] = _buildFacetCut(
             address(new TimelockFacet()), "TimelockFacet", IDiamond.FacetCutAction.Add
         );
-        diamondCuts[8] = _buildFacetCut(
+        diamondCuts[7] = _buildFacetCut(
             address(new VaultsFacet()), "VaultsFacet", IDiamond.FacetCutAction.Add
         );
-        diamondCuts[9] = _buildFacetCut(
+        diamondCuts[8] = _buildFacetCut(
             address(new XrplProviderWalletsFacet()), "XrplProviderWalletsFacet", IDiamond.FacetCutAction.Add
+        );
+        // new facets (append at end)
+        diamondCuts[9] = _buildFacetCut(
+            address(new MemoInstructionsFacet()), "MemoInstructionsFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[10] = _buildFacetCut(
+            address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[11] = _buildFacetCut(
+            address(new ReaderFacet()), "ReaderFacet", IDiamond.FacetCutAction.Add
         );
         return diamondCuts;
     }

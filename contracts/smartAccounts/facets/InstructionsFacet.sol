@@ -9,6 +9,7 @@ import {IIInstructionsFacet} from "../interface/IIInstructionsFacet.sol";
 // import is needed for @inheritdoc
 // solhint-disable-next-line no-unused-import
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
+import {IMemoInstructionsFacet} from "../../userInterfaces/facets/IMemoInstructionsFacet.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
 import {PaymentProofs} from "../library/PaymentProofs.sol";
 import {FXrp} from "../library/FXrp.sol";
@@ -17,6 +18,8 @@ import {Vaults} from "../library/Vaults.sol";
 import {AgentVaults} from "../library/AgentVaults.sol";
 import {InstructionFees} from "../library/InstructionFees.sol";
 import {Instructions} from "../library/Instructions.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
+import {Pause} from "../library/Pause.sol";
 import {PaymentReferenceParser} from "../library/PaymentReferenceParser.sol";
 import {FacetBase} from "./FacetBase.sol";
 
@@ -26,6 +29,11 @@ import {FacetBase} from "./FacetBase.sol";
  */
 contract InstructionsFacet is IIInstructionsFacet, FacetBase {
 
+    modifier notPaused {
+        Pause.checkNotPaused();
+        _;
+    }
+
     /// @inheritdoc IInstructionsFacet
     function reserveCollateral(
         string calldata _xrplAddress,
@@ -33,6 +41,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         bytes32 _transactionId
     )
         external payable
+        notPaused
         returns (uint256 _collateralReservationId)
     {
         // check instruction id
@@ -69,6 +78,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         string calldata _xrplAddress
     )
         external
+        notPaused
     {
         bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
 
@@ -107,12 +117,12 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         // user should call deposit in that case
         require(amount == reservationInfo.valueUBA, InvalidAmount());
         // mark transaction as used
-        require(!state.usedTransactionIds[transactionId], TransactionAlreadyExecuted());
+        require(!state.usedTransactionIds[transactionId], IMemoInstructionsFacet.TransactionAlreadyExecuted());
         state.usedTransactionIds[transactionId] = true;
 
         // execute deposit
         address vault = Vaults.getVaultAddress(paymentReference);
-        Vault.deposit(personalAccount, instructionType, vault, amount); // instructionType == vaultType
+        Vault.deposit(personalAccount, IVaultsFacet.VaultType(instructionType), vault, amount);
 
         // emit event
         emit InstructionExecuted(
@@ -130,6 +140,7 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         string calldata _xrplAddress
     )
         external payable
+        notPaused
     {
         bytes32 paymentReference = _proof.data.responseBody.standardPaymentReference;
         uint256 instructionType = PaymentReferenceParser.getInstructionType(paymentReference);
@@ -147,9 +158,9 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         PaymentProofs.verifyPayment(_proof, _xrplAddress);
 
         // mark transaction as used
-        Instructions.State storage state = Instructions.getState();
         bytes32 transactionId = _proof.data.requestBody.transactionId;
-        require(!state.usedTransactionIds[transactionId], TransactionAlreadyExecuted());
+        Instructions.State storage state = Instructions.getState();
+        require(!state.usedTransactionIds[transactionId], IMemoInstructionsFacet.TransactionAlreadyExecuted());
         state.usedTransactionIds[transactionId] = true;
 
         // create or get existing Personal Account for the XRPL address
@@ -174,17 +185,6 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
     }
 
     /// @inheritdoc IInstructionsFacet
-    function isTransactionIdUsed(
-        bytes32 _transactionId
-    )
-        external view
-        returns (bool)
-    {
-        Instructions.State storage state = Instructions.getState();
-        return state.usedTransactionIds[_transactionId];
-    }
-
-    /// @inheritdoc IInstructionsFacet
     function getTransactionIdForCollateralReservation(
         uint256 _collateralReservationId
     )
@@ -194,4 +194,6 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         Instructions.State storage state = Instructions.getState();
         return state.collateralReservationIdToTransactionId[_collateralReservationId];
     }
+
+
 }

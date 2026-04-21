@@ -27,20 +27,6 @@ checksum = "6360df12918b82436dfd68a4a7d9b962aa4d4b0b6bf323ecbd400b9eca5e5974"
 integrity = "ede37ded73bb7dff1325cdfcc124d83afff3d92e646a9418d79ac0d6a9721b05"
 
 [[dependencies]]
-name = "@uniswap-v3-core"
-version = "1.0.1"
-url = "https://soldeer-revisions.s3.amazonaws.com/@uniswap-v3-core/1_0_1_22-01-2024_13:19:53_v3-core.zip"
-checksum = "96ad846c29246d5b9844c72239f5b722e6cd16378930c10d4461d98656d506a7"
-integrity = "fc895fca9ed19a0f2e445545d4569b2cbb2fd1c70ec25c64ed83ec252f88aa24"
-
-[[dependencies]]
-name = "@uniswap-v3-periphery"
-version = "1.4.4"
-url = "https://soldeer-revisions.s3.amazonaws.com/@uniswap-v3-periphery/1_4_4_22-01-2024_13:20:51_v3-periphery.zip"
-checksum = "f1ce151585a084bb3ec6fb9cbce4520924d41398c3ce8979169de6f7f70d6a81"
-integrity = "e101a06117b3274cd21a3032fa9a55446e842dc0e0e1b0b25008e094a446c453"
-
-[[dependencies]]
 name = "flare-periphery"
 version = "0.1.44-alpha.6"
 url = "https://soldeer-revisions.s3.amazonaws.com/flare-periphery/0_1_44-alpha_6_01-04-2026_13:29:31_soldeer-flare-periphery.zip"

@@ -13,7 +13,11 @@ contract PersonalAccountProxy is BeaconProxy {
     constructor(address _controller, string memory _xrplOwner)
         BeaconProxy(
             _controller,
-            abi.encodeWithSelector(INITIALIZE_SELECTOR, _controller, _xrplOwner)
+            abi.encodeWithSelector(
+                INITIALIZE_SELECTOR,
+                _controller,
+                _xrplOwner
+            )
         )
     {}
 }

@@ -53,9 +53,9 @@ contracts.forEach((contract) => {
   const contractName = contractFile.replace(".sol", "");
   // find the full path of the contract file
   const matches: string[] = globSync(`contracts/{smartAccounts,diamond,composer}/**/${contractFile}`);
-  console.log(matches);
   if (matches.length === 0) {
-    throw new Error(`Contract file not found: ${contractFile}`);
+    console.log(`Skipping ${address} (${contractFile}): source file not in repo (deprecated/removed contract)`);
+    return;
   }
   if (matches.length > 1) {
     throw new Error(`Multiple contract files found for ${contractFile}: ${matches.join(", ")}`);

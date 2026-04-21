@@ -6,14 +6,17 @@ import {PersonalAccount} from "../contracts/smartAccounts/implementation/Persona
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 import {IIVault} from "../contracts/smartAccounts/interface/IIVault.sol";
+import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AgentInfo.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
-import {FtsoV2Interface} from "flare-periphery/src/flare/FtsoV2Interface.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
 import {MockBeacon} from "../contracts/mock/MockBeacon.sol";
+import {MockERC721} from "../contracts/mock/MockERC721.sol";
+import {MockERC1155} from "../contracts/mock/MockERC1155.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 contract PersonalAccountTest is Test {
@@ -43,7 +46,7 @@ contract PersonalAccountTest is Test {
             controller, // needs to implement the IBeacon interface
             xrplOwner
         );
-        personalAccount = PersonalAccount(address(personalAccountProxy));
+        personalAccount = PersonalAccount(payable(address(personalAccountProxy)));
 
         depositVault = makeAddr("depositVault");
         fxrp = makeAddr("fxrp");
@@ -59,7 +62,10 @@ contract PersonalAccountTest is Test {
 
     function testInitializeRevertAlreadyInitialized() public {
         vm.expectRevert(IPersonalAccount.AlreadyInitialized.selector);
-        personalAccount.initialize(makeAddr("controller"), xrplOwner);
+        personalAccount.initialize(
+            makeAddr("controller"),
+            xrplOwner
+        );
     }
 
     function testInitializeRevertInvalidCBeacon() public {
@@ -211,7 +217,7 @@ contract PersonalAccountTest is Test {
     function testDepositRevertOnlyController() public {
         vm.expectRevert(IPersonalAccount.OnlyController.selector);
         personalAccount.deposit(
-            1,
+            IVaultsFacet.VaultType.Firelight,
             depositVault,
             100
         );
@@ -223,7 +229,7 @@ contract PersonalAccountTest is Test {
         vm.prank(controller);
         vm.expectRevert(IPersonalAccount.ApprovalFailed.selector);
         personalAccount.deposit(
-            1,
+            IVaultsFacet.VaultType.Firelight,
             depositVault,
             0
         );
@@ -257,7 +263,7 @@ contract PersonalAccountTest is Test {
             shares
         );
         uint256 returnedShares = personalAccount.deposit(
-            1,
+            IVaultsFacet.VaultType.Firelight,
             depositVault,
             assets
         );
@@ -292,7 +298,7 @@ contract PersonalAccountTest is Test {
             shares
         );
         uint256 returnedShares = personalAccount.deposit(
-            2,
+            IVaultsFacet.VaultType.Upshift,
             depositVault,
             assets
         );
@@ -478,116 +484,46 @@ contract PersonalAccountTest is Test {
         assertEq(returnedAssets, assets);
     }
 
-    function testExecuteSwapRevertOnlyController() public {
-        vm.expectRevert(IPersonalAccount.OnlyController.selector);
-        personalAccount.executeSwap(
-            address(0),
-            address(0),
-            bytes21(0),
-            address(0),
-            bytes21(0),
-            0,
-            0
-        );
+    function testReceiveERC721() public {
+        MockERC721 nft = new MockERC721();
+        address minter = makeAddr("minter");
+        nft.mint(minter, 1);
+        vm.prank(minter);
+        nft.safeTransferFrom(minter, address(personalAccount), 1);
+        assertEq(nft.ownerOf(1), address(personalAccount));
     }
 
-    function testExecuteSwap() public {
-        address uniswapV3Router = makeAddr("uniswapV3Router");
-        address tokenIn = makeAddr("tokenIn");
-        bytes21 tokenInFeedId = bytes21(keccak256("tokenInFeedId"));
-        address tokenOut = makeAddr("tokenOut");
-        bytes21 tokenOutFeedId = bytes21(keccak256("tokenOutFeedId"));
-        uint256 amountIn = 1000;
-        uint256 amountOut = 950;
+    function testReceiveERC1155() public {
+        MockERC1155 token = new MockERC1155();
+        address minter = makeAddr("minter");
+        token.mint(minter, 1, 10);
+        vm.prank(minter);
+        token.safeTransferFrom(minter, address(personalAccount), 1, 5, "");
+        assertEq(token.balanceOf(address(personalAccount), 1), 5);
+    }
 
-        // mock personal account balance of tokenIn
-        vm.mockCall(
-            tokenIn,
-            abi.encodeWithSelector(
-                IERC20.balanceOf.selector,
-                address(personalAccount)
-            ),
-            abi.encode(amountIn)
-        );
+    function testReceiveERC1155Batch() public {
+        MockERC1155 token = new MockERC1155();
+        address minter = makeAddr("minter");
+        token.mint(minter, 1, 10);
+        token.mint(minter, 2, 20);
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = 1;
+        ids[1] = 2;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 5;
+        amounts[1] = 15;
+        vm.prank(minter);
+        token.safeBatchTransferFrom(minter, address(personalAccount), ids, amounts, "");
+        assertEq(token.balanceOf(address(personalAccount), 1), 5);
+        assertEq(token.balanceOf(address(personalAccount), 2), 15);
+    }
 
-        // mock tokenIn decimals
-        vm.mockCall(
-            tokenIn,
-            abi.encodeWithSelector(
-                IERC20Metadata.decimals.selector
-            ),
-            abi.encode(18)
-        );
-
-        // mock tokenOut decimals
-        vm.mockCall(
-            tokenOut,
-            abi.encodeWithSelector(
-                IERC20Metadata.decimals.selector
-            ),
-            abi.encode(6)
-        );
-
-        address ftsoV2 = makeAddr("ftsoV2");
-        // mock get FtsoV2
-        _mockGetContractAddressByHash(
-            "FtsoV2",
-            ftsoV2
-        );
-
-        // mock getFeedsByIdInWei
-        bytes21[] memory feedIds = new bytes21[](2);
-        feedIds[0] = tokenInFeedId;
-        feedIds[1] = tokenOutFeedId;
-        uint256[] memory valuesInWei = new uint256[](2);
-        valuesInWei[0] = 1234; // mock price for tokenIn
-        valuesInWei[1] = 12345; // mock price for tokenOut
-        vm.mockCall(
-            ftsoV2,
-            abi.encodeWithSelector(
-                FtsoV2Interface.getFeedsByIdInWei.selector,
-                feedIds
-            ),
-            abi.encode(valuesInWei)
-        );
-
-        // mock safeIncreaseAllowance
-        vm.mockCall(
-            tokenIn,
-            abi.encodeWithSelector(
-                IERC20.allowance.selector,
-                address(personalAccount),
-                uniswapV3Router
-            ),
-            abi.encode(0)
-        );
-
-        // mock exactInputSingle
-        vm.mockCall(
-            uniswapV3Router,
-            abi.encodeWithSelector(
-                ISwapRouter.exactInputSingle.selector
-            ),
-            abi.encode(amountOut)
-        );
-
-        vm.prank(controller);
-        vm.expectEmit();
-        emit IPersonalAccount.SwapExecuted(
-            tokenIn,
-            tokenOut,
-            amountIn,
-            amountOut
-        );
-        personalAccount.executeSwap(
-            uniswapV3Router,
-            tokenIn,
-            tokenInFeedId,
-            tokenOut,
-            tokenOutFeedId,
-            3000,
-            5000
-        );
+    function testSupportsInterface() public view {
+        assertTrue(personalAccount.supportsInterface(type(IERC721Receiver).interfaceId));
+        assertTrue(personalAccount.supportsInterface(type(IERC1155Receiver).interfaceId));
+        assertTrue(personalAccount.supportsInterface(type(IERC165).interfaceId));
+        assertFalse(personalAccount.supportsInterface(bytes4(0xdeadbeef)));
     }
 
     //// helper functions
