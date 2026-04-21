@@ -17,7 +17,7 @@
     "build": "forge build",
     "---------TEST---SCRIPTS": "",
     "test": "forge test -vvv",
-    "coverage": "forge coverage --report lcov && node scripts/forge-lcov-prune.js && genhtml lcov.info.pruned --branch-coverage --output-dir coverage",
+    "coverage": "forge coverage --ir-minimum --report lcov && node scripts/forge-lcov-prune.js && genhtml lcov.info.pruned --branch-coverage --output-dir coverage",
     "---------DEPLOY---SCRIPTS": "",
     "deploy_contracts": "bash deployment/scripts/deploy-smart-accounts.sh",
     "deploy_personal_account_implementation": "bash deployment/scripts/deploy-personal-account-implementation.sh",

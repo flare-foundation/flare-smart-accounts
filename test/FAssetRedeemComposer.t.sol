@@ -1100,7 +1100,7 @@ contract FAssetRedeemComposerTest is Test {
 
     // --- implementation ---
 
-    function testImplementation() public view {
+    function testImplementation() public {
         assertEq(composer.implementation(), redeemerAccountImplementation);
     }
 
@@ -1547,7 +1547,7 @@ contract FAssetRedeemComposerTest is Test {
         assertEq(accountOwner, address(0));
     }
 
-    function testIsRedeemerAccountFalseForUnrelatedContract() public view {
+    function testIsRedeemerAccountFalseForUnrelatedContract() public {
         (bool isAccount, address accountOwner) = composer.isRedeemerAccount(address(composerImpl));
         assertFalse(isAccount);
         assertEq(accountOwner, address(0));
@@ -1649,7 +1649,9 @@ contract FAssetRedeemComposerTest is Test {
         uint32 _srcEid,
         uint256 _amountLD
     ) private pure returns (bytes memory, bytes32) {
-        return _encodeMessageFull(_redeemer, _redeemerUnderlying, false, 0, payable(address(0)), 0, _srcEid, _amountLD);
+        return _encodeMessageFull(
+            _redeemer, _redeemerUnderlying, false, 0, payable(address(0)), 0, _srcEid, _amountLD
+        );
     }
 
     function _encodeMessageFull(
