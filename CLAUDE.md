@@ -4,9 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Flare Smart Accounts (FSA) is an account abstraction protocol enabling XRPL users to perform actions on the Flare blockchain without holding FLR tokens. Each XRPL address gets a unique smart account on Flare, controlled exclusively through XRPL Payment transactions.
+This repository hosts two related on-chain modules:
 
-The system is implemented as a Diamond proxy (EIP-2535) — `MasterAccountController` — that manages per-user `PersonalAccount`s linked to XRPL addresses. It supports FAsset minting/redeeming, vault deposits, and Account Abstraction via `IXRPPayment` proofs.
+### 1. Flare Smart Accounts (FSA) — `contracts/smartAccounts/`
+
+An account abstraction protocol enabling XRPL users to perform actions on the Flare blockchain without holding FLR tokens. Each XRPL address gets a unique smart account on Flare, controlled exclusively through XRPL Payment transactions.
+
+Implemented as a Diamond proxy (EIP-2535) — `MasterAccountController` — that manages per-user `PersonalAccount`s linked to XRPL addresses. Supports FAsset minting/redeeming, vault deposits, and Account Abstraction via `IXRPPayment` proofs and XRPL memo instructions.
+
+### 2. FAsset Redeem Composer — `contracts/composer/`
+
+A LayerZero-based module for cross-chain FAsset redemption. Lets users initiate an FAsset redemption from another chain via a LayerZero compose message, with per-redeemer deterministic accounts for isolation.
+
+Independent of FSA — shares the Flare repo, governance patterns (`OwnableWithTimelock`), and FAsset interface, but is deployed separately.
 
 ## Tech Stack
 
@@ -31,24 +41,29 @@ forge test --mt <testName>               # run a specific test function
 forge test -vvv --match-test <testName>  # run specific test with traces
 pnpm coverage                            # coverage report (lcov + genhtml)
 
-# Linting & Formatting
+# Linting & Formatting & Type-check
 pnpm lint-sol                # solhint on contracts, tests, deployment
 pnpm lint-sol-contracts      # lint only contracts/
 pnpm lint-sol-test           # lint only test/
 pnpm lint:check              # ESLint on TypeScript
 pnpm format:check            # Prettier check on TS/JS
+pnpm typecheck               # TypeScript type-check (tsc --noEmit)
 
 # Deployment
-pnpm deploy_contracts <network> <fullDeploy>   # e.g. pnpm deploy_contracts coston2 true
-pnpm diamond_cut <network> <cut-file-name>     # execute a diamond cut upgrade
-pnpm deploy_composer <network>                 # deploy FAsset redeem composer
-pnpm verify_contracts <network>                # verify contracts on Blockscout
+pnpm deploy_contracts <network> <fullDeploy>                # e.g. pnpm deploy_contracts coston2 true
+pnpm deploy_personal_account_implementation <network>       # deploy only PersonalAccount impl
+pnpm diamond_cut <network> <cut-file-name>                  # execute a diamond cut upgrade
+pnpm deploy_composer <network>                              # deploy FAsset redeem composer
+pnpm verify_contracts <network>                             # verify contracts on Blockscout
 ```
 
+Network argument supports base networks (`coston2`, `coston`, `flare`, `songbird`, `scdev`) plus `-staging` suffix (e.g. `coston2-staging`).
+
 **After every change, run these checks before considering work complete:**
-1. `pnpm lint-sol` — ensure no lint errors (warnings are acceptable)
+1. `pnpm lint-sol` — ensure no Solidity lint errors (warnings are acceptable)
 2. `forge build` — ensure compilation succeeds
 3. `pnpm coverage` — ensure all tests pass and coverage report generates
+4. `pnpm typecheck` — ensure no TypeScript errors (if TS files were changed)
 
 ## Project Structure
 
@@ -115,7 +130,7 @@ PersonalAccount (beacon proxy) ← MasterAccountController (diamond)
 - **Memo instruction codes:** `0xFF` execute UserOp, `0xE0` ignore memo, `0xE1` increase nonce, `0xE2` replace fee, `0xD0` set executor, `0xD1` remove executor
 - **Transaction ID tracking:** `usedTransactionIds` in `Instructions.State` — shared by both legacy and memo paths
 - **Nonce-on-success:** Memo instruction nonce only increments on successful execution (XRPL txns are irreversible, proofs must be retryable)
-- **Pausing:** `PauseFacet` with separate pauser/unpauser roles. `notPaused` modifier on `InstructionsFacet` state-modifying functions
+- **Pausing:** `PauseFacet` with separate pauser/unpauser roles. `notPaused` modifier on state-modifying functions of `InstructionsFacet` and `MemoInstructionsFacet`
 
 ## Code Conventions
 
@@ -125,7 +140,7 @@ PersonalAccount (beacon proxy) ← MasterAccountController (diamond)
 - **Named imports** only: `import {Foo} from "path/to/Foo.sol";`
 - **Custom errors** instead of revert strings: `require(condition, CustomError())`
 - **NatSpec** on public interfaces
-- Use `ReentrancyGuard` for state-changing external calls and `SafeERC20` for token transfers
+- Use `ReentrancyGuardTransient` (EIP-1153) for state-changing external calls and `SafeERC20` for token transfers
 - Max line length: 119 chars (Solidity), 120 chars (TypeScript)
 - Formatting: Prettier with print width 80, tab width 4, double quotes
 - Function parameters: each on its own line, prefixed with `_`

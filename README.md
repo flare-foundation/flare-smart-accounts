@@ -6,8 +6,7 @@
 
 The Flare Smart Accounts is an account abstraction that allows XRPL users to perform actions on the Flare chain without owning any FLR token. Each XRPL address is assigned a unique smart account on the Flare chain, which only it can control. They do so through Payment transactions on the XRPL. The Flare Smart Accounts are especially useful as a way of interacting with the FAssets workflow.
 
-## Overview
-
+This repository also contains the **FAsset Redeem Composer** — a LayerZero-based module for initiating FAsset redemptions from other chains. It lives alongside FSA but is deployed independently.
 
 ## Development and contribution
 
