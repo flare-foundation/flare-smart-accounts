@@ -38,6 +38,7 @@ import {IITimelockFacet} from "../contracts/smartAccounts/interface/IITimelockFa
 import {XrplProviderWalletsFacet} from "../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 import {SimpleExample} from "../contracts/mock/SimpleExample.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
+import {IIPauseFacet} from "../contracts/smartAccounts/interface/IIPauseFacet.sol";
 import {IReaderFacet} from "../contracts/userInterfaces/facets/IReaderFacet.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 
@@ -2460,6 +2461,29 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.getExecuteTimelockedCallTimestamp(encodedCall);
     }
 
+    function testExecuteTimelockedCallPropagatesInnerRevert() public {
+        testSetTimelockDuration();
+        // Schedule removePausers(nonPauser) which will revert when executed
+        address nonPauser = makeAddr("nonPauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = nonPauser;
+        bytes memory encodedCall = abi.encodeWithSelector(
+            IIPauseFacet.removePausers.selector,
+            pausers
+        );
+
+        vm.prank(governance);
+        masterAccountController.removePausers(pausers);
+
+        uint256 allowedAfterTimestamp = block.timestamp + 2 days;
+        vm.warp(allowedAfterTimestamp);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IPauseFacet.NotPauser.selector, nonPauser)
+        );
+        masterAccountController.executeTimelockedCall(encodedCall);
+    }
+
     function testExecuteTimelockedCallRevertTimelockInvalidSelector() public {
         testSetTimelockDuration();
         uint256 newDuration = 3 days;
@@ -2647,6 +2671,189 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             0,
             memoData,
             payable(executor)
+        );
+    }
+
+    function testDirectMintRevertInvalidSender() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        uint64 fee = 100;
+        fxrp.mint(address(masterAccountController), amount);
+
+        address wrongSender = makeAddr("wrongSender");
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+        PackedUserOperation memory packedUserOp = PackedUserOperation({
+            sender: wrongSender,
+            nonce: 0,
+            initCode: "",
+            callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF), uint8(1), fee, abi.encode(packedUserOp)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.InvalidSender.selector, wrongSender, personalAccountAddr
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTxInvalidSender"), xrplAddress1, amount, 0, memoData, payable(executor)
+        );
+    }
+
+    function testDirectMintRevertInvalidNonce() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        uint64 fee = 100;
+        fxrp.mint(address(masterAccountController), amount);
+
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+        PackedUserOperation memory packedUserOp = PackedUserOperation({
+            sender: personalAccountAddr,
+            nonce: 42, // current state is 0; expect InvalidNonce
+            initCode: "",
+            callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF), uint8(1), fee, abi.encode(packedUserOp)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IMemoInstructionsFacet.InvalidNonce.selector, 0, 42)
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTxInvalidNonce"), xrplAddress1, amount, 0, memoData, payable(executor)
+        );
+    }
+
+    function testDirectMintRevertCallFailed() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        uint64 fee = 100;
+        fxrp.mint(address(masterAccountController), amount);
+
+        // target call that reverts: simpleExample has no revertMe(); selector will miss -> revert
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("nonExistentFunction()")
+        });
+        PackedUserOperation memory packedUserOp = PackedUserOperation({
+            sender: personalAccountAddr,
+            nonce: 0,
+            initCode: "",
+            callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF), uint8(1), fee, abi.encode(packedUserOp)
+        );
+
+        // CallFailed wraps the inner returnData bytes
+        vm.expectRevert();
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTxCallFailed"), xrplAddress1, amount, 0, memoData, payable(executor)
+        );
+    }
+
+    function testDirectMintIgnoreMemoRevertBadLength() public {
+        uint256 amount = 5000;
+        fxrp.mint(address(masterAccountController), amount);
+
+        // 0xE0 requires exactly 42 bytes; send only the 10-byte header (passes facet check but fails library)
+        bytes memory memoData = abi.encodePacked(uint8(0xE0), uint8(1), uint64(0));
+
+        vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTxIgnoreMemoBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        );
+    }
+
+    function testDirectMintSetNonceRevertBadLength() public {
+        uint256 amount = 5000;
+        fxrp.mint(address(masterAccountController), amount);
+
+        // 0xE1 requires exactly 42 bytes
+        bytes memory memoData = abi.encodePacked(uint8(0xE1), uint8(1), uint64(0));
+
+        vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTxSetNonceBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        );
+    }
+
+    function testDirectMintSetExecutorRevertBadLength() public {
+        uint256 amount = 5000;
+        fxrp.mint(address(masterAccountController), amount);
+
+        // 0xD0 requires exactly 30 bytes
+        bytes memory memoData = abi.encodePacked(uint8(0xD0), uint8(1), uint64(0));
+
+        vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTxSetExecBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        );
+    }
+
+    function testDirectMintRemoveExecutorRevertBadLength() public {
+        uint256 amount = 5000;
+        fxrp.mint(address(masterAccountController), amount);
+
+        // 0xD1 requires exactly 10 bytes; send 20 bytes to trigger library revert
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xD1), uint8(1), uint64(0), bytes10("extraData")
+        );
+
+        vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTxRemoveExecBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        );
+    }
+
+    function testDirectMintReplaceFeeRevertBadLength() public {
+        uint256 amount = 5000;
+        fxrp.mint(address(masterAccountController), amount);
+
+        // 0xE2 requires exactly 50 bytes
+        bytes memory memoData = abi.encodePacked(uint8(0xE2), uint8(1), uint64(0));
+
+        vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.mintedFAssets(
+            bytes32("dmTxReplaceFeeBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
         );
     }
 
@@ -3637,6 +3844,92 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             "",
             payable(executor)
         );
+    }
+
+    function testAddPausersRevertAlreadyAdded() public {
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+
+        vm.prank(governance);
+        masterAccountController.addPausers(pausers);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IPauseFacet.PauserAlreadyAdded.selector, pauser)
+        );
+        vm.prank(governance);
+        masterAccountController.addPausers(pausers);
+    }
+
+    function testRemovePausersRevertNotPauser() public {
+        address notPauser = makeAddr("notPauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = notPauser;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IPauseFacet.NotPauser.selector, notPauser)
+        );
+        vm.prank(governance);
+        masterAccountController.removePausers(pausers);
+    }
+
+    function testAddUnpausersRevertAlreadyAdded() public {
+        address unpauser = makeAddr("unpauser");
+        address[] memory unpausers = new address[](1);
+        unpausers[0] = unpauser;
+
+        vm.prank(governance);
+        masterAccountController.addUnpausers(unpausers);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IPauseFacet.UnpauserAlreadyAdded.selector, unpauser)
+        );
+        vm.prank(governance);
+        masterAccountController.addUnpausers(unpausers);
+    }
+
+    function testRemoveUnpausersRevertNotUnpauser() public {
+        address notUnpauser = makeAddr("notUnpauser");
+        address[] memory unpausers = new address[](1);
+        unpausers[0] = notUnpauser;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IPauseFacet.NotUnpauser.selector, notUnpauser)
+        );
+        vm.prank(governance);
+        masterAccountController.removeUnpausers(unpausers);
+    }
+
+    function testGetPausers() public {
+        address pauserA = makeAddr("pauserA");
+        address pauserB = makeAddr("pauserB");
+        address[] memory pausers = new address[](2);
+        pausers[0] = pauserA;
+        pausers[1] = pauserB;
+
+        vm.prank(governance);
+        masterAccountController.addPausers(pausers);
+
+        address[] memory registered = masterAccountController.getPausers();
+        assertEq(registered.length, 2);
+        assertTrue(registered[0] == pauserA || registered[1] == pauserA);
+        assertTrue(registered[0] == pauserB || registered[1] == pauserB);
+    }
+
+    function testGetUnpausers() public {
+        address unpauserA = makeAddr("unpauserA");
+        address unpauserB = makeAddr("unpauserB");
+        address[] memory unpausers = new address[](2);
+        unpausers[0] = unpauserA;
+        unpausers[1] = unpauserB;
+
+        vm.prank(governance);
+        masterAccountController.addUnpausers(unpausers);
+
+        address[] memory registered = masterAccountController.getUnpausers();
+        assertEq(registered.length, 2);
+        assertTrue(registered[0] == unpauserA || registered[1] == unpauserA);
+        assertTrue(registered[0] == unpauserB || registered[1] == unpauserB);
     }
 
     function testViewFunctionsWorkWhenPaused() public {

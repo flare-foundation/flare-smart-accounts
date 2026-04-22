@@ -92,6 +92,26 @@ contract PersonalAccountTest is Test {
         );
     }
 
+    function testInitializeRevertInvalidControllerAddress() public {
+        // Constructor sets controllerAddress to EMPTY_ADDRESS (0x...1111) to prevent
+        // re-initialization of the impl. Clear slot 0 to bypass that guard and reach
+        // the `_controllerAddress != address(0)` check.
+        PersonalAccount fresh = new PersonalAccount();
+        vm.store(address(fresh), bytes32(uint256(0)), bytes32(0));
+        vm.expectRevert(IPersonalAccount.InvalidControllerAddress.selector);
+        fresh.initialize(address(0), xrplOwner);
+    }
+
+    function testOnTransferReceived() public {
+        bytes4 sel = personalAccount.onTransferReceived(
+            makeAddr("operator"),
+            makeAddr("from"),
+            123,
+            ""
+        );
+        assertEq(sel, personalAccount.onTransferReceived.selector);
+    }
+
     function testInitializeCheckValues() public {
         assertEq(personalAccount.controllerAddress(), controller);
         assertEq(personalAccount.xrplOwner(), xrplOwner);
