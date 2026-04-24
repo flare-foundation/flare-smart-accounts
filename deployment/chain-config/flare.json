@@ -51,13 +51,6 @@
     }
   ],
   "xrplProviderWallets": ["rM2LEysS4isvAJkZFfxKDL5z4aTfWcBTXV"],
-  "uniswapV3Router": "0x5FD34090E9b195d8482Ad3CC63dB078534F1b113",
-  "usdt0": "0xe7cd86e13AC4309349F30B3435a9d337750fC82D",
-  "wNatStableCoinPoolFeeTierPPM": 3000,
-  "stableCoinFXrpPoolFeeTierPPM": 3000,
-  "maxSlippagePPM": 5000,
-  "stableCoinUsdFeedId": "0x01555344542f555344000000000000000000000000",
-  "wNatUsdFeedId": "0x01464c522f55534400000000000000000000000000",
   "timelockDurationSeconds": 3600,
 
   "endpoint": "0x0000000000000000000000000000000000000000",

@@ -1,17 +1,14 @@
 {
   "compilerOptions": {
     "target": "es2024",
-    "module": "commonjs",
-    "declaration": true,
-    "esModuleInterop": true,
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true,
-    "noImplicitAny": true,
-    "forceConsistentCasingInFileNames": true,
+    "lib": ["ES2024"],
+    "module": "Node20",
+    "types": ["node"],
     "strict": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "outDir": "dist",
+    "isolatedModules": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true
   },
   "include": [
     "./deployment",

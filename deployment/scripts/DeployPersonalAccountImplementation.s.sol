@@ -6,10 +6,13 @@ import {PersonalAccount} from "../../contracts/smartAccounts/implementation/Pers
 
 // solhint-disable no-console
 contract DeployPersonalAccountImplementation is Script {
-    function run() external {
+    function run(bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         string memory network = _getNetwork(block.chainid);
+        if (_staging) {
+            network = string.concat(network, "-staging");
+        }
 
         vm.startBroadcast(deployerPrivateKey);
         PersonalAccount personalAccountImpl = new PersonalAccount();
@@ -30,6 +33,10 @@ contract DeployPersonalAccountImplementation is Script {
     function _getNetwork(uint256 _chainId) private pure returns (string memory) {
         if (_chainId == 14) {
             return "flare";
+        } else if (_chainId == 19) {
+            return "songbird";
+        } else if (_chainId == 16) {
+            return "coston";
         } else if (_chainId == 114) {
             return "coston2";
         } else {

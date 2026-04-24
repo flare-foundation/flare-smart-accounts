@@ -2,6 +2,8 @@
 pragma solidity >=0.7.6 <0.9;
 
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
+
 
 /**
  * @title IIPersonalAccount
@@ -54,13 +56,13 @@ interface IIPersonalAccount is IPersonalAccount {
 
     /**
      * @notice Deposit assets into the vault.
-     * @param _vaultType The type of the vault (1: Firelight, 2: Upshift).
+     * @param _vaultType The type of the vault.
      * @param _vault Vault address.
      * @param _assets The amount of assets to deposit.
      * @return _shares The received shares.
      */
     function deposit(
-        uint256 _vaultType,
+        IVaultsFacet.VaultType _vaultType,
         address _vault,
         uint256 _assets
     )
@@ -128,26 +130,11 @@ interface IIPersonalAccount is IPersonalAccount {
         returns (uint256 _shares, uint256 _assets);
 
     /**
-     * @notice Execute a swap on Uniswap V3.
-     * @param _uniswapV3Router The address of the Uniswap V3 router.
-     * @param _tokenIn The address of the input token.
-     * @param _tokenInFeedId The feed ID of the input token.
-     * @param _tokenOut The address of the output token.
-     * @param _tokenOutFeedId The feed ID of the output token.
-     * @param _poolFeeTierPPM The fee tier of the pool to use for the swap (in PPM).
-     * @param _maxSlippagePPM The maximum slippage allowed for the swap (in PPM).
-     * @return amountIn The amount of input tokens used for the swap.
-     * @return amountOut The amount of output tokens received from the swap.
+     * @notice Execute a series of calls (user operation).
+     * @param _calls Array of calls to execute.
      */
-    function executeSwap(
-        address _uniswapV3Router,
-        address _tokenIn,
-        bytes21 _tokenInFeedId,
-        address _tokenOut,
-        bytes21 _tokenOutFeedId,
-        uint24 _poolFeeTierPPM,
-        uint24 _maxSlippagePPM
+    function executeUserOp(
+        IPersonalAccount.Call[] calldata _calls
     )
-        external
-        returns (uint256 amountIn, uint256 amountOut);
+        external payable;
 }

@@ -1,4 +1,4 @@
-import * as fs from "fs";
+import fs from "node:fs";
 
 // Read Forge output from a output file
 const outputPath = "forge-deploy-output.txt";
@@ -17,13 +17,13 @@ let network: string = "unknown";
 lines.forEach((line: string) => {
   const match = line.match(/^\s*DEPLOYED:\s*([^,]+),\s*([^:]+):\s*(0x[a-fA-F0-9]{40})$/);
   const matchNetwork = line.match(/^\s*NETWORK:\s*([a-zA-Z0-9_-]+)/);
-  if (match) {
+  if (match && match[1] && match[2] && match[3]) {
     contracts.push({
       name: match[1].trim(),
       contractName: match[2].trim(),
       address: match[3].trim(),
     });
-  } else if (matchNetwork) {
+  } else if (matchNetwork && matchNetwork[1]) {
     network = matchNetwork[1].trim();
   }
 });

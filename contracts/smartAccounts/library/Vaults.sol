@@ -11,8 +11,8 @@ library Vaults {
     struct VaultInfo {
         /// @notice Vault address
         address vaultAddress;
-        /// @notice Vault type (1 = Firelight, 2 = Upshift, ...)
-        uint8 vaultType;
+        /// @notice Vault type
+        IVaultsFacet.VaultType vaultType;
     }
 
     /// @custom:storage-location erc7201:smartAccounts.Vaults.State
@@ -37,7 +37,7 @@ library Vaults {
         uint256 instructionType = PaymentReferenceParser.getInstructionType(_paymentReference);
         require(_vault != address(0), IVaultsFacet.InvalidVaultId(vaultId));
         require(
-            instructionType == vaultInfo.vaultType,
+            instructionType == uint256(vaultInfo.vaultType),
             IInstructionsFacet.InvalidInstructionType(instructionType)
         );
     }

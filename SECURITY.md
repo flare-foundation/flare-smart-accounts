@@ -17,5 +17,28 @@ scope, rules, and submission guidelines.
 ## Vulnerability disclosures
 
 Critical vulnerabilities will be disclosed via GitHub's
-[security advisory](https://github.com/flare-foundation/fassets/security)
+[security advisory](https://github.com/flare-foundation/flare-smart-accounts/security)
 system.
+
+## Review scope and audits
+
+### In scope
+
+- `contracts/composer/**/*`
+- `contracts/smartAccounts/**/*`
+- `contracts/userInterfaces/**/*`
+- `contracts/utils/**/*`
+
+### Out of scope
+
+- `contracts/diamond/**/*`
+- `contracts/mock/**/*`
+
+### Previous audits
+
+All audit reports are available in the [`audit/`](./audit/) folder.
+
+| Report | Auditor | Date |
+| ------ | ------- | ---- |
+| [Smart Accounts Audit Report](./audit/2025-11-26-Zellic-Smart_Accounts_Audit_Report.pdf) | Zellic | November 2025 |
+| [Smart Accounts Diff Audit v1](./audit/2026-02-12-Zellic-Smart_Accounts_diff_v1.pdf) | Zellic | February 2026 |

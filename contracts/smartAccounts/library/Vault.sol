@@ -3,12 +3,13 @@ pragma solidity ^0.8.27;
 
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
+import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 
 library Vault {
 
     function deposit(
         IIPersonalAccount _personalAccount,
-        uint256 _vaultType,
+        IVaultsFacet.VaultType _vaultType,
         address _vault,
         uint256 _amount
     )

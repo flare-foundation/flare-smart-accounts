@@ -123,7 +123,10 @@ export function loadAbi(contractName: string): AbiItem[] {
 export function parseArgs(argv: string[]) {
   const args: Record<string, string> = {};
   for (let i = 2; i < argv.length; i += 2) {
-    args[argv[i].replace(/^--/, "")] = argv[i + 1];
+    const key = argv[i];
+    const value = argv[i + 1];
+    if (key === undefined || value === undefined) continue;
+    args[key.replace(/^--/, "")] = value;
   }
   return args;
 }
@@ -133,11 +136,10 @@ export function readFacetsFile(p: string) {
   const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter(Boolean);
   return lines.map((l) => {
     const parts = l.split("|");
-    if (parts.length !== 2) {
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
       throw new Error(`Invalid facets line (expected address|contractName): ${l}`);
     }
-    const [address, contractName] = parts;
-    return { address, contractName };
+    return { address: parts[0], contractName: parts[1] };
   });
 }
 
@@ -146,6 +148,9 @@ export function readLoupeFile(p: string) {
   const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter(Boolean);
   return lines.map((l) => {
     const [facetAddress, selectors] = l.split("|");
+    if (!facetAddress) {
+      throw new Error(`Invalid loupe line (expected facetAddress|selectors): ${l}`);
+    }
     const functionSelectors = (selectors ? selectors.split(",") : []).filter(Boolean);
     return { facetAddress, functionSelectors };
   });

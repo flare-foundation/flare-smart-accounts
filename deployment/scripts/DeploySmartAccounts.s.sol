@@ -10,6 +10,7 @@ import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISing
 import {IIMasterAccountController} from "../../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
+import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
@@ -19,17 +20,20 @@ import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaults
 import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
+import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
-import {SwapFacet} from "../../contracts/smartAccounts/facets/SwapFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol";
+import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
+import {ReaderFacet} from "../../contracts/smartAccounts/facets/ReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
 
 // solhint-disable no-console
 // solhint-disable-next-line max-line-length
 // forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
 
+// solhint-disable-next-line max-states-count
 contract DeploySmartAccounts is Script {
     struct AgentVaultConfig {
         address agentVaultAddress;
@@ -39,7 +43,7 @@ contract DeploySmartAccounts is Script {
     struct VaultConfig {
         uint256 vaultId;
         address vaultAddress;
-        uint8 vaultType;
+        IVaultsFacet.VaultType vaultType;
     }
 
     struct MasterAccountControllerParams {
@@ -53,13 +57,6 @@ contract DeploySmartAccounts is Script {
         uint256 paymentProofValidityDurationSeconds;
         uint256 defaultInstructionFee;
         string[] xrplProviderWallets;
-        address uniswapV3Router;
-        address usdt0;
-        uint24 wNatStableCoinPoolFeeTierPPM;
-        uint24 stableCoinFXrpPoolFeeTierPPM;
-        uint24 maxSlippagePPM;
-        bytes21 stableCoinUsdFeedId;
-        bytes21 wNatUsdFeedId;
         uint256 timelockDurationSeconds;
     }
 
@@ -80,14 +77,16 @@ contract DeploySmartAccounts is Script {
     ExecutorsFacet private executorsFacet;
     InstructionFeesFacet private instructionFeesFacet;
     InstructionsFacet private instructionsFacet;
+    MemoInstructionsFacet private memoInstructionsFacet;
     PaymentProofsFacet private paymentProofsFacet;
     PersonalAccountsFacet private personalAccountsFacet;
-    SwapFacet private swapFacet;
     TimelockFacet private timelockFacet;
+    PauseFacet private pauseFacet;
+    ReaderFacet private readerFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
-    function run(bool _fullDeploy) external {
+    function run(bool _fullDeploy, bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
@@ -97,10 +96,17 @@ contract DeploySmartAccounts is Script {
 
         if (chainId == 14) {
             network = "flare";
+        } else if (chainId == 19) {
+            network = "songbird";
+        } else if (chainId == 16) {
+            network = "coston";
         } else if (chainId == 114) {
             network = "coston2";
         } else {
             network = "scdev";
+        }
+        if (_staging) {
+            network = string.concat(network, "-staging");
         }
         configFile = string.concat(configFile, network, ".json");
         console2.log(string.concat("NETWORK: ", network));
@@ -117,13 +123,6 @@ contract DeploySmartAccounts is Script {
         params.paymentProofValidityDurationSeconds = vm.parseJsonUint(config, ".paymentProofValidityDurationSeconds");
         params.defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
         params.xrplProviderWallets = vm.parseJsonStringArray(config, ".xrplProviderWallets");
-        params.uniswapV3Router = vm.parseJsonAddress(config, ".uniswapV3Router");
-        params.usdt0 = vm.parseJsonAddress(config, ".usdt0");
-        params.wNatStableCoinPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".wNatStableCoinPoolFeeTierPPM"));
-        params.stableCoinFXrpPoolFeeTierPPM = uint24(vm.parseJsonUint(config, ".stableCoinFXrpPoolFeeTierPPM"));
-        params.maxSlippagePPM = uint24(vm.parseJsonUint(config, ".maxSlippagePPM"));
-        params.stableCoinUsdFeedId = bytes21(vm.parseJsonBytes(config, ".stableCoinUsdFeedId"));
-        params.wNatUsdFeedId = bytes21(vm.parseJsonBytes(config, ".wNatUsdFeedId"));
         params.timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
 
         // if initial owner not set in config, use deployer address - for testing purposes
@@ -294,22 +293,6 @@ contract DeploySmartAccounts is Script {
         );
 
         if (_fullDeploy) {
-            // set swap parameters
-            if (params.uniswapV3Router != address(0)) {
-                console2.log("Setting swap parameters");
-                masterAccountController.setSwapParams(
-                    params.uniswapV3Router,
-                    params.usdt0,
-                    params.wNatStableCoinPoolFeeTierPPM,
-                    params.stableCoinFXrpPoolFeeTierPPM,
-                    params.maxSlippagePPM,
-                    params.stableCoinUsdFeedId,
-                    params.wNatUsdFeedId
-                );
-            } else {
-                console2.log("Swap parameters not set, swap is disabled");
-            }
-
             console2.log("Adding XRPL provider wallets");
             masterAccountController.addXrplProviderWallets(params.xrplProviderWallets);
 
@@ -325,7 +308,7 @@ contract DeploySmartAccounts is Script {
             console2.log("Adding vaults");
             uint256[] memory vaultIds = new uint256[](params.vaults.length);
             address[] memory vaultAddresses = new address[](params.vaults.length);
-            uint8[] memory vaultTypes = new uint8[](params.vaults.length);
+            IVaultsFacet.VaultType[] memory vaultTypes = new IVaultsFacet.VaultType[](params.vaults.length);
             for (uint256 i = 0; i < params.vaults.length; i++) {
                 vaultIds[i] = params.vaults[i].vaultId;
                 vaultAddresses[i] = params.vaults[i].vaultAddress;
@@ -379,24 +362,30 @@ contract DeploySmartAccounts is Script {
         executorsFacet = new ExecutorsFacet();
         instructionFeesFacet = new InstructionFeesFacet();
         instructionsFacet = new InstructionsFacet();
+        memoInstructionsFacet = new MemoInstructionsFacet();
         paymentProofsFacet = new PaymentProofsFacet();
         personalAccountsFacet = new PersonalAccountsFacet();
-        swapFacet = new SwapFacet();
         timelockFacet = new TimelockFacet();
+        pauseFacet = new PauseFacet();
+        readerFacet = new ReaderFacet();
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
 
-        smartAccountsFacets = new IDiamond.FacetCut[](10);
+        smartAccountsFacets = new IDiamond.FacetCut[](12);
+        // v1.0.0 facets (keep original order)
         smartAccountsFacets[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
         smartAccountsFacets[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
         smartAccountsFacets[2] = _addFacet(address(instructionFeesFacet), "InstructionFeesFacet");
         smartAccountsFacets[3] = _addFacet(address(instructionsFacet), "InstructionsFacet");
         smartAccountsFacets[4] = _addFacet(address(paymentProofsFacet), "PaymentProofsFacet");
         smartAccountsFacets[5] = _addFacet(address(personalAccountsFacet), "PersonalAccountsFacet");
-        smartAccountsFacets[6] = _addFacet(address(swapFacet), "SwapFacet");
-        smartAccountsFacets[7] = _addFacet(address(timelockFacet), "TimelockFacet");
-        smartAccountsFacets[8] = _addFacet(address(vaultsFacet), "VaultsFacet");
-        smartAccountsFacets[9] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+        smartAccountsFacets[6] = _addFacet(address(timelockFacet), "TimelockFacet");
+        smartAccountsFacets[7] = _addFacet(address(vaultsFacet), "VaultsFacet");
+        smartAccountsFacets[8] = _addFacet(address(xrplProviderWalletsFacet), "XrplProviderWalletsFacet");
+        // new facets (append at end)
+        smartAccountsFacets[9] = _addFacet(address(memoInstructionsFacet), "MemoInstructionsFacet");
+        smartAccountsFacets[10] = _addFacet(address(pauseFacet), "PauseFacet");
+        smartAccountsFacets[11] = _addFacet(address(readerFacet), "ReaderFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {
@@ -441,13 +430,6 @@ contract DeploySmartAccounts is Script {
                 "DEPLOYED: PersonalAccountsFacet, ",
                 "PersonalAccountsFacet.sol: ",
                 vm.toString(address(personalAccountsFacet))
-            )
-        );
-        console2.log(
-            string.concat(
-                "DEPLOYED: SwapFacet, ",
-                "SwapFacet.sol: ",
-                vm.toString(address(swapFacet))
             )
         );
         console2.log(

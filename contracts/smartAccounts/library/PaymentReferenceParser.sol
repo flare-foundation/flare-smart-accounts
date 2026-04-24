@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet.sol";
+import {IMemoInstructionsFacet} from "../../userInterfaces/facets/IMemoInstructionsFacet.sol";
 import {IAgentVaultsFacet} from "../../userInterfaces/facets/IAgentVaultsFacet.sol";
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 
@@ -85,7 +85,7 @@ library PaymentReferenceParser {
     function getValue(bytes32 _paymentReference) internal pure returns (uint256 _value) {
         // bytes 02-11: uint80
         _value = (uint256(_paymentReference) >> 160) & ((uint256(1) << 80) - 1);
-        require(_value > 0, IInstructionsFacet.ValueZero());
+        require(_value > 0, IMemoInstructionsFacet.ValueZero());
     }
 
     function getAgentVaultId(bytes32 _paymentReference) internal pure returns (uint256 _agentVaultId) {
@@ -103,6 +103,6 @@ library PaymentReferenceParser {
     function getAddress(bytes32 _paymentReference) internal pure returns (address _address) {
         // bytes 12-31: address (20 bytes)
         _address = address(uint160(uint256(_paymentReference) & ((uint256(1) << 160) - 1)));
-        require(_address != address(0), IInstructionsFacet.AddressZero());
+        require(_address != address(0), IMemoInstructionsFacet.AddressZero());
     }
 }

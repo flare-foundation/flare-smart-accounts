@@ -7,12 +7,15 @@
     "InstructionsFacet",
     "PaymentProofsFacet",
     "PersonalAccountsFacet",
-    "SwapFacet",
     "TimelockFacet",
     "VaultsFacet",
     "XrplProviderWalletsFacet",
     "OwnershipFacet",
-    "DiamondLoupeFacet"
+    "DiamondLoupeFacet",
+    "MemoInstructionsFacet",
+    "PauseFacet",
+    "ReaderFacet",
+    "DiamondCutFacet"
   ],
   "deleteAllOldMethods": false,
   "deleteSelectorSigs": [],

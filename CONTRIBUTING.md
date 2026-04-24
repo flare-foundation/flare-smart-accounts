@@ -140,7 +140,7 @@ pnpm verify_contracts coston2
 ```
 
 ### Execute Diamond Cut
-To execute a diamond cut on an existing diamond contract (or to only print execute transaction data), first create the cut file (see [cut-example.json](deployment/cuts/cut-example.json)) and put it in the `deployment/cuts/<network>` folder.
+To execute a diamond cut on an existing diamond contract (or to only print execute transaction data), first create the cut file (see [cut-example.json](deployment/cuts/coston2/cut-example.json)) and put it in the `deployment/cuts/<network>` folder.
 
 Then run the diamond_cut script with:
 

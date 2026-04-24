@@ -91,7 +91,10 @@ library PersonalAccounts {
         // address(this) resolves to the diamond address when called via delegatecall from facet.
         return abi.encodePacked(
             type(PersonalAccountProxy).creationCode,
-            abi.encode(address(this), _xrplOwner)
+            abi.encode(
+                address(this),
+                _xrplOwner
+            )
         );
     }
 
