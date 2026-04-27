@@ -42,3 +42,5 @@ All audit reports are available in the [`audit/`](./audit/) folder.
 | ------ | ------- | ---- |
 | [Smart Accounts Audit Report](./audit/2025-11-26-Zellic-Smart_Accounts_Audit_Report.pdf) | Zellic | November 2025 |
 | [Smart Accounts Diff Audit v1](./audit/2026-02-12-Zellic-Smart_Accounts_diff_v1.pdf) | Zellic | February 2026 |
+| [FAsset Redeem Composer Audit Report](./audit/2026-04-15-Zellic-FAsset_Redeem_Composer_Audit_Report.pdf) | Zellic | April 2026 |
+| [Smart Accounts Diff Audit v2](./audit/2026-04-23-Zellic-Smart_Accounts_diff_v2.pdf) | Zellic | April 2026 |
