@@ -129,12 +129,4 @@ interface IIPersonalAccount is IPersonalAccount {
         external
         returns (uint256 _shares, uint256 _assets);
 
-    /**
-     * @notice Execute a series of calls (user operation).
-     * @param _calls Array of calls to execute.
-     */
-    function executeUserOp(
-        IPersonalAccount.Call[] calldata _calls
-    )
-        external payable;
 }

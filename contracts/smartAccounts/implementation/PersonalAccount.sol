@@ -235,7 +235,7 @@ contract PersonalAccount is
         emit Claimed(_vault, _year, _month, _day, _shares, _assets);
     }
 
-    /// @inheritdoc IIPersonalAccount
+    /// @inheritdoc IPersonalAccount
     function executeUserOp(
         IPersonalAccount.Call[] calldata _calls
     )

@@ -11,7 +11,6 @@ import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
-import {IIPersonalAccount} from "../contracts/smartAccounts/interface/IIPersonalAccount.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
 import {MockSingletonFactory} from "../contracts/mock/MockSingletonFactory.sol";
@@ -2691,7 +2690,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             sender: wrongSender,
             nonce: 0,
             initCode: "",
-            callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+            callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
             accountGasLimits: 0,
             preVerificationGas: 0,
             gasFees: 0,
@@ -2729,7 +2728,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             sender: personalAccountAddr,
             nonce: 42, // current state is 0; expect InvalidNonce
             initCode: "",
-            callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+            callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
             accountGasLimits: 0,
             preVerificationGas: 0,
             gasFees: 0,
@@ -2766,7 +2765,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             sender: personalAccountAddr,
             nonce: 0,
             initCode: "",
-            callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+            callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
             accountGasLimits: 0,
             preVerificationGas: 0,
             gasFees: 0,
@@ -2872,7 +2871,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             data: abi.encodeWithSignature("setFlag(bool)", true)
         });
         bytes memory callData = abi.encodeCall(
-            IIPersonalAccount.executeUserOp,
+            IPersonalAccount.executeUserOp,
             (calls)
         );
         PackedUserOperation memory packedUserOp = PackedUserOperation({
@@ -3046,7 +3045,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             data: abi.encodeWithSignature("setFlag(bool)", true)
         });
         bytes memory callData = abi.encodeCall(
-            IIPersonalAccount.executeUserOp,
+            IPersonalAccount.executeUserOp,
             (calls)
         );
         bytes memory execMemo = abi.encodePacked(
@@ -3158,7 +3157,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             data: abi.encodeWithSignature("setFlag(bool)", true)
         });
         bytes memory callData = abi.encodeCall(
-            IIPersonalAccount.executeUserOp,
+            IPersonalAccount.executeUserOp,
             (calls)
         );
         bytes memory execMemo = abi.encodePacked(
@@ -3289,7 +3288,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
                 sender: personalAccountAddr,
                 nonce: 0,
                 initCode: "",
-                callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+                callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
                 accountGasLimits: 0,
                 preVerificationGas: 0,
                 gasFees: 0,
@@ -3448,7 +3447,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
                 sender: personalAccountAddr,
                 nonce: 0,
                 initCode: "",
-                callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+                callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
                 accountGasLimits: 0,
                 preVerificationGas: 0,
                 gasFees: 0,
@@ -3494,7 +3493,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
                 sender: personalAccountAddr,
                 nonce: 0,
                 initCode: "",
-                callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+                callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
                 accountGasLimits: 0,
                 preVerificationGas: 0,
                 gasFees: 0,
@@ -3560,7 +3559,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
                 sender: personalAccountAddr,
                 nonce: 0,
                 initCode: "",
-                callData: abi.encodeCall(IIPersonalAccount.executeUserOp, (calls)),
+                callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
                 accountGasLimits: 0,
                 preVerificationGas: 0,
                 gasFees: 0,
