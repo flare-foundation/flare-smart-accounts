@@ -185,14 +185,16 @@ interface IMemoInstructionsFacet {
      * @param _underlyingTimestamp The XRPL transaction timestamp.
      * @param _memoData The raw XRPL memo bytes.
      * @param _executor The executor address.
+     * @param _data Extra data not contained in the XRPL memo.
      */
-    function mintedFAssets(
+    function handleMintedFAssets(
         bytes32 _transactionId,
         string calldata _sourceAddress,
         uint256 _amount,
         uint256 _underlyingTimestamp,
         bytes calldata _memoData,
-        address payable _executor
+        address payable _executor,
+        bytes calldata _data
     )
         external payable;
 

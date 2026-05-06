@@ -31,13 +31,14 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
     /// @dev _executor is always msg.sender of the direct minting call to the AssetManager.
     /// XRPL transactions to smart accounts must NOT use destination tags — using a tag
     /// allows front-running via tag purchase on the direct minting facet.
-    function mintedFAssets(
+    function handleMintedFAssets(
         bytes32 _transactionId,
         string calldata _sourceAddress,
         uint256 _amount,
         uint256 /* _underlyingTimestamp */,
         bytes calldata _memoData,
-        address payable _executor
+        address payable _executor,
+        bytes calldata /* _data */
     )
         external payable
         notPaused
