@@ -275,6 +275,7 @@ contract FAssetRedeemComposer is
         address payable executor = redeemComposeMessage.executor != address(0) ?
             redeemComposeMessage.executor : defaultExecutor;
 
+        bytes32 guid = _guid; // stack too deep issue fix
         try IIFAssetRedeemerAccount(redeemerAccount).redeemFAsset{value: redeemComposeMessage.executorFee}(
             assetManager,
             amountToRedeemAfterFee,
@@ -294,7 +295,7 @@ contract FAssetRedeemComposer is
             }
 
             emit FAssetRedeemed(
-                _guid,
+                guid,
                 srcEid,
                 redeemComposeMessage.redeemer,
                 redeemerAccount,
@@ -315,7 +316,7 @@ contract FAssetRedeemComposer is
             }
 
             emit FAssetRedeemFailed(
-                _guid,
+                guid,
                 srcEid,
                 redeemComposeMessage.redeemer,
                 redeemerAccount,
