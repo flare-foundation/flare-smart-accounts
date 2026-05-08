@@ -15,6 +15,20 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 
 contract FAssetRedeemComposerTest is Test {
+    struct LzComposeVars {
+        string redeemerUnderlying;
+        address redeemer;
+        uint32 srcEid;
+        uint256 amountLD;
+        uint256 composerFee;
+        uint256 amountToRedeem;
+        uint256 executorFee;
+        uint256 nativeValue;
+        bytes message;
+        bytes32 guid;
+        address redeemerAccount;
+    }
+
     FAssetRedeemComposer private composerImpl;
     FAssetRedeemComposerProxy private composerProxy;
     FAssetRedeemComposer private composer;
@@ -579,22 +593,24 @@ contract FAssetRedeemComposerTest is Test {
         vm.prank(owner);
         composer.setComposerFees(srcEids, fees);
 
-        address redeemer = makeAddr("redeemer");
-        string memory redeemerUnderlying = "rExample";
-        uint256 amountLD = 1000;
-        uint256 composerFee = amountLD * feePPM / 1_000_000;
-        uint256 amountToRedeem = amountLD - composerFee;
-        uint256 nativeValue = 0.1 ether;
+        LzComposeVars memory v;
+        v.redeemer = makeAddr("redeemer");
+        v.redeemerUnderlying = "rExample";
+        v.srcEid = srcEid;
+        v.amountLD = 1000;
+        v.composerFee = v.amountLD * feePPM / 1_000_000;
+        v.amountToRedeem = v.amountLD - v.composerFee;
+        v.nativeValue = 0.1 ether;
 
-        (bytes memory message, bytes32 guid) = _encodeMessageFull(
-            redeemer, redeemerUnderlying, false, 0, payable(address(0)), nativeValue, srcEid, amountLD
+        (v.message, v.guid) = _encodeMessageFull(
+            v.redeemer, v.redeemerUnderlying, false, 0, payable(address(0)), v.nativeValue, v.srcEid, v.amountLD
         );
 
-        address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
+        v.redeemerAccount = composer.getRedeemerAccountAddress(v.redeemer);
 
         // Mock token transfers
-        _mockSafeTransfer(fAsset, composerFeeRecipient, composerFee);
-        _mockSafeTransfer(fAsset, redeemerAccount, amountToRedeem);
+        _mockSafeTransfer(fAsset, composerFeeRecipient, v.composerFee);
+        _mockSafeTransfer(fAsset, v.redeemerAccount, v.amountToRedeem);
 
         // Mock approvals for setMaxAllowances (called during deployment)
         _mockForceApprove(fAsset, true);
@@ -605,48 +621,48 @@ contract FAssetRedeemComposerTest is Test {
         vm.mockCall(
             assetManager,
             abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
-            abi.encode(amountToRedeem) // returns redeemedAmountUBA
+            abi.encode(v.amountToRedeem) // returns redeemedAmountUBA
         );
 
         // fund sender
-        vm.deal(endpoint, nativeValue);
+        vm.deal(endpoint, v.nativeValue);
 
         vm.prank(endpoint);
 
         vm.expectEmit();
         emit IFAssetRedeemComposer.ComposerFeeCollected(
-            guid,
-            srcEid,
+            v.guid,
+            v.srcEid,
             composerFeeRecipient,
-            composerFee
+            v.composerFee
         );
 
         vm.expectEmit();
         emit IFAssetRedeemComposer.FAssetTransferred(
-            redeemerAccount,
-            amountToRedeem
+            v.redeemerAccount,
+            v.amountToRedeem
         );
 
         vm.expectEmit();
         emit IFAssetRedeemComposer.FAssetRedeemed(
-            guid,
-            srcEid,
-            redeemer,
-            redeemerAccount,
-            amountToRedeem,
-            redeemerUnderlying,
+            v.guid,
+            v.srcEid,
+            v.redeemer,
+            v.redeemerAccount,
+            v.amountToRedeem,
+            v.redeemerUnderlying,
             false,
             0,
             defaultExecutor,
-            nativeValue,
-            amountToRedeem, // result
+            v.nativeValue,
+            v.amountToRedeem, // result
             0 // wrappedAmount (no excess)
         );
 
-        composer.lzCompose{value: nativeValue}(
+        composer.lzCompose{value: v.nativeValue}(
             trustedSourceOApp,
-            guid,
-            message,
+            v.guid,
+            v.message,
             address(0),
             ""
         );
@@ -1526,24 +1542,24 @@ contract FAssetRedeemComposerTest is Test {
     }
 
     function testLzComposeSuccessExcessNativeWrapped() public {
-        address redeemer = makeAddr("redeemer");
-        string memory redeemerUnderlying = "rExample";
-        uint32 srcEid = 1;
-        uint256 amountLD = 1000;
-        uint256 composerFee = amountLD * defaultComposerFeePPM / 1_000_000;
-        uint256 amountToRedeem = amountLD - composerFee;
-        uint256 executorFee = 0.1 ether;
-        uint256 nativeValue = 0.5 ether;
-        uint256 excess = nativeValue - executorFee;
+        LzComposeVars memory v;
+        v.redeemer = makeAddr("redeemer");
+        v.redeemerUnderlying = "rExample";
+        v.srcEid = 1;
+        v.amountLD = 1000;
+        v.composerFee = v.amountLD * defaultComposerFeePPM / 1_000_000;
+        v.amountToRedeem = v.amountLD - v.composerFee;
+        v.executorFee = 0.1 ether;
+        v.nativeValue = 0.5 ether;
 
-        (bytes memory message, bytes32 guid) = _encodeMessageFull(
-            redeemer, redeemerUnderlying, false, 0, payable(address(0)), executorFee, srcEid, amountLD
+        (v.message, v.guid) = _encodeMessageFull(
+            v.redeemer, v.redeemerUnderlying, false, 0, payable(address(0)), v.executorFee, v.srcEid, v.amountLD
         );
 
-        address redeemerAccount = composer.getRedeemerAccountAddress(redeemer);
+        v.redeemerAccount = composer.getRedeemerAccountAddress(v.redeemer);
 
-        _mockSafeTransfer(fAsset, composerFeeRecipient, composerFee);
-        _mockSafeTransfer(fAsset, redeemerAccount, amountToRedeem);
+        _mockSafeTransfer(fAsset, composerFeeRecipient, v.composerFee);
+        _mockSafeTransfer(fAsset, v.redeemerAccount, v.amountToRedeem);
         _mockForceApprove(fAsset, true);
         _mockForceApprove(stableCoin, true);
         _mockForceApprove(wNat, true);
@@ -1551,40 +1567,40 @@ contract FAssetRedeemComposerTest is Test {
         vm.mockCall(
             assetManager,
             abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
-            abi.encode(amountToRedeem)
+            abi.encode(v.amountToRedeem)
         );
 
         // Mock wNat.depositTo for the excess amount
         vm.mockCall(
             wNat,
-            excess,
-            abi.encodeWithSignature("depositTo(address)", redeemerAccount),
+            v.nativeValue - v.executorFee,
+            abi.encodeWithSignature("depositTo(address)", v.redeemerAccount),
             ""
         );
 
-        vm.deal(endpoint, nativeValue);
+        vm.deal(endpoint, v.nativeValue);
         vm.prank(endpoint);
 
         vm.expectEmit();
         emit IFAssetRedeemComposer.FAssetRedeemed(
-            guid,
-            srcEid,
-            redeemer,
-            redeemerAccount,
-            amountToRedeem,
-            redeemerUnderlying,
+            v.guid,
+            v.srcEid,
+            v.redeemer,
+            v.redeemerAccount,
+            v.amountToRedeem,
+            v.redeemerUnderlying,
             false,
             0,
             defaultExecutor,
-            executorFee,
-            amountToRedeem,
-            excess // wrappedAmount
+            v.executorFee,
+            v.amountToRedeem,
+            v.nativeValue - v.executorFee // wrappedAmount
         );
 
-        composer.lzCompose{value: nativeValue}(
+        composer.lzCompose{value: v.nativeValue}(
             trustedSourceOApp,
-            guid,
-            message,
+            v.guid,
+            v.message,
             address(0),
             ""
         );
