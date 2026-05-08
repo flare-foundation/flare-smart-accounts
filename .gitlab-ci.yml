@@ -126,7 +126,7 @@ format-check:
   - pnpm format:check
 
 slither:
-  image: timivesel/foundry-custom:latest
+  image: flarefoundation/foundry-custom:latest
   tags: [ flarenetwork-md ]
   timeout: 10 minutes
   needs:
@@ -150,7 +150,7 @@ slither:
 test:
   timeout: 10 minutes
   tags: [ flarenetwork-md ]
-  image: timivesel/foundry-custom:latest
+  image: flarefoundation/foundry-custom:latest
   needs:
   - job: build-node-modules
     artifacts: false
@@ -167,7 +167,7 @@ test:
 ##
 
 coverage:
-  image: timivesel/foundry-custom:latest
+  image: flarefoundation/foundry-custom:latest
   tags: [ flarenetwork-md ]
   timeout: 10 minutes
   needs:
