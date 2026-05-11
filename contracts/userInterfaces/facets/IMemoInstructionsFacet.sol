@@ -177,6 +177,17 @@ interface IMemoInstructionsFacet {
     );
 
     /**
+     * @notice Reverts if the keccak256 of the executor-provided _data does not
+     * match the hash carried in the 0xFE memo's userOp.callData.
+     * @param expected The hash committed to in the memo.
+     * @param actual The hash of the supplied _data.
+     */
+    error CustomInstructionHashMismatch(
+        bytes32 expected,
+        bytes32 actual
+    );
+
+    /**
      * @notice Called by the AssetManager when FAssets are minted via direct minting.
      * FAssets are transferred to the MasterAccountController before this call.
      * @param _transactionId The XRPL transaction ID.

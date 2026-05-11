@@ -127,7 +127,7 @@ PersonalAccount (beacon proxy) ← MasterAccountController (diamond)
 
 - **Legacy path:** XRPL payment → FDC `IPayment.Proof` (`standardPaymentReference`) → `InstructionsFacet` → library routing → `PersonalAccount` execution
 - **Memo path:** `handleMintedFAssets()` (direct minting with XRPL memo data) → `MemoInstructionsFacet`
-- **Memo instruction codes:** `0xFF` execute UserOp, `0xE0` ignore memo, `0xE1` increase nonce, `0xE2` replace fee, `0xD0` set executor, `0xD1` remove executor
+- **Memo instruction codes:** `0xFF` execute UserOp (UserOp inlined in memo), `0xFE` execute UserOp with data (memo carries `keccak256(_data)`; UserOp arrives via `_data`), `0xE0` ignore memo, `0xE1` increase nonce, `0xE2` replace fee, `0xD0` set executor, `0xD1` remove executor
 - **Transaction ID tracking:** `usedTransactionIds` in `Instructions.State` — shared by both legacy and memo paths
 - **Nonce-on-success:** Memo instruction nonce only increments on successful execution (XRPL txns are irreversible, proofs must be retryable)
 - **Pausing:** `PauseFacet` with separate pauser/unpauser roles. `notPaused` modifier on state-modifying functions of `InstructionsFacet` and `MemoInstructionsFacet`

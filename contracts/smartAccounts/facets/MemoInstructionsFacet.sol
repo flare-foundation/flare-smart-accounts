@@ -38,7 +38,7 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         uint256 /* _underlyingTimestamp */,
         bytes calldata _memoData,
         address payable _executor,
-        bytes calldata /* _data */
+        bytes calldata _data
     )
         external payable
         notPaused
@@ -93,8 +93,8 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         // if memo present and not ignored, execute memo instruction
         if (!memoIgnored && _memoData.length > 0) {
             uint8 instructionId = uint8(_memoData[0]);
-            if (instructionId == 0xFF) {
-                MemoInstructions.execute(_memoData, personalAccount);
+            if (instructionId == 0xFF || instructionId == 0xFE) {
+                MemoInstructions.execute(_memoData, personalAccount, _data);
             } else if (instructionId == 0xE0) {
                 MemoInstructions.setIgnoreMemo(_memoData, personalAccount);
             } else if (instructionId == 0xE1) {

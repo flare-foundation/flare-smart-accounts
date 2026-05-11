@@ -27,8 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `FAssetRedeemerAccount` (per-redeemer BeaconProxy via CREATE2, redemption with destination tag support).
     - `FAssetRedeemComposerProxy` (ERC1967) and `FAssetRedeemerAccountProxy` (BeaconProxy).
   - `OwnableWithTimelock` utility for timelocked owner operations (max 7 days).
+  - 0xFE memo opcode — Execute UserOp with data. The 42-byte memo carries only `[0xFE][walletId][fee][keccak256(_data)]`; the encoded `PackedUserOperation` arrives via the AssetManager-forwarded `_data` parameter. Lifts the XRPL memo size constraint at the cost of executor-side coordination.
 
 ### Changed
+  - Renamed `mintedFAssets()` to `handleMintedFAssets()` to reflect that it's a post-mint callback, not an action.
+  - Added a `bytes _data` parameter to `handleMintedFAssets()` for memo opcodes that need inputs not contained in the XRPL memo.
   - `InstructionsFacet` split: legacy payment-proof flow stays in `InstructionsFacet`, memo/direct-minting flow moved to new `MemoInstructionsFacet`. Both share `Instructions.State.usedTransactionIds` for cross-path replay protection.
   - `ReentrancyGuard` → `ReentrancyGuardTransient` (EIP-1153) on `PersonalAccount`.
   - Vault type from `uint8` to `VaultType` enum (`None`, `Firelight`, `Upshift`) in `IVaultsFacet`.

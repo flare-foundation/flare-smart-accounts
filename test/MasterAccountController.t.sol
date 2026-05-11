@@ -4394,4 +4394,323 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         return (_instructionType << 4) | _instructionCommand;
     }
 
+    // -----------------------------------------------------------------
+    // Memo code 0xFE — ExecuteUserOpWithData (callData = hash, real callData via _data)
+    // -----------------------------------------------------------------
+
+    /// Build _data = abi.encode(PackedUserOperation) for 0xFE.
+    function _build0xFEData(
+        address _pa,
+        uint256 _nonce,
+        bytes memory _realCallData
+    )
+        private pure
+        returns (bytes memory)
+    {
+        PackedUserOperation memory packed = PackedUserOperation({
+            sender: _pa,
+            nonce: _nonce,
+            initCode: "",
+            callData: _realCallData,
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        return abi.encode(packed);
+    }
+
+    /// Build memo = [0xFE][walletId=1][fee][hash:32] = 42 bytes.
+    function _build0xFEMemo(uint64 _fee, bytes32 _hash) private pure returns (bytes memory) {
+        return abi.encodePacked(uint8(0xFE), uint8(1), _fee, _hash);
+    }
+
+    function _setFlagCallData(bool _value) private view returns (bytes memory) {
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", _value)
+        });
+        return abi.encodeCall(IPersonalAccount.executeUserOp, (calls));
+    }
+
+    function testExecuteWithData0xFEHappyPath() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        uint64 fee = 100;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(fee, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        vm.expectEmit();
+        emit IMemoInstructionsFacet.UserOperationExecuted(personalAccountAddr, 0);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feHappy"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+
+        assertEq(simpleExample.flag(), true);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+        assertEq(fxrp.balanceOf(personalAccountAddr), amount - fee);
+        assertEq(fxrp.balanceOf(executor), fee);
+    }
+
+    function testExecuteWithData0xFEMultiCall() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        // call setFlag(true) then setFlag(false); both must run (final state false)
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](2);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+        calls[1] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", false)
+        });
+        bytes memory realCallData = abi.encodeCall(IPersonalAccount.executeUserOp, (calls));
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, realCallData);
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        // pre-set flag to true to confirm second call (false) actually runs
+        vm.prank(address(masterAccountController));
+        simpleExample.setFlag(true);
+        assertEq(simpleExample.flag(), true);
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feMulti"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+
+        assertEq(simpleExample.flag(), false);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+    }
+
+    function testExecuteWithData0xFERevertHashMismatch() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes32 wrongHash = keccak256("not the right data");
+        bytes memory memoData = _build0xFEMemo(0, wrongHash);
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.CustomInstructionHashMismatch.selector,
+                wrongHash,
+                keccak256(data)
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feMismatch"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+    }
+
+    function testExecuteWithData0xFERevertEmptyData() public {
+        uint256 amount = 5000;
+
+        bytes32 anyHash = keccak256("anything");
+        bytes memory memoData = _build0xFEMemo(0, anyHash);
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.CustomInstructionHashMismatch.selector,
+                anyHash,
+                keccak256("")
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feEmpty"), xrplAddress1, amount, 0, memoData, payable(executor), ""
+        );
+    }
+
+    function testExecuteWithData0xFERevertInvalidMemoLength() public {
+        uint256 amount = 5000;
+
+        // 0xFE expects exactly 42 bytes; ship only the 10-byte header
+        bytes memory memoData = abi.encodePacked(uint8(0xFE), uint8(1), uint64(0));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feLen"), xrplAddress1, amount, 0, memoData, payable(executor), ""
+        );
+    }
+
+    function testExecuteWithData0xFERevertWrongSender() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        address wrongSender = makeAddr("wrongSender");
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(wrongSender, 0, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.InvalidSender.selector, wrongSender, personalAccountAddr
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feSender"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFERevertWrongNonce() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 42, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(IMemoInstructionsFacet.InvalidNonce.selector, 0, 42)
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feNonce"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFEHonorsPaExecutor() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        address paExecutor = makeAddr("paExecutor");
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory setExecMemo =
+            abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), bytes20(paExecutor));
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feSetExec"), xrplAddress1, amount, 0, setExecMemo, payable(executor), ""
+        );
+        assertEq(masterAccountController.getExecutor(personalAccountAddr), paExecutor);
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.WrongExecutor.selector, paExecutor, executor
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feExec"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFEReplayProtection() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        bytes32 txId = bytes32("feReplay");
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            txId, xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(IMemoInstructionsFacet.TransactionAlreadyExecuted.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            txId, xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFEInternalCallReverts() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("nonexistent()")
+        });
+        bytes memory realCallData = abi.encodeCall(IPersonalAccount.executeUserOp, (calls));
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, realCallData);
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert();
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feInner"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFENonceUnchangedOnRevert() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes memory badMemo = _build0xFEMemo(0, keccak256("wrong"));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert();
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feNonceA"), xrplAddress1, amount, 0, badMemo, payable(executor), data
+        );
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+
+        bytes memory goodMemo = _build0xFEMemo(0, keccak256(data));
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feNonceB"), xrplAddress1, amount, 0, goodMemo, payable(executor), data
+        );
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+    }
+
+    function testExecuteWithData0xFEIgnoreMemoStillWorks() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        bytes32 stuckTxId = bytes32("feIgnoreStuck");
+        bytes32 unstickTxId = bytes32("feIgnoreUnstick");
+
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory ignoreMemo = abi.encodePacked(uint8(0xE0), uint8(1), uint64(0), stuckTxId);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            unstickTxId, xrplAddress1, amount, 0, ignoreMemo, payable(executor), ""
+        );
+
+        // 0xFE memo whose UserOp would otherwise revert (wrong sender), but txId is ignored
+        bytes memory data = _build0xFEData(makeAddr("wrongSender"), 0, _setFlagCallData(true));
+        bytes memory feMemo = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            stuckTxId, xrplAddress1, amount, 0, feMemo, payable(executor), data
+        );
+
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+        assertEq(simpleExample.flag(), false);
+    }
+
 }
