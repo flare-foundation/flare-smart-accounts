@@ -11,6 +11,11 @@
       "vaultId": 2,
       "vaultAddress": "0x373D7d201C8134D4a2f7b5c63560da217e3dEA28",
       "vaultType": 2
+    },
+    {
+      "vaultId": 3,
+      "vaultAddress": "0x2439D4bb753A0f3777d4C9011AFacc475ba6B951",
+      "vaultType": 2
     }
   ],
   "agentVaults": [
