@@ -42,4 +42,4 @@ forge script deployment/scripts/DeployComposer.s.sol:DeployComposer \
   --sig "run(bool)" "$ONLY_IMPL" \
   --broadcast | tee forge-deploy-output.txt
 
-ts-node deployment/scripts/save-deployed-addresses.ts
+npx tsx deployment/scripts/save-deployed-addresses.ts
