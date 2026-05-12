@@ -2356,7 +2356,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IInstructionsFacet.InvalidInstructionType.selector,
-                1
+                1, // instructionType from payment reference (Firelight)
+                2  // actual vault type (Upshift) — vault ID 4 is the Upshift vault
             )
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
