@@ -2,7 +2,6 @@
 pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
-import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IIMemoInstructionsFacet} from "../interface/IIMemoInstructionsFacet.sol";
@@ -43,8 +42,10 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         external payable
         notPaused
     {
-        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-        require(msg.sender == address(assetManager), OnlyAssetManager());
+        require(
+            msg.sender == address(ContractRegistry.getAssetManagerFXRP()),
+            OnlyAssetManager()
+        );
         // get or create PA
         address personalAccount = address(PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress));
 
@@ -60,30 +61,20 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         }
 
         // check PA executor (0xD0/0xD1 bypass to prevent lock-out)
-        bool bypassesExecutorCheck = !memoIgnored && _memoData.length > 0 &&
-            (uint8(_memoData[0]) == 0xD0 || uint8(_memoData[0]) == 0xD1);
-        if (!bypassesExecutorCheck) {
-            address paExecutor = MemoInstructions.getExecutor(personalAccount);
-            if (paExecutor != address(0)) {
-                require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
+        // scoped block so `bypassesExecutorCheck` and `paExecutor` are released before the helper call below
+        {
+            bool bypassesExecutorCheck = !memoIgnored && _memoData.length > 0 &&
+                (uint8(_memoData[0]) == 0xD0 || uint8(_memoData[0]) == 0xD1);
+            if (!bypassesExecutorCheck) {
+                address paExecutor = MemoInstructions.getExecutor(personalAccount);
+                if (paExecutor != address(0)) {
+                    require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
+                }
             }
         }
 
         // determine executor fee
-        uint256 executorFee;
-        if (!memoIgnored && _memoData.length > 0) {
-            require(_memoData.length >= 10, InvalidMemoData());
-            executorFee = uint64(bytes8(_memoData[2:10]));
-        } else {
-            // no memo or memo ignored — use default fee
-            executorFee = assetManager.getDirectMintingExecutorFeeUBA();
-        }
-        // check fee override (applies to all instruction IDs)
-        uint64 feeOverride = MemoInstructions.getReplacementFee(personalAccount, _transactionId);
-        if (feeOverride > 0) {
-            executorFee = feeOverride - 1;
-            delete MemoInstructions.getState().replacementFee[personalAccount][_transactionId];
-        }
+        uint256 executorFee = _resolveExecutorFee(personalAccount, _transactionId, _memoData, memoIgnored);
 
         _distributeFAssets(
             personalAccount, _transactionId,
@@ -140,6 +131,30 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         returns (uint256)
     {
         return MemoInstructions.getNonce(_personalAccount);
+    }
+
+    function _resolveExecutorFee(
+        address _personalAccount,
+        bytes32 _transactionId,
+        bytes calldata _memoData,
+        bool _memoIgnored
+    )
+        private
+        returns (uint256 _executorFee)
+    {
+        if (!_memoIgnored && _memoData.length > 0) {
+            require(_memoData.length >= 10, InvalidMemoData());
+            _executorFee = uint64(bytes8(_memoData[2:10]));
+        } else {
+            // no memo or memo ignored — use default fee
+            _executorFee = ContractRegistry.getAssetManagerFXRP().getDirectMintingExecutorFeeUBA();
+        }
+        // check fee override (applies to all instruction IDs)
+        uint64 feeOverride = MemoInstructions.getReplacementFee(_personalAccount, _transactionId);
+        if (feeOverride > 0) {
+            _executorFee = feeOverride - 1;
+            delete MemoInstructions.getState().replacementFee[_personalAccount][_transactionId];
+        }
     }
 
     function _distributeFAssets(
