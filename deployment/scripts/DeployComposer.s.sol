@@ -121,7 +121,7 @@ contract DeployComposer is Script {
             );
             console2.log(
                 string.concat(
-                    "DEPLOYED: FAssetRedeemComposer, ",
+                    "DEPLOYED: FAssetRedeemComposer_FXRP, ",
                     "FAssetRedeemComposerProxy.sol: ",
                     vm.toString(address(composerProxy))
                 )

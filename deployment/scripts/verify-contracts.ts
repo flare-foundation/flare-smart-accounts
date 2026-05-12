@@ -4,7 +4,7 @@ import { execSync } from "child_process";
 // get network from command line argument (mandatory)
 const network = process.argv[2];
 if (!network) {
-  throw new Error("Usage: ts-node verify-contracts.ts <network>");
+  throw new Error("Usage: tsx verify-contracts.ts <network>");
 }
 // check if network is valid (supports base networks and any "*-staging")
 const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev"];
