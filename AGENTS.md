@@ -69,7 +69,8 @@ pnpm typecheck
 pnpm deploy_contracts <network> <fullDeploy>
 pnpm deploy_personal_account_implementation <network>
 pnpm diamond_cut <network> <cut-file-name>
-pnpm check_facet_redeploys <network> [cut-file-name]
+pnpm check_facet_redeploys <network> [cut-file-name] [--no-build]
+pnpm check_stale_selectors <network> [cut-file-name] [--no-build]
 pnpm deploy_composer <network>
 pnpm verify_contracts <network>
 ```
@@ -263,6 +264,8 @@ There are two valid ways to prepare the `facets` list:
 - For a smaller cut file, first run `pnpm check_facet_redeploys <network> [cut-file-name]` and include only facets reported as `REDEPLOY`.
 
 Do not rely only on the source import graph, since internal libraries, interfaces, compiler settings, and embedded creation code can change facet bytecode.
+
+Before executing a cut, run `pnpm check_stale_selectors <network> [cut-file-name]` to find selectors that are live in the diamond but absent from current artifact ABIs. Review selectors reported as `REVIEW`; add only intentionally removed selectors to `deleteSelectorSigs` in the cut JSON, and leave selectors out when they should remain live through an older facet. `deleteSelectorSigs` entries accept either a 4-byte hex selector (e.g. `"0xe8a6eec2"`) or a canonical function signature (e.g. `"mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"`); signatures are hashed to selectors at cut-build time. The checker always compares against all deployed facet artifacts, even when the cut file lists only a minimal facet subset, resolves function signatures on a best-effort basis from local cut data and git history, and prints both live and currently deployed facet addresses when the historical facet can be identified.
 
 ## External Dependencies
 
