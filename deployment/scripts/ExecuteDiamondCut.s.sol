@@ -364,7 +364,10 @@ contract ExecuteDiamondCut is Script {
         }
         bytes memory onChain = _addr.code;
         bytes memory expected = vm.getDeployedCode(_artifactPath);
-        return keccak256(onChain) == keccak256(expected);
+        if (keccak256(onChain) == keccak256(expected)) {
+            return true;
+        }
+        return _runtimeCodeHash(onChain) == _runtimeCodeHash(expected);
     }
 
     function _findDeployedAddressFromFile(
@@ -384,6 +387,44 @@ contract ExecuteDiamondCut is Script {
             }
         }
         return address(0);
+    }
+
+    function _runtimeCodeHash(
+        bytes memory _code
+    )
+        internal pure
+        returns (bytes32 _hash)
+    {
+        uint256 runtimeLength = _code.length - _metadataSuffixLength(_code);
+        //solhint-disable-next-line no-inline-assembly
+        assembly {
+            _hash := keccak256(add(_code, 0x20), runtimeLength)
+        }
+    }
+
+    function _metadataSuffixLength(
+        bytes memory _code
+    )
+        internal pure
+        returns (uint256)
+    {
+        uint256 codeLength = _code.length;
+        if (codeLength < 2) {
+            return 0;
+        }
+
+        uint256 metadataLength = (uint256(uint8(_code[codeLength - 2])) << 8)
+            | uint256(uint8(_code[codeLength - 1]));
+        if (metadataLength == 0 || metadataLength + 2 > codeLength) {
+            return 0;
+        }
+
+        uint256 metadataStart = codeLength - metadataLength - 2;
+        if (uint8(_code[metadataStart]) >> 5 != 5) {
+            return 0;
+        }
+
+        return metadataLength + 2;
     }
 
     function _logCutData(
