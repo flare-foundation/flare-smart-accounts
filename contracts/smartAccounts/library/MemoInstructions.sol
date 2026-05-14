@@ -23,7 +23,7 @@ library MemoInstructions {
     ///   0xFF — UserOp is ABI-encoded inside the memo, after the 10-byte header.
     ///          _data is ignored.
     ///   0xFE — Memo carries only [opcode][walletId][fee][hash:32] = 42 bytes.
-    ///          _data is the ABI-encoded UserOp; the handler verifies that
+    ///          _data is the ABI-encoded PackedUserOperation; the handler verifies that
     ///          keccak256(_data) matches the hash before decoding.
     function execute(
         bytes calldata _memoData,

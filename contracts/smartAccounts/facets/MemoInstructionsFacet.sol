@@ -61,15 +61,12 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
         }
 
         // check PA executor (0xD0/0xD1 bypass to prevent lock-out)
-        // scoped block so `bypassesExecutorCheck` and `paExecutor` are released before the helper call below
-        {
-            bool bypassesExecutorCheck = !memoIgnored && _memoData.length > 0 &&
-                (uint8(_memoData[0]) == 0xD0 || uint8(_memoData[0]) == 0xD1);
-            if (!bypassesExecutorCheck) {
-                address paExecutor = MemoInstructions.getExecutor(personalAccount);
-                if (paExecutor != address(0)) {
-                    require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
-                }
+        bool bypassesExecutorCheck = !memoIgnored && _memoData.length > 0 &&
+            (uint8(_memoData[0]) == 0xD0 || uint8(_memoData[0]) == 0xD1);
+        if (!bypassesExecutorCheck) {
+            address paExecutor = MemoInstructions.getExecutor(personalAccount);
+            if (paExecutor != address(0)) {
+                require(_executor == paExecutor, WrongExecutor(paExecutor, _executor));
             }
         }
 
