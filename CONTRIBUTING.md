@@ -154,5 +154,23 @@ Do not include the `.json` extension unless otherwise specified; the script will
 
 The script will read the `execute` flag from cut JSON file to determine whether to actually execute the cut or just print the transaction data.
 
+The cut file may include all candidate facets for review. For each listed facet, `ExecuteDiamondCut.s.sol` checks the previously deployed address in `deployment/deploys/<network>.json` and reuses it when the functional deployed bytecode matches the freshly compiled artifact. The comparison ignores the facet's own trailing Solidity metadata, so unrelated metadata-only rebuilds should not force redeployment.
+
+#### Embedded `PersonalAccountProxy.creationCode` and CREATE2 stability
+
+Facets that inline `PersonalAccounts` creation or address-derivation logic can embed `type(PersonalAccountProxy).creationCode` into their runtime bytecode. If the embedded proxy creation code changes, including its metadata, those facets may be redeployed even when their source files did not change. This keeps on-chain Personal Account address derivation consistent; predicted addresses for not-yet-deployed Personal Accounts should be recomputed after such a cut.
+
+#### Preparing the `facets` list
+
+There are two valid ways to prepare the `facets` list. For the safest review flow, list all candidate facets and let the script reuse unchanged deployments. For a smaller cut file, first run the dry-run helper below and include only the facets reported as `REDEPLOY`; do not rely only on the source import graph, since internal libraries, interfaces, compiler settings, and embedded creation code can change facet bytecode.
+
+To preview which facets will be redeployed without executing a cut, run:
+
+```bash
+pnpm check_facet_redeploys <network> [cut-file-name]
+```
+
+The optional cut file name limits the check to the facets listed in `deployment/cuts/<network>/<cut-file-name>.json`; otherwise all deployed facets are checked. Use `--no-build` only when you want to compare against already-built artifacts.
+
 #### Note on Internal Output Files
 Intermediate files generated during diamond cut deployment are written to the `deployment/output-internal/` directory. These files are for internal use only and are not considered essential output or deployment artifacts. You generally do not need to track or use these files unless you are debugging or developing deployment scripts.
