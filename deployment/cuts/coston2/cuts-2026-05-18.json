@@ -1,0 +1,25 @@
+{
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "AgentVaultsFacet",
+    "ExecutorsFacet",
+    "InstructionFeesFacet",
+    "InstructionsFacet",
+    "PaymentProofsFacet",
+    "PersonalAccountsFacet",
+    "TimelockFacet",
+    "VaultsFacet",
+    "XrplProviderWalletsFacet",
+    "MemoInstructionsFacet",
+    "PauseFacet",
+    "ReaderFacet",
+    "OwnershipFacet",
+    "DiamondLoupeFacet",
+    "DiamondCutFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [
+    "mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"
+  ],
+  "execute": false
+}
