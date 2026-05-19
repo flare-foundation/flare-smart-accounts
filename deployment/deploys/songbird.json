@@ -1,0 +1,57 @@
+[
+  {
+    "name": "DiamondCutFacet",
+    "contractName": "DiamondCutFacet.sol",
+    "address": "0xbBfDC00D4a230eB2cBf2623f8ca67C23D31E094D"
+  },
+  {
+    "name": "DiamondLoupeFacet",
+    "contractName": "DiamondLoupeFacet.sol",
+    "address": "0x39Da5ec984c0E5797E0BD24706Ab35F21EB065d1"
+  },
+  {
+    "name": "OwnershipFacet",
+    "contractName": "OwnershipFacet.sol",
+    "address": "0x615eAdb82F2c3b84Ee4cd7ac5DefdF381d585978"
+  },
+  {
+    "name": "MasterAccountController",
+    "contractName": "MasterAccountController.sol",
+    "address": "0x434936d47503353f06750Db1A444DBDC5F0AD37c"
+  },
+  {
+    "name": "PersonalAccountImplementation",
+    "contractName": "PersonalAccount.sol",
+    "address": "0x095E4ABd5Ae4186c91857754118B920b492b9EaE"
+  },
+  {
+    "name": "MemoInstructionsFacet",
+    "contractName": "MemoInstructionsFacet.sol",
+    "address": "0xE353d3B2B244a19c10521F685469c41543522a76"
+  },
+  {
+    "name": "PauseFacet",
+    "contractName": "PauseFacet.sol",
+    "address": "0xBE9D866d9899ccd8e4104a7A18b2719702FEDF78"
+  },
+  {
+    "name": "PersonalAccountsFacet",
+    "contractName": "PersonalAccountsFacet.sol",
+    "address": "0xB050aD3E74d358C08b321e6482C3052b82Bd615B"
+  },
+  {
+    "name": "ReaderFacet",
+    "contractName": "ReaderFacet.sol",
+    "address": "0x2f2C80E27A854cA959c502225de34aa530055C50"
+  },
+  {
+    "name": "TimelockFacet",
+    "contractName": "TimelockFacet.sol",
+    "address": "0x7c1A04Cdd66A5f2226795cDeE276433b2Bfaef80"
+  },
+  {
+    "name": "MasterAccountControllerInit",
+    "contractName": "MasterAccountControllerInit.sol",
+    "address": "0xa4b442A6E158E52DC0dB064E30e85e971B92CD2c"
+  }
+]

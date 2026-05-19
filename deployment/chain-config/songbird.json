@@ -1,0 +1,31 @@
+{
+  "initialOwner": "0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA",
+  "governance": "0x51e40f275feecA0A859CdA9D499afBcBe3804B71",
+  "vaults": [],
+  "agentVaults": [],
+  "executor": "0x02954e158Be2b477E1C26F31e8AA0c21b378445C",
+  "executorFee": "10000000000000000000",
+  "sourceId": "",
+  "paymentProofValidityDurationSeconds": 7200,
+  "defaultInstructionFee": 0,
+  "instructionFees": [],
+  "xrplProviderWallets": [],
+  "timelockDurationSeconds": 0,
+  "pausers": [
+    "0x51e40f275feecA0A859CdA9D499afBcBe3804B71",
+    "0xbe41f722b72fd91637c8660c8BDe3f4a7441aA5c"
+  ],
+  "unpausers": [
+    "0x51e40f275feecA0A859CdA9D499afBcBe3804B71",
+    "0xbe41f722b72fd91637c8660c8BDe3f4a7441aA5c"
+  ],
+
+  "endpoint": "0x0000000000000000000000000000000000000000",
+  "trustedSourceOApp": "0x0000000000000000000000000000000000000000",
+  "assetManager": "0x0000000000000000000000000000000000000000",
+  "stableCoin": "0x0000000000000000000000000000000000000000",
+  "wNat": "0x0000000000000000000000000000000000000000",
+  "composerFeeRecipient": "0x0000000000000000000000000000000000000000",
+  "defaultComposerFeePPM": 0,
+  "composerExecutor": "0x0000000000000000000000000000000000000000"
+}
