@@ -32,7 +32,7 @@
   {
     "name": "InstructionsFacet",
     "contractName": "InstructionsFacet.sol",
-    "address": "0xDfEAEE215910aF20bAd4B93FFAB2F5c36A1eae08"
+    "address": "0xd7b8D88603De93dD9b430ea5f81dC32C117Df250"
   },
   {
     "name": "PaymentProofsFacet",
@@ -42,7 +42,7 @@
   {
     "name": "PersonalAccountsFacet",
     "contractName": "PersonalAccountsFacet.sol",
-    "address": "0xee1E29CFf051Bea3AFDDDC2ce60417621a7F9E4a"
+    "address": "0xa071b43060DaA8eaA0d14DBE5Ea03ed18c9ed1d6"
   },
   {
     "name": "TimelockFacet",
@@ -92,7 +92,7 @@
   {
     "name": "MemoInstructionsFacet",
     "contractName": "MemoInstructionsFacet.sol",
-    "address": "0x35cF00211758Db1703a9EC819790A8e97c209051"
+    "address": "0x32c6379B2978A9aB75993cA82e3ADc77dd50010C"
   },
   {
     "name": "PauseFacet",
@@ -102,6 +102,6 @@
   {
     "name": "ReaderFacet",
     "contractName": "ReaderFacet.sol",
-    "address": "0x791d13C3099BF0d22f6367649B7c0378f88f9Cd7"
+    "address": "0xbcE1972De5d1598a948A36186eCeBFD4690F3a5C"
   }
 ]
