@@ -26,6 +26,8 @@
   "defaultInstructionFee": 1000,
   "xrplProviderWallets": ["rLb3Qrz2wh4cbMUQYi4iTJBM5ggfbUYw27"],
   "timelockDurationSeconds": 3600,
+  "pausers": [],
+  "unpausers": [],
 
   "endpoint": "0x0000000000000000000000000000000000000000",
   "trustedSourceOApp": "0x0000000000000000000000000000000000000000",

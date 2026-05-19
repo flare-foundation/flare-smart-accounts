@@ -58,6 +58,8 @@ contract DeploySmartAccounts is Script {
         uint256 defaultInstructionFee;
         string[] xrplProviderWallets;
         uint256 timelockDurationSeconds;
+        address[] pausers;
+        address[] unpausers;
     }
 
     address public constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -124,6 +126,8 @@ contract DeploySmartAccounts is Script {
         params.defaultInstructionFee = vm.parseJsonUint(config, ".defaultInstructionFee");
         params.xrplProviderWallets = vm.parseJsonStringArray(config, ".xrplProviderWallets");
         params.timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
+        params.pausers = vm.parseJsonAddressArray(config, ".pausers");
+        params.unpausers = vm.parseJsonAddressArray(config, ".unpausers");
 
         // if initial owner not set in config, use deployer address - for testing purposes
         if (params.initialOwner == address(0)) {
@@ -315,6 +319,15 @@ contract DeploySmartAccounts is Script {
                 vaultTypes[i] = params.vaults[i].vaultType;
             }
             masterAccountController.addVaults(vaultIds, vaultAddresses, vaultTypes);
+
+            if (params.pausers.length > 0) {
+                console2.log("Adding pausers");
+                masterAccountController.addPausers(params.pausers);
+            }
+            if (params.unpausers.length > 0) {
+                console2.log("Adding unpausers");
+                masterAccountController.addUnpausers(params.unpausers);
+            }
 
             console2.log("Setting timelock duration");
             masterAccountController.setTimelockDuration(params.timelockDurationSeconds);

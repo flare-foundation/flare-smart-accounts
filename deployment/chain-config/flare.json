@@ -57,6 +57,8 @@
   ],
   "xrplProviderWallets": ["rM2LEysS4isvAJkZFfxKDL5z4aTfWcBTXV"],
   "timelockDurationSeconds": 3600,
+  "pausers": [],
+  "unpausers": [],
 
   "endpoint": "0x1a44076050125825900e736c501f859c50fE728c",
   "trustedSourceOApp": "0xd70659a6396285BF7214d7Ea9673184e7C72E07E",
