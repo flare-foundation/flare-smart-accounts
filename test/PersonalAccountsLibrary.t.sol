@@ -19,11 +19,13 @@ import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAcc
  * update fixtures in this file without explicit cross-chain alignment.
  */
 contract PersonalAccountsLibraryTest is Test {
-
     /// @dev keccak256 of `PROXY_CREATION_CODE` from the live Flare deployment (commit `2abb115`).
     bytes32 private constant EXPECTED_PROXY_CREATION_CODE_HASH =
         0x309250c8635e70dc667c1239a7bb73386e767b7084e9328b70de2c1f505b9b4a;
 
+    /// @dev Not runnable under `forge coverage` — coverage disables via-IR and `type(...).creationCode`
+    /// comes out structurally different from the via-IR build the constant was frozen against.
+    /// Excluded by name in `.gitlab-ci.yml` and `package.json`'s `coverage` script.
     function testProxyCreationCodeLengthMatchesFreshCompilation() public pure {
         // Cheapest smoke test: if `PersonalAccountProxy.sol` recompiles to a different *length*,
         // the proxy's runtime size changed and the frozen constant no longer represents the live
@@ -35,13 +37,15 @@ contract PersonalAccountsLibraryTest is Test {
         );
     }
 
+    /// @dev Not runnable under `forge coverage` — same reason as the length test above.
+    /// Excluded by name in `.gitlab-ci.yml` and `package.json`'s `coverage` script.
     function testProxyCreationCodeMatchesFreshCompilationModuloMetadata() public pure {
         // Strips the trailing CBOR metadata from both sides and compares the remaining (functional)
         // creation bytecode. Catches same-length semantic edits to `PersonalAccountProxy.sol` that
         // the length check misses (e.g. swapping opcodes / changing constants in the constructor
         // logic while preserving total bytecode size).
         bytes memory frozen = _stripMetadata(PersonalAccounts.PROXY_CREATION_CODE);
-        bytes memory fresh  = _stripMetadata(type(PersonalAccountProxy).creationCode);
+        bytes memory fresh = _stripMetadata(type(PersonalAccountProxy).creationCode);
         assertEq(
             keccak256(frozen),
             keccak256(fresh),
@@ -62,7 +66,7 @@ contract PersonalAccountsLibraryTest is Test {
     /// Major type 5 (`>> 5 == 5`) at the blob start validates it's a solc-emitted CBOR map, not
     /// arbitrary trailing data. Falls back to "no strip" on malformed input so the comparison
     /// still detects drift instead of silently passing.
-    function _stripMetadata(bytes memory _code) internal pure returns (bytes memory _stripped) {
+    function _stripMetadata(bytes memory _code) private pure returns (bytes memory _stripped) {
         uint256 codeLen = _code.length;
         if (codeLen < 2) return _code;
 
