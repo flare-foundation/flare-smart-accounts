@@ -78,6 +78,7 @@ pnpm verify_contracts <network>
 - `<fullDeploy>` is a boolean (`true` or `false`). `false` skips initialization and is useful for diamond facets.
 - Supported networks are `coston2`, `coston`, `flare`, `songbird`, and `scdev`, plus `-staging` variants such as `coston2-staging`.
 - Deployment requires `.env` with `<NETWORK>_RPC_URL` and `DEPLOYER_PRIVATE_KEY`.
+- All `forge script` invocations use `--offline` to skip Foundry's external selector/source lookups. Without it, runs on Flare/Songbird hang for several minutes — likely external signature/source database calls timing out for these chains. The chain RPC itself is unaffected.
 
 ### Required Checks
 

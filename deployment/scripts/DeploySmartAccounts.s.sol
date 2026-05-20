@@ -31,7 +31,7 @@ import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/Xrp
 
 // solhint-disable no-console
 // solhint-disable-next-line max-line-length
-// forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
+// forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --offline --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
 
 // solhint-disable-next-line max-states-count
 contract DeploySmartAccounts is Script {

@@ -49,6 +49,7 @@ mkdir -p "$OUTPUT_DIR"
 forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
+  --offline \
   --sig "run(bool,bool)" "$FULL_DEPLOY" "$STAGING" \
   --broadcast | tee forge-deploy-output.txt
 npx tsx deployment/scripts/save-deployed-addresses.ts
