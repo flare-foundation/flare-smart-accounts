@@ -119,6 +119,7 @@ contracts/
   diamond/           # Diamond proxy infrastructure (EIP-2535)
   utils/             # Shared helpers (for example OwnableWithTimelock)
   mock/              # Test mocks
+docs/specs/          # Protocol-level specification docs (per-module pages link to .sol sources)
 test/                # Foundry tests
 deployment/
   chain-config/      # Per-network chain config JSON
@@ -129,6 +130,8 @@ deployment/
 scripts/             # Repository utility scripts
 audit/               # Security audit reports
 ```
+
+Spec docs at [`docs/specs/`](./docs/specs/index.md) describe how the on-chain contracts fit together. Source files remain the source of truth — when you change behavior, update both.
 
 ## Architecture
 

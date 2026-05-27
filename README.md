@@ -8,6 +8,15 @@ The Flare Smart Accounts is an account abstraction that allows XRPL users to per
 
 This repository also contains the **FAsset Redeem Composer** — a LayerZero-based module for initiating FAsset redemptions from other chains. It lives alongside FSA but is deployed independently.
 
+## Specification docs
+
+Protocol-level specs for both modules live under [`docs/specs/`](./docs/specs/index.md). They describe the on-chain behavior and link back to the source files that are the source of truth:
+
+- [Introduction](./docs/specs/Introduction.md) and [Architecture](./docs/specs/Architecture.md) — what the repo contains, how it fits together.
+- [Smart Accounts](./docs/specs/SmartAccounts/index.md) — diamond, personal accounts, payment-reference and memo instruction flows, vaults, executors, fees, pause, timelock.
+- [FAsset Redeem Composer](./docs/specs/Composer/index.md) — LayerZero compose flow, per-redeemer accounts, composer and executor fees.
+- [API reference](./docs/specs/ApiReference.md) — pointer index from each module to its public `userInterfaces/I*.sol`.
+
 ## Development and contribution
 
 If you want to use Flare Smart Accounts in your project, start on [developer hub - Flare Smart Accounts](https://dev.flare.network/smart-accounts/overview/).
