@@ -18,6 +18,8 @@ contract DeployMyERC4626 is Script {
         );
 
         depositVault.setLagDuration(300);
+        depositVault.setDepositCap(100000000);
+        depositVault.setDepositLimit(100000000);
 
         vm.stopBroadcast();
 
