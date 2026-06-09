@@ -16,6 +16,16 @@ contract MyERC4626Test is Test {
         myERC4626 = new MyERC4626(mintableERC20, "My ERC4626", "MERC4626");
     }
 
+    function testSetDepositCap() public {
+        myERC4626.setDepositCap(100000000);
+        assertEq(myERC4626.depositCap(), 100000000);
+    }
+
+    function testSetDepositLimit() public {
+        myERC4626.setDepositLimit(100000000);
+        assertEq(myERC4626.depositLimit(), 100000000);
+    }
+
     function testSend() public {
         vm.startPrank(user);
         mintableERC20.mint(user, 2000);
@@ -109,5 +119,11 @@ contract MyERC4626Test is Test {
         assertEq(myERC4626.pendingWithdrawAssets(user, 1), 0); // pending withdraw assets cleared
         assertEq(mintableERC20.balanceOf(user), 700); // assets transferred to user
         vm.stopPrank();
+    }
+
+    function testDefaultCapAndLimit() public view {
+        assertEq(myERC4626.depositCap(), 25000000000000);
+        assertEq(myERC4626.depositLimit(), 25000000000000);
+        assertEq(myERC4626.lagDuration(), 1 days);
     }
 }
