@@ -3,6 +3,8 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 
+import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+
 import {MyERC4626} from "../contracts/mock/MyERC4626.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 
@@ -118,6 +120,112 @@ contract MyERC4626Test is Test {
         assertEq(myERC4626.assetsPendingWithdraw(), 0); // pending withdraw cleared
         assertEq(myERC4626.pendingWithdrawAssets(user, 1), 0); // pending withdraw assets cleared
         assertEq(mintableERC20.balanceOf(user), 700); // assets transferred to user
+        vm.stopPrank();
+    }
+
+    function testMaxDepositReflectsRemainingCapacity() public {
+        myERC4626.setDepositCap(1000);
+        assertEq(myERC4626.maxDeposit(user), 1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 1000);
+        mintableERC20.approve(address(myERC4626), 1000);
+        myERC4626.deposit(600, user);
+        vm.stopPrank();
+
+        // capacity shrinks by the deposited amount
+        assertEq(myERC4626.maxDeposit(user), 400);
+    }
+
+    function testDepositUpToCapSucceeds() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 1000);
+        mintableERC20.approve(address(myERC4626), 1000);
+        // deposit exactly up to the cap
+        myERC4626.deposit(1000, user);
+        vm.stopPrank();
+
+        assertEq(myERC4626.totalAssets(), 1000);
+        assertEq(myERC4626.maxDeposit(user), 0);
+    }
+
+    function testDepositRevertsWhenCapExceeded() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 2000);
+        mintableERC20.approve(address(myERC4626), 2000);
+        // fill the vault to the cap
+        myERC4626.deposit(1000, user);
+
+        // any further deposit exceeds the cap and reverts
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, user, 1, 0)
+        );
+        myERC4626.deposit(1, user);
+        vm.stopPrank();
+    }
+
+    function testDepositRevertsWhenSingleAmountAboveCap() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 2000);
+        mintableERC20.approve(address(myERC4626), 2000);
+        // a single deposit larger than the cap reverts with the remaining capacity
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, user, 1500, 1000)
+        );
+        myERC4626.deposit(1500, user);
+        vm.stopPrank();
+    }
+
+    function testMintRevertsWhenCapExceeded() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 2000);
+        mintableERC20.approve(address(myERC4626), 2000);
+        // shares are 1:1 with assets initially, so cap maps to 1000 mintable shares
+        assertEq(myERC4626.maxMint(user), 1000);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxMint.selector, user, 1001, 1000)
+        );
+        myERC4626.mint(1001, user);
+        vm.stopPrank();
+    }
+
+    function testCapFreesUpAfterWithdrawRequest() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 1000);
+        mintableERC20.approve(address(myERC4626), 1000);
+        myERC4626.deposit(1000, user);
+        assertEq(myERC4626.maxDeposit(user), 0);
+
+        // pending withdrawals are excluded from totalAssets, freeing cap space
+        myERC4626.withdraw(400, user, user);
+        assertEq(myERC4626.maxDeposit(user), 400);
+        vm.stopPrank();
+    }
+
+    function testCustomDepositOverloadRespectsCap() public {
+        // the 3-arg overload is the Upshift deposit path used by PersonalAccount
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 2000);
+        mintableERC20.approve(address(myERC4626), 2000);
+        myERC4626.deposit(address(mintableERC20), 1000, user);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC4626.ERC4626ExceededMaxDeposit.selector, user, 1, 0)
+        );
+        myERC4626.deposit(address(mintableERC20), 1, user);
         vm.stopPrank();
     }
 
