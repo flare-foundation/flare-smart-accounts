@@ -16,7 +16,8 @@ contract MyERC4626 is ERC4626 {
 
     /// @notice The duration of the time-lock for withdrawals (in seconds).
     uint256 public lagDuration;
-    /// @notice The deposit cap for the vault (in asset units).
+    /// @notice The deposit cap for the vault (in asset units). Enforced on the multi-asset
+    /// (Upshift) deposit path only; the single-asset (Firelight) deposit and mint are not capped.
     uint256 public depositCap;
     /// @notice The deposit limit for the vault (in asset units).
     uint256 public depositLimit;
@@ -64,6 +65,7 @@ contract MyERC4626 is ERC4626 {
     );
 
     error InvalidAsset();
+    error DepositCapReached();
     error NoPendingWithdrawAssets();
     error NoPendingWithdrawShares();
     error InvalidPeriod();
@@ -110,6 +112,7 @@ contract MyERC4626 is ERC4626 {
         returns (uint256 _shares)
     {
         require(_assetIn == asset(), InvalidAsset());
+        require(totalAssets() + _amountIn <= depositCap, DepositCapReached());
         _shares = super.deposit(_amountIn, _receiverAddr);
         emit Deposit(_assetIn, _amountIn, _shares, msg.sender, _receiverAddr);
     }
@@ -217,31 +220,6 @@ contract MyERC4626 is ERC4626 {
      */
     function totalAssets() public view override returns (uint256) {
         return super.totalAssets() - assetsPendingWithdraw;
-    }
-
-    /**
-     * @notice Returns the maximum amount of assets that can be deposited for a receiver.
-     * @dev Enforces the vault `depositCap` against the current total assets. Returns the
-     *      remaining capacity, or zero once the cap has been reached. The base ERC4626
-     *      `deposit` reverts with `ERC4626ExceededMaxDeposit` when an amount exceeds this.
-     * @return The maximum depositable amount in asset units.
-     */
-    function maxDeposit(address) public view override returns (uint256) {
-        uint256 currentAssets = totalAssets();
-        if (currentAssets >= depositCap) {
-            return 0;
-        }
-        return depositCap - currentAssets;
-    }
-
-    /**
-     * @notice Returns the maximum amount of shares that can be minted for a receiver.
-     * @dev Derived from `maxDeposit` so the `depositCap` is enforced on the mint path too.
-     * @param _receiver The address that would receive the minted shares.
-     * @return The maximum number of mintable shares.
-     */
-    function maxMint(address _receiver) public view override returns (uint256) {
-        return convertToShares(maxDeposit(_receiver));
     }
 
     ////////////////////////// firelight specific functions //////////////////////////
