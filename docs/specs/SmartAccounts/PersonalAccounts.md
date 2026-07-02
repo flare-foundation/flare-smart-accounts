@@ -61,7 +61,7 @@ That test contract holds three checks:
 
 Editing the constant is a **cross-chain coordination event**: every PA that has been *predicted but not yet deployed* will move to a new address. The first two tests are excluded from coverage runs (coverage disables `via_ir`, which changes the bytes); the third is the load-bearing pin and runs everywhere.
 
-The same property has an operational implication for `diamondCut`: facets that embed `type(PersonalAccountProxy).creationCode` in their runtime bytecode (or reach it transitively) can be flagged for redeployment by `pnpm check_facet_redeploys` even when their source files did not change, because their metadata-derived bytes have shifted. See the deployment notes in `AGENTS.md` for the full workflow.
+The frozen constant also keeps `diamondCut` redeployment decisions stable. Facets that inline `PersonalAccounts` address-derivation logic — `PersonalAccountsFacet`, `InstructionsFacet`, `ReaderFacet`, and `MemoInstructionsFacet` — bake `PROXY_CREATION_CODE` into their runtime bytecode. Because it is a constant, those bytes do not drift across rebuilds, so `pnpm check_cut` flags these facets for redeployment only when their own logic actually changed, not because of unrelated metadata churn in `PersonalAccountProxy` or its imports. The embedded bytes shift only if the constant itself is edited (the guarded cross-chain event above); `check_cut` detects that specific case and reports it as a redeploy. See the deployment notes in `AGENTS.md` for the full workflow.
 
 ## PersonalAccount surface
 

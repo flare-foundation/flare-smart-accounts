@@ -69,8 +69,7 @@ pnpm typecheck
 pnpm deploy_contracts <network> <fullDeploy>
 pnpm deploy_personal_account_implementation <network>
 pnpm diamond_cut <network> <cut-file-name>
-pnpm check_facet_redeploys <network> [cut-file-name] [--no-build]
-pnpm check_stale_selectors <network> [cut-file-name] [--no-build]
+pnpm check_cut <network> [cut-file-name] [--no-build]
 pnpm deploy_composer <network>
 pnpm verify_contracts <network>
 ```
@@ -260,16 +259,19 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
 
 Diamond cut files can list all candidate facets. `ExecuteDiamondCut.s.sol` checks the previously deployed address in `deployment/deploys/<network>.json` and reuses it when functional deployed bytecode matches the freshly compiled artifact. The comparison ignores the facet's own trailing Solidity metadata, so unrelated metadata-only rebuilds should not force redeployment.
 
-Facets that inline `PersonalAccounts` creation or address-derivation logic can embed `type(PersonalAccountProxy).creationCode` into their runtime bytecode. If the embedded proxy creation code changes, including its metadata, those facets may be redeployed even when their source files did not change. This keeps on-chain Personal Account address derivation consistent; predicted addresses for not-yet-deployed Personal Accounts should be recomputed after such a cut.
+Facets that inline `PersonalAccounts` address-derivation logic (`PersonalAccountsFacet`, `InstructionsFacet`, `ReaderFacet`, `MemoInstructionsFacet`) bake the frozen `PROXY_CREATION_CODE` constant into their runtime bytecode. Because it is a constant, those bytes do not drift across rebuilds, so `check_cut` does not flag these facets for redeployment on unrelated metadata churn — only genuine logic changes trigger a redeploy. The embedded bytes change only if the constant itself is edited, which is a cross-chain coordination event: predicted addresses for not-yet-deployed Personal Accounts shift and must be recomputed after such a cut.
 
 There are two valid ways to prepare the `facets` list:
 
 - For the safest review flow, list all candidate facets and let the script reuse unchanged deployments.
-- For a smaller cut file, first run `pnpm check_facet_redeploys <network> [cut-file-name]` and include only facets reported as `REDEPLOY`.
+- For a smaller cut file, first run `pnpm check_cut <network> [cut-file-name]` and include only facets reported as `ADD` or `REPLACE`.
 
 Do not rely only on the source import graph, since internal libraries, interfaces, compiler settings, and embedded creation code can change facet bytecode.
 
-Before executing a cut, run `pnpm check_stale_selectors <network> [cut-file-name]` to find selectors that are live in the diamond but absent from current artifact ABIs. Review selectors reported as `REVIEW`; add only intentionally removed selectors to `deleteSelectorSigs` in the cut JSON, and leave selectors out when they should remain live through an older facet. `deleteSelectorSigs` entries accept either a 4-byte hex selector (e.g. `"0xe8a6eec2"`) or a canonical function signature (e.g. `"mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"`); signatures are hashed to selectors at cut-build time. The checker always compares against all deployed facet artifacts, even when the cut file lists only a minimal facet subset, resolves function signatures on a best-effort basis from local cut data and git history, and prints both live and currently deployed facet addresses when the historical facet can be identified.
+Before executing a cut, run `pnpm check_cut <network> [cut-file-name]` to preview the full cut plan. It reports two sections:
+
+- **Facets (deploy):** each facet as `ADD` (in the cut, not yet deployed), `REPLACE` (deployed but functional runtime bytecode differs), `REUSE` (deployed and unchanged — trailing Solidity metadata differences are ignored), or `REMOVE` (deployed but no longer in source). Pass a cut file so facets you intend to add are detected as `ADD`; without one the scope is limited to already-deployed facets.
+- **Selectors to remove:** selectors that are live in the diamond but absent from the ABIs of every facet that will remain after the cut (deployed facets that still have artifacts, plus the new facets listed in the cut). Listing the new facets in the cut is what stops selectors that merely moved to a new facet from being reported. Each selector is marked `listed` (already in `deleteSelectorSigs`, so the cut removes it) or flagged as needing review; add only intentionally removed selectors to `deleteSelectorSigs`, and leave selectors out when they should remain live through an older facet. `deleteSelectorSigs` entries accept either a 4-byte hex selector (e.g. `"0xe8a6eec2"`) or a canonical function signature (e.g. `"mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"`); signatures are hashed to selectors at cut-build time. Signatures for orphaned selectors are resolved on a best-effort basis from local cut data and git history, and both live and currently deployed facet addresses are printed when the historical facet can be identified.
 
 ## External Dependencies
 

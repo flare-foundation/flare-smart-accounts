@@ -162,21 +162,20 @@ Facets that inline `PersonalAccounts` creation or address-derivation logic can e
 
 #### Preparing the `facets` list
 
-There are two valid ways to prepare the `facets` list. For the safest review flow, list all candidate facets and let the script reuse unchanged deployments. For a smaller cut file, first run the dry-run helper below and include only the facets reported as `REDEPLOY`; do not rely only on the source import graph, since internal libraries, interfaces, compiler settings, and embedded creation code can change facet bytecode.
+There are two valid ways to prepare the `facets` list. For the safest review flow, list all candidate facets and let the script reuse unchanged deployments. For a smaller cut file, first run the dry-run helper below and include only the facets reported as `ADD` or `REPLACE`; do not rely only on the source import graph, since internal libraries, interfaces, compiler settings, and embedded creation code can change facet bytecode.
 
-To preview which facets will be redeployed without executing a cut, run:
-
-```bash
-pnpm check_facet_redeploys <network> [cut-file-name] [--no-build]
-```
-
-To preview selectors that are live in the diamond but absent from the current artifact ABIs, run:
+To preview the full cut plan without executing a cut, run:
 
 ```bash
-pnpm check_stale_selectors <network> [cut-file-name] [--no-build]
+pnpm check_cut <network> [cut-file-name] [--no-build]
 ```
 
-Review selectors reported as `REVIEW` before executing the cut. Add a selector to `deleteSelectorSigs` in the cut JSON only when it should be removed from the diamond; leave it out when the selector should intentionally remain live through an older facet. Entries accept either a 4-byte hex selector (e.g. `"0xe8a6eec2"`) or a canonical function signature (e.g. `"mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"`); signatures are hashed to selectors at cut-build time. When a cut file is supplied, the checker uses its `diamond` and `deleteSelectorSigs`, but it always compares the live diamond against all deployed facet artifacts so minimal cut files do not create false positives. Function signatures are resolved on a best-effort basis from local cut data and git history; when the historical facet can be identified, the output includes both the live selector address and the currently deployed address for that facet name. Use `--no-build` only when you want to compare against already-built artifacts.
+The output has two sections:
+
+- **Facets (deploy):** each facet as `ADD` (in the cut, not yet deployed), `REPLACE` (deployed but functional runtime bytecode differs), `REUSE` (deployed and unchanged — trailing Solidity metadata differences are ignored), or `REMOVE` (deployed but no longer in source). Supply a cut file so facets you intend to add show up as `ADD`; without one the scope is limited to already-deployed facets.
+- **Selectors to remove:** selectors live in the diamond but absent from the ABIs of every facet that will remain after the cut — the deployed facets that still have artifacts plus the new facets listed in the cut. Listing the new facets is what prevents a selector that merely moved to a new facet from being reported. Each selector is marked `listed` (already in `deleteSelectorSigs`, so the cut removes it) or flagged for review.
+
+Review flagged selectors before executing the cut. Add a selector to `deleteSelectorSigs` in the cut JSON only when it should be removed from the diamond; leave it out when the selector should intentionally remain live through an older facet. Entries accept either a 4-byte hex selector (e.g. `"0xe8a6eec2"`) or a canonical function signature (e.g. `"mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"`); signatures are hashed to selectors at cut-build time. Function signatures for orphaned selectors are resolved on a best-effort basis from local cut data and git history; when the historical facet can be identified, the output includes both the live selector address and the currently deployed address for that facet name. Use `--no-build` only when you want to compare against already-built artifacts.
 
 #### Note on Internal Output Files
 Intermediate files generated during diamond cut deployment are written to the `deployment/output-internal/` directory. These files are for internal use only and are not considered essential output or deployment artifacts. You generally do not need to track or use these files unless you are debugging or developing deployment scripts.
