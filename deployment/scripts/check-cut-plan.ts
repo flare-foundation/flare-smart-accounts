@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync, execSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import Web3, { type AbiFunctionFragment } from "web3";
 import { isFunctionFragment, loadAbi, toSelector } from "../utils/prep-cut";
@@ -49,6 +49,8 @@ interface StaleSelector {
   facetName?: string;
   deployedFacetAddress?: string;
   signature?: string;
+  // Set when the selector still exists on another facet in the repo (moved, not removed).
+  movedTo?: string;
 }
 
 const ZERO_CODE = "0x";
@@ -125,16 +127,31 @@ async function buildFacetPlans(
   cutFacetNames: string[]
 ): Promise<FacetPlan[]> {
   const proxyCreationCode = loadCreationCode("PersonalAccountProxy");
+  const repoFacetSources = buildRepoFacetSourceSet();
   const plans: FacetPlan[] = [];
 
   for (const facet of deployedFacets) {
     const artifactPath = artifactPathFor(facet.name);
-    if (!existsSync(artifactPath)) {
+    // Source presence — not artifact presence — is the source of truth for "still exists".
+    // A stale artifact (forge does not prune artifacts of deleted sources) must not mask a removal.
+    if (!repoFacetSources.has(facet.name)) {
       plans.push({
         name: facet.name,
         address: facet.address,
         action: "REMOVE",
-        reason: "removed from source (no artifact); its live selectors are listed below",
+        reason: existsSync(artifactPath)
+          ? "removed from source (stale artifact present — run `forge clean`); its live selectors are listed below"
+          : "removed from source; its live selectors are listed below",
+      });
+      continue;
+    }
+
+    if (!existsSync(artifactPath)) {
+      plans.push({
+        name: facet.name,
+        address: facet.address,
+        action: "REPLACE",
+        reason: "source present but artifact missing — run `forge build` (cannot compare; treating as redeploy)",
       });
       continue;
     }
@@ -341,10 +358,13 @@ async function buildStaleSelectors(
   diamond: string
 ): Promise<StaleSelector[]> {
   // Selectors kept after the cut come from every facet that will remain on the diamond:
-  // the deployed facets that still have artifacts, plus any new facets listed in the cut.
-  // Including the cut's new facets is what stops moved selectors from being flagged as stale.
+  // the deployed facets that still exist in source, plus any new facets listed in the cut.
+  // Requiring source presence (not just an artifact) stops a removed facet's stale-artifact
+  // selectors from being treated as kept; including the cut's new facets stops moved selectors
+  // from being flagged as stale.
+  const repoFacetSources = buildRepoFacetSourceSet();
   const keptFacetNames = uniqueStrings([...deployedFacets.map((contract) => contract.name), ...cutFacetNames]).filter(
-    (name) => existsSync(artifactPathFor(name))
+    (name) => repoFacetSources.has(name) && existsSync(artifactPathFor(name))
   );
 
   const repoSelectors = buildRepoSelectorMap(keptFacetNames);
@@ -352,11 +372,26 @@ async function buildStaleSelectors(
   const deployedFacetAddressesByName = buildDeployedFacetAddressesByName(deployedContracts);
   const loupeFacets = await fetchLoupeFacets(web3, diamond);
 
-  return enrichStaleSelectors(
+  const stale = enrichStaleSelectors(
     findStaleSelectors(loupeFacets, repoSelectors),
     facetNamesByAddress,
     deployedFacetAddressesByName
   );
+
+  // Classify each stale selector: MOVED (still exists on some facet in the repo, just not in
+  // this cut's scope) vs genuinely REMOVED (gone from all source). A moved selector must NOT be
+  // added to deleteSelectorSigs — deleting it would drop a live function; its facet belongs in the cut.
+  const allRepoSelectors = buildAllRepoFacetSelectorMap();
+  for (const selector of stale) {
+    const moved = allRepoSelectors.get(selector.selector.toLowerCase());
+    if (moved) {
+      selector.movedTo = moved.contractName;
+      if (!selector.signature) {
+        selector.signature = moved.signature;
+      }
+    }
+  }
+  return stale;
 }
 
 function buildRepoSelectorMap(facetNames: string[]): Map<string, RepoSelectorInfo> {
@@ -368,6 +403,39 @@ function buildRepoSelectorMap(facetNames: string[]): Map<string, RepoSelectorInf
         contractName: facetName,
         signature: functionSignature(fn),
       });
+    }
+  }
+  return selectors;
+}
+
+// Names of every concrete facet implementation currently in the repo
+// (contracts/**/facets/*Facet.sol, interfaces excluded). Source presence — not artifact presence —
+// is the source of truth for whether a facet still exists; a stale artifact for a deleted facet
+// (forge does not prune artifacts of removed sources) must not mask its removal.
+function buildRepoFacetSourceSet(): Set<string> {
+  const names = new Set<string>();
+  for (const sourcePath of globSync("contracts/**/facets/*Facet.sol")) {
+    if (/interface/i.test(sourcePath)) {
+      continue;
+    }
+    names.add(basename(sourcePath).replace(/\.sol$/, ""));
+  }
+  return names;
+}
+
+// Selectors of every concrete facet implementation currently in the repo, regardless of deploy/cut
+// scope. Used to tell a MOVED selector (still defined on some facet) apart from a genuinely REMOVED one.
+function buildAllRepoFacetSelectorMap(): Map<string, RepoSelectorInfo> {
+  const selectors = new Map<string, RepoSelectorInfo>();
+  for (const facetName of buildRepoFacetSourceSet()) {
+    if (!existsSync(artifactPathFor(facetName))) {
+      continue;
+    }
+    for (const fn of loadAbi(facetName).filter(isFunctionFragment)) {
+      const selector = toSelector(fn).toLowerCase();
+      if (!selectors.has(selector)) {
+        selectors.set(selector, { contractName: facetName, signature: functionSignature(fn) });
+      }
     }
   }
   return selectors;
@@ -852,13 +920,14 @@ function printFacetPlan(plans: FacetPlan[]) {
 }
 
 function printSelectorPlan(staleSelectors: StaleSelector[], deleteSelectors: Set<string>) {
+  const removed = staleSelectors.filter((stale) => !stale.movedTo);
+  const moved = staleSelectors.filter((stale) => stale.movedTo);
+
   console.log("=== Selectors to remove ===");
-  if (staleSelectors.length === 0) {
-    console.log("  (none — every live selector is present in a kept facet ABI)");
-    console.log("");
-    return;
+  if (removed.length === 0) {
+    console.log("  (none — every live selector still exists in current source)");
   }
-  for (const stale of staleSelectors) {
+  for (const stale of removed) {
     const listed = deleteSelectors.has(stale.selector);
     console.log(`DELETE   ${stale.selector} ${stale.signature ?? "unknown"}`);
     console.log(
@@ -871,29 +940,62 @@ function printSelectorPlan(staleSelectors: StaleSelector[], deleteSelectors: Set
     );
   }
   console.log("");
+
+  if (moved.length > 0) {
+    console.log("=== Moved selectors (repoint — do NOT delete) ===");
+    for (const stale of moved) {
+      const wronglyListed = deleteSelectors.has(stale.selector);
+      console.log(`MOVE     ${stale.selector} ${stale.signature ?? "unknown"}`);
+      console.log(
+        `         live on ${stale.facetName ?? "unknown"} (${stale.facetAddress}); now defined on ${stale.movedTo}`
+      );
+      console.log(
+        wronglyListed
+          ? `         ⚠ IN deleteSelectorSigs — REMOVE it: this selector moved, deleting it drops a live function. Add ${stale.movedTo} to the cut's facets instead.`
+          : `         add ${stale.movedTo} to the cut's facets so it repoints (Replace); do NOT add to deleteSelectorSigs`
+      );
+    }
+    console.log("");
+  }
 }
 
 function printSummary(plans: FacetPlan[], staleSelectors: StaleSelector[], deleteSelectors: Set<string>) {
   const count = (action: FacetAction) => plans.filter((plan) => plan.action === action).length;
-  const listed = staleSelectors.filter((stale) => deleteSelectors.has(stale.selector)).length;
-  const needsListing = staleSelectors.length - listed;
+  const removed = staleSelectors.filter((stale) => !stale.movedTo);
+  const moved = staleSelectors.filter((stale) => stale.movedTo);
+  const listed = removed.filter((stale) => deleteSelectors.has(stale.selector)).length;
+  const needsListing = removed.length - listed;
+  const wronglyListedMoved = moved.filter((stale) => deleteSelectors.has(stale.selector));
 
   console.log("Summary");
   console.log(
     `  Facets:  ${count("ADD")} add, ${count("REPLACE")} replace, ${count("REUSE")} reuse, ${count("REMOVE")} remove`
   );
   console.log(
-    `  Selectors to remove: ${staleSelectors.length} (${listed} listed, ${needsListing} need adding to deleteSelectorSigs)`
+    `  Selectors to remove: ${removed.length} (${listed} listed, ${needsListing} need adding to deleteSelectorSigs)`
   );
+  if (moved.length > 0) {
+    console.log(`  Moved selectors: ${moved.length} (repoint by adding their facet to the cut; do NOT delete)`);
+  }
 
   if (needsListing > 0) {
     console.log("");
     console.log("Add only intentionally removed selectors to deleteSelectorSigs in the cut JSON");
     console.log("(entries accept a 4-byte hex selector or a canonical function signature):");
-    for (const stale of staleSelectors) {
+    for (const stale of removed) {
       if (!deleteSelectors.has(stale.selector)) {
         console.log(`  - ${stale.selector} ${stale.signature ?? "unknown"}`);
       }
+    }
+  }
+
+  if (wronglyListedMoved.length > 0) {
+    console.log("");
+    console.log(
+      "⚠ deleteSelectorSigs contains selectors that MOVED (not removed) — remove these and add their facet to the cut:"
+    );
+    for (const stale of wronglyListedMoved) {
+      console.log(`  - ${stale.selector} ${stale.signature ?? "unknown"} → now on ${stale.movedTo}`);
     }
   }
 }

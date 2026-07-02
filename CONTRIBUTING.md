@@ -170,10 +170,11 @@ To preview the full cut plan without executing a cut, run:
 pnpm check_cut <network> [cut-file-name] [--no-build]
 ```
 
-The output has two sections:
+The output has three sections:
 
-- **Facets (deploy):** each facet as `ADD` (in the cut, not yet deployed), `REPLACE` (deployed but functional runtime bytecode differs), `REUSE` (deployed and unchanged — trailing Solidity metadata differences are ignored), or `REMOVE` (deployed but no longer in source). Supply a cut file so facets you intend to add show up as `ADD`; without one the scope is limited to already-deployed facets.
-- **Selectors to remove:** selectors live in the diamond but absent from the ABIs of every facet that will remain after the cut — the deployed facets that still have artifacts plus the new facets listed in the cut. Listing the new facets is what prevents a selector that merely moved to a new facet from being reported. Each selector is marked `listed` (already in `deleteSelectorSigs`, so the cut removes it) or flagged for review.
+- **Facets (deploy):** each facet as `ADD`, `REPLACE`, `REUSE`, or `REMOVE` (no longer in the source tree). `REMOVE` is decided by source presence, not artifact presence, so a stale artifact from a deleted facet cannot hide a removal (the reason then tells you to run `forge clean`). Supply a cut file so facets you intend to add show up as `ADD`; without one the scope is limited to already-deployed facets.
+- **Selectors to remove:** live diamond selectors that no longer exist on any facet in current source. Each is marked `listed` (already in `deleteSelectorSigs`, so the cut removes it) or flagged for review.
+- **Moved selectors:** live selectors that still exist in the repo but on a _different_ facet — reported as `MOVE`, not deletions. Repoint them by adding that facet to the cut's `facets`; do **not** add them to `deleteSelectorSigs` (deleting a moved selector drops a live function). The tool warns if a moved selector is already listed there.
 
 Review flagged selectors before executing the cut. Add a selector to `deleteSelectorSigs` in the cut JSON only when it should be removed from the diamond; leave it out when the selector should intentionally remain live through an older facet. Entries accept either a 4-byte hex selector (e.g. `"0xe8a6eec2"`) or a canonical function signature (e.g. `"mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"`); signatures are hashed to selectors at cut-build time. Function signatures for orphaned selectors are resolved on a best-effort basis from local cut data and git history; when the historical facet can be identified, the output includes both the live selector address and the currently deployed address for that facet name. Use `--no-build` only when you want to compare against already-built artifacts.
 
