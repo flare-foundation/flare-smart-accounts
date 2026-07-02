@@ -10,7 +10,7 @@
   "defaultInstructionFee": 0,
   "instructionFees": [],
   "xrplProviderWallets": [],
-  "timelockDurationSeconds": 0,
+  "timelockDurationSeconds": 3600,
   "pausers": [
     "0x51e40f275feecA0A859CdA9D499afBcBe3804B71",
     "0xbe41f722b72fd91637c8660c8BDe3f4a7441aA5c"
