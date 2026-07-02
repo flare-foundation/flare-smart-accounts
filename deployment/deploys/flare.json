@@ -45,11 +45,6 @@
     "address": "0x1E262a42336757F31428DAe1C852A04e0558145a"
   },
   {
-    "name": "SwapFacet",
-    "contractName": "SwapFacet.sol",
-    "address": "0x5f14e35A2b3F350b86487a9E21972BF9B0D23DDf"
-  },
-  {
     "name": "TimelockFacet",
     "contractName": "TimelockFacet.sol",
     "address": "0x8e3A6a98e26ee972C67F84aC3E3433ee4d9f3a80"
