@@ -1,0 +1,19 @@
+{
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "MemoInstructionsFacet",
+    "PauseFacet",
+    "ReaderFacet",
+    "InstructionsFacet",
+    "PersonalAccountsFacet",
+    "VaultsFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [
+    "swapWNatForStableCoin(string)",
+    "getSwapParams()",
+    "swapStableCoinForFAsset(string)",
+    "setSwapParams(address,address,uint24,uint24,uint24,bytes21,bytes21)"
+  ],
+  "execute": false
+}

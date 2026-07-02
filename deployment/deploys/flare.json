@@ -32,7 +32,7 @@
   {
     "name": "InstructionsFacet",
     "contractName": "InstructionsFacet.sol",
-    "address": "0x6Acf5F4A973Df4584dfDC6b8DFE6FE42579E9b2D"
+    "address": "0x82e9ea6664320fA07B39714420E5db5ED75b4C98"
   },
   {
     "name": "PaymentProofsFacet",
@@ -42,7 +42,7 @@
   {
     "name": "PersonalAccountsFacet",
     "contractName": "PersonalAccountsFacet.sol",
-    "address": "0xe596659A47Ba8654A2fbf7f40dF6bC2134a7C3be"
+    "address": "0x1E262a42336757F31428DAe1C852A04e0558145a"
   },
   {
     "name": "SwapFacet",
@@ -57,7 +57,7 @@
   {
     "name": "VaultsFacet",
     "contractName": "VaultsFacet.sol",
-    "address": "0x08D41C1922d09F3FA164f159fB6359CFdA38d7db"
+    "address": "0x1Af6e97a212FFC27fa47ba7B2f3134Ef504f005c"
   },
   {
     "name": "XrplProviderWalletsFacet",
@@ -77,7 +77,7 @@
   {
     "name": "PersonalAccountImplementation",
     "contractName": "PersonalAccount.sol",
-    "address": "0x6752F826fbA00117cD4f34724C9fc6A0dF46DD59"
+    "address": "0x3eFab0Eb4c65163651BB1FC50d84D4AF0B782d09"
   },
   {
     "name": "FAssetRedeemComposerImplementation",
@@ -93,5 +93,20 @@
     "name": "FAssetRedeemComposer_FXRP",
     "contractName": "FAssetRedeemComposerProxy.sol",
     "address": "0x9692EDBB253ef6f5459A498A93E34674B333cC69"
+  },
+  {
+    "name": "MemoInstructionsFacet",
+    "contractName": "MemoInstructionsFacet.sol",
+    "address": "0x96B1c3AffB76C2ca4b6BAd7F5a566aF19621466e"
+  },
+  {
+    "name": "PauseFacet",
+    "contractName": "PauseFacet.sol",
+    "address": "0x588683acc6500cd9E08471F4D32a3BF40f71275f"
+  },
+  {
+    "name": "ReaderFacet",
+    "contractName": "ReaderFacet.sol",
+    "address": "0x0CD8cAa37BfB38B479f46030A896B50E4F48c093"
   }
 ]
