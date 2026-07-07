@@ -44,6 +44,7 @@ mkdir -p "$OUTPUT_DIR"
 forge script deployment/scripts/DeployPersonalAccountImplementation.s.sol:DeployPersonalAccountImplementation \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
+  --offline \
   --sig "run(bool)" "$STAGING" \
   --broadcast | tee forge-deploy-output.txt
 

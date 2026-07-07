@@ -38,7 +38,7 @@ library Vaults {
         require(_vault != address(0), IVaultsFacet.InvalidVaultId(vaultId));
         require(
             instructionType == uint256(vaultInfo.vaultType),
-            IInstructionsFacet.InvalidInstructionType(instructionType)
+            IInstructionsFacet.InvalidInstructionType(instructionType, uint256(vaultInfo.vaultType))
         );
     }
 

@@ -107,11 +107,112 @@ export function isFunctionFragment(item: unknown): item is AbiFunctionFragment {
 }
 
 export function toSelector(item: string | AbiItem) {
-  if (typeof item === "string" && /^0x[0-9a-f]{8}$/i.test(item)) return item;
+  if (typeof item === "string") {
+    if (/^0x[0-9a-f]{8}$/i.test(item)) return item;
+    if (/^[A-Za-z_][A-Za-z0-9_]*\(.*\)$/.test(item)) {
+      requireCanonicalFunctionSignature(item);
+      return web3.eth.abi.encodeFunctionSignature(item);
+    }
+  }
   if (isFunctionFragment(item)) {
     return web3.eth.abi.encodeFunctionSignature(item);
   }
-  throw new Error("toSelector: expected a selector string or a function ABI fragment");
+  throw new Error(
+    "toSelector: expected a 4-byte hex selector, a function signature string, or a function ABI fragment"
+  );
+}
+
+function requireCanonicalFunctionSignature(signature: string) {
+  if (/\s/.test(signature)) {
+    throw new Error(`Invalid function signature '${signature}': use canonical ABI format without whitespace`);
+  }
+
+  const match = /^([A-Za-z_][A-Za-z0-9_]*)\((.*)\)$/.exec(signature);
+  if (!match) {
+    throw new Error(`Invalid function signature '${signature}'`);
+  }
+
+  const params = splitTopLevelTypes(match[2] ?? "");
+  if (!params || !params.every(isCanonicalAbiType)) {
+    throw new Error(`Invalid function signature '${signature}': use canonical ABI parameter types`);
+  }
+}
+
+function splitTopLevelTypes(types: string): string[] | undefined {
+  if (types.length === 0) {
+    return [];
+  }
+
+  const result: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < types.length; i++) {
+    const c = types[i];
+    if (c === "(") {
+      depth++;
+    } else if (c === ")") {
+      if (depth === 0) {
+        return undefined;
+      }
+      depth--;
+    } else if (c === "," && depth === 0) {
+      result.push(types.slice(start, i));
+      start = i + 1;
+    }
+  }
+
+  if (depth !== 0) {
+    return undefined;
+  }
+  result.push(types.slice(start));
+  return result.every((type) => type.length > 0) ? result : undefined;
+}
+
+function isCanonicalAbiType(type: string): boolean {
+  let baseType = type;
+  while (baseType.endsWith("]")) {
+    const arrayMatch = /^(.*)(\[(?:[1-9][0-9]*)?\])$/.exec(baseType);
+    if (!arrayMatch || !arrayMatch[1]) {
+      return false;
+    }
+    baseType = arrayMatch[1];
+  }
+
+  // Canonical Solidity selector form uses bare-paren tuples like (t1,t2),
+  // NOT the `tuple(...)` JSON-ABI form. The two hash to different selectors.
+  if (baseType.startsWith("(") && baseType.endsWith(")")) {
+    const tupleTypes = splitTopLevelTypes(baseType.slice(1, -1));
+    return !!tupleTypes && tupleTypes.every(isCanonicalAbiType);
+  }
+
+  return isCanonicalElementaryAbiType(baseType);
+}
+
+function isCanonicalElementaryAbiType(type: string): boolean {
+  if (["address", "bool", "string", "bytes", "function"].includes(type)) {
+    return true;
+  }
+
+  const bytesMatch = /^bytes([0-9]+)$/.exec(type);
+  if (bytesMatch?.[1]) {
+    const size = Number(bytesMatch[1]);
+    return size >= 1 && size <= 32;
+  }
+
+  const intMatch = /^(?:u?int)([0-9]+)$/.exec(type);
+  if (intMatch?.[1]) {
+    const size = Number(intMatch[1]);
+    return size >= 8 && size <= 256 && size % 8 === 0;
+  }
+
+  const fixedMatch = /^(?:u?fixed)([0-9]+)x([0-9]+)$/.exec(type);
+  if (fixedMatch?.[1] && fixedMatch[2]) {
+    const bits = Number(fixedMatch[1]);
+    const decimals = Number(fixedMatch[2]);
+    return bits >= 8 && bits <= 256 && bits % 8 === 0 && decimals >= 1 && decimals <= 80;
+  }
+
+  return false;
 }
 
 export function loadAbi(contractName: string): AbiItem[] {

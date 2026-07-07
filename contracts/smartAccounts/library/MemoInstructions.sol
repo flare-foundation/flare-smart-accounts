@@ -18,14 +18,38 @@ library MemoInstructions {
         abi.encode(uint256(keccak256("smartAccounts.MemoInstructions.State")) - 1)) & ~bytes32(uint256(0xff)
     );
 
+    /// Two memo opcodes share this entry point. Both arrive at the same
+    /// PackedUserOperation; only the delivery channel differs:
+    ///   0xFF — UserOp is ABI-encoded inside the memo, after the 10-byte header.
+    ///          _data is ignored.
+    ///   0xFE — Memo carries only [opcode][walletId][fee][hash:32] = 42 bytes.
+    ///          _data is the ABI-encoded PackedUserOperation; the handler verifies that
+    ///          keccak256(_data) matches the hash before decoding.
     function execute(
         bytes calldata _memoData,
-        address _personalAccount
+        address _personalAccount,
+        bytes calldata _data
     )
         internal
     {
-        // decode PackedUserOperation from memoData (skip 10-byte header: instructionId + walletId + uint64 fee)
-        PackedUserOperation memory userOp = abi.decode(_memoData[10:], (PackedUserOperation));
+        PackedUserOperation memory userOp;
+        uint8 opcode = uint8(_memoData[0]);
+        if (opcode == 0xFF) {
+            // UserOp ABI-encoded right after the 10-byte header
+            userOp = abi.decode(_memoData[10:], (PackedUserOperation));
+        } else if (opcode == 0xFE) {
+            // memo: [0xFE][walletId:uint8][fee:uint64][userOpHash:bytes32] = 42 bytes
+            require(_memoData.length == 42, IMemoInstructionsFacet.InvalidMemoData());
+            bytes32 expected = bytes32(_memoData[10:42]);
+            bytes32 actual = keccak256(_data);
+            require(
+                actual == expected,
+                IMemoInstructionsFacet.CustomInstructionHashMismatch(expected, actual)
+            );
+            userOp = abi.decode(_data, (PackedUserOperation));
+        } else {
+            revert IMemoInstructionsFacet.InvalidInstructionId(opcode);
+        }
 
         // validate sender
         require(
@@ -35,7 +59,7 @@ library MemoInstructions {
 
         State storage state = getState();
 
-        // validate nonce
+        // validate nonce + increment
         require(
             userOp.nonce == state.nonces[_personalAccount],
             IMemoInstructionsFacet.InvalidNonce(state.nonces[_personalAccount], userOp.nonce)
@@ -43,7 +67,8 @@ library MemoInstructions {
         ++state.nonces[_personalAccount];
 
         // execute callData on PA (Diamond is controller, so onlyController is satisfied)
-        (bool success, bytes memory returnData) = _personalAccount.call{value: msg.value}(userOp.callData);
+        (bool success, bytes memory returnData) =
+            _personalAccount.call{value: msg.value}(userOp.callData);
         require(success, IMemoInstructionsFacet.CallFailed(returnData));
 
         emit IMemoInstructionsFacet.UserOperationExecuted(

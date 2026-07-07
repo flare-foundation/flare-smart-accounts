@@ -2356,7 +2356,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IInstructionsFacet.InvalidInstructionType.selector,
-                1
+                1, // instructionType from payment reference (Firelight)
+                2  // actual vault type (Upshift) — vault ID 4 is the Upshift vault
             )
         );
         masterAccountController.executeInstruction(proof, xrplAddress1);
@@ -2533,13 +2534,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             executor
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx1"),
             xrplAddress1,
             amount,
             0,
             "",
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         assertEq(fxrp.balanceOf(personalAccountAddr), amount);
@@ -2547,13 +2549,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
     function testDirectMintRevertOnlyAssetManager() public {
         vm.expectRevert(IMemoInstructionsFacet.OnlyAssetManager.selector);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx5"),
             xrplAddress1,
             1000,
             0,
             "",
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -2569,13 +2572,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             )
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx6"),
             xrplAddress1,
             100,
             0,
             "",
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -2585,24 +2589,26 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         fxrp.mint(address(masterAccountController), amount * 2);
 
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx7"),
             xrplAddress1,
             amount,
             0,
             "",
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         vm.expectRevert(IMemoInstructionsFacet.TransactionAlreadyExecuted.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx7"),
             xrplAddress1,
             amount,
             0,
             "",
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -2618,13 +2624,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encodeWithSelector(IMemoInstructionsFacet.InvalidInstructionId.selector, uint8(0x11))
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx8"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -2638,13 +2645,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx9"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -2663,13 +2671,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert();
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx11"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -2707,8 +2716,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             )
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
-            bytes32("dmTxInvalidSender"), xrplAddress1, amount, 0, memoData, payable(executor)
+        masterAccountController.handleMintedFAssets(
+            bytes32("dmTxInvalidSender"), xrplAddress1, amount, 0, memoData, payable(executor),
+            ""
         );
     }
 
@@ -2743,8 +2753,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encodeWithSelector(IMemoInstructionsFacet.InvalidNonce.selector, 0, 42)
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
-            bytes32("dmTxInvalidNonce"), xrplAddress1, amount, 0, memoData, payable(executor)
+        masterAccountController.handleMintedFAssets(
+            bytes32("dmTxInvalidNonce"), xrplAddress1, amount, 0, memoData, payable(executor),
+            ""
         );
     }
 
@@ -2779,8 +2790,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // CallFailed wraps the inner returnData bytes
         vm.expectRevert();
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
-            bytes32("dmTxCallFailed"), xrplAddress1, amount, 0, memoData, payable(executor)
+        masterAccountController.handleMintedFAssets(
+            bytes32("dmTxCallFailed"), xrplAddress1, amount, 0, memoData, payable(executor),
+            ""
         );
     }
 
@@ -2793,8 +2805,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
-            bytes32("dmTxIgnoreMemoBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        masterAccountController.handleMintedFAssets(
+            bytes32("dmTxIgnoreMemoBadLen"), xrplAddress1, amount, 0, memoData, payable(executor),
+            ""
         );
     }
 
@@ -2807,8 +2820,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
-            bytes32("dmTxSetNonceBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        masterAccountController.handleMintedFAssets(
+            bytes32("dmTxSetNonceBadLen"), xrplAddress1, amount, 0, memoData, payable(executor),
+            ""
         );
     }
 
@@ -2821,8 +2835,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
-            bytes32("dmTxSetExecBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        masterAccountController.handleMintedFAssets(
+            bytes32("dmTxSetExecBadLen"), xrplAddress1, amount, 0, memoData, payable(executor),
+            ""
         );
     }
 
@@ -2837,8 +2852,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
-            bytes32("dmTxRemoveExecBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        masterAccountController.handleMintedFAssets(
+            bytes32("dmTxRemoveExecBadLen"), xrplAddress1, amount, 0, memoData, payable(executor),
+            ""
         );
     }
 
@@ -2851,8 +2867,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
-            bytes32("dmTxReplaceFeeBadLen"), xrplAddress1, amount, 0, memoData, payable(executor)
+        masterAccountController.handleMintedFAssets(
+            bytes32("dmTxReplaceFeeBadLen"), xrplAddress1, amount, 0, memoData, payable(executor),
+            ""
         );
     }
 
@@ -2898,13 +2915,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             0
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("dmTx10"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         assertEq(simpleExample.flag(), true);
@@ -2926,13 +2944,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encodeWithSelector(IMemoInstructionsFacet.InvalidInstructionId.selector, uint8(0x11))
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             dmTxId,
             xrplAddress1,
             amount,
             0,
             badMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -2955,13 +2974,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IMemoInstructionsFacet.IgnoreMemoSet(personalAccountAddr, stuckTxId);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             unstickTxId,
             xrplAddress1,
             amount,
             0,
             unstickMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // Step 2: submit the stuck tx — UserOp should be skipped, just mints
@@ -2986,13 +3006,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         // should NOT revert — ignoreMemo flag causes UserOp to be skipped
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             stuckTxId,
             xrplAddress1,
             amount,
             0,
             badMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // nonce should still be 0 (UserOp was not executed)
@@ -3018,13 +3039,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IMemoInstructionsFacet.NonceIncreased(personalAccountAddr, newNonce);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("increaseNonceTx1"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         assertEq(masterAccountController.getNonce(personalAccountAddr), newNonce);
@@ -3065,13 +3087,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             }))
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("execTx1"),
             xrplAddress1,
             amount,
             0,
             execMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
         assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
 
@@ -3088,13 +3111,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encodeWithSelector(IMemoInstructionsFacet.InvalidNonceIncrease.selector, 1, 0)
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("increaseNonceTx2"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -3115,13 +3139,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encodeWithSelector(IMemoInstructionsFacet.InvalidNonceIncrease.selector, 0, newNonce)
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("increaseNonceTx3"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -3138,13 +3163,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encode(uint256(5))
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("nonceTx1"),
             xrplAddress1,
             amount,
             0,
             nonceMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
         assertEq(masterAccountController.getNonce(personalAccountAddr), 5);
 
@@ -3178,13 +3204,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("execTx2"),
             xrplAddress1,
             amount,
             0,
             execMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         assertEq(simpleExample.flag(), true);
@@ -3207,13 +3234,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IMemoInstructionsFacet.ExecutorSet(personalAccountAddr, newExecutor);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("setExecTx1"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         assertEq(masterAccountController.getExecutor(personalAccountAddr), newExecutor);
@@ -3227,13 +3255,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // set executor
         fxrp.mint(address(masterAccountController), amount);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("setExecTx2"),
             xrplAddress1,
             amount,
             0,
             abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), newExecutor),
-            payable(executor)
+            payable(executor),
+            ""
         );
         assertEq(masterAccountController.getExecutor(personalAccountAddr), newExecutor);
 
@@ -3242,13 +3271,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IMemoInstructionsFacet.ExecutorRemoved(personalAccountAddr);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("rmExecTx1"),
             xrplAddress1,
             amount,
             0,
             abi.encodePacked(uint8(0xD1), uint8(1), uint64(0)),
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         assertEq(masterAccountController.getExecutor(personalAccountAddr), address(0));
@@ -3263,13 +3293,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // set executor
         fxrp.mint(address(masterAccountController), amount);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("setExecTx3"),
             xrplAddress1,
             amount,
             0,
             abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), paExecutor),
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // submit 0xFF with wrong executor
@@ -3301,13 +3332,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encodeWithSelector(IMemoInstructionsFacet.WrongExecutor.selector, paExecutor, wrongExecutor)
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("execTx3"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(wrongExecutor)
+            payable(wrongExecutor),
+            ""
         );
     }
 
@@ -3320,13 +3352,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // set executor
         fxrp.mint(address(masterAccountController), amount);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("setExecTx4"),
             xrplAddress1,
             amount,
             0,
             abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), paExecutor),
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // plain direct mint with wrong executor
@@ -3335,13 +3368,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encodeWithSelector(IMemoInstructionsFacet.WrongExecutor.selector, paExecutor, wrongExecutor)
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("plainTx1"),
             xrplAddress1,
             amount,
             0,
             "",
-            payable(wrongExecutor)
+            payable(wrongExecutor),
+            ""
         );
     }
 
@@ -3354,25 +3388,27 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // set executor
         fxrp.mint(address(masterAccountController), amount);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("setExecTx5"),
             xrplAddress1,
             amount,
             0,
             abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), paExecutor),
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // 0xD1 with different executor — should succeed (bypass)
         fxrp.mint(address(masterAccountController), amount);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("rmExecTx2"),
             xrplAddress1,
             amount,
             0,
             abi.encodePacked(uint8(0xD1), uint8(1), uint64(0)),
-            payable(otherExecutor)
+            payable(otherExecutor),
+            ""
         );
 
         assertEq(masterAccountController.getExecutor(personalAccountAddr), address(0));
@@ -3392,13 +3428,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(IMemoInstructionsFacet.AddressZero.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("setExecTx6"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -3422,13 +3459,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IMemoInstructionsFacet.ReplacementFeeSet(personalAccountAddr, stuckTxId, newFee);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("replaceTx1"),
             xrplAddress1,
             amount,
             0,
             replaceMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // Step 2: submit the stuck 0xFF tx — should use replacement fee
@@ -3457,13 +3495,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             stuckTxId,
             xrplAddress1,
             amount,
             0,
             execMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // executor should get replacement fee (200), not original (10)
@@ -3503,13 +3542,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("noReplaceTx1"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         assertEq(fxrp.balanceOf(executor), fee);
@@ -3534,13 +3574,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IMemoInstructionsFacet.ReplacementFeeSet(personalAccountAddr, stuckTxId, 0);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("replaceTx2"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // submit the stuck 0xFF tx — executor should get 0 fee
@@ -3569,13 +3610,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             stuckTxId,
             xrplAddress1,
             amount,
             0,
             execMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // executor gets 0 from stuck tx (replacement fee=0), PA gets all
@@ -3598,13 +3640,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             stuckTxId
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             unstickTxId,
             xrplAddress1,
             amount,
             0,
             unstickMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // Step 2: submit the stuck tx with malformed memo (only 3 bytes, < 6)
@@ -3613,13 +3656,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         bytes memory malformedMemo = abi.encodePacked(uint8(0xFF), uint8(1), uint8(0));
 
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             stuckTxId,
             xrplAddress1,
             amount,
             0,
             malformedMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // FAssets minted to PA, memo ignored
@@ -3645,13 +3689,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             newFee
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("replaceFeeNonFF"),
             xrplAddress1,
             amount,
             0,
             replaceMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // Step 2: submit 0xE1 (increaseNonce) with low fee in memo — override should apply
@@ -3663,13 +3708,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
             abi.encode(uint256(5))
         );
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             targetTxId,
             xrplAddress1,
             amount,
             0,
             nonceMemo,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // executor gets unstickFee (50) from first tx + replacement fee (200) from second tx
@@ -3703,13 +3749,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         );
 
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("emptyCallDataTx"),
             xrplAddress1,
             amount,
             0,
             memoData,
-            payable(executor)
+            payable(executor),
+            ""
         );
 
         // custom fee applied, nonce incremented
@@ -3835,13 +3882,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         vm.expectRevert(IPauseFacet.IsPaused.selector);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("pausedTx1"),
             xrplAddress1,
             amount,
             0,
             "",
-            payable(executor)
+            payable(executor),
+            ""
         );
     }
 
@@ -3955,13 +4003,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // no executor set — any executor should work
         fxrp.mint(address(masterAccountController), amount);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("anyExecTx1"),
             xrplAddress1,
             amount,
             0,
             "",
-            payable(anyExecutor)
+            payable(anyExecutor),
+            ""
         );
 
         // verify FAssets transferred
@@ -4048,13 +4097,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         // trigger PA creation
         fxrp.mint(address(masterAccountController), 1);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("xrplAddrTx"),
             xrplAddress1,
             1,
             0,
             "",
-            payable(executor)
+            payable(executor),
+            ""
         );
         address pa = masterAccountController.getPersonalAccount(xrplAddress1);
         vm.deal(pa, 2 ether);
@@ -4109,13 +4159,14 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256 amount = 1000;
         fxrp.mint(address(masterAccountController), amount);
         vm.prank(assetManagerFxrpMock);
-        masterAccountController.mintedFAssets(
+        masterAccountController.handleMintedFAssets(
             bytes32("isSmartTx"),
             xrplAddress1,
             amount,
             0,
             "",
-            payable(executor)
+            payable(executor),
+            ""
         );
         address pa = masterAccountController.getPersonalAccount(xrplAddress1);
 
@@ -4342,6 +4393,325 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         uint256 _instructionCommand
     ) private pure returns (uint256) {
         return (_instructionType << 4) | _instructionCommand;
+    }
+
+    // -----------------------------------------------------------------
+    // Memo code 0xFE — ExecuteUserOpWithData (callData = hash, real callData via _data)
+    // -----------------------------------------------------------------
+
+    /// Build _data = abi.encode(PackedUserOperation) for 0xFE.
+    function _build0xFEData(
+        address _pa,
+        uint256 _nonce,
+        bytes memory _realCallData
+    )
+        private pure
+        returns (bytes memory)
+    {
+        PackedUserOperation memory packed = PackedUserOperation({
+            sender: _pa,
+            nonce: _nonce,
+            initCode: "",
+            callData: _realCallData,
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        return abi.encode(packed);
+    }
+
+    /// Build memo = [0xFE][walletId=1][fee][hash:32] = 42 bytes.
+    function _build0xFEMemo(uint64 _fee, bytes32 _hash) private pure returns (bytes memory) {
+        return abi.encodePacked(uint8(0xFE), uint8(1), _fee, _hash);
+    }
+
+    function _setFlagCallData(bool _value) private view returns (bytes memory) {
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", _value)
+        });
+        return abi.encodeCall(IPersonalAccount.executeUserOp, (calls));
+    }
+
+    function testExecuteWithData0xFEHappyPath() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        uint64 fee = 100;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(fee, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+
+        vm.expectEmit();
+        emit IMemoInstructionsFacet.UserOperationExecuted(personalAccountAddr, 0);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feHappy"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+
+        assertEq(simpleExample.flag(), true);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+        assertEq(fxrp.balanceOf(personalAccountAddr), amount - fee);
+        assertEq(fxrp.balanceOf(executor), fee);
+    }
+
+    function testExecuteWithData0xFEMultiCall() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        // call setFlag(true) then setFlag(false); both must run (final state false)
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](2);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+        calls[1] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", false)
+        });
+        bytes memory realCallData = abi.encodeCall(IPersonalAccount.executeUserOp, (calls));
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, realCallData);
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        // pre-set flag to true to confirm second call (false) actually runs
+        vm.prank(address(masterAccountController));
+        simpleExample.setFlag(true);
+        assertEq(simpleExample.flag(), true);
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feMulti"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+
+        assertEq(simpleExample.flag(), false);
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+    }
+
+    function testExecuteWithData0xFERevertHashMismatch() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes32 wrongHash = keccak256("not the right data");
+        bytes memory memoData = _build0xFEMemo(0, wrongHash);
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.CustomInstructionHashMismatch.selector,
+                wrongHash,
+                keccak256(data)
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feMismatch"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+    }
+
+    function testExecuteWithData0xFERevertEmptyData() public {
+        uint256 amount = 5000;
+
+        bytes32 anyHash = keccak256("anything");
+        bytes memory memoData = _build0xFEMemo(0, anyHash);
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.CustomInstructionHashMismatch.selector,
+                anyHash,
+                keccak256("")
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feEmpty"), xrplAddress1, amount, 0, memoData, payable(executor), ""
+        );
+    }
+
+    function testExecuteWithData0xFERevertInvalidMemoLength() public {
+        uint256 amount = 5000;
+
+        // 0xFE expects exactly 42 bytes; ship only the 10-byte header
+        bytes memory memoData = abi.encodePacked(uint8(0xFE), uint8(1), uint64(0));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(IMemoInstructionsFacet.InvalidMemoData.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feLen"), xrplAddress1, amount, 0, memoData, payable(executor), ""
+        );
+    }
+
+    function testExecuteWithData0xFERevertWrongSender() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        address wrongSender = makeAddr("wrongSender");
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(wrongSender, 0, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.InvalidSender.selector, wrongSender, personalAccountAddr
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feSender"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFERevertWrongNonce() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 42, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(IMemoInstructionsFacet.InvalidNonce.selector, 0, 42)
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feNonce"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFEHonorsPaExecutor() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        address paExecutor = makeAddr("paExecutor");
+        uint256 amount = 5000;
+
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory setExecMemo =
+            abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), bytes20(paExecutor));
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feSetExec"), xrplAddress1, amount, 0, setExecMemo, payable(executor), ""
+        );
+        assertEq(masterAccountController.getExecutor(personalAccountAddr), paExecutor);
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.WrongExecutor.selector, paExecutor, executor
+            )
+        );
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feExec"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFEReplayProtection() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        bytes32 txId = bytes32("feReplay");
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            txId, xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert(IMemoInstructionsFacet.TransactionAlreadyExecuted.selector);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            txId, xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFEInternalCallReverts() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("nonexistent()")
+        });
+        bytes memory realCallData = abi.encodeCall(IPersonalAccount.executeUserOp, (calls));
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, realCallData);
+        bytes memory memoData = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert();
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feInner"), xrplAddress1, amount, 0, memoData, payable(executor), data
+        );
+    }
+
+    function testExecuteWithData0xFENonceUnchangedOnRevert() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+
+        bytes memory data = _build0xFEData(personalAccountAddr, 0, _setFlagCallData(true));
+        bytes memory badMemo = _build0xFEMemo(0, keccak256("wrong"));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.expectRevert();
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feNonceA"), xrplAddress1, amount, 0, badMemo, payable(executor), data
+        );
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+
+        bytes memory goodMemo = _build0xFEMemo(0, keccak256(data));
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("feNonceB"), xrplAddress1, amount, 0, goodMemo, payable(executor), data
+        );
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 1);
+    }
+
+    function testExecuteWithData0xFEIgnoreMemoStillWorks() public {
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        bytes32 stuckTxId = bytes32("feIgnoreStuck");
+        bytes32 unstickTxId = bytes32("feIgnoreUnstick");
+
+        fxrp.mint(address(masterAccountController), amount);
+        bytes memory ignoreMemo = abi.encodePacked(uint8(0xE0), uint8(1), uint64(0), stuckTxId);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            unstickTxId, xrplAddress1, amount, 0, ignoreMemo, payable(executor), ""
+        );
+
+        // 0xFE memo whose UserOp would otherwise revert (wrong sender), but txId is ignored
+        bytes memory data = _build0xFEData(makeAddr("wrongSender"), 0, _setFlagCallData(true));
+        bytes memory feMemo = _build0xFEMemo(0, keccak256(data));
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            stuckTxId, xrplAddress1, amount, 0, feMemo, payable(executor), data
+        );
+
+        assertEq(masterAccountController.getNonce(personalAccountAddr), 0);
+        assertEq(simpleExample.flag(), false);
     }
 
 }

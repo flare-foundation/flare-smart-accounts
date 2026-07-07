@@ -39,6 +39,7 @@ fi
 forge script deployment/scripts/DeployComposer.s.sol:DeployComposer \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
+  --offline \
   --sig "run(bool)" "$ONLY_IMPL" \
   --broadcast | tee forge-deploy-output.txt
 

@@ -49,5 +49,6 @@ mkdir -p "$OUTPUT_DIR"
 forge script deployment/scripts/ExecuteDiamondCut.s.sol:ExecuteDiamondCut \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
+  --offline \
   --broadcast \
   --sig "run(string,bool)" "$CUT_JSON" "$STAGING"

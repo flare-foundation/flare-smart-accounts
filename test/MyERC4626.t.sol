@@ -16,6 +16,16 @@ contract MyERC4626Test is Test {
         myERC4626 = new MyERC4626(mintableERC20, "My ERC4626", "MERC4626");
     }
 
+    function testSetDepositCap() public {
+        myERC4626.setDepositCap(100000000);
+        assertEq(myERC4626.depositCap(), 100000000);
+    }
+
+    function testSetDepositLimit() public {
+        myERC4626.setDepositLimit(100000000);
+        assertEq(myERC4626.depositLimit(), 100000000);
+    }
+
     function testSend() public {
         vm.startPrank(user);
         mintableERC20.mint(user, 2000);
@@ -109,5 +119,99 @@ contract MyERC4626Test is Test {
         assertEq(myERC4626.pendingWithdrawAssets(user, 1), 0); // pending withdraw assets cleared
         assertEq(mintableERC20.balanceOf(user), 700); // assets transferred to user
         vm.stopPrank();
+    }
+
+    function testUpshiftDepositUpToCapSucceeds() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 1000);
+        mintableERC20.approve(address(myERC4626), 1000);
+        // multi-asset (Upshift) deposit exactly up to the cap
+        myERC4626.deposit(address(mintableERC20), 1000, user);
+        vm.stopPrank();
+
+        assertEq(myERC4626.totalAssets(), 1000);
+    }
+
+    function testUpshiftDepositRevertsWhenCapExceeded() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 2000);
+        mintableERC20.approve(address(myERC4626), 2000);
+        // fill the vault to the cap via the Upshift path
+        myERC4626.deposit(address(mintableERC20), 1000, user);
+
+        // any further Upshift deposit exceeds the cap and reverts
+        vm.expectRevert(MyERC4626.DepositCapReached.selector);
+        myERC4626.deposit(address(mintableERC20), 1, user);
+        vm.stopPrank();
+    }
+
+    function testUpshiftDepositRevertsWhenSingleAmountAboveCap() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 2000);
+        mintableERC20.approve(address(myERC4626), 2000);
+        // a single Upshift deposit larger than the cap reverts
+        vm.expectRevert(MyERC4626.DepositCapReached.selector);
+        myERC4626.deposit(address(mintableERC20), 1500, user);
+        vm.stopPrank();
+    }
+
+    function testFirelightDepositIgnoresCap() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 2000);
+        mintableERC20.approve(address(myERC4626), 2000);
+        // single-asset (Firelight) deposit is NOT capped, even well beyond the cap
+        myERC4626.deposit(2000, user);
+        vm.stopPrank();
+
+        assertEq(myERC4626.totalAssets(), 2000);
+    }
+
+    function testMintIgnoresCap() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 2000);
+        mintableERC20.approve(address(myERC4626), 2000);
+        // mint is NOT capped
+        myERC4626.mint(2000, user);
+        vm.stopPrank();
+
+        assertEq(myERC4626.totalAssets(), 2000);
+    }
+
+    function testCapFreesUpAfterWithdrawRequest() public {
+        myERC4626.setDepositCap(1000);
+
+        vm.startPrank(user);
+        mintableERC20.mint(user, 1400);
+        mintableERC20.approve(address(myERC4626), 1400);
+        myERC4626.deposit(address(mintableERC20), 1000, user);
+
+        // a deposit on top of a full vault reverts
+        vm.expectRevert(MyERC4626.DepositCapReached.selector);
+        myERC4626.deposit(address(mintableERC20), 400, user);
+
+        // pending withdrawals are excluded from totalAssets, freeing cap space
+        myERC4626.withdraw(400, user, user);
+        assertEq(myERC4626.totalAssets(), 600);
+
+        // the freed capacity can now be redeposited via the Upshift path
+        myERC4626.deposit(address(mintableERC20), 400, user);
+        assertEq(myERC4626.totalAssets(), 1000);
+        vm.stopPrank();
+    }
+
+    function testDefaultCapAndLimit() public view {
+        assertEq(myERC4626.depositCap(), 25000000000000);
+        assertEq(myERC4626.depositLimit(), 25000000000000);
+        assertEq(myERC4626.lagDuration(), 1 days);
     }
 }

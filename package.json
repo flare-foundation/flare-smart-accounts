@@ -1,6 +1,6 @@
 {
   "name": "flare-smart-accounts",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Smart contracts implementing Flare Smart Accounts.",
   "main": "",
   "repository": {
@@ -17,12 +17,13 @@
     "build": "forge build",
     "---------TEST---SCRIPTS": "",
     "test": "forge test -vvv",
-    "coverage": "forge coverage --report lcov && node scripts/forge-lcov-prune.js && genhtml lcov.info.pruned --branch-coverage --output-dir coverage",
+    "coverage": "forge coverage --report lcov --no-match-test 'testProxyCreationCode(LengthMatchesFreshCompilation|MatchesFreshCompilationModuloMetadata)' && node scripts/forge-lcov-prune.js && genhtml lcov.info.pruned --branch-coverage --output-dir coverage",
     "---------DEPLOY---SCRIPTS": "",
     "deploy_contracts": "bash deployment/scripts/deploy-smart-accounts.sh",
     "deploy_personal_account_implementation": "bash deployment/scripts/deploy-personal-account-implementation.sh",
-    "deploy_my_erc4626_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast'",
+    "deploy_my_erc4626_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --offline --broadcast'",
     "diamond_cut": "bash deployment/scripts/execute-diamond-cut.sh",
+    "check_cut": "tsx deployment/scripts/check-cut-plan.ts",
     "deploy_composer": "bash deployment/scripts/deploy-composer.sh",
     "---------LINTER---SCRIPTS": "",
     "lint:check": "eslint \"{deployment,scripts}/**/*.ts\"",

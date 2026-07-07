@@ -154,5 +154,29 @@ Do not include the `.json` extension unless otherwise specified; the script will
 
 The script will read the `execute` flag from cut JSON file to determine whether to actually execute the cut or just print the transaction data.
 
+The cut file may include all candidate facets for review. For each listed facet, `ExecuteDiamondCut.s.sol` checks the previously deployed address in `deployment/deploys/<network>.json` and reuses it when the functional deployed bytecode matches the freshly compiled artifact. The comparison ignores the facet's own trailing Solidity metadata, so unrelated metadata-only rebuilds should not force redeployment.
+
+#### Embedded `PersonalAccountProxy.creationCode` and CREATE2 stability
+
+Facets that inline `PersonalAccounts` creation or address-derivation logic can embed `type(PersonalAccountProxy).creationCode` into their runtime bytecode. If the embedded proxy creation code changes, including its metadata, those facets may be redeployed even when their source files did not change. This keeps on-chain Personal Account address derivation consistent; predicted addresses for not-yet-deployed Personal Accounts should be recomputed after such a cut.
+
+#### Preparing the `facets` list
+
+There are two valid ways to prepare the `facets` list. For the safest review flow, list all candidate facets and let the script reuse unchanged deployments. For a smaller cut file, first run the dry-run helper below and include only the facets reported as `ADD` or `REPLACE`; do not rely only on the source import graph, since internal libraries, interfaces, compiler settings, and embedded creation code can change facet bytecode.
+
+To preview the full cut plan without executing a cut, run:
+
+```bash
+pnpm check_cut <network> [cut-file-name] [--no-build]
+```
+
+The output has three sections:
+
+- **Facets (deploy):** each facet as `ADD`, `REPLACE`, `REUSE`, or `REMOVE` (no longer in the source tree). `REMOVE` is decided by source presence, not artifact presence, so a stale artifact from a deleted facet cannot hide a removal (the reason then tells you to run `forge clean`). Supply a cut file so facets you intend to add show up as `ADD`; without one the scope is limited to already-deployed facets.
+- **Selectors to remove:** live diamond selectors that no longer exist on any facet in current source. Each is marked `listed` (already in `deleteSelectorSigs`, so the cut removes it) or flagged for review.
+- **Moved selectors:** live selectors that still exist in the repo but on a _different_ facet — reported as `MOVE`, not deletions. Repoint them by adding that facet to the cut's `facets`; do **not** add them to `deleteSelectorSigs` (deleting a moved selector drops a live function). The tool warns if a moved selector is already listed there.
+
+Review flagged selectors before executing the cut. Add a selector to `deleteSelectorSigs` in the cut JSON only when it should be removed from the diamond; leave it out when the selector should intentionally remain live through an older facet. Entries accept either a 4-byte hex selector (e.g. `"0xe8a6eec2"`) or a canonical function signature (e.g. `"mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"`); signatures are hashed to selectors at cut-build time. Function signatures for orphaned selectors are resolved on a best-effort basis from local cut data and git history; when the historical facet can be identified, the output includes both the live selector address and the currently deployed address for that facet name. Use `--no-build` only when you want to compare against already-built artifacts.
+
 #### Note on Internal Output Files
 Intermediate files generated during diamond cut deployment are written to the `deployment/output-internal/` directory. These files are for internal use only and are not considered essential output or deployment artifacts. You generally do not need to track or use these files unless you are debugging or developing deployment scripts.

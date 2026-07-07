@@ -16,6 +16,11 @@
       "vaultId": 3,
       "vaultAddress": "0x4066A1363a04ce3B23eEcB53dEfa65f94A24355E",
       "vaultType": 2
+    },
+    {
+      "vaultId": 4,
+      "vaultAddress": "0xD91324A6e8884147F6425E9ddd60e11Aea060B5b",
+      "vaultType": 2
     }
   ],
   "agentVaults": [],
@@ -26,6 +31,8 @@
   "defaultInstructionFee": 1000,
   "xrplProviderWallets": ["rEyj8nsHLdgt79KJWzXR5BgF7ZbaohbXwq"],
   "timelockDurationSeconds": 3600,
+  "pausers": [],
+  "unpausers": [],
 
   "endpoint": "0x6EDCE65403992e310A62460808c4b910D972f10f",
   "trustedSourceOApp": "0xCd3d2127935Ae82Af54Fc31cCD9D3440dbF46639",

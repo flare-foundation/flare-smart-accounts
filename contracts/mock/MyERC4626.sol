@@ -16,6 +16,11 @@ contract MyERC4626 is ERC4626 {
 
     /// @notice The duration of the time-lock for withdrawals (in seconds).
     uint256 public lagDuration;
+    /// @notice The deposit cap for the vault (in asset units). Enforced on the multi-asset
+    /// (Upshift) deposit path only; the single-asset (Firelight) deposit and mint are not capped.
+    uint256 public depositCap;
+    /// @notice The deposit limit for the vault (in asset units).
+    uint256 public depositLimit;
     /// @notice The total amount of assets pending withdrawal across all periods.
     uint256 public assetsPendingWithdraw;
     mapping(address receiverAddr => mapping(uint256 period => uint256 assets)) public pendingWithdrawAssets;
@@ -60,6 +65,7 @@ contract MyERC4626 is ERC4626 {
     );
 
     error InvalidAsset();
+    error DepositCapReached();
     error NoPendingWithdrawAssets();
     error NoPendingWithdrawShares();
     error InvalidPeriod();
@@ -80,6 +86,8 @@ contract MyERC4626 is ERC4626 {
         ERC4626(baseAsset_)
     {
         lagDuration = 1 days;
+        depositCap = 25000000000000;
+        depositLimit = 25000000000000;
     }
 
     /// firelight vault - using redeem + claimWithdraw
@@ -104,6 +112,7 @@ contract MyERC4626 is ERC4626 {
         returns (uint256 _shares)
     {
         require(_assetIn == asset(), InvalidAsset());
+        require(totalAssets() + _amountIn <= depositCap, DepositCapReached());
         _shares = super.deposit(_amountIn, _receiverAddr);
         emit Deposit(_assetIn, _amountIn, _shares, msg.sender, _receiverAddr);
     }
@@ -184,6 +193,18 @@ contract MyERC4626 is ERC4626 {
         lagDuration = _lagDuration;
     }
 
+    /// @notice Sets the deposit cap for the vault.
+    /// @param _depositCap The new deposit cap in asset units.
+    function setDepositCap(uint256 _depositCap) public {
+        depositCap = _depositCap;
+    }
+
+    /// @notice Sets the deposit limit for the vault.
+    /// @param _depositLimit The new deposit limit in asset units.
+    function setDepositLimit(uint256 _depositLimit) public {
+        depositLimit = _depositLimit;
+    }
+
     function uniqueReceiversLength(
         uint256 _period
     )
@@ -232,14 +253,6 @@ contract MyERC4626 is ERC4626 {
     {
         (uint256 year, uint256 month, uint256 day) = DateUtils.timestampToDate(block.timestamp);
         return _getPeriodFromDate(year, month, day);
-    }
-
-    /**
-     * @notice Returns the deposit limit for the vault.
-     * @return The deposit limit.
-     */
-    function depositLimit() external view returns (uint256) {
-        return 25000000000000;
     }
 
     ////////////////////////// upshift specific functions //////////////////////////
@@ -325,14 +338,6 @@ contract MyERC4626 is ERC4626 {
     */
     function getTotalAssets() external view returns (uint256) {
         return totalSupply();
-    }
-
-    /**
-     * @notice Returns the deposit cap for the vault.
-     * @return The deposit cap.
-     */
-    function depositCap() external view returns (uint256) {
-        return 25000000000000;
     }
 
     /**

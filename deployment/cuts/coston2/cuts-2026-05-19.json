@@ -1,0 +1,12 @@
+{
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "InstructionsFacet",
+    "MemoInstructionsFacet",
+    "PersonalAccountsFacet",
+    "ReaderFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "execute": false
+}
