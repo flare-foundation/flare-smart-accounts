@@ -156,6 +156,8 @@ test:
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   before_script:
+  - corepack enable pnpm
+  - pnpm install --frozen-lockfile
   - forge soldeer install
   - forge install --no-git
   - forge build
@@ -175,6 +177,8 @@ coverage:
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   before_script:
+  - corepack enable pnpm
+  - pnpm install --frozen-lockfile
   - forge soldeer install
   - forge install --no-git
   - forge build
