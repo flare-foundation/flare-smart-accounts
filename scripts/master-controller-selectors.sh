@@ -54,5 +54,4 @@ for i in "${!SELECTORS[@]}"; do
   SELECTORS_STR+="${SELECTORS[$i]}"
 done
 SELECTORS_STR+="]"
-SELECTORS_STR="${SELECTORS_STR}"
 cast abi-encode "f(bytes4[])" "$SELECTORS_STR"

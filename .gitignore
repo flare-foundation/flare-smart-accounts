@@ -32,6 +32,7 @@ typechain-web3
 nul
 null
 .DS_Store
+.idea
 
 # slither
 slither.json

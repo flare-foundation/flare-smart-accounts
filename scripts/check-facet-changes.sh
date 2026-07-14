@@ -22,7 +22,7 @@ fi
 
 # Capture before state
 echo "Capturing bytecode hashes BEFORE changes..."
-find "$ARTIFACTS_DIR" -type f -name "*.json" -path "*Facet*" | xargs sha256sum | sort > /tmp/facet_hashes_before.txt
+find "$ARTIFACTS_DIR" -type f -name "*.json" -path "*Facet*" -print0 | xargs -0 sha256sum | sort > /tmp/facet_hashes_before.txt
 BEFORE_COUNT=$(wc -l < /tmp/facet_hashes_before.txt)
 echo "Captured $BEFORE_COUNT artifacts"
 echo ""
@@ -36,7 +36,7 @@ echo ""
 
 # Capture after state
 echo "Capturing bytecode hashes AFTER changes..."
-find "$ARTIFACTS_DIR" -type f -name "*.json" -path "*Facet*" | xargs sha256sum | sort > /tmp/facet_hashes_after.txt
+find "$ARTIFACTS_DIR" -type f -name "*.json" -path "*Facet*" -print0 | xargs -0 sha256sum | sort > /tmp/facet_hashes_after.txt
 AFTER_COUNT=$(wc -l < /tmp/facet_hashes_after.txt)
 echo "Captured $AFTER_COUNT artifacts"
 echo ""
@@ -67,6 +67,7 @@ echo "Summary: $FACET_COUNT facet(s) need redeployment"
 echo "======================================"
 echo ""
 echo "These facets must be included in the diamond cut:"
+# shellcheck disable=SC2001
 echo "$CHANGED" | sed 's/^/  - /'
 echo ""
 

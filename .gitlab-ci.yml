@@ -1,3 +1,8 @@
+stages:
+  - build
+  - test
+  - sbom
+
 # Prevent duplicate pipelines (MR and BRANCH pipelines, when a MR is opened for the given branch)
 workflow:
   rules:
@@ -6,7 +11,10 @@ workflow:
   - when: always
 
 default:
-  tags: [ flarenetwork ]
+  tags:
+    - flarenetwork
+  artifacts:
+    expire_in: 3 days
 
 ##
 ## PARTIALS
@@ -27,15 +35,15 @@ default:
 
 
 include:
+- component: gitlab.com/flarenetwork/ci-components-private/lgtm@2
+- component: gitlab.com/flarenetwork/ci-components-private/dependency-track@2
+- component: gitlab.com/flarenetwork/ci-components-private/lint-shell@2
+- component: gitlab.com/flarenetwork/ci-components-private/lint-dockerfile@2
 - template: Jobs/SAST.latest.gitlab-ci.yml
-- template: Jobs/Dependency-Scanning.latest.gitlab-ci.yml
 - template: Jobs/Secret-Detection.latest.gitlab-ci.yml
 
 
 sast:
-  needs: []
-
-dependency_scanning:
   needs: []
 
 .secret-analyzer:
@@ -67,6 +75,7 @@ build-node-modules:
 
 lint-test:
   image: node:24
+  stage: test
   needs:
   - job: build-node-modules
     artifacts: false
@@ -77,6 +86,7 @@ lint-test:
 
 lint-contracts:
   image: node:24
+  stage: test
   needs:
   - job: build-node-modules
     artifacts: false
@@ -87,6 +97,7 @@ lint-contracts:
 
 lint-deployment:
   image: node:24
+  stage: test
   needs:
   - job: build-node-modules
     artifacts: false
@@ -97,6 +108,7 @@ lint-deployment:
 
 lint-ts:
   image: node:24
+  stage: test
   needs:
   - job: build-node-modules
     artifacts: false
@@ -107,6 +119,7 @@ lint-ts:
 
 typecheck:
   image: node:24
+  stage: test
   needs:
   - job: build-node-modules
     artifacts: false
@@ -127,6 +140,7 @@ format-check:
 
 slither:
   image: flarefoundation/foundry-custom:latest
+  stage: test
   tags: [ flarenetwork-md ]
   timeout: 10 minutes
   needs:
@@ -149,6 +163,7 @@ slither:
 ##
 test:
   timeout: 10 minutes
+  stage: test
   tags: [ flarenetwork-md ]
   image: flarefoundation/foundry-custom:latest
   needs:
@@ -170,6 +185,7 @@ test:
 
 coverage:
   image: flarefoundation/foundry-custom:latest
+  stage: test
   tags: [ flarenetwork-md ]
   timeout: 10 minutes
   needs:
@@ -191,6 +207,7 @@ coverage:
 
 coverage-reports:
   image: node:24-alpine
+  stage: test
   timeout: 4 minutes
   needs:
   - job: coverage
