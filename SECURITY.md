@@ -31,7 +31,6 @@ system.
 
 ### Out of scope
 
-- `contracts/diamond/**/*`
 - `contracts/mock/**/*`
 
 ### Previous audits
