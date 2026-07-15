@@ -61,6 +61,7 @@ build-node-modules:
   script:
   - corepack enable pnpm
   - pnpm install --frozen-lockfile
+  - pnpm exec tsx --eval 'const value = 1 as number; if (value !== 1) process.exit(1)'
   cache:
   - key:
       files: [ pnpm-lock.yaml ]
