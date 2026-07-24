@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 // solhint-disable no-console
 
 import {Script, console2} from "forge-std/Script.sol";
+import {DeployConfigTypes} from "../types/DeployConfigTypes.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {DiamondArgs} from "../../contracts/diamond/implementation/Diamond.sol";
@@ -34,18 +35,7 @@ import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/Xrp
 // forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts --private-key $DEPLOYER_PRIVATE_KEY --rpc-url $COSTON2_RPC_URL --offline --etherscan-api-key $FLARE_RPC_API_KEY --broadcast --verify --verifier-url $COSTON2_FLARE_EXPLORER_API
 
 // solhint-disable-next-line max-states-count
-contract DeploySmartAccounts is Script {
-    struct AgentVaultConfig {
-        address agentVaultAddress;
-        uint256 agentVaultId;
-    }
-
-    struct VaultConfig {
-        uint256 vaultId;
-        address vaultAddress;
-        IVaultsFacet.VaultType vaultType;
-    }
-
+contract DeploySmartAccounts is Script, DeployConfigTypes {
     struct MasterAccountControllerParams {
         address initialOwner;
         address governance;

@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {DeploySmartAccounts} from "../deployment/scripts/DeploySmartAccounts.s.sol";
+import {DeployConfigTypes} from "../deployment/types/DeployConfigTypes.sol";
 import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
 
 /**
@@ -16,7 +16,7 @@ import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol"
  * `vm.parseJson` ABI-encodes a JSON object's members in alphabetical key
  * order on Foundry < 1.5; newer versions first look for any compiled struct
  * whose field names match the object's keys and use that struct's declared
- * order (foundry-rs/foundry#11612). {DeploySmartAccounts.run} therefore
+ * order (foundry-rs/foundry#11612). DeploySmartAccounts.run therefore
  * requires forge >= 1.5.0 via `vm.foundryVersionAtLeast`, and this test pins
  * the resulting decode mapping — if a future Foundry changes the rule, or a
  * struct with the same field-name set is ever added elsewhere in the project
@@ -27,7 +27,7 @@ import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol"
  * id fits an address slot and any address fits a uint256), so a reordering
  * would NOT revert — only these assertions catch it.
  */
-contract DeployConfigDecodeTest is Test {
+contract DeployConfigDecodeTest is Test, DeployConfigTypes {
     address private constant VAULT_1 = 0x1111111111111111111111111111111111111111;
     address private constant VAULT_2 = 0x2222222222222222222222222222222222222222;
     address private constant AGENT_VAULT = 0x3333333333333333333333333333333333333333;
@@ -70,9 +70,9 @@ contract DeployConfigDecodeTest is Test {
     }
 
     function testAgentVaultConfigDecode() public pure {
-        DeploySmartAccounts.AgentVaultConfig[] memory agentVaults = abi.decode(
+        AgentVaultConfig[] memory agentVaults = abi.decode(
             vm.parseJson(AGENT_VAULTS_JSON, ".agentVaults"),
-            (DeploySmartAccounts.AgentVaultConfig[])
+            (AgentVaultConfig[])
         );
 
         assertEq(agentVaults.length, 1, "agent vault count");
@@ -81,8 +81,8 @@ contract DeployConfigDecodeTest is Test {
     }
 
     function _assertVaults(string memory json) private pure {
-        DeploySmartAccounts.VaultConfig[] memory vaults =
-            abi.decode(vm.parseJson(json, ".vaults"), (DeploySmartAccounts.VaultConfig[]));
+        VaultConfig[] memory vaults =
+            abi.decode(vm.parseJson(json, ".vaults"), (VaultConfig[]));
 
         assertEq(vaults.length, 2, "vault count");
         assertEq(vaults[0].vaultId, 1, "vaultId[0]");
