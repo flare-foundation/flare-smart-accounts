@@ -89,6 +89,16 @@ contract DeploySmartAccounts is Script {
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
     function run(bool _fullDeploy, bool _staging) external {
+        // The VaultConfig/AgentVaultConfig decodes below rely on forge >= 1.5
+        // encoding JSON objects in the declared field order of the matching
+        // struct (foundry-rs/foundry#11612); older versions encode members
+        // alphabetically and would silently swap ABI-compatible fields.
+        // test/DeployConfigDecode.t.sol pins the decode mapping.
+        require(
+            vm.foundryVersionAtLeast("1.5.0"),
+            "forge >= 1.5.0 required: config struct decoding relies on declared field order"
+        );
+
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
