@@ -8,6 +8,7 @@ The contracts live under [`contracts/smartAccounts/`](../../../contracts/smartAc
 
 - [Architecture](./Architecture.md) — the diamond, facets, libraries, namespaced storage
 - [Personal Accounts](./PersonalAccounts.md) — per-user beacon proxies, CREATE2 derivation, frozen creation code
+- [Loan Subaccounts](./LoanSubaccounts.md) — typed per-PA staging accounts for loan flows, type-aware implementation resolution, creation/prediction
 - [Payment-reference instructions](./PaymentReferenceInstructions.md) — proof-based flow, the 32-byte payment reference layout, replay protection
 - [Memo instructions](./MemoInstructions.md) — direct-minting flow, the seven memo opcodes, nonces, executors, fee overrides
 - [Payment proofs](./PaymentProofs.md) — FDC `IPayment.Proof` verification, source ID, provider wallets, validity window

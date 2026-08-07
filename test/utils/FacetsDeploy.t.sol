@@ -14,6 +14,7 @@ import {AgentVaultsFacet} from "../../contracts/smartAccounts/facets/AgentVaults
 import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFacet.sol";
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
+import {LoanSubaccountsFacet} from "../../contracts/smartAccounts/facets/LoanSubaccountsFacet.sol";
 import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
@@ -56,7 +57,7 @@ contract FacetsDeploy is Test {
     }
 
     function deploySmartAccountsFacets() internal returns (IDiamond.FacetCut[] memory) {
-        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](12);
+        IDiamond.FacetCut[] memory diamondCuts = new IDiamond.FacetCut[](13);
 
         // v1.0.0 facets (keep original order)
         diamondCuts[0] = _buildFacetCut(
@@ -95,6 +96,9 @@ contract FacetsDeploy is Test {
         );
         diamondCuts[11] = _buildFacetCut(
             address(new ReaderFacet()), "ReaderFacet", IDiamond.FacetCutAction.Add
+        );
+        diamondCuts[12] = _buildFacetCut(
+            address(new LoanSubaccountsFacet()), "LoanSubaccountsFacet", IDiamond.FacetCutAction.Add
         );
         return diamondCuts;
     }

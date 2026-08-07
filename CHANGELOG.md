@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+  - Loan subaccount scaffolding (step 1): deterministic per-Personal-Account staging accounts for loan flows.
+    - `LoanSubaccount` — base implementation with `initialize`, `controllerAddress`, `parentPersonalAccount`, `subaccountType`, and `implementation`. Asset-moving methods are added in later steps.
+    - `LoanSubaccountProxy` — minimal proxy that resolves its implementation per `SubaccountType` through the controller (controller-as-beacon); the type is fixed at deployment.
+    - `LoanSubaccountsFacet` + `LoanSubaccounts` library — per-`SubaccountType` implementation registry with timelocked `setLoanSubaccountImplementation` and `loanImplementationForType` resolution.
+    - `ILoanSubaccount` / `ILoanSubaccountsFacet` public interfaces and the `SubaccountType` enum (`None`, `Loan`).
+  - Loan subaccount creation and prediction (step 2):
+    - `LoanSubaccounts` library: CREATE2 deployment via the EIP-2470 singleton factory (salt `0`, init code from the diamond, parent Personal Account, and subaccount type), `computeLoanSubaccountAddress`, `getOrCreateLoanSubaccount`, and the per-parent registry with `LoanSubaccountCreated` event.
+    - `createLoanSubaccount(xrplOwner, type)` — permissionless, `notPaused`; requires the parent Personal Account to be deployed.
+    - `getLoanSubaccount(xrplOwner, type)` — view returning the registered or predicted subaccount address.
+    - Spec page `docs/specs/SmartAccounts/LoanSubaccounts.md`. Note: proxy creation code must be frozen (PA-style constant + pinned-hash test) before the first production deployment.
+
 ## [[v2.0.0](https://github.com/flare-foundation/flare-smart-accounts/releases/tag/v2.0.0)] - 2026-07-07
 
 ### Added

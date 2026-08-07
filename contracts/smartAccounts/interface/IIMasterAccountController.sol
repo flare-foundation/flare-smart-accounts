@@ -10,6 +10,7 @@ import {IIAgentVaultsFacet} from "./IIAgentVaultsFacet.sol";
 import {IIExecutorsFacet} from "./IIExecutorsFacet.sol";
 import {IIInstructionFeesFacet} from "./IIInstructionFeesFacet.sol";
 import {IIInstructionsFacet} from "./IIInstructionsFacet.sol";
+import {IILoanSubaccountsFacet} from "./IILoanSubaccountsFacet.sol";
 import {IIMemoInstructionsFacet} from "./IIMemoInstructionsFacet.sol";
 import {IIPauseFacet} from "./IIPauseFacet.sol";
 import {IIPaymentProofsFacet} from "./IIPaymentProofsFacet.sol";
@@ -33,6 +34,7 @@ interface IIMasterAccountController is
     IIExecutorsFacet,
     IIInstructionFeesFacet,
     IIInstructionsFacet,
+    IILoanSubaccountsFacet,
     IIMemoInstructionsFacet,
     IIPauseFacet,
     IIPaymentProofsFacet,

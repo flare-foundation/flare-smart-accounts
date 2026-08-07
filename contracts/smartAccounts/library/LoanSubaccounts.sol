@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.27;
+
+import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
+import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
+import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
+import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {LoanSubaccountProxy} from "../proxy/LoanSubaccountProxy.sol";
+import {PersonalAccounts} from "./PersonalAccounts.sol";
+
+library LoanSubaccounts {
+
+    /// @custom:storage-location erc7201:smartAccounts.LoanSubaccounts.State
+    struct State {
+        /// @notice Implementation used by each subaccount type's proxy instances.
+        mapping(ILoanSubaccountsFacet.SubaccountType subaccountType => address) typeImplementation;
+        /// Mapping from parent Personal Account and subaccount type to the loan subaccount
+        mapping(address parentPersonalAccount =>
+            mapping(ILoanSubaccountsFacet.SubaccountType subaccountType => ILoanSubaccount)) loanSubaccounts;
+    }
+
+    bytes32 internal constant STATE_POSITION = keccak256(
+        abi.encode(uint256(keccak256("smartAccounts.LoanSubaccounts.State")) - 1)) & ~bytes32(uint256(0xff)
+    );
+
+    function setLoanSubaccountImplementation(
+        ILoanSubaccountsFacet.SubaccountType _subaccountType,
+        address _implementation
+    )
+        internal
+    {
+        require(
+            _subaccountType != ILoanSubaccountsFacet.SubaccountType.None,
+            ILoanSubaccountsFacet.InvalidSubaccountType()
+        );
+        require(
+            _implementation.code.length > 0,
+            ILoanSubaccountsFacet.InvalidLoanSubaccountImplementation()
+        );
+        State storage state = getState();
+        state.typeImplementation[_subaccountType] = _implementation;
+        emit ILoanSubaccountsFacet.LoanSubaccountImplementationSet(_subaccountType, _implementation);
+    }
+
+    function getOrCreateLoanSubaccount(
+        address _parentPersonalAccount,
+        ILoanSubaccountsFacet.SubaccountType _subaccountType
+    )
+        internal
+        returns (ILoanSubaccount _loanSubaccount)
+    {
+        State storage state = getState();
+        _loanSubaccount = state.loanSubaccounts[_parentPersonalAccount][_subaccountType];
+        if (address(_loanSubaccount) == address(0)) {
+            // create new loan subaccount
+            _loanSubaccount = createLoanSubaccount(_parentPersonalAccount, _subaccountType);
+        }
+    }
+
+    function createLoanSubaccount(
+        address _parentPersonalAccount,
+        ILoanSubaccountsFacet.SubaccountType _subaccountType
+    )
+        internal
+        returns (ILoanSubaccount _loanSubaccount)
+    {
+        require(
+            _subaccountType != ILoanSubaccountsFacet.SubaccountType.None,
+            ILoanSubaccountsFacet.InvalidSubaccountType()
+        );
+        require(
+            getLoanSubaccountImplementation(_subaccountType) != address(0),
+            ILoanSubaccountsFacet.LoanSubaccountImplementationNotSet(_subaccountType)
+        );
+
+        bytes memory bytecode = generateBytecode(_parentPersonalAccount, _subaccountType);
+        // check if already deployed
+        address loanSubaccountProxyAddress = Create2.computeAddress(
+            bytes32(0), keccak256(bytecode), PersonalAccounts.SINGLETON_FACTORY
+        );
+        uint256 codeSize = loanSubaccountProxyAddress.code.length;
+        if (codeSize == 0) {
+            // deploy via EIP-2470 singleton factory using CREATE2
+            IISingletonFactory(PersonalAccounts.SINGLETON_FACTORY).deploy(bytecode, bytes32(0));
+        }
+
+        _loanSubaccount = ILoanSubaccount(loanSubaccountProxyAddress);
+
+        // ensure the proxy address is a contract
+        codeSize = loanSubaccountProxyAddress.code.length;
+        require(
+            codeSize > 0,
+            ILoanSubaccountsFacet.LoanSubaccountNotSuccessfullyDeployed(loanSubaccountProxyAddress)
+        );
+
+        State storage state = getState();
+        state.loanSubaccounts[_parentPersonalAccount][_subaccountType] = _loanSubaccount;
+        emit ILoanSubaccountsFacet.LoanSubaccountCreated(
+            loanSubaccountProxyAddress,
+            _parentPersonalAccount,
+            _subaccountType
+        );
+    }
+
+    /**
+     * @notice Generates the bytecode for deploying a LoanSubaccountProxy contract.
+     * @dev Uses `type(LoanSubaccountProxy).creationCode` while the module is under development.
+     * Before the first production deployment (or the first time a predicted address is handed out),
+     * this must be frozen to a constant, exactly like {PersonalAccounts.PROXY_CREATION_CODE}, so
+     * loan subaccount CREATE2 addresses stay identical across chains and rebuilds.
+     * @return The bytecode to be used for CREATE2 deployment.
+     */
+    function generateBytecode(
+        address _parentPersonalAccount,
+        ILoanSubaccountsFacet.SubaccountType _subaccountType
+    )
+        internal view
+        returns (bytes memory)
+    {
+        // Use the controller (diamond) address to resolve the implementation per subaccount type.
+        // address(this) resolves to the diamond address when called via delegatecall from facet.
+        return abi.encodePacked(
+            type(LoanSubaccountProxy).creationCode,
+            abi.encode(
+                address(this),
+                _parentPersonalAccount,
+                _subaccountType
+            )
+        );
+    }
+
+    function computeLoanSubaccountAddress(
+        address _parentPersonalAccount,
+        ILoanSubaccountsFacet.SubaccountType _subaccountType
+    )
+        internal view
+        returns (address _loanSubaccount)
+    {
+        bytes memory bytecode = generateBytecode(_parentPersonalAccount, _subaccountType);
+        _loanSubaccount = Create2.computeAddress(
+            bytes32(0), keccak256(bytecode), PersonalAccounts.SINGLETON_FACTORY
+        );
+    }
+
+    function getLoanSubaccountImplementation(
+        ILoanSubaccountsFacet.SubaccountType _subaccountType
+    )
+        internal view
+        returns (address)
+    {
+        return getState().typeImplementation[_subaccountType];
+    }
+
+    function getState()
+        internal pure
+        returns (State storage _state)
+    {
+        bytes32 position = STATE_POSITION;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            _state.slot := position
+        }
+    }
+}
