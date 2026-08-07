@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `createLoanSubaccount(xrplOwner, type)` — permissionless, `notPaused`; requires the parent Personal Account to be deployed.
     - `getLoanSubaccount(xrplOwner, type)` — view returning the registered or predicted subaccount address.
     - Spec page `docs/specs/SmartAccounts/LoanSubaccounts.md`. Note: proxy creation code must be frozen (PA-style constant + pinned-hash test) before the first production deployment.
+  - Spellcheck: `pnpm spellcheck` (cspell over contracts, tests, deployment, and docs) with an advisory `spellcheck` CI job.
+
+### Fixed
+  - Misspelled `newWallet` variable name in `MasterAccountControllerTest`.
 
 ## [[v2.0.0](https://github.com/flare-foundation/flare-smart-accounts/releases/tag/v2.0.0)] - 2026-07-07
 

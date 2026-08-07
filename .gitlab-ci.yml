@@ -139,6 +139,19 @@ format-check:
   - corepack enable pnpm
   - pnpm format:check
 
+spellcheck:
+  image: node:24
+  stage: test
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  # Advisory: a stray or new word surfaces in the pipeline but does not block.
+  allow_failure: true
+  script:
+  - corepack enable pnpm
+  - pnpm spellcheck
+
 slither:
   image: flarefoundation/foundry-custom:latest
   stage: test

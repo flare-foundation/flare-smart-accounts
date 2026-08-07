@@ -1736,7 +1736,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
     }
 
     function testAddXrplProviderWallets() public {
-        string memory newWalet = "newXrplWallet";
+        string memory newWallet = "newXrplWallet";
         assertEq(
             masterAccountController.getXrplProviderWallets().length,
             1
@@ -1752,7 +1752,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.responseBody.status = 0;
         proof.data.responseBody.blockTimestamp = uint64(block.timestamp);
         proof.data.responseBody.sourceAddressHash = keccak256(bytes(xrplAddress1));
-        proof.data.responseBody.receivingAddressHash = keccak256(bytes(newWalet));
+        proof.data.responseBody.receivingAddressHash = keccak256(bytes(newWallet));
         proof.data.requestBody.transactionId = bytes32("tx1");
         _mockVerifyPayment(true);
 
@@ -1761,7 +1761,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
 
         // add new wallet
         string[] memory newWallets = new string[](2);
-        newWallets[0] = newWalet;
+        newWallets[0] = newWallet;
         newWallets[1] = "newWallet2";
         vm.prank(governance);
         vm.expectEmit();

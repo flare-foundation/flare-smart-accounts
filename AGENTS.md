@@ -61,7 +61,10 @@ pnpm lint:fix
 pnpm format:check
 pnpm format:fix
 pnpm typecheck
+pnpm spellcheck
 ```
+
+Spellcheck uses cspell with the dictionary in `.vscode/cspell.json`; add legitimate new vocabulary there instead of ignoring findings. The CI job is advisory (`allow_failure: true`).
 
 ### Deployment
 
