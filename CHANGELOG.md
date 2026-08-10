@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `createLoanSubaccount(xrplOwner, type)` — permissionless, `notPaused`; requires the parent Personal Account to be deployed.
     - `getLoanSubaccount(xrplOwner, type)` — view returning the registered or predicted subaccount address.
     - Spec page `docs/specs/SmartAccounts/LoanSubaccounts.md`. Note: proxy creation code must be frozen (PA-style constant + pinned-hash test) before the first production deployment.
+  - Loan subaccount account abstraction dispatch (step 3):
+    - `onlyParent` modifier on `LoanSubaccount`: restricted methods are callable only by the parent Personal Account, reached through the existing `0xFF`/`0xFE` memo path via `PersonalAccount.executeUserOp`. No new memo opcode — the subaccount address already commits to the subaccount type.
+    - A user operation creates the subaccount with `createLoanSubaccount` as its first call, then calls a method on it: calling a subaccount that is not deployed yet would silently succeed, since a call to an address with no code returns success.
   - Spellcheck: `pnpm spellcheck` (cspell over contracts, tests, deployment, and docs) with an advisory `spellcheck` CI job.
 
 ### Fixed

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
+import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
@@ -17,16 +18,21 @@ import {PersonalAccount} from "../contracts/smartAccounts/implementation/Persona
 import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSubaccount.sol";
 import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol";
 import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
+import {MockLoanSubaccount} from "../contracts/mock/MockLoanSubaccount.sol";
+import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
 import {ILoanSubaccountsFacet} from "../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
+import {IMemoInstructionsFacet} from "../contracts/userInterfaces/facets/IMemoInstructionsFacet.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
 
 /**
  * @title LoanSubaccountTest
- * @notice Steps 1 and 2 coverage: deterministic loan subaccount deployment, initialization,
- * implementation self-lock, per-type resolution through the controller (beacon), upgrade
- * routing, and controller-side creation/prediction (`createLoanSubaccount`, `getLoanSubaccount`).
- * Asset-moving methods are intentionally out of scope in these steps.
+ * @notice Steps 1 to 3 coverage: deterministic loan subaccount deployment, initialization,
+ * implementation self-lock, per-type resolution through the controller (beacon), upgrade routing,
+ * controller-side creation/prediction, and account abstraction dispatch from an XRPL instruction
+ * through the parent Personal Account into the subaccount. Asset-moving methods are intentionally
+ * out of scope in these steps.
  */
 contract LoanSubaccountTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -51,6 +57,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     AgentInfo.Info private agentInfo;
     uint256 private collateralReservationFee;
     string private xrplOwner;
+    MintableERC20 private fxrp;
 
     // base facets are CREATE2-deployed with a fixed salt, so they are deployed once and shared
     IDiamond.FacetCut[] private baseCuts;
@@ -71,6 +78,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         agentInfo.status = AgentInfo.Status.NORMAL;
         collateralReservationFee = 123;
         xrplOwner = "rExampleXrplAddress";
+        fxrp = new MintableERC20("F-XRPL", "fXRP", 6);
 
         // deploy the personal account implementation (required by the controller init)
         personalAccountImplementation = address(new PersonalAccount());
@@ -91,6 +99,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         _mockGetAgentInfo(agent, agentInfo);
         _mockCollateralReservationFee(collateralReservationFee);
         _mockReserveCollateral(22);
+        _mockGetFAsset();
+        _mockGetDirectMintingExecutorFeeUBA(0);
         _addAgentVault(controller);
     }
 
@@ -360,6 +370,176 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
+    //
+    // step 3: account abstraction dispatch into the subaccount
+    //
+
+    function testDispatchFromXrplInstructionReachesSubaccount() public {
+        // the loan subaccount implementation for this type exposes a parent-restricted method
+        vm.prank(governance);
+        controller.setLoanSubaccountImplementation(
+            ILoanSubaccountsFacet.SubaccountType.Loan,
+            address(new MockLoanSubaccount())
+        );
+
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        address subaccount = controller.getLoanSubaccount(
+            xrplOwner,
+            ILoanSubaccountsFacet.SubaccountType.Loan
+        );
+        assertEq(subaccount.code.length, 0);
+
+        // one user operation: create the subaccount, then call it
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](2);
+        calls[0] = IPersonalAccount.Call({
+            target: address(controller),
+            value: 0,
+            data: abi.encodeCall(
+                ILoanSubaccountsFacet.createLoanSubaccount,
+                (xrplOwner, ILoanSubaccountsFacet.SubaccountType.Loan)
+            )
+        });
+        calls[1] = IPersonalAccount.Call({
+            target: subaccount,
+            value: 0,
+            data: abi.encodeWithSignature("ping()")
+        });
+
+        _executeUserOp(personalAccount, calls, bytes32("dmLoanDispatch"));
+
+        // the subaccount was created by the instruction and is owned by the caller's PA
+        assertNotEq(subaccount.code.length, 0);
+        assertEq(LoanSubaccount(subaccount).parentPersonalAccount(), personalAccount);
+
+        // the restricted method ran, called by the parent Personal Account
+        assertEq(MockLoanSubaccount(subaccount).pingCount(), 1);
+        assertEq(MockLoanSubaccount(subaccount).lastPingCaller(), personalAccount);
+    }
+
+    function testDispatchForwardsValueToSubaccount() public {
+        vm.prank(governance);
+        controller.setLoanSubaccountImplementation(
+            ILoanSubaccountsFacet.SubaccountType.Loan,
+            address(new MockLoanSubaccount())
+        );
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        address subaccount = controller.getLoanSubaccount(
+            xrplOwner,
+            ILoanSubaccountsFacet.SubaccountType.Loan
+        );
+        uint256 value = 3 ether;
+
+        // the restricted methods added next need native value (executor and messaging fees),
+        // so it must survive the whole chain: instruction -> Personal Account -> subaccount
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](2);
+        calls[0] = IPersonalAccount.Call({
+            target: address(controller),
+            value: 0,
+            data: abi.encodeCall(
+                ILoanSubaccountsFacet.createLoanSubaccount,
+                (xrplOwner, ILoanSubaccountsFacet.SubaccountType.Loan)
+            )
+        });
+        calls[1] = IPersonalAccount.Call({
+            target: subaccount,
+            value: value,
+            data: abi.encodeWithSignature("ping()")
+        });
+
+        _executeUserOpWithValue(personalAccount, calls, bytes32("dmLoanValue"), value);
+
+        assertEq(MockLoanSubaccount(subaccount).lastPingValue(), value);
+        assertEq(subaccount.balance, value);
+    }
+
+    function testDispatchToUncreatedSubaccountSilentlyDoesNothing() public {
+        vm.prank(governance);
+        controller.setLoanSubaccountImplementation(
+            ILoanSubaccountsFacet.SubaccountType.Loan,
+            address(new MockLoanSubaccount())
+        );
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        address subaccount = controller.getLoanSubaccount(
+            xrplOwner,
+            ILoanSubaccountsFacet.SubaccountType.Loan
+        );
+
+        // calling the subaccount without creating it first: a call to an address with no code
+        // returns success, so the instruction does not revert and simply has no effect.
+        // this is why user operations must create the subaccount as their first call.
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: subaccount,
+            value: 0,
+            data: abi.encodeWithSignature("ping()")
+        });
+
+        _executeUserOp(personalAccount, calls, bytes32("dmLoanNoCode"));
+
+        assertEq(subaccount.code.length, 0);
+    }
+
+    function testDispatchRevertWhenCallingAnotherAccountsSubaccount() public {
+        vm.prank(governance);
+        controller.setLoanSubaccountImplementation(
+            ILoanSubaccountsFacet.SubaccountType.Loan,
+            address(new MockLoanSubaccount())
+        );
+        address personalAccount = _createPersonalAccount(xrplOwner);
+
+        // another XRPL owner's subaccount, created and owned by their Personal Account
+        string memory otherOwner = "rOtherXrplAddress";
+        _createPersonalAccount(otherOwner);
+        address otherSubaccount = controller.createLoanSubaccount(
+            otherOwner,
+            ILoanSubaccountsFacet.SubaccountType.Loan
+        );
+
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: otherSubaccount,
+            value: 0,
+            data: abi.encodeWithSignature("ping()")
+        });
+
+        // the subaccount rejects the foreign parent, and the failure propagates out through the
+        // Personal Account and the memo handler, reverting the whole instruction
+        _executeUserOpExpectRevert(
+            personalAccount,
+            calls,
+            bytes32("dmLoanForeign"),
+            abi.encodeWithSelector(
+                IMemoInstructionsFacet.CallFailed.selector,
+                abi.encodeWithSelector(
+                    IPersonalAccount.CallFailed.selector,
+                    0,
+                    abi.encodeWithSelector(ILoanSubaccount.OnlyParent.selector)
+                )
+            )
+        );
+    }
+
+    function testSubaccountMethodRevertOnlyParent() public {
+        vm.prank(governance);
+        controller.setLoanSubaccountImplementation(
+            ILoanSubaccountsFacet.SubaccountType.Loan,
+            address(new MockLoanSubaccount())
+        );
+        _createPersonalAccount(xrplOwner);
+        address subaccount = controller.createLoanSubaccount(
+            xrplOwner,
+            ILoanSubaccountsFacet.SubaccountType.Loan
+        );
+
+        // neither a random caller nor the controller may drive the subaccount directly
+        vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
+        MockLoanSubaccount(subaccount).ping();
+
+        vm.prank(address(controller));
+        vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
+        MockLoanSubaccount(subaccount).ping();
+    }
+
     function testGetLoanSubaccountDifferentOwnersGetDifferentAddresses() public view {
         address subaccount1 = controller.getLoanSubaccount(
             "rOwner1",
@@ -468,6 +648,78 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertNotEq(_personalAccount.code.length, 0);
     }
 
+    /// Drives an XRPL-signed instruction through the direct-minting memo path (opcode 0xFF),
+    /// which executes the user operation on the Personal Account.
+    function _executeUserOp(
+        address _personalAccount,
+        IPersonalAccount.Call[] memory _calls,
+        bytes32 _transactionId
+    )
+        private
+    {
+        _executeUserOpWithValue(_personalAccount, _calls, _transactionId, 0);
+    }
+
+    function _executeUserOpExpectRevert(
+        address _personalAccount,
+        IPersonalAccount.Call[] memory _calls,
+        bytes32 _transactionId,
+        bytes memory _expectedRevert
+    )
+        private
+    {
+        _executeUserOpWithValue(_personalAccount, _calls, _transactionId, 0, _expectedRevert);
+    }
+
+    function _executeUserOpWithValue(
+        address _personalAccount,
+        IPersonalAccount.Call[] memory _calls,
+        bytes32 _transactionId,
+        uint256 _value
+    )
+        private
+    {
+        _executeUserOpWithValue(_personalAccount, _calls, _transactionId, _value, "");
+    }
+
+    function _executeUserOpWithValue(
+        address _personalAccount,
+        IPersonalAccount.Call[] memory _calls,
+        bytes32 _transactionId,
+        uint256 _value,
+        bytes memory _expectedRevert
+    )
+        private
+    {
+        uint64 memoFee = 0;
+        uint256 amount = 5_000;
+        fxrp.mint(address(controller), amount);
+
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: _personalAccount,
+            nonce: controller.getNonce(_personalAccount),
+            initCode: "",
+            callData: abi.encodeCall(IPersonalAccount.executeUserOp, (_calls)),
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF), uint8(1), memoFee, abi.encode(userOp)
+        );
+
+        vm.deal(assetManagerFxrpMock, _value);
+        if (_expectedRevert.length > 0) {
+            vm.expectRevert(_expectedRevert);
+        }
+        vm.prank(assetManagerFxrpMock);
+        controller.handleMintedFAssets{value: _value}(
+            _transactionId, xrplOwner, amount, 0, memoData, executor, ""
+        );
+    }
+
     function _deploySubaccount() private returns (LoanSubaccount) {
         LoanSubaccountProxy proxy = new LoanSubaccountProxy(
             address(controller),
@@ -509,6 +761,22 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             assetManagerFxrpMock,
             abi.encodeWithSelector(IAssetManager.reserveCollateral.selector),
             abi.encode(_reservationId)
+        );
+    }
+
+    function _mockGetFAsset() private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(IAssetManager.fAsset.selector),
+            abi.encode(address(fxrp))
+        );
+    }
+
+    function _mockGetDirectMintingExecutorFeeUBA(uint256 _fee) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSignature("getDirectMintingExecutorFeeUBA()"),
+            abi.encode(_fee)
         );
     }
 }

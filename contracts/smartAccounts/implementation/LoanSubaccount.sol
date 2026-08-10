@@ -21,6 +21,14 @@ contract LoanSubaccount is ILoanSubaccount {
     /// @notice Subaccount type.
     ILoanSubaccountsFacet.SubaccountType public subaccountType;
 
+    /// @dev Restricted methods are reached through FSA account abstraction: an XRPL-signed
+    /// instruction drives the controller, which drives the parent Personal Account, which calls
+    /// this subaccount. The parent is fixed at deployment and is part of this account's address.
+    modifier onlyParent() {
+        require(msg.sender == parentPersonalAccount, OnlyParent());
+        _;
+    }
+
     constructor() {
         // ensure the implementation contract itself cannot be initialized/used
         controllerAddress = EMPTY_ADDRESS;

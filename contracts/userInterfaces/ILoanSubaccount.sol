@@ -37,6 +37,11 @@ interface ILoanSubaccount {
     error InvalidParentPersonalAccount();
 
     /**
+     * @notice Reverts if the caller is not the parent Personal Account.
+     */
+    error OnlyParent();
+
+    /**
      * @notice Initializes the loan subaccount.
      * @param _controllerAddress MasterAccountController address.
      * @param _parentPersonalAccount Parent Personal Account address.

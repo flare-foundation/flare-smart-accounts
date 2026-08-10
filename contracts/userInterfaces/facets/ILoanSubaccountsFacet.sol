@@ -76,8 +76,10 @@ interface ILoanSubaccountsFacet {
 
     /**
      * @notice Creates the loan subaccount for an XRPL owner's Personal Account if it does not exist yet.
-     * @dev Permissionless: anyone can trigger creation (for example an executor sweeping assets that
-     * already landed on the predicted address). The Personal Account must already be deployed.
+     * @dev Permissionless: anyone can trigger creation. An executor uses it to materialize a
+     * subaccount whose predicted address already received assets, so that they can be swept; a user
+     * operation uses it as its first call, before calling a method on the subaccount. The Personal
+     * Account must already be deployed.
      * @param _xrplOwner The XRPL address of the owner.
      * @param _subaccountType The subaccount type.
      * @return The loan subaccount contract address.
