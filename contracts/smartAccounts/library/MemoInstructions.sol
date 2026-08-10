@@ -25,6 +25,8 @@ library MemoInstructions {
     ///   0xFE — Memo carries only [opcode][walletId][fee][hash:32] = 42 bytes.
     ///          _data is the ABI-encoded PackedUserOperation; the handler verifies that
     ///          keccak256(_data) matches the hash before decoding.
+    // false positive: msg.value comes from `MemoInstructionsFacet.handleMintedFAssets`, which is `external payable`
+    // slither-disable-next-line msg-value-in-nonpayable
     function execute(
         bytes calldata _memoData,
         address _personalAccount,
