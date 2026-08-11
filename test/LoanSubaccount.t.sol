@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import {Test} from "forge-std/Test.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
+import {IRedeemExtended} from "flare-periphery/src/flare/IRedeemExtended.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
@@ -28,11 +29,10 @@ import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
 
 /**
  * @title LoanSubaccountTest
- * @notice Steps 1 to 3 coverage: deterministic loan subaccount deployment, initialization,
- * implementation self-lock, per-type resolution through the controller (beacon), upgrade routing,
- * controller-side creation/prediction, and account abstraction dispatch from an XRPL instruction
- * through the parent Personal Account into the subaccount. Asset-moving methods are intentionally
- * out of scope in these steps.
+ * @notice Deterministic loan subaccount deployment, initialization, implementation self-lock,
+ * per-type resolution through the controller (beacon), upgrade routing, controller-side
+ * creation/prediction, account abstraction dispatch from an XRPL instruction through the parent
+ * Personal Account into the subaccount, and the backward cleanup move (`sweepRedeem`).
  */
 contract LoanSubaccountTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
@@ -540,6 +540,80 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         MockLoanSubaccount(subaccount).ping();
     }
 
+    //
+    // step 4: sweepRedeem (backward cleanup move)
+    //
+
+    function testSweepRedeemRedeemsWholeBalanceToParentXrplOwner() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        // deliberately not a whole number of lots: the sweep must leave nothing behind
+        uint256 balance = 250e6;
+        uint256 redeemedAmount = 250e6;
+        fxrp.mint(subaccount, balance);
+        _mockRedeemAmount(redeemedAmount);
+
+        // redeemed to the parent Personal Account's XRPL owner, with the controller's executor
+        vm.expectCall(
+            assetManagerFxrpMock,
+            executorFee,
+            abi.encodeWithSelector(
+                IRedeemExtended.redeemAmount.selector, balance, xrplOwner, executor
+            )
+        );
+        vm.deal(address(this), executorFee);
+        (uint256 amount, uint256 redeemed) =
+            ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+
+        assertEq(amount, balance);
+        assertEq(redeemed, redeemedAmount);
+    }
+
+    function testSweepRedeemPartialRedemptionLeavesRemainderOnTheAccount() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 250e6);
+        // FAssets can redeem less than requested when tickets run out; the rest stays here
+        _mockRedeemAmount(100e6);
+
+        vm.deal(address(this), executorFee);
+        (uint256 amount, uint256 redeemed) =
+            ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+
+        assertEq(amount, 250e6);
+        assertEq(redeemed, 100e6);
+    }
+
+    function testSweepRedeemCanBeCalledByAnyone() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        _mockRedeemAmount(100e6);
+        fxrp.mint(subaccount, 100e6);
+
+        address caller = makeAddr("randomCaller");
+        vm.deal(caller, executorFee);
+        vm.prank(caller);
+        (uint256 amount,) = ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+
+        assertEq(amount, 100e6);
+    }
+
+    function testSweepRedeemRevertNothingToRedeem() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+
+        vm.deal(address(this), executorFee);
+        vm.expectRevert(ILoanSubaccount.NothingToRedeem.selector);
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+    }
+
+    function testSweepRedeemRevertInsufficientFundsForRedeem() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+
+        vm.deal(address(this), executorFee);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccount.InsufficientFundsForRedeem.selector, executorFee)
+        );
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee - 1}();
+    }
+
     function testGetLoanSubaccountDifferentOwnersGetDifferentAddresses() public view {
         address subaccount1 = controller.getLoanSubaccount(
             "rOwner1",
@@ -717,6 +791,22 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(assetManagerFxrpMock);
         controller.handleMintedFAssets{value: _value}(
             _transactionId, xrplOwner, amount, 0, memoData, executor, ""
+        );
+    }
+
+    function _createSubaccountFor(string memory _xrplOwner) private returns (address) {
+        _createPersonalAccount(_xrplOwner);
+        return controller.createLoanSubaccount(
+            _xrplOwner,
+            ILoanSubaccountsFacet.SubaccountType.Loan
+        );
+    }
+
+    function _mockRedeemAmount(uint256 _redeemedAmount) private {
+        vm.mockCall(
+            assetManagerFxrpMock,
+            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
+            abi.encode(_redeemedAmount)
         );
     }
 

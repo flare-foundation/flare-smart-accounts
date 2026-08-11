@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
+import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
 import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
+import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 
 /**
  * @title LoanSubaccount contract
@@ -10,7 +15,7 @@ import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccount
  * @dev The controller (MasterAccountController Diamond) is the beacon: the proxy and this
  * contract resolve the implementation per subaccount type through {loanImplementationForType}.
  */
-contract LoanSubaccount is ILoanSubaccount {
+contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
 
     address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
 
@@ -55,6 +60,35 @@ contract LoanSubaccount is ILoanSubaccount {
         subaccountType = _subaccountType;
 
         emit LoanSubaccountInitialized(_controllerAddress, _parentPersonalAccount, _subaccountType);
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function sweepRedeem()
+        external payable
+        nonReentrant
+        returns (uint256 _amount, uint256 _redeemedAmount)
+    {
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
+        _amount = assetManager.fAsset().balanceOf(address(this));
+        require(_amount > 0, NothingToRedeem());
+
+        (address payable executor, uint256 executorFee) =
+            IExecutorsFacet(controllerAddress).getExecutorInfo();
+        require(msg.value >= executorFee, InsufficientFundsForRedeem(executorFee));
+
+        _redeemedAmount = assetManager.redeemAmount{value: msg.value}(
+            _amount,
+            IPersonalAccount(parentPersonalAccount).xrplOwner(),
+            executor
+        );
+
+        emit FXrpRedeemed(
+            parentPersonalAccount,
+            _amount,
+            _redeemedAmount,
+            executor,
+            executorFee
+        );
     }
 
     /// @inheritdoc ILoanSubaccount

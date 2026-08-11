@@ -22,6 +22,22 @@ interface ILoanSubaccount {
     );
 
     /**
+     * @notice Emitted when idle FXRP is redeemed to the parent Personal Account's XRPL owner.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param amount Amount of FXRP requested for redemption (the whole balance).
+     * @param redeemedAmount Amount of FXRP actually redeemed, which can be less.
+     * @param executor Executor used for the redemption.
+     * @param executorFee Executor fee paid with the redemption.
+     */
+    event FXrpRedeemed(
+        address indexed parentPersonalAccount,
+        uint256 amount,
+        uint256 redeemedAmount,
+        address executor,
+        uint256 executorFee
+    );
+
+    /**
      * @notice Reverts if the contract is already initialized.
      */
     error AlreadyInitialized();
@@ -40,6 +56,33 @@ interface ILoanSubaccount {
      * @notice Reverts if the caller is not the parent Personal Account.
      */
     error OnlyParent();
+
+    /**
+     * @notice Reverts if there is no FXRP to redeem.
+     */
+    error NothingToRedeem();
+
+    /**
+     * @notice Reverts if the sent value does not cover the executor fee.
+     * @param executorFee The required executor fee.
+     */
+    error InsufficientFundsForRedeem(
+        uint256 executorFee
+    );
+
+    /**
+     * @notice Redeems all idle FXRP to the parent Personal Account's XRPL owner.
+     * @dev Permissionless: this is the backward cleanup move, so anyone may trigger it. The
+     * destination is read on-chain from the parent Personal Account and cannot be chosen by the
+     * caller, and the executor comes from the controller, so the call takes no parameters at all.
+     * Redeems the whole balance rather than whole lots, so nothing is left stranded; FAssets can
+     * still redeem less than requested, in which case the remainder stays and can be swept again.
+     * @return _amount Amount of FXRP requested for redemption (the whole balance).
+     * @return _redeemedAmount Amount of FXRP actually redeemed.
+     */
+    function sweepRedeem()
+        external payable
+        returns (uint256 _amount, uint256 _redeemedAmount);
 
     /**
      * @notice Initializes the loan subaccount.

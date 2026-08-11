@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Loan subaccount account abstraction dispatch (step 3):
     - `onlyParent` modifier on `LoanSubaccount`: restricted methods are callable only by the parent Personal Account, reached through the existing `0xFF`/`0xFE` memo path via `PersonalAccount.executeUserOp`. No new memo opcode — the subaccount address already commits to the subaccount type.
     - A user operation creates the subaccount with `createLoanSubaccount` as its first call, then calls a method on it: calling a subaccount that is not deployed yet would silently succeed, since a call to an address with no code returns success.
+  - `LoanSubaccount.sweepRedeem()` — the backward cleanup move: permissionless, redeems all idle FXRP to the parent Personal Account's XRPL owner. Takes no parameters, so neither the destination (read from the parent account) nor the executor (read from the controller) can be chosen by the caller. Uses the UBA-based `redeemAmount` rather than the lot-based `redeem`, so no remainder is left stranded on the account.
   - Spellcheck: `pnpm spellcheck` (cspell over contracts, tests, deployment, and docs) with an advisory `spellcheck` CI job.
 
 ### Fixed
