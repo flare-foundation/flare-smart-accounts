@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: scaffolding. The account, its proxy, the per-type implementation registry, and controller-side creation/prediction are in place. Asset-moving methods (sweeps, LayerZero calls) and the instruction dispatch are added in later steps.
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, and the backward cleanup move (`sweepRedeem`) are in place. The forward cleanup move (`sweepToLoan`) and the LayerZero call are still to come.
 
 ## Typed subaccounts
 
@@ -74,6 +74,27 @@ executeUserOp([
 ])
 ```
 
+## Cleanup moves
+
+Assets can strand at the subaccount whenever a cross-chain flow breaks part-way. Both directions out are permissionless, so an executor — or anyone — can clear them:
+
+- **`sweepRedeem()`** — the backward move. Redeems idle FXRP to the parent Personal Account's XRPL owner through FAssets. It takes **no parameters**: the destination is read on-chain from the parent account, the executor and fee come from the controller, and `msg.value` must cover the fee. Reverts with `NothingToRedeem` rather than no-op, so a caller's value is returned instead of being trapped on the account.
+
+  It calls `redeemAmount` (the UBA-based entry point on `IRedeemExtended`, which the asset manager implements) with the **whole balance**, rather than `redeem`, which only accepts whole lots. A cleanup method that redeemed whole lots would strand the remainder — up to one lot short of a full sweep — with no way out, which defeats the purpose. FAssets may still redeem less than requested when redemption tickets run out; the remainder simply stays on the account and can be swept again.
+- **`sweepToLoan()`** — the forward move. Bridges idle FXRP onward to the loan chain over LayerZero. It also takes **no parameters**, for the same reason: the destination is **this account's own address**, which is identical on every chain because it is CREATE2-derived from inputs that do not vary by chain, and the destination chain and OFT come from governance-set controller settings (`setLoanBridgeSettings`, timelocked). So a permissionless caller has nothing to point at. `msg.value` must cover the LayerZero messaging fee; the exact quoted fee is forwarded and any excess is returned to the caller rather than left on an account with no native exit.
+
+  The FXRP OFT is a lock/unlock adapter (`approvalRequired() == true`), so the sweep approves it for the exact amount and resets the allowance to zero afterwards. No compose message is attached: this is cleanup, moving the assets across, and depositing them into the lending protocol is a separate forward move on the destination side. FXRP and the OFT both use 6 decimals, so nothing is lost to shared-decimal dust and `minAmountLD` equals the full amount.
+
+## Who may choose a destination
+
+Two different rules apply, and the difference is the signature:
+
+- **Instruction destinations are the user's choice.** A borrow names where the RLUSD goes, and the XRPL signature authorizes it. Two forms are supported: an XRPL address reached over Wormhole, or a plain EVM address (typically an exchange deposit address), which the Ethereum-side account transfers to directly. The EVM address is not validated — it is the user's money and the user's choice, the same way the XRPL target is already allowed to be an arbitrary account. The destination kind and the address travel inside the `executeLayerZeroCall` payload, which this repo treats as opaque; the payload format needs a destination-kind tag, to be pinned down when the LayerZero schema is frozen.
+- **Cleanup destinations are never the caller's choice.** Sweeps are permissionless and carry no signature, so their destination must be derived on-chain from `parentPersonalAccount` — never from caller-supplied data. Anyone may move stranded assets; nobody may redirect them.
+
+Caveats specific to the EVM disbursement option, for the front end rather than the contracts: RLUSD is a regulated stablecoin and can freeze or blacklist addresses, so a transfer can revert and turn a borrow into a stuck disbursement; some exchange deposit addresses are not credited when the sender is a contract, or need a tag an ERC-20 transfer cannot carry; and a wrong address is unrecoverable, since nothing is checked.
+
 ## Open design items (decide with the asset-moving methods)
 
+- **Stuck RLUSD on the Ethereum side has only one move: repay.** RLUSD arriving there is indistinguishable between an inbound repayment and a borrow whose outbound leg failed, and a borrow may name an arbitrary destination, so a permissionless "send onward" would let anyone redirect a repayment to a third party. Repay is safe under every interpretation, since its target is the account's own position. The cost is that a failed disbursement silently unwinds the loan the user asked for. A bounded retry is possible if the account records the pending disbursement (amount plus destination) at borrow time, so the retry is driven by stored state rather than calldata; that is likely the same state needed to prevent double borrows when a LayerZero message stalls. Product decision, to settle before the Ethereum-side work.
 - **Native payability.** The implementation currently has no `receive()`, so plain FLR transfers revert (the proxy's payable fallback delegates to the implementation, which rejects empty calldata). Payability is an implementation-level property — it can be added later via a beacon upgrade with no effect on CREATE2 addresses. Decide as a pair when the sweeps are implemented: either stay non-payable *and* verify the redeem/LayerZero integrations never refund native to the account (a refund against a non-payable account reverts the whole flow), or add `receive()` *plus* a permissionless `sweepNative()` that pushes the balance to the parent Personal Account (fixed destination, consistent with the sweep philosophy). Lean: payable + exit, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.
