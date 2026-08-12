@@ -2,11 +2,11 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, and the backward cleanup move (`sweepRedeem`) are in place. The forward cleanup move (`sweepToLoan`) and the LayerZero call are still to come.
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The LayerZero call (`executeLayerZeroCall`) and the sweep-direction lifecycle are still to come.
 
 ## Typed subaccounts
 
-Subaccounts are typed by a raw `uint256` identifier (`0` is reserved and invalid; `1` is the loan type — see the `SUBACCOUNT_TYPE_*` constants in [`ILoanSubaccountsFacet`](../../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol)). It is deliberately not a Solidity enum: the proxy creation code — and with it the constructor ABI — is frozen for deterministic CREATE2 addresses, and a compiled enum decoder rejects values outside the range it was compiled with, which would make future types undeployable through the frozen artifact. With a raw integer, a new type needs only a registered implementation. Each type has its own implementation contract, registered per type in [`LoanSubaccounts.State.typeImplementation`](../../../contracts/smartAccounts/library/LoanSubaccounts.sol) and managed by the timelocked `setLoanSubaccountImplementation`.
+Subaccounts are typed by a raw `uint256` identifier (`0` is reserved and invalid; `1` is the loan type — see the `SUBACCOUNT_TYPE_*` constants in [`ILoanSubaccountsFacet`](../../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol)). It is deliberately not a Solidity enum: the proxy creation code — and with it the constructor ABI — gets frozen for deterministic CREATE2 addresses (see below; still pending), and a compiled enum decoder rejects values outside the range it was compiled with, which would make future types undeployable through the frozen artifact. With a raw integer, a new type needs only a registered implementation. Each type has its own implementation contract, registered per type in [`LoanSubaccounts.State.typeImplementation`](../../../contracts/smartAccounts/library/LoanSubaccounts.sol) and managed by the timelocked `setLoanSubaccountImplementation`.
 
 ## Deployment model
 
@@ -65,7 +65,7 @@ XRPL memo → MemoInstructionsFacet.handleMintedFAssets → MemoInstructions.exe
 
 The subaccount type does not need encoding in the instruction: the address already commits to `(parentPersonalAccount, subaccountType)`, so *which* subaccount is called is *which* type is meant. Adding subaccount methods or types therefore needs no controller change, no new memo opcode, and no diamond cut. The controller still enforces pause, nonce, replay protection, executor, and fee on the way in, because that all happens in `handleMintedFAssets` before the user operation runs.
 
-Calling a subaccount that is not deployed yet would **silently succeed** — a call to an address with no code returns success, so `executeUserOp` would not revert and the instruction would do nothing. User operations must therefore create the subaccount first. `createLoanSubaccount` is permissionless and idempotent, so it can be the first call of every such operation:
+Calling a subaccount that is not deployed yet would **silently succeed** — a call to an address with no code returns success, so `executeUserOp` would not revert. The instruction does nothing, except that any native value it carried is transferred to the codeless address, where it sits until the subaccount is created and `sweepNativeToParent` recovers it. User operations must therefore create the subaccount first. `createLoanSubaccount` is permissionless and idempotent, so it can be the first call of every such operation:
 
 ```text
 executeUserOp([

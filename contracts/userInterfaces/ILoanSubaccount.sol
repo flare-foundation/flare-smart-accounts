@@ -147,6 +147,12 @@ interface ILoanSubaccount {
     error NativeSweepFailed();
 
     /**
+     * @notice Reverts on the implementation contract itself, which is never initialized: it must
+     * not accept native, and its recovery methods have no parent to send to.
+     */
+    error NotInitialized();
+
+    /**
      * @notice Reverts if the sent value does not cover the executor fee.
      * @param executorFee The required executor fee.
      */

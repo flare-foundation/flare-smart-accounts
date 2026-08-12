@@ -29,6 +29,7 @@ import {
     SUBACCOUNT_TYPE_LOAN,
     SUBACCOUNT_TYPE_NONE
 } from "../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {IMemoInstructionsFacet} from "../contracts/userInterfaces/facets/IMemoInstructionsFacet.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
@@ -575,8 +576,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testSweepRedeemRedeemsWholeBalanceToParentXrplOwner() public {
         address subaccount = _createSubaccountFor(xrplOwner);
-        // deliberately not a whole number of lots: the sweep must leave nothing behind
-        uint256 balance = 250e6;
+        // deliberately not a whole number of lots (FXRP lot size is 10e6), so this exercises a
+        // UBA redemption that the lot-based `redeem` could not fully perform
+        uint256 balance = 250e6 + 1;
         fxrp.mint(subaccount, balance);
         mockAssetManager.setMinimumRedeemAmountUBA(10e6);
 
@@ -654,6 +656,97 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             abi.encodeWithSelector(ILoanSubaccount.BelowMinimumRedemption.selector, 100e6)
         );
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+    }
+
+    function testSweepRedeemAtExactMinimumBoundary() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        mockAssetManager.setMinimumRedeemAmountUBA(100e6);
+        fxrp.mint(subaccount, 100e6);
+
+        // at exactly the minimum the balance is redeemable, so redemption must take it and
+        // parent recovery must refuse it - the two paths meet with no gap and no overlap
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanSubaccount.FXrpAboveMinimumRedemption.selector, 100e6, 100e6
+            )
+        );
+        ILoanSubaccount(subaccount).sweepToParent(address(fxrp));
+
+        vm.deal(address(this), executorFee);
+        (uint256 amount, uint256 redeemed) =
+            ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(amount, 100e6);
+        assertEq(redeemed, 100e6);
+    }
+
+    function testSweepRedeemForwardsWholeValueToAssetManager() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+
+        // overpayment is deliberate: the whole msg.value is forwarded to the asset manager,
+        // which uses it for the executor fee
+        uint256 sent = executorFee + 1 ether;
+        vm.deal(address(this), sent);
+        ILoanSubaccount(subaccount).sweepRedeem{value: sent}();
+
+        assertEq(mockAssetManager.lastRedeemValue(), sent);
+    }
+
+    function testPartialRedemptionRemainderBelowMinimumIsRecoverable() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address parent = _personalAccountOf(xrplOwner);
+        mockAssetManager.setMinimumRedeemAmountUBA(100e6);
+        mockAssetManager.setMaxRedeemPerCall(100e6);
+        fxrp.mint(subaccount, 150e6);
+
+        // a real partial redemption produces the below-minimum remainder
+        vm.deal(address(this), 2 * executorFee);
+        (, uint256 redeemed) = ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(redeemed, 100e6);
+        assertEq(fxrp.balanceOf(subaccount), 50e6);
+
+        // the remainder cannot be redeemed again, and leaves through parent recovery instead
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccount.BelowMinimumRedemption.selector, 100e6)
+        );
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        uint256 recovered = ILoanSubaccount(subaccount).sweepToParent(address(fxrp));
+        assertEq(recovered, 50e6);
+        assertEq(fxrp.balanceOf(parent), 50e6);
+    }
+
+    function testImplementationContractRejectsNativeAndRecovery() public {
+        // the implementation contract is never initialized and has no parent: it must not
+        // accept native, and its recovery methods must not burn to the zero address
+        vm.deal(address(this), 1 ether);
+        // solhint-disable-next-line avoid-low-level-calls
+        (bool ok, ) = address(loanImpl).call{value: 1 ether}("");
+        assertFalse(ok);
+
+        // native can still be force-sent past the guarded receive; recovery must refuse
+        vm.deal(address(loanImpl), 1 ether);
+        vm.expectRevert(ILoanSubaccount.NotInitialized.selector);
+        loanImpl.sweepNativeToParent();
+
+        fxrp.mint(address(loanImpl), 1e6);
+        vm.expectRevert(ILoanSubaccount.NotInitialized.selector);
+        loanImpl.sweepToParent(address(fxrp));
+    }
+
+    function testPublicAggregateExposesLoanFacet() public {
+        // typed through the public aggregate, so an omission there fails compilation here
+        IMasterAccountController publicController = IMasterAccountController(address(controller));
+        _createPersonalAccount(xrplOwner);
+        address subaccount =
+            publicController.createLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        assertEq(
+            publicController.getLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN),
+            subaccount
+        );
+        assertEq(
+            publicController.loanImplementationForType(SUBACCOUNT_TYPE_LOAN),
+            address(loanImpl)
+        );
     }
 
     function testSweepRedeemRevertInsufficientFundsForRedeem() public {

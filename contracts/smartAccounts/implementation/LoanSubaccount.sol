@@ -49,7 +49,10 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
     }
 
     /// @dev Native can arrive as a bridge or redemption refund; {sweepNativeToParent} is its exit.
-    receive() external payable {}
+    /// The implementation contract itself (never initialized, no parent) rejects it.
+    receive() external payable {
+        require(parentPersonalAccount != address(0), NotInitialized());
+    }
 
     /// @inheritdoc ILoanSubaccount
     function initialize(
@@ -172,6 +175,8 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         nonReentrant
         returns (uint256 _amount)
     {
+        // never on the implementation contract itself, where the parent is unset
+        require(parentPersonalAccount != address(0), NotInitialized());
         IERC20 token = IERC20(_token);
         _amount = token.balanceOf(address(this));
         require(_amount > 0, NothingToSweep());
@@ -198,6 +203,9 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         nonReentrant
         returns (uint256 _amount)
     {
+        // never on the implementation contract itself: native can be force-sent even past the
+        // guarded receive, and recovery there would burn it to the zero address
+        require(parentPersonalAccount != address(0), NotInitialized());
         _amount = address(this).balance;
         require(_amount > 0, NothingToSweep());
 

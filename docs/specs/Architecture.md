@@ -120,9 +120,9 @@ The on-chain code separates into three layers:
 interface IMasterAccountController is
     IDiamondCut, IDiamondLoupe, IERC165, IERC173,
     IAgentVaultsFacet, IExecutorsFacet, IInstructionFeesFacet,
-    IInstructionsFacet, IMemoInstructionsFacet, IPauseFacet,
-    IPaymentProofsFacet, IPersonalAccountsFacet, IReaderFacet,
-    ITimelockFacet, IVaultsFacet, IXrplProviderWalletsFacet
+    IInstructionsFacet, ILoanSubaccountsFacet, IMemoInstructionsFacet,
+    IPauseFacet, IPaymentProofsFacet, IPersonalAccountsFacet,
+    IReaderFacet, ITimelockFacet, IVaultsFacet, IXrplProviderWalletsFacet
 {}
 ```
 
