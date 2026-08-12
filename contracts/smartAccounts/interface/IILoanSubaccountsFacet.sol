@@ -19,4 +19,16 @@ interface IILoanSubaccountsFacet is ILoanSubaccountsFacet {
         address _implementation
     )
         external;
+
+    /**
+     * @notice Sets the settings used to bridge FXRP to the loan chain.
+     * @param _fxrpOft The FXRP OFT used to bridge FXRP.
+     * @param _destinationEid The LayerZero endpoint id of the loan chain.
+     * Can only be called by the owner (timelocked).
+     */
+    function setLoanBridgeSettings(
+        address _fxrpOft,
+        uint32 _destinationEid
+    )
+        external;
 }

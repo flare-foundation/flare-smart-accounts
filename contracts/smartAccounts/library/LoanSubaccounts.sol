@@ -17,6 +17,10 @@ library LoanSubaccounts {
         /// Mapping from parent Personal Account and subaccount type to the loan subaccount
         mapping(address parentPersonalAccount =>
             mapping(ILoanSubaccountsFacet.SubaccountType subaccountType => ILoanSubaccount)) loanSubaccounts;
+        /// @notice FXRP OFT used to bridge FXRP to the loan chain.
+        address fxrpOft;
+        /// @notice LayerZero endpoint id of the loan chain.
+        uint32 destinationEid;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -40,6 +44,20 @@ library LoanSubaccounts {
         State storage state = getState();
         state.typeImplementation[_subaccountType] = _implementation;
         emit ILoanSubaccountsFacet.LoanSubaccountImplementationSet(_subaccountType, _implementation);
+    }
+
+    function setLoanBridgeSettings(
+        address _fxrpOft,
+        uint32 _destinationEid
+    )
+        internal
+    {
+        require(_fxrpOft.code.length > 0, ILoanSubaccountsFacet.InvalidFxrpOft());
+        require(_destinationEid != 0, ILoanSubaccountsFacet.InvalidDestinationEid());
+        State storage state = getState();
+        state.fxrpOft = _fxrpOft;
+        state.destinationEid = _destinationEid;
+        emit ILoanSubaccountsFacet.LoanBridgeSettingsSet(_fxrpOft, _destinationEid);
     }
 
     function getOrCreateLoanSubaccount(
@@ -140,6 +158,14 @@ library LoanSubaccounts {
         _loanSubaccount = Create2.computeAddress(
             bytes32(0), keccak256(bytecode), PersonalAccounts.SINGLETON_FACTORY
         );
+    }
+
+    function getLoanBridgeSettings()
+        internal view
+        returns (address _fxrpOft, uint32 _destinationEid)
+    {
+        State storage state = getState();
+        return (state.fxrpOft, state.destinationEid);
     }
 
     function getLoanSubaccountImplementation(

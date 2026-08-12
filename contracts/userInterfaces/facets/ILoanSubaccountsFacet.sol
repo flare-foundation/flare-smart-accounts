@@ -29,6 +29,16 @@ interface ILoanSubaccountsFacet {
     );
 
     /**
+     * @notice Emitted when the loan bridge settings are set.
+     * @param fxrpOft The FXRP OFT used to bridge FXRP to the loan chain.
+     * @param destinationEid The LayerZero endpoint id of the loan chain.
+     */
+    event LoanBridgeSettingsSet(
+        address fxrpOft,
+        uint32 destinationEid
+    );
+
+    /**
      * @notice Emitted when a new loan subaccount is created.
      * @param loanSubaccount The deployed loan subaccount contract address.
      * @param parentPersonalAccount The parent Personal Account address.
@@ -49,6 +59,16 @@ interface ILoanSubaccountsFacet {
      * @notice Reverts if the subaccount type is invalid (for example `None`).
      */
     error InvalidSubaccountType();
+
+    /**
+     * @notice Reverts if the FXRP OFT address is invalid.
+     */
+    error InvalidFxrpOft();
+
+    /**
+     * @notice Reverts if the destination endpoint id is invalid.
+     */
+    error InvalidDestinationEid();
 
     /**
      * @notice Reverts if no implementation is configured for the subaccount type.
@@ -115,4 +135,15 @@ interface ILoanSubaccountsFacet {
     )
         external view
         returns (address);
+
+    /**
+     * @notice Returns the settings used to bridge FXRP to the loan chain.
+     * @dev These are governance-set rather than supplied by the caller, so that a permissionless
+     * sweep cannot choose where the assets are bridged to.
+     * @return _fxrpOft The FXRP OFT used to bridge FXRP.
+     * @return _destinationEid The LayerZero endpoint id of the loan chain.
+     */
+    function getLoanBridgeSettings()
+        external view
+        returns (address _fxrpOft, uint32 _destinationEid);
 }

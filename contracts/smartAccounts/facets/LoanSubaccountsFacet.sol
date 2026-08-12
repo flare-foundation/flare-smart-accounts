@@ -32,6 +32,17 @@ contract LoanSubaccountsFacet is IILoanSubaccountsFacet, FacetBase {
         LoanSubaccounts.setLoanSubaccountImplementation(_subaccountType, _implementation);
     }
 
+    /// @inheritdoc IILoanSubaccountsFacet
+    function setLoanBridgeSettings(
+        address _fxrpOft,
+        uint32 _destinationEid
+    )
+        external
+        onlyOwnerWithTimelock
+    {
+        LoanSubaccounts.setLoanBridgeSettings(_fxrpOft, _destinationEid);
+    }
+
     /// @inheritdoc ILoanSubaccountsFacet
     function createLoanSubaccount(
         string calldata _xrplOwner,
@@ -84,5 +95,13 @@ contract LoanSubaccountsFacet is IILoanSubaccountsFacet, FacetBase {
         returns (address)
     {
         return LoanSubaccounts.getLoanSubaccountImplementation(_subaccountType);
+    }
+
+    /// @inheritdoc ILoanSubaccountsFacet
+    function getLoanBridgeSettings()
+        external view
+        returns (address _fxrpOft, uint32 _destinationEid)
+    {
+        return LoanSubaccounts.getLoanBridgeSettings();
     }
 }

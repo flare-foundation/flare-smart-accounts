@@ -6,6 +6,13 @@ checksum = "f73f1e8877056a7da659cc066bb53a64f4d45ca2aff140011b06bd0d19cee7e6"
 integrity = "02ad8267467ffbc41f1a0f047081ec530be01ff70f4d0715d4c64286a46a9dab"
 
 [[dependencies]]
+name = "@layerzerolabs-oapp-evm"
+version = "0.4.1"
+url = "https://soldeer-revisions.s3.amazonaws.com/@layerzerolabs-oapp-evm/0_4_1_14-12-2025_22:00:19_oapp-evm.zip"
+checksum = "65bf469656c64d3f448d5c23798376d3b399e55b3cee0d1838fe42cfc70a361b"
+integrity = "9b5962846e82481219ab5592bcc38c3b9966d978a79615e3e8eb98d28373b266"
+
+[[dependencies]]
 name = "@layerzerolabs-oft-evm"
 version = "4.0.1"
 url = "https://soldeer-revisions.s3.amazonaws.com/@layerzerolabs-oft-evm/4_0_1_14-12-2025_22:00:24_oft-evm.zip"

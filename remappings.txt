@@ -3,4 +3,5 @@ flare-periphery/=dependencies/flare-periphery-0.1.52/
 forge-std/=dependencies/forge-std-1.10.0/src/
 @layerzerolabs/oft-evm/=dependencies/@layerzerolabs-oft-evm-4.0.1/
 @layerzerolabs/lz-evm-protocol-v2/=dependencies/@layerzerolabs-lz-evm-protocol-v2-3.0.159/
+@layerzerolabs/oapp-evm/=dependencies/@layerzerolabs-oapp-evm-0.4.1/
 @openzeppelin/contracts-upgradeable/=dependencies/@openzeppelin-contracts-upgradeable-5.5.0/

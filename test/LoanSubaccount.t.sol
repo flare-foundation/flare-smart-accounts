@@ -20,6 +20,7 @@ import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSuba
 import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol";
 import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
 import {MockLoanSubaccount} from "../contracts/mock/MockLoanSubaccount.sol";
+import {MockOft} from "../contracts/mock/MockOft.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
 import {ILoanSubaccountsFacet} from "../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
@@ -34,6 +35,7 @@ import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
  * creation/prediction, account abstraction dispatch from an XRPL instruction through the parent
  * Personal Account into the subaccount, and the backward cleanup move (`sweepRedeem`).
  */
+// solhint-disable-next-line max-states-count
 contract LoanSubaccountTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
 
@@ -58,6 +60,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     uint256 private collateralReservationFee;
     string private xrplOwner;
     MintableERC20 private fxrp;
+    MockOft private fxrpOft;
+    uint32 private destinationEid;
+    uint256 private messagingFee;
 
     // base facets are CREATE2-deployed with a fixed salt, so they are deployed once and shared
     IDiamond.FacetCut[] private baseCuts;
@@ -79,6 +84,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         collateralReservationFee = 123;
         xrplOwner = "rExampleXrplAddress";
         fxrp = new MintableERC20("F-XRPL", "fXRP", 6);
+        destinationEid = 30101; // Ethereum
+        messagingFee = 0.01 ether;
+        fxrpOft = new MockOft(fxrp, messagingFee);
 
         // deploy the personal account implementation (required by the controller init)
         personalAccountImplementation = address(new PersonalAccount());
@@ -614,6 +622,111 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee - 1}();
     }
 
+    //
+    // step 4: sweepToLoan (forward cleanup move)
+    //
+
+    function testSweepToLoanBridgesWholeBalanceToOwnAddressOnLoanChain() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        uint256 balance = 250e6;
+        fxrp.mint(subaccount, balance);
+        _configureLoanBridge();
+
+        vm.deal(address(this), messagingFee);
+        uint256 amount = ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+
+        assertEq(amount, balance);
+        // the FXRP left the subaccount and the adapter locked it
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertEq(fxrp.balanceOf(address(fxrpOft)), balance);
+
+        // destination is this account's own address on the configured chain, full amount, no compose
+        (uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,,,) = fxrpOft.lastSendParam();
+        assertEq(dstEid, destinationEid);
+        assertEq(to, bytes32(uint256(uint160(subaccount))));
+        assertEq(amountLD, balance);
+        assertEq(minAmountLD, balance);
+        assertEq(fxrpOft.lastValue(), messagingFee);
+    }
+
+    function testSweepToLoanCanBeCalledByAnyoneAndRefundsExcess() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        address caller = makeAddr("randomCaller");
+        uint256 sent = messagingFee + 1 ether;
+        vm.deal(caller, sent);
+        vm.prank(caller);
+        ILoanSubaccount(subaccount).sweepToLoan{value: sent}();
+
+        // only the fee was forwarded; the excess came back to the caller, not stranded here
+        assertEq(fxrpOft.lastValue(), messagingFee);
+        assertEq(fxrpOft.lastRefundAddress(), caller);
+        assertEq(caller.balance, sent - messagingFee);
+        assertEq(subaccount.balance, 0);
+    }
+
+    function testSweepToLoanLeavesNoStandingApproval() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        vm.deal(address(this), messagingFee);
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+
+        assertEq(fxrp.allowance(subaccount, address(fxrpOft)), 0);
+    }
+
+    function testSweepToLoanRevertNothingToSweep() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        _configureLoanBridge();
+
+        vm.deal(address(this), messagingFee);
+        vm.expectRevert(ILoanSubaccount.NothingToSweep.selector);
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+    }
+
+    function testSweepToLoanRevertLoanBridgeNotConfigured() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+
+        vm.deal(address(this), messagingFee);
+        vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+    }
+
+    function testSweepToLoanRevertInsufficientFundsForSweep() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        vm.deal(address(this), messagingFee);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccount.InsufficientFundsForSweep.selector, messagingFee)
+        );
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee - 1}();
+    }
+
+    function testSetLoanBridgeSettingsRevertNotOwner() public {
+        address notOwner = makeAddr("notOwner");
+        vm.prank(notOwner);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
+        );
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
+    }
+
+    function testSetLoanBridgeSettingsRevertInvalidValues() public {
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        controller.setLoanBridgeSettings(makeAddr("notAContract"), destinationEid);
+
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationEid.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), 0);
+    }
+
     function testGetLoanSubaccountDifferentOwnersGetDifferentAddresses() public view {
         address subaccount1 = controller.getLoanSubaccount(
             "rOwner1",
@@ -800,6 +913,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             _xrplOwner,
             ILoanSubaccountsFacet.SubaccountType.Loan
         );
+    }
+
+    function _configureLoanBridge() private {
+        vm.prank(governance);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
     }
 
     function _mockRedeemAmount(uint256 _redeemedAmount) private {

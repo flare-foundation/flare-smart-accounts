@@ -3,7 +3,11 @@ pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
+import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
 import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
@@ -16,6 +20,7 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
  * contract resolve the implementation per subaccount type through {loanImplementationForType}.
  */
 contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
+    using SafeERC20 for IERC20;
 
     address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
 
@@ -89,6 +94,62 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
             executor,
             executorFee
         );
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function sweepToLoan()
+        external payable
+        nonReentrant
+        returns (uint256 _amount)
+    {
+        IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
+        _amount = fxrp.balanceOf(address(this));
+        require(_amount > 0, NothingToSweep());
+
+        (address fxrpOft, uint32 destinationEid) =
+            ILoanSubaccountsFacet(controllerAddress).getLoanBridgeSettings();
+        require(fxrpOft != address(0) && destinationEid != 0, LoanBridgeNotConfigured());
+
+        // this account has the same address on every chain, so it is its own destination;
+        // the OFT enforces its own execution options, and FXRP and the OFT share 6 decimals,
+        // so the full amount arrives and `minAmountLD` can equal `amountLD`
+        SendParam memory sendParam = SendParam({
+            dstEid: destinationEid,
+            to: bytes32(uint256(uint160(address(this)))),
+            amountLD: _amount,
+            minAmountLD: _amount,
+            extraOptions: "",
+            composeMsg: "",
+            oftCmd: ""
+        });
+
+        MessagingFee memory fee = IOFT(fxrpOft).quoteSend(sendParam, false);
+        require(msg.value >= fee.nativeFee, InsufficientFundsForSweep(fee.nativeFee));
+
+        // the OFT is a lock/unlock adapter, so it must be approved to pull the FXRP
+        fxrp.forceApprove(fxrpOft, _amount);
+        // two false positives on this call: slither arbitrary-send-eth (recipient is the
+        // governance-set OFT, value capped by the msg.value check above) and solhint
+        // check-send-result (this is the OFT's `send`, not address.send; it reverts on failure)
+        // slither-disable-start arbitrary-send-eth
+        // solhint-disable-next-line check-send-result
+        (MessagingReceipt memory receipt, ) = IOFT(fxrpOft).send{value: fee.nativeFee}(
+            sendParam,
+            fee,
+            msg.sender
+        );
+        // slither-disable-end arbitrary-send-eth
+        fxrp.forceApprove(fxrpOft, 0);
+
+        // return the caller's excess, so it is not stranded on an account with no native exit
+        uint256 excess = msg.value - fee.nativeFee;
+        if (excess > 0) {
+            // solhint-disable-next-line avoid-low-level-calls
+            (bool success, ) = msg.sender.call{value: excess}("");
+            require(success, RefundFailed());
+        }
+
+        emit FXrpSweptToLoan(parentPersonalAccount, _amount, destinationEid, receipt.guid);
     }
 
     /// @inheritdoc ILoanSubaccount
