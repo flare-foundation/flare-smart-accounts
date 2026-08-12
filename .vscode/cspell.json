@@ -194,6 +194,7 @@
     "uint64",
     "uint8",
     "uint80",
+    "undeployable",
     "Unconfigured",
     "Undeployed",
     "underprovisions",

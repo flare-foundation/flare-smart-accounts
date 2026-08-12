@@ -6,7 +6,7 @@ Status: in progress. The account, its proxy, the per-type implementation registr
 
 ## Typed subaccounts
 
-Subaccounts are typed by [`ILoanSubaccountsFacet.SubaccountType`](../../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol) (`None` is reserved; `Loan` is the first real type). Each type has its own implementation contract, registered per type in [`LoanSubaccounts.State.typeImplementation`](../../../contracts/smartAccounts/library/LoanSubaccounts.sol) and managed by the timelocked `setLoanSubaccountImplementation`.
+Subaccounts are typed by a raw `uint256` identifier (`0` is reserved and invalid; `1` is the loan type — see the `SUBACCOUNT_TYPE_*` constants in [`ILoanSubaccountsFacet`](../../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol)). It is deliberately not a Solidity enum: the proxy creation code — and with it the constructor ABI — is frozen for deterministic CREATE2 addresses, and a compiled enum decoder rejects values outside the range it was compiled with, which would make future types undeployable through the frozen artifact. With a raw integer, a new type needs only a registered implementation. Each type has its own implementation contract, registered per type in [`LoanSubaccounts.State.typeImplementation`](../../../contracts/smartAccounts/library/LoanSubaccounts.sol) and managed by the timelocked `setLoanSubaccountImplementation`.
 
 ## Deployment model
 
@@ -15,7 +15,7 @@ Subaccounts are deployed as [`LoanSubaccountProxy`](../../../contracts/smartAcco
 ```solidity
 contract LoanSubaccountProxy is Proxy {
     address private immutable controller;
-    ILoanSubaccountsFacet.SubaccountType private immutable subaccountType;
+    uint256 private immutable subaccountType;
 
     function _implementation() internal view override returns (address) {
         return ILoanSubaccountsFacet(controller).loanImplementationForType(subaccountType);

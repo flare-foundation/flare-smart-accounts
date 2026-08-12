@@ -4,7 +4,10 @@ pragma solidity ^0.8.27;
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
 import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
-import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {
+    ILoanSubaccountsFacet,
+    SUBACCOUNT_TYPE_NONE
+} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
 import {LoanSubaccountProxy} from "../proxy/LoanSubaccountProxy.sol";
 import {PersonalAccounts} from "./PersonalAccounts.sol";
 
@@ -13,10 +16,10 @@ library LoanSubaccounts {
     /// @custom:storage-location erc7201:smartAccounts.LoanSubaccounts.State
     struct State {
         /// @notice Implementation used by each subaccount type's proxy instances.
-        mapping(ILoanSubaccountsFacet.SubaccountType subaccountType => address) typeImplementation;
+        mapping(uint256 subaccountType => address) typeImplementation;
         /// Mapping from parent Personal Account and subaccount type to the loan subaccount
         mapping(address parentPersonalAccount =>
-            mapping(ILoanSubaccountsFacet.SubaccountType subaccountType => ILoanSubaccount)) loanSubaccounts;
+            mapping(uint256 subaccountType => ILoanSubaccount)) loanSubaccounts;
         /// @notice FXRP OFT used to bridge FXRP to the loan chain.
         address fxrpOft;
         /// @notice LayerZero endpoint id of the loan chain.
@@ -28,15 +31,12 @@ library LoanSubaccounts {
     );
 
     function setLoanSubaccountImplementation(
-        ILoanSubaccountsFacet.SubaccountType _subaccountType,
+        uint256 _subaccountType,
         address _implementation
     )
         internal
     {
-        require(
-            _subaccountType != ILoanSubaccountsFacet.SubaccountType.None,
-            ILoanSubaccountsFacet.InvalidSubaccountType()
-        );
+        require(_subaccountType != SUBACCOUNT_TYPE_NONE, ILoanSubaccountsFacet.InvalidSubaccountType());
         require(
             _implementation.code.length > 0,
             ILoanSubaccountsFacet.InvalidLoanSubaccountImplementation()
@@ -62,7 +62,7 @@ library LoanSubaccounts {
 
     function getOrCreateLoanSubaccount(
         address _parentPersonalAccount,
-        ILoanSubaccountsFacet.SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         internal
         returns (ILoanSubaccount _loanSubaccount)
@@ -77,15 +77,12 @@ library LoanSubaccounts {
 
     function createLoanSubaccount(
         address _parentPersonalAccount,
-        ILoanSubaccountsFacet.SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         internal
         returns (ILoanSubaccount _loanSubaccount)
     {
-        require(
-            _subaccountType != ILoanSubaccountsFacet.SubaccountType.None,
-            ILoanSubaccountsFacet.InvalidSubaccountType()
-        );
+        require(_subaccountType != SUBACCOUNT_TYPE_NONE, ILoanSubaccountsFacet.InvalidSubaccountType());
         require(
             getLoanSubaccountImplementation(_subaccountType) != address(0),
             ILoanSubaccountsFacet.LoanSubaccountImplementationNotSet(_subaccountType)
@@ -130,7 +127,7 @@ library LoanSubaccounts {
      */
     function generateBytecode(
         address _parentPersonalAccount,
-        ILoanSubaccountsFacet.SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         internal view
         returns (bytes memory)
@@ -149,7 +146,7 @@ library LoanSubaccounts {
 
     function computeLoanSubaccountAddress(
         address _parentPersonalAccount,
-        ILoanSubaccountsFacet.SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         internal view
         returns (address _loanSubaccount)
@@ -169,7 +166,7 @@ library LoanSubaccounts {
     }
 
     function getLoanSubaccountImplementation(
-        ILoanSubaccountsFacet.SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         internal view
         returns (address)

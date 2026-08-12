@@ -15,7 +15,7 @@ interface IILoanSubaccountsFacet is ILoanSubaccountsFacet {
      * Can only be called by the owner (timelocked).
      */
     function setLoanSubaccountImplementation(
-        SubaccountType _subaccountType,
+        uint256 _subaccountType,
         address _implementation
     )
         external;

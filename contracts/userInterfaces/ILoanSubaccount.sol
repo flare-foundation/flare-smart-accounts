@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
-import {ILoanSubaccountsFacet} from "./facets/ILoanSubaccountsFacet.sol";
-
 /**
  * @title ILoanSubaccount
  * @notice User interface for deterministic loan subaccounts.
@@ -18,7 +16,7 @@ interface ILoanSubaccount {
     event LoanSubaccountInitialized(
         address indexed controllerAddress,
         address indexed parentPersonalAccount,
-        ILoanSubaccountsFacet.SubaccountType indexed subaccountType
+        uint256 indexed subaccountType
     );
 
     /**
@@ -144,7 +142,7 @@ interface ILoanSubaccount {
     function initialize(
         address _controllerAddress,
         address _parentPersonalAccount,
-        ILoanSubaccountsFacet.SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         external;
 
@@ -170,7 +168,7 @@ interface ILoanSubaccount {
      */
     function subaccountType()
         external view
-        returns (ILoanSubaccountsFacet.SubaccountType);
+        returns (uint256);
 
     /**
      * @notice Returns the implementation address of the subaccount.

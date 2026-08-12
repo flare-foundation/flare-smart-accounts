@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
+/// @dev Reserved subaccount type: "not configured". Never has an implementation.
+uint256 constant SUBACCOUNT_TYPE_NONE = 0;
+/// @dev The loan subaccount type.
+uint256 constant SUBACCOUNT_TYPE_LOAN = 1;
+
 /**
  * @title ILoanSubaccountsFacet
  * @notice Interface for the LoanSubaccountsFacet contract, which resolves the
  * implementation used by loan subaccount proxies per subaccount type. The
  * controller (Diamond) is the beacon for loan subaccounts; a proxy resolves its
  * implementation through {loanImplementationForType} using its fixed type.
+ * @dev The subaccount type is a raw `uint256` rather than an enum on purpose: the proxy creation
+ * code (and with it this ABI) is frozen for deterministic CREATE2 addresses, and a compiled enum
+ * decoder rejects values outside the range it was compiled with, which would make future type
+ * values undeployable through the frozen artifact. Type `0` is reserved and invalid; any other
+ * value is usable once governance registers an implementation for it.
  */
 interface ILoanSubaccountsFacet {
-
-    /**
-     * @notice Loan subaccount type. `None` (0) is reserved for "not configured".
-     */
-    enum SubaccountType {
-        None,
-        Loan
-    }
 
     /**
      * @notice Emitted when the loan subaccount implementation is set for a type.
@@ -24,7 +26,7 @@ interface ILoanSubaccountsFacet {
      * @param implementation The implementation address set for the type.
      */
     event LoanSubaccountImplementationSet(
-        SubaccountType indexed subaccountType,
+        uint256 indexed subaccountType,
         address implementation
     );
 
@@ -47,7 +49,7 @@ interface ILoanSubaccountsFacet {
     event LoanSubaccountCreated(
         address indexed loanSubaccount,
         address indexed parentPersonalAccount,
-        SubaccountType indexed subaccountType
+        uint256 indexed subaccountType
     );
 
     /**
@@ -56,7 +58,7 @@ interface ILoanSubaccountsFacet {
     error InvalidLoanSubaccountImplementation();
 
     /**
-     * @notice Reverts if the subaccount type is invalid (for example `None`).
+     * @notice Reverts if the subaccount type is invalid (the reserved type `0`).
      */
     error InvalidSubaccountType();
 
@@ -75,7 +77,7 @@ interface ILoanSubaccountsFacet {
      * @param subaccountType The subaccount type without an implementation.
      */
     error LoanSubaccountImplementationNotSet(
-        SubaccountType subaccountType
+        uint256 subaccountType
     );
 
     /**
@@ -106,7 +108,7 @@ interface ILoanSubaccountsFacet {
      */
     function createLoanSubaccount(
         string calldata _xrplOwner,
-        SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         external
         returns (address);
@@ -120,7 +122,7 @@ interface ILoanSubaccountsFacet {
      */
     function getLoanSubaccount(
         string calldata _xrplOwner,
-        SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         external view
         returns (address);
@@ -131,7 +133,7 @@ interface ILoanSubaccountsFacet {
      * @return The implementation address, or the zero address if not configured.
      */
     function loanImplementationForType(
-        SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         external view
         returns (address);

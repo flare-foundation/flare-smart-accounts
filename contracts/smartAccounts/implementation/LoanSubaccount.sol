@@ -9,7 +9,10 @@ import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/Reentrancy
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
-import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {
+    ILoanSubaccountsFacet,
+    SUBACCOUNT_TYPE_NONE
+} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 
@@ -29,7 +32,7 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
     /// @notice Parent Personal Account address.
     address public parentPersonalAccount;
     /// @notice Subaccount type.
-    ILoanSubaccountsFacet.SubaccountType public subaccountType;
+    uint256 public subaccountType;
 
     /// @dev Restricted methods are reached through FSA account abstraction: an XRPL-signed
     /// instruction drives the controller, which drives the parent Personal Account, which calls
@@ -48,17 +51,14 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
     function initialize(
         address _controllerAddress,
         address _parentPersonalAccount,
-        ILoanSubaccountsFacet.SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         external
     {
         require(controllerAddress == address(0), AlreadyInitialized());
         require(_controllerAddress != address(0), InvalidControllerAddress());
         require(_parentPersonalAccount != address(0), InvalidParentPersonalAccount());
-        require(
-            _subaccountType != ILoanSubaccountsFacet.SubaccountType.None,
-            ILoanSubaccountsFacet.InvalidSubaccountType()
-        );
+        require(_subaccountType != SUBACCOUNT_TYPE_NONE, ILoanSubaccountsFacet.InvalidSubaccountType());
 
         controllerAddress = _controllerAddress;
         parentPersonalAccount = _parentPersonalAccount;

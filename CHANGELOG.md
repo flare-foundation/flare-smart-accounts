@@ -10,9 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
   - Loan subaccount scaffolding (step 1): deterministic per-Personal-Account staging accounts for loan flows.
     - `LoanSubaccount` — base implementation with `initialize`, `controllerAddress`, `parentPersonalAccount`, `subaccountType`, and `implementation`. Asset-moving methods are added in later steps.
-    - `LoanSubaccountProxy` — minimal proxy that resolves its implementation per `SubaccountType` through the controller (controller-as-beacon); the type is fixed at deployment.
-    - `LoanSubaccountsFacet` + `LoanSubaccounts` library — per-`SubaccountType` implementation registry with timelocked `setLoanSubaccountImplementation` and `loanImplementationForType` resolution.
-    - `ILoanSubaccount` / `ILoanSubaccountsFacet` public interfaces and the `SubaccountType` enum (`None`, `Loan`).
+    - `LoanSubaccountProxy` — minimal proxy that resolves its implementation per subaccount type through the controller (controller-as-beacon); the type is fixed at deployment.
+    - `LoanSubaccountsFacet` + `LoanSubaccounts` library — per-type implementation registry with timelocked `setLoanSubaccountImplementation` and `loanImplementationForType` resolution.
+    - `ILoanSubaccount` / `ILoanSubaccountsFacet` public interfaces. The subaccount type is a raw `uint256` (`0` reserved, `1` = loan), not an enum, so type values unknown when the proxy creation code is frozen stay deployable through the frozen artifact.
   - Loan subaccount creation and prediction (step 2):
     - `LoanSubaccounts` library: CREATE2 deployment via the EIP-2470 singleton factory (salt `0`, init code from the diamond, parent Personal Account, and subaccount type), `computeLoanSubaccountAddress`, `getOrCreateLoanSubaccount`, and the per-parent registry with `LoanSubaccountCreated` event.
     - `createLoanSubaccount(xrplOwner, type)` — permissionless, `notPaused`; requires the parent Personal Account to be deployed.
@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `onlyParent` modifier on `LoanSubaccount`: restricted methods are callable only by the parent Personal Account, reached through the existing `0xFF`/`0xFE` memo path via `PersonalAccount.executeUserOp`. No new memo opcode — the subaccount address already commits to the subaccount type.
     - A user operation creates the subaccount with `createLoanSubaccount` as its first call, then calls a method on it: calling a subaccount that is not deployed yet would silently succeed, since a call to an address with no code returns success.
   - `LoanSubaccount.sweepToLoan()` — the forward cleanup move: permissionless, bridges all idle FXRP over LayerZero to this account's own address on the loan chain (identical on every chain by CREATE2 derivation). Takes no parameters; the destination chain and FXRP OFT come from governance-set `setLoanBridgeSettings`, so the caller cannot choose where the assets go. The quoted messaging fee is forwarded and any excess `msg.value` is returned to the caller.
-  - `IIOft` — minimal local subset of LayerZero's `IOFT` (`quoteSend`, `send` and their structs), since LayerZero's own interface pulls types from a package that is not a dependency of this project.
+  - `@layerzerolabs-oapp-evm` dependency, so LayerZero's canonical `IOFT` interface (which imports its types from it) is used directly.
   - `LoanSubaccount.sweepRedeem()` — the backward cleanup move: permissionless, redeems all idle FXRP to the parent Personal Account's XRPL owner. Takes no parameters, so neither the destination (read from the parent account) nor the executor (read from the controller) can be chosen by the caller. Uses the UBA-based `redeemAmount` rather than the lot-based `redeem`, so no remainder is left stranded on the account.
   - Spellcheck: `pnpm spellcheck` (cspell over contracts, tests, deployment, and docs) with an advisory `spellcheck` CI job.
 

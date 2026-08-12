@@ -4,7 +4,10 @@ pragma solidity ^0.8.27;
 import {IILoanSubaccountsFacet} from "../interface/IILoanSubaccountsFacet.sol";
 // import is needed for @inheritdoc
 // solhint-disable-next-line no-unused-import
-import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {
+    ILoanSubaccountsFacet,
+    SUBACCOUNT_TYPE_NONE
+} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
 import {LoanSubaccounts} from "../library/LoanSubaccounts.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
 import {Pause} from "../library/Pause.sol";
@@ -23,7 +26,7 @@ contract LoanSubaccountsFacet is IILoanSubaccountsFacet, FacetBase {
 
     /// @inheritdoc IILoanSubaccountsFacet
     function setLoanSubaccountImplementation(
-        SubaccountType _subaccountType,
+        uint256 _subaccountType,
         address _implementation
     )
         external
@@ -46,7 +49,7 @@ contract LoanSubaccountsFacet is IILoanSubaccountsFacet, FacetBase {
     /// @inheritdoc ILoanSubaccountsFacet
     function createLoanSubaccount(
         string calldata _xrplOwner,
-        SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         external
         notPaused
@@ -63,12 +66,12 @@ contract LoanSubaccountsFacet is IILoanSubaccountsFacet, FacetBase {
     /// @inheritdoc ILoanSubaccountsFacet
     function getLoanSubaccount(
         string calldata _xrplOwner,
-        SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         external view
         returns (address _loanSubaccount)
     {
-        require(_subaccountType != SubaccountType.None, InvalidSubaccountType());
+        require(_subaccountType != SUBACCOUNT_TYPE_NONE, InvalidSubaccountType());
 
         address parentPersonalAccount =
             address(PersonalAccounts.getState().personalAccounts[_xrplOwner]);
@@ -89,7 +92,7 @@ contract LoanSubaccountsFacet is IILoanSubaccountsFacet, FacetBase {
 
     /// @inheritdoc ILoanSubaccountsFacet
     function loanImplementationForType(
-        SubaccountType _subaccountType
+        uint256 _subaccountType
     )
         external view
         returns (address)

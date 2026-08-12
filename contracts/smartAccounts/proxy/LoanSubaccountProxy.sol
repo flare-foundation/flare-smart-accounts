@@ -17,7 +17,7 @@ contract LoanSubaccountProxy is Proxy {
     /// @notice MasterAccountController address used to resolve the implementation.
     address private immutable controller;
     /// @notice Subaccount type, fixed at deployment.
-    ILoanSubaccountsFacet.SubaccountType private immutable subaccountType;
+    uint256 private immutable subaccountType;
 
     /**
      * @notice Deploys the proxy and initializes loan subaccount state.
@@ -28,7 +28,7 @@ contract LoanSubaccountProxy is Proxy {
     constructor(
         address _controller,
         address _parentPersonalAccount,
-        ILoanSubaccountsFacet.SubaccountType _subaccountType
+        uint256 _subaccountType
     ) {
         controller = _controller;
         subaccountType = _subaccountType;
