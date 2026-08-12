@@ -249,8 +249,10 @@ interface ILoanSubaccount {
      * and all of {sweepToLoan}'s guards apply: reverts while the controller is paused, requires
      * configured bridge settings, and re-checks the OFT's live peer against the pinned one.
      * The FXRP OFT adapter enforces execution options only for plain sends, so `_extraOptions`
-     * must carry both the destination `lzReceive` gas and the `lzCompose` gas. `msg.value` must
-     * cover the LayerZero messaging fee; any excess is returned to the caller (the parent).
+     * must be type-3 options carrying both the destination `lzReceive` gas and the `lzCompose`
+     * gas; enforced options, if the adapter's owner later configures them, are prepended by
+     * LayerZero and raise the quoted fee. `msg.value` must cover the LayerZero messaging fee;
+     * any excess is returned to the caller (the parent).
      * @param _composeMsg The composed payload, delivered to this account's `lzCompose` on the
      * destination chain. Must not be empty.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).

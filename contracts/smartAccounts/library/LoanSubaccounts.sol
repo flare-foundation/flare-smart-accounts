@@ -82,6 +82,15 @@ library LoanSubaccounts {
             IOFT(_fxrpOft).sharedDecimals() == IERC20Metadata(fxrp).decimals(),
             ILoanSubaccountsFacet.InvalidFxrpOft()
         );
+        // the destination-side compose authentication depends on the canonical OFT message
+        // codec (composeFrom = source caller), so the adapter must declare the canonical
+        // interface and codec version exactly; version stability of the pinned adapter is a
+        // deployment assumption (the production adapter is not a proxy)
+        (bytes4 interfaceId, uint64 version) = IOFT(_fxrpOft).oftVersion();
+        require(
+            interfaceId == type(IOFT).interfaceId && version == 1,
+            ILoanSubaccountsFacet.InvalidFxrpOft()
+        );
         require(
             IOAppCore(_fxrpOft).peers(_destinationEid) == _destinationPeer,
             ILoanSubaccountsFacet.InvalidDestinationPeer()

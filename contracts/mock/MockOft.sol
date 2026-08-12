@@ -26,6 +26,8 @@ contract MockOft is IOFT {
     IERC20 public immutable underlyingToken;
     uint256 public nativeFee;
     uint8 public sharedDecimalsValue = 6;
+    bytes4 public oftInterfaceId = 0x02e49c2c;
+    uint64 public oftMessageVersion = 1;
     mapping(uint32 eid => bytes32 peer) public peers;
 
     SendParam public lastSendParam;
@@ -47,6 +49,11 @@ contract MockOft is IOFT {
 
     function setPeer(uint32 _eid, bytes32 _peer) external {
         peers[_eid] = _peer;
+    }
+
+    function setOftVersion(bytes4 _interfaceId, uint64 _version) external {
+        oftInterfaceId = _interfaceId;
+        oftMessageVersion = _version;
     }
 
     /// @inheritdoc IOFT
@@ -100,6 +107,14 @@ contract MockOft is IOFT {
     }
 
     /// @inheritdoc IOFT
+    function oftVersion()
+        external view
+        returns (bytes4, uint64)
+    {
+        return (oftInterfaceId, oftMessageVersion);
+    }
+
+    /// @inheritdoc IOFT
     function quoteOFT(
         SendParam calldata _sendParam
     )
@@ -120,13 +135,5 @@ contract MockOft is IOFT {
         returns (bool)
     {
         return true;
-    }
-
-    /// @inheritdoc IOFT
-    function oftVersion()
-        external pure
-        returns (bytes4, uint64)
-    {
-        return (0x02e49c2c, 1);
     }
 }

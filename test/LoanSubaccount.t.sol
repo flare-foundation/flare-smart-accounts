@@ -1154,6 +1154,28 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
     }
 
+    function testSetLoanBridgeSettingsRevertWrongOftVersion() public {
+        fxrpOft.setPeer(destinationEid, destinationPeer);
+
+        // wrong message-codec version: the destination-side compose authentication depends on
+        // the canonical codec, so only version 1 is accepted
+        fxrpOft.setOftVersion(0x02e49c2c, 2);
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+
+        // wrong interface id
+        fxrpOft.setOftVersion(0xdeadbeef, 1);
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+
+        // the canonical pair is accepted
+        fxrpOft.setOftVersion(0x02e49c2c, 1);
+        vm.prank(governance);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+    }
+
     function testSetLoanBridgeSettingsRevertNoPeerForDestination() public {
         // no peer wired for the destination endpoint: the route does not exist
         vm.prank(governance);
@@ -1249,7 +1271,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         _configureLoanBridge();
 
         bytes memory composeMsg = abi.encode(uint8(1), makeAddr("exchangeDeposit"), 100e6);
-        bytes memory extraOptions = hex"0003aabbcc";
+        bytes memory extraOptions = _canonicalLoanOptions();
         vm.deal(personalAccount, messagingFee);
         vm.expectEmit();
         emit ILoanSubaccount.LayerZeroCallExecuted(
@@ -1333,11 +1355,75 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         calls[0] = IPersonalAccount.Call({
             target: subaccount,
             value: messagingFee,
-            data: abi.encodeCall(ILoanSubaccount.executeLayerZeroCall, (composeMsg, ""))
+            data: abi.encodeCall(ILoanSubaccount.executeLayerZeroCall, (composeMsg, _canonicalLoanOptions()))
         });
         _executeUserOpWithValue(personalAccount, calls, bytes32("dmLoanCall"), messagingFee);
 
         assertEq(fxrp.balanceOf(address(fxrpOft)), 100e6);
+        (,,,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
+        assertEq(composeMsgSent, composeMsg);
+    }
+
+    function testLoanInstructionAtomicMintFundExecuteInOneTransaction() public {
+        // the primary loan flow, all in ONE handleMintedFAssets transaction: FAssets mints and
+        // funds the Personal Account, and the user operation creates the subaccount, funds it
+        // and bridges with the payload. The subaccount balance never exists outside this
+        // transaction, so the permissionless sweeps have nothing to front-run.
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        _configureLoanBridge();
+        address subaccount = controller.getLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        assertEq(subaccount.code.length, 0);
+
+        uint256 loanAmount = 100e6;
+        bytes memory composeMsg = abi.encode(uint8(1), makeAddr("exchangeDeposit"), loanAmount);
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](3);
+        calls[0] = IPersonalAccount.Call({
+            target: address(controller),
+            value: 0,
+            data: abi.encodeCall(
+                ILoanSubaccountsFacet.createLoanSubaccount, (xrplOwner, SUBACCOUNT_TYPE_LOAN)
+            )
+        });
+        calls[1] = IPersonalAccount.Call({
+            target: address(fxrp),
+            value: 0,
+            data: abi.encodeCall(fxrp.transfer, (subaccount, loanAmount))
+        });
+        calls[2] = IPersonalAccount.Call({
+            target: subaccount,
+            value: messagingFee,
+            data: abi.encodeCall(
+                ILoanSubaccount.executeLayerZeroCall, (composeMsg, _canonicalLoanOptions())
+            )
+        });
+
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: personalAccount,
+            nonce: controller.getNonce(personalAccount),
+            initCode: "",
+            callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
+            accountGasLimits: 0,
+            preVerificationGas: 0,
+            gasFees: 0,
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF), uint8(1), uint64(0), abi.encode(userOp)
+        );
+        // the minted FXRP arrives at the controller with the memo, exactly as in production
+        fxrp.mint(address(controller), loanAmount);
+        vm.deal(assetManagerFxrpMock, messagingFee);
+        vm.prank(assetManagerFxrpMock);
+        controller.handleMintedFAssets{value: messagingFee}(
+            bytes32("dmAtomicLoan"), xrplOwner, loanAmount, 0, memoData, executor, ""
+        );
+
+        // created, funded, drained into the bridge - nothing remains at any intermediate stop
+        assertNotEq(subaccount.code.length, 0);
+        assertEq(fxrp.balanceOf(personalAccount), 0);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertEq(fxrp.balanceOf(address(fxrpOft)), loanAmount);
         (,,,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
         assertEq(composeMsgSent, composeMsg);
     }
@@ -1663,5 +1749,22 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function _personalAccountOf(string memory _xrplOwner) private view returns (address) {
         return controller.getPersonalAccount(_xrplOwner);
+    }
+
+    /// Canonical type-3 options as a production loan instruction would carry them: destination
+    /// lzReceive gas plus index-0 lzCompose gas. Byte-identical to LayerZero's
+    /// `OptionsBuilder.newOptions().addExecutorLzReceiveOption(100_000, 0)
+    /// .addExecutorLzComposeOption(0, 200_000, 0)` (not imported: it pulls two extra packages),
+    /// validated against the live FXRP adapter's `quoteSend`.
+    function _canonicalLoanOptions() private pure returns (bytes memory) {
+        // worker id 1 = executor; option type 1 = lzReceive (gas), type 3 = lzCompose
+        // (index ++ gas); each option is [workerId ++ size ++ optionType ++ payload]
+        bytes memory lzReceivePayload = abi.encodePacked(uint128(100_000));
+        bytes memory lzComposePayload = abi.encodePacked(uint16(0), uint128(200_000));
+        return abi.encodePacked(
+            uint16(3),
+            uint8(1), uint16(1 + lzReceivePayload.length), uint8(1), lzReceivePayload,
+            uint8(1), uint16(1 + lzComposePayload.length), uint8(3), lzComposePayload
+        );
     }
 }
