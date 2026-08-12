@@ -86,15 +86,28 @@ Assets can strand at the subaccount whenever a cross-chain flow breaks part-way.
   The FXRP OFT is a lock/unlock adapter (`approvalRequired() == true`), so the sweep approves it for the exact amount and resets the allowance to zero afterwards. It reverts while the controller is paused: the forward sweep is the incident-containment surface (an OFT or route compromise is stopped by pausers immediately, without waiting out the timelock), while `sweepRedeem` stays available during a pause so assets can always exit toward the user. `setLoanBridgeSettings` validates that the OFT wraps the FXRP token, shares its decimals, and that its live peer for the destination endpoint equals the **pinned expected peer** exactly — existence alone would accept a wrong route — so misconfiguration fails at the timelocked call, not in the field; explicit zeros clear the settings, which disables the forward sweep until reconfigured. Every `sweepToLoan` re-checks the OFT's live peer against the pinned one before locking FXRP, so a peer mutation on the OFT after configuration fails sweeps closed instead of routing to an unknown remote OApp. No compose message is attached: this is cleanup, moving the assets across, and depositing them into the lending protocol is a separate forward move on the destination side. FXRP and the OFT both use 6 decimals, so nothing is lost to shared-decimal dust and `minAmountLD` equals the full amount.
 
 Which direction to sweep is the **executor's operational decision**, deliberately not enforced
-on-chain. External review proposed a parent-stamped direction lifecycle, so a third party could
-not front-run the executor and trigger the opposite direction first; it was built, evaluated,
-and rejected as a product decision. Both destinations are the user's own — the parent's XRPL
+on-chain. A parent-stamped direction lifecycle — so a third party could not front-run the
+executor and trigger the opposite direction first — was considered, built, evaluated, and
+rejected as a product decision. Both destinations are the user's own — the parent's XRPL
 owner backward, this account's own cross-chain address forward — so a front-run cannot lose or
 redirect funds; it is linear-cost vandalism, a real fee paid per attempt for no gain. The
 lifecycle, in exchange, would have blocked the backward exit for its timeout duration (even
 during a pause), delayed legitimate direction changes, and added a standing state machine to
 custody code. The invariant that matters holds without it: anyone may move the assets, nobody
 may redirect them.
+
+The same openness is an **accepted risk** against the loan instruction: a stranded balance awaiting a parent-signed `executeLayerZeroCall` can be swept
+out from under it, aborting the requested loan action. Two bounds keep this accepted rather
+than fixed. First, the **primary loan flow is atomic and immune**: one `handleMintedFAssets`
+transaction mints the FXRP, funds the Personal Account, creates the subaccount, transfers, and
+bridges with the payload — the subaccount balance never exists outside that transaction, so
+there is nothing to front-run (a test covers the five steps in one transaction). Only
+*retry-after-strand* is exposed: FXRP already sitting on the subaccount while the user signs a
+fresh instruction. Second, in that window the funds can only be pushed to the user's own
+addresses. The griefing asymmetry is real, though — the attacker pays a fixed executor or
+messaging fee while `sweepRedeem` imposes a re-mint round trip whose cost is proportional to
+the balance — so this is accepted, not solved; revisit (the direction lifecycle is the known
+remedy) if such griefing is ever observed in practice.
 
 ### Recovery to the parent Personal Account
 
@@ -170,9 +183,11 @@ differs is authorization and inputs:
   options only for plain sends (`SEND`, 100k destination gas). For composed sends
   (`SEND_AND_CALL`) its enforced options are empty — which does not block the send (verified
   against the live adapter) but leaves the caller responsible for the complete options:
-  destination `lzReceive` gas plus `lzCompose` gas. Should the adapter's owner later enforce
-  msgType-2 options, they get prepended to the caller's — worst case a small overpay, never a
-  break.
+  destination `lzReceive` gas plus `lzCompose` gas. The options must be **type-3**: once the
+  adapter's owner enforces msgType-2 options, LayerZero's `combineOptions` prepends them to the
+  caller's and *rejects* non-type-3 caller options outright, and the combined enforced gas
+  raises the quoted fee (unboundedly in principle — the quote is taken before sending, so a
+  raised fee fails the instruction rather than draining anything).
 - The quoted messaging fee is forwarded and any excess `msg.value` returns to the caller (the
   parent), same as the sweeps.
 
@@ -181,6 +196,27 @@ address on the loan chain — which must implement `ILayerZeroComposer` (the Eth
 implementation of this same account). Token credit and compose execution are separate steps in
 LayerZero: if `lzCompose` fails, the FXRP is already on the destination account, and the
 compose call can be retried permissionlessly through the endpoint.
+
+**Release gates for the Ethereum-side account** (none of this is enforceable from the Flare
+side):
+
+- **`lzCompose` must authenticate the composed payload.** Anyone holding FXRP can call the
+  public OFT directly, name another user's subaccount as recipient, and attach an arbitrary
+  borrow/disbursement payload. The canonical OFT encoding records the *source-side caller* as
+  `composeFrom` (`OFTMsgCodec.encode`), so the receiver must verify **all** of: `msg.sender`
+  is the LayerZero `EndpointV2`, `_from` is the pinned FXRP OFT, the source EID is Flare, and
+  `composeFrom == address(this)` — only the account itself calls `send` on the Flare side, and
+  it has the same address on both chains, so the check is self-referential. The credited
+  amount must be read from the codec (`amountLD`), never from the payload; the executor and
+  any extra data are untrusted. A payload failing these checks is ignored (the tokens are
+  simply a donation); it must not execute.
+- **Idle FXRP on the Ethereum account needs an exit.** Plain `sweepToLoan` cleanup delivers
+  FXRP with no payload by design, and a failed `lzCompose` leaves credited FXRP behind — the
+  Ethereum side must offer cleanup for that state under the same invariant (anyone may move,
+  nobody may redirect), because the Flare side cannot instruct on it (`executeLayerZeroCall`
+  needs a non-zero Flare-side balance).
+- **A real Endpoint/OFT compose-delivery simulation** belongs to the Ethereum-side test suite
+  as a regression test; the live-adapter verification recorded here is evidence, not a test.
 
 ## Who may choose a destination
 
@@ -194,5 +230,5 @@ Caveats specific to the EVM disbursement option, for the front end rather than t
 ## Open design items (decide with the asset-moving methods)
 
 - **Stuck RLUSD on the Ethereum side has only one move: repay.** RLUSD arriving there is indistinguishable between an inbound repayment and a borrow whose outbound leg failed, and a borrow may name an arbitrary destination, so a permissionless "send onward" would let anyone redirect a repayment to a third party. Repay is safe under every interpretation, since its target is the account's own position. The cost is that a failed disbursement silently unwinds the loan the user asked for. A bounded retry is possible if the account records the pending disbursement (amount plus destination) at borrow time, so the retry is driven by stored state rather than calldata; that is likely the same state needed to prevent double borrows when a LayerZero message stalls. Product decision, to settle before the Ethereum-side work.
-- **TODO, parked: grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above), so a pause held across FDC's attestation window combined with an unavailable executor recreates the executor dependency. The designed fix: relays stay parent-only until the request's `lastUnderlyingTimestamp` (read per-request from `redemptionRequestInfo`, no stored clock) is a grace period past, then open to anyone — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable. Implemented and tested, then parked; decide later whether the compound-failure scenario justifies it.
+- **TODO, parked: grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above), so a pause held across FDC's attestation window combined with an unavailable executor recreates the executor dependency. The designed fix: relays stay parent-only until the request's `lastUnderlyingTimestamp` (read per-request from `redemptionRequestInfo`, no stored clock) is a grace period past, then open to anyone — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable. Implemented and tested, then parked; **must be decided before the first production deployment**, rather than left to incident-time executor availability.
 - ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.
