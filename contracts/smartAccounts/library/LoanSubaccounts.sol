@@ -28,6 +28,9 @@ library LoanSubaccounts {
         address fxrpOft;
         /// @notice LayerZero endpoint id of the loan chain.
         uint32 destinationEid;
+        /// @notice The expected remote OApp (peer) on the loan chain, pinned so that a later
+        /// peer mutation on the OFT fails sweeps closed instead of routing to an unknown OApp.
+        bytes32 destinationPeer;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -52,23 +55,27 @@ library LoanSubaccounts {
 
     function setLoanBridgeSettings(
         address _fxrpOft,
-        uint32 _destinationEid
+        uint32 _destinationEid,
+        bytes32 _destinationPeer
     )
         internal
     {
         State storage state = getState();
-        if (_fxrpOft == address(0) && _destinationEid == 0) {
+        if (_fxrpOft == address(0) && _destinationEid == 0 && _destinationPeer == bytes32(0)) {
             // explicit clear: disables the forward sweep until reconfigured
             delete state.fxrpOft;
             delete state.destinationEid;
-            emit ILoanSubaccountsFacet.LoanBridgeSettingsSet(address(0), 0);
+            delete state.destinationPeer;
+            emit ILoanSubaccountsFacet.LoanBridgeSettingsSet(address(0), 0, bytes32(0));
             return;
         }
         require(_fxrpOft.code.length > 0, ILoanSubaccountsFacet.InvalidFxrpOft());
         require(_destinationEid != 0, ILoanSubaccountsFacet.InvalidDestinationEid());
+        require(_destinationPeer != bytes32(0), ILoanSubaccountsFacet.InvalidDestinationPeer());
         // the OFT must actually be an FXRP bridge: it must wrap the FXRP token, share its
         // decimals (sweeps send with minAmountLD == amountLD, so any shared-decimal dust would
-        // make them revert), and have a peer wired for the destination chain
+        // make them revert), and its peer for the destination chain must be exactly the intended
+        // remote OApp - existence alone would accept a wrong route
         address fxrp = address(ContractRegistry.getAssetManagerFXRP().fAsset());
         require(IOFT(_fxrpOft).token() == fxrp, ILoanSubaccountsFacet.InvalidFxrpOft());
         require(
@@ -76,12 +83,13 @@ library LoanSubaccounts {
             ILoanSubaccountsFacet.InvalidFxrpOft()
         );
         require(
-            IOAppCore(_fxrpOft).peers(_destinationEid) != bytes32(0),
-            ILoanSubaccountsFacet.InvalidDestinationEid()
+            IOAppCore(_fxrpOft).peers(_destinationEid) == _destinationPeer,
+            ILoanSubaccountsFacet.InvalidDestinationPeer()
         );
         state.fxrpOft = _fxrpOft;
         state.destinationEid = _destinationEid;
-        emit ILoanSubaccountsFacet.LoanBridgeSettingsSet(_fxrpOft, _destinationEid);
+        state.destinationPeer = _destinationPeer;
+        emit ILoanSubaccountsFacet.LoanBridgeSettingsSet(_fxrpOft, _destinationEid, _destinationPeer);
     }
 
     function getOrCreateLoanSubaccount(
@@ -183,10 +191,10 @@ library LoanSubaccounts {
 
     function getLoanBridgeSettings()
         internal view
-        returns (address _fxrpOft, uint32 _destinationEid)
+        returns (address _fxrpOft, uint32 _destinationEid, bytes32 _destinationPeer)
     {
         State storage state = getState();
-        return (state.fxrpOft, state.destinationEid);
+        return (state.fxrpOft, state.destinationEid, state.destinationPeer);
     }
 
     function getLoanSubaccountImplementation(

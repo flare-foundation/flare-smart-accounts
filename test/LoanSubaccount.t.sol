@@ -70,6 +70,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     MockOft private fxrpOft;
     uint32 private destinationEid;
     uint256 private messagingFee;
+    bytes32 private destinationPeer;
 
     // base facets are CREATE2-deployed with a fixed salt, so they are deployed once and shared
     IDiamond.FacetCut[] private baseCuts;
@@ -95,6 +96,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         destinationEid = 30101; // Ethereum
         messagingFee = 0.01 ether;
         fxrpOft = new MockOft(fxrp, messagingFee);
+        destinationPeer = bytes32(uint256(uint160(address(fxrpOft))));
 
         // deploy the personal account implementation (required by the controller init)
         personalAccountImplementation = address(new PersonalAccount());
@@ -977,17 +979,17 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
     }
 
     function testSetLoanBridgeSettingsRevertInvalidValues() public {
         vm.prank(governance);
         vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
-        controller.setLoanBridgeSettings(makeAddr("notAContract"), destinationEid);
+        controller.setLoanBridgeSettings(makeAddr("notAContract"), destinationEid, destinationPeer);
 
         vm.prank(governance);
         vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationEid.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), 0);
+        controller.setLoanBridgeSettings(address(fxrpOft), 0, destinationPeer);
     }
 
     function testSetLoanBridgeSettingsRevertWrongToken() public {
@@ -998,25 +1000,59 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(governance);
         vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
-        controller.setLoanBridgeSettings(address(otherOft), destinationEid);
+        controller.setLoanBridgeSettings(address(otherOft), destinationEid, bytes32(uint256(1)));
     }
 
     function testSetLoanBridgeSettingsRevertWrongSharedDecimals() public {
         // shared decimals below the token's would truncate to dust; sweeps send with
         // minAmountLD == amountLD, so such an OFT must be rejected up front
-        fxrpOft.setPeer(destinationEid, bytes32(uint256(1)));
+        fxrpOft.setPeer(destinationEid, destinationPeer);
         fxrpOft.setSharedDecimals(4);
 
         vm.prank(governance);
         vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
     }
 
     function testSetLoanBridgeSettingsRevertNoPeerForDestination() public {
         // no peer wired for the destination endpoint: the route does not exist
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationEid.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+    }
+
+    function testSetLoanBridgeSettingsRevertPeerMismatch() public {
+        // the live peer must equal the intended remote OApp exactly; existence is not identity
+        fxrpOft.setPeer(destinationEid, bytes32(uint256(0xbad)));
+
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+
+        // a zero expected peer is never valid
+        fxrpOft.setPeer(destinationEid, destinationPeer);
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, bytes32(0));
+    }
+
+    function testSweepToLoanRevertWhenPeerMutatedAfterConfiguration() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        // the OFT owner changes the peer after governance pinned it: the sweep must fail
+        // closed instead of delivering the locked FXRP to an unknown remote OApp
+        fxrpOft.setPeer(destinationEid, bytes32(uint256(0xbad)));
+
+        vm.deal(address(this), messagingFee);
+        vm.expectRevert(ILoanSubaccount.WrongDestinationPeer.selector);
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+
+        // restoring the pinned peer restores the sweep
+        fxrpOft.setPeer(destinationEid, destinationPeer);
+        uint256 amount = ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        assertEq(amount, 100e6);
     }
 
     function testClearLoanBridgeSettingsDisablesForwardSweep() public {
@@ -1026,11 +1062,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // clearing with explicit zeros disables the forward sweep until reconfigured
         vm.prank(governance);
-        controller.setLoanBridgeSettings(address(0), 0);
+        controller.setLoanBridgeSettings(address(0), 0, bytes32(0));
 
-        (address oft, uint32 eid) = controller.getLoanBridgeSettings();
+        (address oft, uint32 eid, bytes32 peer) = controller.getLoanBridgeSettings();
         assertEq(oft, address(0));
         assertEq(eid, 0);
+        assertEq(peer, bytes32(0));
 
         vm.deal(address(this), messagingFee);
         vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
@@ -1249,9 +1286,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function _configureLoanBridge() private {
-        fxrpOft.setPeer(destinationEid, bytes32(uint256(uint160(address(fxrpOft)))));
+        fxrpOft.setPeer(destinationEid, destinationPeer);
         vm.prank(governance);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
     }
 
     function _deploySubaccount() private returns (LoanSubaccount) {

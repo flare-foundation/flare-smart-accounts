@@ -37,7 +37,8 @@ interface ILoanSubaccountsFacet {
      */
     event LoanBridgeSettingsSet(
         address fxrpOft,
-        uint32 destinationEid
+        uint32 destinationEid,
+        bytes32 destinationPeer
     );
 
     /**
@@ -71,6 +72,11 @@ interface ILoanSubaccountsFacet {
      * @notice Reverts if the destination endpoint id is invalid.
      */
     error InvalidDestinationEid();
+
+    /**
+     * @notice Reverts if the destination peer is invalid, or does not match the OFT's live peer.
+     */
+    error InvalidDestinationPeer();
 
     /**
      * @notice Reverts if no implementation is configured for the subaccount type.
@@ -144,8 +150,10 @@ interface ILoanSubaccountsFacet {
      * sweep cannot choose where the assets are bridged to.
      * @return _fxrpOft The FXRP OFT used to bridge FXRP.
      * @return _destinationEid The LayerZero endpoint id of the loan chain.
+     * @return _destinationPeer The expected remote OApp (peer) on the loan chain. Pinned so a
+     * peer mutation on the OFT after configuration fails sweeps closed.
      */
     function getLoanBridgeSettings()
         external view
-        returns (address _fxrpOft, uint32 _destinationEid);
+        returns (address _fxrpOft, uint32 _destinationEid, bytes32 _destinationPeer);
 }

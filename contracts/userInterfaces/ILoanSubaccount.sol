@@ -108,6 +108,12 @@ interface ILoanSubaccount {
     error LoanBridgeNotConfigured();
 
     /**
+     * @notice Reverts if the OFT's live peer for the destination chain no longer matches the
+     * peer pinned in the controller's bridge settings.
+     */
+    error WrongDestinationPeer();
+
+    /**
      * @notice Reverts if the sent value does not cover the LayerZero messaging fee.
      * @param messagingFee The required messaging fee.
      */

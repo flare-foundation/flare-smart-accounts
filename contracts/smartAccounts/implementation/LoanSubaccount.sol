@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
+import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
 import {
@@ -121,9 +122,15 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         // always exit toward the user's own XRPL address
         require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
 
-        (address fxrpOft, uint32 destinationEid) =
+        (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
             ILoanSubaccountsFacet(controllerAddress).getLoanBridgeSettings();
         require(fxrpOft != address(0) && destinationEid != 0, LoanBridgeNotConfigured());
+        // a peer mutation on the OFT after configuration must fail closed, not deliver the
+        // locked FXRP to an unknown remote OApp
+        require(
+            IOAppCore(fxrpOft).peers(destinationEid) == destinationPeer,
+            WrongDestinationPeer()
+        );
 
         // this account has the same address on every chain, so it is its own destination;
         // the OFT enforces its own execution options, and FXRP and the OFT share 6 decimals,
