@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The LayerZero call (`executeLayerZeroCall`) and the sweep-direction lifecycle are still to come.
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The LayerZero call (`executeLayerZeroCall`) is still to come; a sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
 
 ## Typed subaccounts
 
@@ -85,6 +85,17 @@ Assets can strand at the subaccount whenever a cross-chain flow breaks part-way.
 
   The FXRP OFT is a lock/unlock adapter (`approvalRequired() == true`), so the sweep approves it for the exact amount and resets the allowance to zero afterwards. It reverts while the controller is paused: the forward sweep is the incident-containment surface (an OFT or route compromise is stopped by pausers immediately, without waiting out the timelock), while `sweepRedeem` stays available during a pause so assets can always exit toward the user. `setLoanBridgeSettings` validates that the OFT wraps the FXRP token, shares its decimals, and that its live peer for the destination endpoint equals the **pinned expected peer** exactly — existence alone would accept a wrong route — so misconfiguration fails at the timelocked call, not in the field; explicit zeros clear the settings, which disables the forward sweep until reconfigured. Every `sweepToLoan` re-checks the OFT's live peer against the pinned one before locking FXRP, so a peer mutation on the OFT after configuration fails sweeps closed instead of routing to an unknown remote OApp. No compose message is attached: this is cleanup, moving the assets across, and depositing them into the lending protocol is a separate forward move on the destination side. FXRP and the OFT both use 6 decimals, so nothing is lost to shared-decimal dust and `minAmountLD` equals the full amount.
 
+Which direction to sweep is the **executor's operational decision**, deliberately not enforced
+on-chain. External review proposed a parent-stamped direction lifecycle, so a third party could
+not front-run the executor and trigger the opposite direction first; it was built, evaluated,
+and rejected as a product decision. Both destinations are the user's own — the parent's XRPL
+owner backward, this account's own cross-chain address forward — so a front-run cannot lose or
+redirect funds; it is linear-cost vandalism, a real fee paid per attempt for no gain. The
+lifecycle, in exchange, would have blocked the backward exit for its timeout duration (even
+during a pause), delayed legitimate direction changes, and added a standing state machine to
+custody code. The invariant that matters holds without it: anyone may move the assets, nobody
+may redirect them.
+
 ### Recovery to the parent Personal Account
 
 Not everything that can land on a subaccount is FXRP. A FAssets redemption default pays the
@@ -132,8 +143,7 @@ Two costs of the relay to be aware of:
   a pause held open across FDC's attestation window, combined with an unavailable executor,
   recreates the executor dependency the relay removes. Operationally: unpause promptly, and keep
   executor monitoring alive during incidents. A grace-period public fallback on the relay (open
-  to anyone once a request is old enough) is planned together with the sweep-direction
-  lifecycle, which introduces the same timeout machinery.
+  to anyone once a request is old enough) is designed but parked — see the open items.
 
 Integration note: the XRP proof's `proofOwner` must be requested as zero or **this account's
 address** — the asset manager sees this account as the caller, not the parent or any relayer.
@@ -142,7 +152,7 @@ address** — the asset manager sees this account as the caller, not the parent 
 
 Two different rules apply, and the difference is the signature:
 
-- **Instruction destinations are the user's choice.** A borrow names where the RLUSD goes, and the XRPL signature authorizes it. Two forms are supported: an XRPL address reached over Wormhole, or a plain EVM address (typically an exchange deposit address), which the Ethereum-side account transfers to directly. The EVM address is not validated — it is the user's money and the user's choice, the same way the XRPL target is already allowed to be an arbitrary account. The destination kind and the address travel inside the `executeLayerZeroCall` payload, which this repo treats as opaque; the payload format needs a destination-kind tag, to be pinned down when the LayerZero schema is frozen.
+- **Instruction destinations are the user's choice.** A borrow names where the RLUSD goes, and the XRPL signature authorizes it. Two forms are supported: an XRPL address reached over Wormhole, or a plain EVM address (typically an exchange deposit address), which the Ethereum-side account transfers to directly. The EVM address is not validated — it is the user's money and the user's choice, the same way the XRPL target is already allowed to be an arbitrary account. The destination kind and the address travel inside the `executeLayerZeroCall` payload, which this repo treats as opaque; the payload format needs a destination-kind tag, to be pinned down when the LayerZero schema is frozen. Both forms will be supported, but the first version implements only the EVM/ERC-20 form — Wormhole has not provided specs yet, so the XRPL form is reserved by the destination-kind tag and added later.
 - **Cleanup destinations are never the caller's choice.** Sweeps are permissionless and carry no signature, so their destination must be derived on-chain from `parentPersonalAccount` — never from caller-supplied data. Anyone may move stranded assets; nobody may redirect them.
 
 Caveats specific to the EVM disbursement option, for the front end rather than the contracts: RLUSD is a regulated stablecoin and can freeze or blacklist addresses, so a transfer can revert and turn a borrow into a stuck disbursement; some exchange deposit addresses are not credited when the sender is a contract, or need a tag an ERC-20 transfer cannot carry; and a wrong address is unrecoverable, since nothing is checked.
@@ -150,5 +160,5 @@ Caveats specific to the EVM disbursement option, for the front end rather than t
 ## Open design items (decide with the asset-moving methods)
 
 - **Stuck RLUSD on the Ethereum side has only one move: repay.** RLUSD arriving there is indistinguishable between an inbound repayment and a borrow whose outbound leg failed, and a borrow may name an arbitrary destination, so a permissionless "send onward" would let anyone redirect a repayment to a third party. Repay is safe under every interpretation, since its target is the account's own position. The cost is that a failed disbursement silently unwinds the loan the user asked for. A bounded retry is possible if the account records the pending disbursement (amount plus destination) at borrow time, so the retry is driven by stored state rather than calldata; that is likely the same state needed to prevent double borrows when a LayerZero message stalls. Product decision, to settle before the Ethereum-side work.
-- **Grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above). When the sweep-direction lifecycle introduces its timeout machinery, extend it to the relays: parent-only until a request is old enough, public afterwards — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable.
+- **TODO, parked: grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above), so a pause held across FDC's attestation window combined with an unavailable executor recreates the executor dependency. The designed fix: relays stay parent-only until the request's `lastUnderlyingTimestamp` (read per-request from `redemptionRequestInfo`, no stored clock) is a grace period past, then open to anyone — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable. Implemented and tested, then parked; decide later whether the compound-failure scenario justifies it.
 - ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.
