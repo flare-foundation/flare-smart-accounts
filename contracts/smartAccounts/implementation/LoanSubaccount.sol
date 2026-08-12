@@ -14,6 +14,7 @@ import {
     SUBACCOUNT_TYPE_NONE
 } from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
+import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 
 /**
@@ -105,6 +106,11 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
         _amount = fxrp.balanceOf(address(this));
         require(_amount > 0, NothingToSweep());
+
+        // the forward sweep is the incident-containment surface: pausing the controller stops
+        // bridging out immediately, while the backward sweep stays available so assets can
+        // always exit toward the user's own XRPL address
+        require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
 
         (address fxrpOft, uint32 destinationEid) =
             ILoanSubaccountsFacet(controllerAddress).getLoanBridgeSettings();

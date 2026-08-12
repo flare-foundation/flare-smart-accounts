@@ -22,6 +22,9 @@ interface IILoanSubaccountsFacet is ILoanSubaccountsFacet {
 
     /**
      * @notice Sets the settings used to bridge FXRP to the loan chain.
+     * @dev Validates that the OFT wraps the FXRP token, shares its decimals, and has a peer
+     * wired for the destination endpoint. Passing zero for both arguments clears the settings,
+     * which disables the forward sweep until reconfigured.
      * @param _fxrpOft The FXRP OFT used to bridge FXRP.
      * @param _destinationEid The LayerZero endpoint id of the loan chain.
      * Can only be called by the owner (timelocked).

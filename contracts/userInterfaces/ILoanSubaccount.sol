@@ -126,7 +126,8 @@ interface ILoanSubaccount {
      * which is identical on every chain because it is CREATE2-derived from inputs that do not vary
      * by chain, and the destination chain and OFT come from the controller, so the caller cannot
      * choose where the assets go. `msg.value` must cover the LayerZero messaging fee; any excess
-     * is returned to the caller.
+     * is returned to the caller. Reverts while the controller is paused: the forward sweep is the
+     * incident-containment surface, while {sweepRedeem} stays available during a pause.
      * @return _amount Amount of FXRP bridged.
      */
     function sweepToLoan()

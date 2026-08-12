@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
+import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {IOFT} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
+import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
 import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
 import {
@@ -52,9 +56,29 @@ library LoanSubaccounts {
     )
         internal
     {
+        State storage state = getState();
+        if (_fxrpOft == address(0) && _destinationEid == 0) {
+            // explicit clear: disables the forward sweep until reconfigured
+            delete state.fxrpOft;
+            delete state.destinationEid;
+            emit ILoanSubaccountsFacet.LoanBridgeSettingsSet(address(0), 0);
+            return;
+        }
         require(_fxrpOft.code.length > 0, ILoanSubaccountsFacet.InvalidFxrpOft());
         require(_destinationEid != 0, ILoanSubaccountsFacet.InvalidDestinationEid());
-        State storage state = getState();
+        // the OFT must actually be an FXRP bridge: it must wrap the FXRP token, share its
+        // decimals (sweeps send with minAmountLD == amountLD, so any shared-decimal dust would
+        // make them revert), and have a peer wired for the destination chain
+        address fxrp = address(ContractRegistry.getAssetManagerFXRP().fAsset());
+        require(IOFT(_fxrpOft).token() == fxrp, ILoanSubaccountsFacet.InvalidFxrpOft());
+        require(
+            IOFT(_fxrpOft).sharedDecimals() == IERC20Metadata(fxrp).decimals(),
+            ILoanSubaccountsFacet.InvalidFxrpOft()
+        );
+        require(
+            IOAppCore(_fxrpOft).peers(_destinationEid) != bytes32(0),
+            ILoanSubaccountsFacet.InvalidDestinationEid()
+        );
         state.fxrpOft = _fxrpOft;
         state.destinationEid = _destinationEid;
         emit ILoanSubaccountsFacet.LoanBridgeSettingsSet(_fxrpOft, _destinationEid);

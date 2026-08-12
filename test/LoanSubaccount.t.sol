@@ -746,6 +746,77 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         controller.setLoanBridgeSettings(address(fxrpOft), 0);
     }
 
+    function testSetLoanBridgeSettingsRevertWrongToken() public {
+        // an OFT wrapping some other token must be rejected, even with a peer wired
+        MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
+        MockOft otherOft = new MockOft(otherToken, messagingFee);
+        otherOft.setPeer(destinationEid, bytes32(uint256(1)));
+
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        controller.setLoanBridgeSettings(address(otherOft), destinationEid);
+    }
+
+    function testSetLoanBridgeSettingsRevertWrongSharedDecimals() public {
+        // shared decimals below the token's would truncate to dust; sweeps send with
+        // minAmountLD == amountLD, so such an OFT must be rejected up front
+        fxrpOft.setPeer(destinationEid, bytes32(uint256(1)));
+        fxrpOft.setSharedDecimals(4);
+
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
+    }
+
+    function testSetLoanBridgeSettingsRevertNoPeerForDestination() public {
+        // no peer wired for the destination endpoint: the route does not exist
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationEid.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
+    }
+
+    function testClearLoanBridgeSettingsDisablesForwardSweep() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        // clearing with explicit zeros disables the forward sweep until reconfigured
+        vm.prank(governance);
+        controller.setLoanBridgeSettings(address(0), 0);
+
+        (address oft, uint32 eid) = controller.getLoanBridgeSettings();
+        assertEq(oft, address(0));
+        assertEq(eid, 0);
+
+        vm.deal(address(this), messagingFee);
+        vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+    }
+
+    function testSweepToLoanRevertWhenPausedButSweepRedeemStillWorks() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+        _mockRedeemAmount(100e6);
+
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+        vm.prank(governance);
+        controller.addPausers(pausers);
+        vm.prank(pauser);
+        controller.pause();
+
+        // the forward sweep is blocked while paused: it is the incident-containment surface
+        vm.deal(address(this), messagingFee + executorFee);
+        vm.expectRevert(IPauseFacet.IsPaused.selector);
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+
+        // the backward sweep stays available, so assets can always exit toward the user
+        (uint256 amount,) = ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(amount, 100e6);
+    }
+
     function testGetLoanSubaccountDifferentOwnersGetDifferentAddresses() public view {
         address subaccount1 = controller.getLoanSubaccount(
             "rOwner1",
@@ -935,6 +1006,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function _configureLoanBridge() private {
+        fxrpOft.setPeer(destinationEid, bytes32(uint256(uint160(address(fxrpOft)))));
         vm.prank(governance);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
     }

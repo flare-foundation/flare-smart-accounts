@@ -25,6 +25,8 @@ contract MockOft is IOFT {
 
     IERC20 public immutable underlyingToken;
     uint256 public nativeFee;
+    uint8 public sharedDecimalsValue = 6;
+    mapping(uint32 eid => bytes32 peer) public peers;
 
     SendParam public lastSendParam;
     uint256 public lastValue;
@@ -37,6 +39,14 @@ contract MockOft is IOFT {
 
     function setNativeFee(uint256 _nativeFee) external {
         nativeFee = _nativeFee;
+    }
+
+    function setSharedDecimals(uint8 _sharedDecimals) external {
+        sharedDecimalsValue = _sharedDecimals;
+    }
+
+    function setPeer(uint32 _eid, bytes32 _peer) external {
+        peers[_eid] = _peer;
     }
 
     /// @inheritdoc IOFT
@@ -81,6 +91,15 @@ contract MockOft is IOFT {
     }
 
     /// @inheritdoc IOFT
+    /// @dev Defaults to 6, matching FXRP, so nothing is lost to shared-decimal dust.
+    function sharedDecimals()
+        external view
+        returns (uint8)
+    {
+        return sharedDecimalsValue;
+    }
+
+    /// @inheritdoc IOFT
     function quoteOFT(
         SendParam calldata _sendParam
     )
@@ -101,15 +120,6 @@ contract MockOft is IOFT {
         returns (bool)
     {
         return true;
-    }
-
-    /// @inheritdoc IOFT
-    /// @dev Matches FXRP: 6 decimals, so nothing is lost to shared-decimal dust.
-    function sharedDecimals()
-        external pure
-        returns (uint8)
-    {
-        return 6;
     }
 
     /// @inheritdoc IOFT
