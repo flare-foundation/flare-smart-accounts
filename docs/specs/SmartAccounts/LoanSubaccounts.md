@@ -85,6 +85,27 @@ Assets can strand at the subaccount whenever a cross-chain flow breaks part-way.
 
   The FXRP OFT is a lock/unlock adapter (`approvalRequired() == true`), so the sweep approves it for the exact amount and resets the allowance to zero afterwards. It reverts while the controller is paused: the forward sweep is the incident-containment surface (an OFT or route compromise is stopped by pausers immediately, without waiting out the timelock), while `sweepRedeem` stays available during a pause so assets can always exit toward the user. `setLoanBridgeSettings` validates that the OFT wraps the FXRP token, shares its decimals, and has a peer wired for the destination endpoint — misconfiguration fails at the timelocked call, not in the field — and accepts explicit zeros to clear the settings, which disables the forward sweep until reconfigured. No compose message is attached: this is cleanup, moving the assets across, and depositing them into the lending protocol is a separate forward move on the destination side. FXRP and the OFT both use 6 decimals, so nothing is lost to shared-decimal dust and `minAmountLD` equals the full amount.
 
+### Recovery to the parent Personal Account
+
+Not everything that can land on a subaccount is FXRP. A FAssets redemption default pays the
+redeemer — this account — in vault collateral (a stablecoin) and/or pool WNat; bridges and
+redemptions can refund native; an instruction can send value to the predicted address before the
+subaccount exists (the account has a `receive()` for native). None of those assets have a bridge
+or redeem exit here, so two permissionless recovery methods push them to the parent Personal
+Account, which accepts any asset and is fully under the user's control:
+
+- **`sweepToParent(token)`** — recovers a token balance. The caller chooses only *which* asset,
+  never where it goes. FXRP is special-cased: only a residual **below** the FAssets minimum
+  redemption amount can be recovered this way (the complement of `sweepRedeem`, which requires
+  at least the minimum), so recovery cannot become a third direction for the loan asset.
+- **`sweepNativeToParent()`** — recovers the native balance.
+
+Both stay available while the controller is paused: the parent is the safest possible
+destination, and an incident should not trap assets. A redemption default itself needs no relay
+on this account — the protocol executor is appointed in the redeem call, and FAssets lets an
+appointed executor trigger the default directly on the asset manager; only the payout lands here
+and is then recovered.
+
 ## Who may choose a destination
 
 Two different rules apply, and the difference is the signature:
@@ -97,4 +118,4 @@ Caveats specific to the EVM disbursement option, for the front end rather than t
 ## Open design items (decide with the asset-moving methods)
 
 - **Stuck RLUSD on the Ethereum side has only one move: repay.** RLUSD arriving there is indistinguishable between an inbound repayment and a borrow whose outbound leg failed, and a borrow may name an arbitrary destination, so a permissionless "send onward" would let anyone redirect a repayment to a third party. Repay is safe under every interpretation, since its target is the account's own position. The cost is that a failed disbursement silently unwinds the loan the user asked for. A bounded retry is possible if the account records the pending disbursement (amount plus destination) at borrow time, so the retry is driven by stored state rather than calldata; that is likely the same state needed to prevent double borrows when a LayerZero message stalls. Product decision, to settle before the Ethereum-side work.
-- **Native payability.** The implementation currently has no `receive()`, so plain FLR transfers revert (the proxy's payable fallback delegates to the implementation, which rejects empty calldata). Payability is an implementation-level property — it can be added later via a beacon upgrade with no effect on CREATE2 addresses. Decide as a pair when the sweeps are implemented: either stay non-payable *and* verify the redeem/LayerZero integrations never refund native to the account (a refund against a non-payable account reverts the whole flow), or add `receive()` *plus* a permissionless `sweepNative()` that pushes the balance to the parent Personal Account (fixed destination, consistent with the sweep philosophy). Lean: payable + exit, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.
+- ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.

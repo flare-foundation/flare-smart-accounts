@@ -25,14 +25,37 @@ interface ILoanSubaccount {
      * @param amount Amount of FXRP requested for redemption (the whole balance).
      * @param redeemedAmount Amount of FXRP actually redeemed, which can be less.
      * @param executor Executor used for the redemption.
-     * @param executorFee Executor fee paid with the redemption.
+     * @param valueForwarded Native value actually forwarded with the redemption (covers the
+     * executor fee).
      */
     event FXrpRedeemed(
         address indexed parentPersonalAccount,
         uint256 amount,
         uint256 redeemedAmount,
         address executor,
-        uint256 executorFee
+        uint256 valueForwarded
+    );
+
+    /**
+     * @notice Emitted when a token balance is recovered to the parent Personal Account.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param token The recovered token.
+     * @param amount The recovered amount.
+     */
+    event TokenSweptToParent(
+        address indexed parentPersonalAccount,
+        address indexed token,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when the native balance is recovered to the parent Personal Account.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param amount The recovered amount.
+     */
+    event NativeSweptToParent(
+        address indexed parentPersonalAccount,
+        uint256 amount
     );
 
     /**
@@ -98,6 +121,32 @@ interface ILoanSubaccount {
     error RefundFailed();
 
     /**
+     * @notice Reverts if the FXRP balance is below the FAssets minimum redemption amount.
+     * Such a residual is recovered with {sweepToParent} instead.
+     * @param minimumRedeemAmount The FAssets minimum redemption amount.
+     */
+    error BelowMinimumRedemption(
+        uint256 minimumRedeemAmount
+    );
+
+    /**
+     * @notice Reverts if FXRP at or above the FAssets minimum redemption amount is passed to
+     * {sweepToParent}. Such a balance moves only through {sweepRedeem} or {sweepToLoan}, so
+     * recovery to the parent cannot become a third direction for the loan asset.
+     * @param balance The FXRP balance.
+     * @param minimumRedeemAmount The FAssets minimum redemption amount.
+     */
+    error FXrpAboveMinimumRedemption(
+        uint256 balance,
+        uint256 minimumRedeemAmount
+    );
+
+    /**
+     * @notice Reverts if the native balance could not be sent to the parent Personal Account.
+     */
+    error NativeSweepFailed();
+
+    /**
      * @notice Reverts if the sent value does not cover the executor fee.
      * @param executorFee The required executor fee.
      */
@@ -112,6 +161,8 @@ interface ILoanSubaccount {
      * caller, and the executor comes from the controller, so the call takes no parameters at all.
      * Redeems the whole balance rather than whole lots, so nothing is left stranded; FAssets can
      * still redeem less than requested, in which case the remainder stays and can be swept again.
+     * Balances below the FAssets minimum redemption amount revert and are recovered with
+     * {sweepToParent} instead.
      * @return _amount Amount of FXRP requested for redemption (the whole balance).
      * @return _redeemedAmount Amount of FXRP actually redeemed.
      */
@@ -132,6 +183,35 @@ interface ILoanSubaccount {
      */
     function sweepToLoan()
         external payable
+        returns (uint256 _amount);
+
+    /**
+     * @notice Recovers a token balance to the parent Personal Account.
+     * @dev Permissionless. The destination is fixed to the parent, so the caller chooses only
+     * which asset to recover, never where it goes. This is how assets with no other exit leave
+     * the account — for example vault collateral or WNat paid out here by a FAssets redemption
+     * default, or an FXRP residual below the FAssets minimum redemption amount. FXRP at or above
+     * that minimum is rejected: the loan asset moves only through {sweepRedeem} or {sweepToLoan}.
+     * Stays available while the controller is paused, since the parent is the safest possible
+     * destination.
+     * @param _token The token to recover.
+     * @return _amount The recovered amount.
+     */
+    function sweepToParent(
+        address _token
+    )
+        external
+        returns (uint256 _amount);
+
+    /**
+     * @notice Recovers the native balance to the parent Personal Account.
+     * @dev Permissionless, fixed destination; see {sweepToParent}. Native can arrive here as a
+     * bridge or redemption refund, or by being sent with an instruction before the subaccount
+     * was deployed.
+     * @return _amount The recovered amount.
+     */
+    function sweepNativeToParent()
+        external
         returns (uint256 _amount);
 
     /**

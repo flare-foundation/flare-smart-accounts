@@ -21,6 +21,7 @@ import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccou
 import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
 import {MockLoanSubaccount} from "../contracts/mock/MockLoanSubaccount.sol";
 import {MockOft} from "../contracts/mock/MockOft.sol";
+import {MockAssetManager} from "../contracts/mock/MockAssetManager.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
 import {
@@ -64,6 +65,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     uint256 private collateralReservationFee;
     string private xrplOwner;
     MintableERC20 private fxrp;
+    MockAssetManager private mockAssetManager;
     MockOft private fxrpOft;
     uint32 private destinationEid;
     uint256 private messagingFee;
@@ -82,12 +84,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         defaultInstructionFee = 1_000_000;
 
         contractRegistryMock = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
-        assetManagerFxrpMock = makeAddr("AssetManagerFXRP");
         agent = makeAddr("agent");
         agentInfo.status = AgentInfo.Status.NORMAL;
         collateralReservationFee = 123;
         xrplOwner = "rExampleXrplAddress";
         fxrp = new MintableERC20("F-XRPL", "fXRP", 6);
+        mockAssetManager = new MockAssetManager(fxrp);
+        assetManagerFxrpMock = address(mockAssetManager);
         destinationEid = 30101; // Ethereum
         messagingFee = 0.01 ether;
         fxrpOft = new MockOft(fxrp, messagingFee);
@@ -111,7 +114,6 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         _mockGetAgentInfo(agent, agentInfo);
         _mockCollateralReservationFee(collateralReservationFee);
         _mockReserveCollateral(22);
-        _mockGetFAsset();
         _mockGetDirectMintingExecutorFeeUBA(0);
         _addAgentVault(controller);
     }
@@ -237,7 +239,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             created
         );
 
-        LoanSubaccount subaccount = LoanSubaccount(created);
+        LoanSubaccount subaccount = LoanSubaccount(payable(created));
         assertEq(subaccount.controllerAddress(), address(controller));
         assertEq(subaccount.parentPersonalAccount(), personalAccount);
         assertEq(subaccount.subaccountType(), SUBACCOUNT_TYPE_LOAN);
@@ -268,7 +270,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             SUBACCOUNT_TYPE_LOAN
         );
 
-        assertEq(LoanSubaccount(created).parentPersonalAccount(), personalAccount);
+        assertEq(LoanSubaccount(payable(created)).parentPersonalAccount(), personalAccount);
     }
 
     function testCreateLoanSubaccountRevertPersonalAccountNotDeployed() public {
@@ -299,10 +301,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // distinct account per type, both functional, each resolving its own implementation
         assertNotEq(futureTypeSubaccount, loanTypeSubaccount);
-        assertEq(LoanSubaccount(futureTypeSubaccount).parentPersonalAccount(), personalAccount);
-        assertEq(LoanSubaccount(futureTypeSubaccount).subaccountType(), futureType);
-        assertEq(LoanSubaccount(futureTypeSubaccount).implementation(), futureImpl);
-        assertEq(LoanSubaccount(loanTypeSubaccount).implementation(), address(loanImpl));
+        assertEq(LoanSubaccount(payable(futureTypeSubaccount)).parentPersonalAccount(), personalAccount);
+        assertEq(LoanSubaccount(payable(futureTypeSubaccount)).subaccountType(), futureType);
+        assertEq(LoanSubaccount(payable(futureTypeSubaccount)).implementation(), futureImpl);
+        assertEq(LoanSubaccount(payable(loanTypeSubaccount)).implementation(), address(loanImpl));
     }
 
     function testCreateLoanSubaccountRevertInvalidSubaccountType() public {
@@ -436,11 +438,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // the subaccount was created by the instruction and is owned by the caller's PA
         assertNotEq(subaccount.code.length, 0);
-        assertEq(LoanSubaccount(subaccount).parentPersonalAccount(), personalAccount);
+        assertEq(LoanSubaccount(payable(subaccount)).parentPersonalAccount(), personalAccount);
 
         // the restricted method ran, called by the parent Personal Account
-        assertEq(MockLoanSubaccount(subaccount).pingCount(), 1);
-        assertEq(MockLoanSubaccount(subaccount).lastPingCaller(), personalAccount);
+        assertEq(MockLoanSubaccount(payable(subaccount)).pingCount(), 1);
+        assertEq(MockLoanSubaccount(payable(subaccount)).lastPingCaller(), personalAccount);
     }
 
     function testDispatchForwardsValueToSubaccount() public {
@@ -475,7 +477,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         _executeUserOpWithValue(personalAccount, calls, bytes32("dmLoanValue"), value);
 
-        assertEq(MockLoanSubaccount(subaccount).lastPingValue(), value);
+        assertEq(MockLoanSubaccount(payable(subaccount)).lastPingValue(), value);
         assertEq(subaccount.balance, value);
     }
 
@@ -560,11 +562,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // neither a random caller nor the controller may drive the subaccount directly
         vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
-        MockLoanSubaccount(subaccount).ping();
+        MockLoanSubaccount(payable(subaccount)).ping();
 
         vm.prank(address(controller));
         vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
-        MockLoanSubaccount(subaccount).ping();
+        MockLoanSubaccount(payable(subaccount)).ping();
     }
 
     //
@@ -575,9 +577,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createSubaccountFor(xrplOwner);
         // deliberately not a whole number of lots: the sweep must leave nothing behind
         uint256 balance = 250e6;
-        uint256 redeemedAmount = 250e6;
         fxrp.mint(subaccount, balance);
-        _mockRedeemAmount(redeemedAmount);
+        mockAssetManager.setMinimumRedeemAmountUBA(10e6);
 
         // redeemed to the parent Personal Account's XRPL owner, with the controller's executor
         vm.expectCall(
@@ -588,30 +589,41 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             )
         );
         vm.deal(address(this), executorFee);
+        vm.expectEmit();
+        emit ILoanSubaccount.FXrpRedeemed(
+            _personalAccountOf(xrplOwner), balance, balance, executor, executorFee
+        );
         (uint256 amount, uint256 redeemed) =
             ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
 
         assertEq(amount, balance);
-        assertEq(redeemed, redeemedAmount);
+        assertEq(redeemed, balance);
+        // the whole balance was burned by the redemption: nothing left stranded here
+        assertEq(fxrp.balanceOf(subaccount), 0);
     }
 
     function testSweepRedeemPartialRedemptionLeavesRemainderOnTheAccount() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         fxrp.mint(subaccount, 250e6);
         // FAssets can redeem less than requested when tickets run out; the rest stays here
-        _mockRedeemAmount(100e6);
+        mockAssetManager.setMaxRedeemPerCall(100e6);
 
-        vm.deal(address(this), executorFee);
+        vm.deal(address(this), 2 * executorFee);
         (uint256 amount, uint256 redeemed) =
             ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
 
         assertEq(amount, 250e6);
         assertEq(redeemed, 100e6);
+        // only the redeemed part was burned; the remainder can be swept again
+        assertEq(fxrp.balanceOf(subaccount), 150e6);
+        (amount, redeemed) = ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(amount, 150e6);
+        assertEq(redeemed, 100e6);
+        assertEq(fxrp.balanceOf(subaccount), 50e6);
     }
 
     function testSweepRedeemCanBeCalledByAnyone() public {
         address subaccount = _createSubaccountFor(xrplOwner);
-        _mockRedeemAmount(100e6);
         fxrp.mint(subaccount, 100e6);
 
         address caller = makeAddr("randomCaller");
@@ -630,6 +642,20 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
     }
 
+    function testSweepRedeemRevertBelowMinimumRedemption() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        mockAssetManager.setMinimumRedeemAmountUBA(100e6);
+        fxrp.mint(subaccount, 100e6 - 1);
+
+        // a residual FAssets cannot redeem is rejected with a clear error instead of reverting
+        // opaquely inside the asset manager; it leaves through sweepToParent instead
+        vm.deal(address(this), executorFee);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccount.BelowMinimumRedemption.selector, 100e6)
+        );
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+    }
+
     function testSweepRedeemRevertInsufficientFundsForRedeem() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -639,6 +665,131 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             abi.encodeWithSelector(ILoanSubaccount.InsufficientFundsForRedeem.selector, executorFee)
         );
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee - 1}();
+    }
+
+    //
+    // step 4: recovery to the parent Personal Account
+    //
+
+    function testSweepToParentRecoversDefaultPayoutTokens() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address parent = _personalAccountOf(xrplOwner);
+        // stand-in for vault collateral or WNat paid out by a FAssets redemption default
+        MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
+        stableCoin.mint(subaccount, 500e18);
+
+        vm.expectEmit();
+        emit ILoanSubaccount.TokenSweptToParent(parent, address(stableCoin), 500e18);
+        uint256 amount = ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
+
+        assertEq(amount, 500e18);
+        assertEq(stableCoin.balanceOf(subaccount), 0);
+        assertEq(stableCoin.balanceOf(parent), 500e18);
+    }
+
+    function testSweepToParentRecoversFxrpResidualBelowMinimum() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address parent = _personalAccountOf(xrplOwner);
+        mockAssetManager.setMinimumRedeemAmountUBA(100e6);
+        fxrp.mint(subaccount, 100e6 - 1);
+
+        uint256 amount = ILoanSubaccount(subaccount).sweepToParent(address(fxrp));
+
+        assertEq(amount, 100e6 - 1);
+        assertEq(fxrp.balanceOf(parent), 100e6 - 1);
+    }
+
+    function testSweepToParentRevertFxrpAboveMinimum() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        mockAssetManager.setMinimumRedeemAmountUBA(100e6);
+        fxrp.mint(subaccount, 250e6);
+
+        // a redeemable FXRP balance moves only through sweepRedeem or sweepToLoan, so recovery
+        // to the parent cannot become a third direction for the loan asset
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanSubaccount.FXrpAboveMinimumRedemption.selector, 250e6, 100e6
+            )
+        );
+        ILoanSubaccount(subaccount).sweepToParent(address(fxrp));
+    }
+
+    function testSweepToParentRevertNothingToSweep() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
+
+        vm.expectRevert(ILoanSubaccount.NothingToSweep.selector);
+        ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
+    }
+
+    function testSweepNativeToParentRecoversNative() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address parent = _personalAccountOf(xrplOwner);
+
+        // the subaccount accepts plain native transfers (bridge or redemption refunds)
+        vm.deal(address(this), 1 ether);
+        // solhint-disable-next-line avoid-low-level-calls
+        (bool ok, ) = subaccount.call{value: 1 ether}("");
+        assertTrue(ok);
+
+        vm.expectEmit();
+        emit ILoanSubaccount.NativeSweptToParent(parent, 1 ether);
+        uint256 amount = ILoanSubaccount(subaccount).sweepNativeToParent();
+
+        assertEq(amount, 1 ether);
+        assertEq(subaccount.balance, 0);
+        assertEq(parent.balance, 1 ether);
+    }
+
+    function testSweepNativeToParentRevertNothingToSweep() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+
+        vm.expectRevert(ILoanSubaccount.NothingToSweep.selector);
+        ILoanSubaccount(subaccount).sweepNativeToParent();
+    }
+
+    function testSweepToParentWorksWhilePaused() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address parent = _personalAccountOf(xrplOwner);
+        MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
+        stableCoin.mint(subaccount, 500e18);
+        vm.deal(subaccount, 1 ether);
+
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+        vm.prank(governance);
+        controller.addPausers(pausers);
+        vm.prank(pauser);
+        controller.pause();
+
+        // recovery to the parent is the safest destination, so it stays available in an incident
+        ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
+        ILoanSubaccount(subaccount).sweepNativeToParent();
+        assertEq(stableCoin.balanceOf(parent), 500e18);
+        assertEq(parent.balance, 1 ether);
+    }
+
+    function testValueSentToUncreatedSubaccountIsRecoverableAfterCreation() public {
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        address subaccount = controller.getLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+
+        // an instruction that carries value to a not-yet-created subaccount does not revert:
+        // the call to the codeless address succeeds and the value lands there
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: subaccount,
+            value: 1 ether,
+            data: abi.encodeWithSignature("ping()")
+        });
+        _executeUserOpWithValue(personalAccount, calls, bytes32("dmLoanValueLost"), 1 ether);
+        assertEq(subaccount.code.length, 0);
+        assertEq(subaccount.balance, 1 ether);
+
+        // once the subaccount is created, the native recovery path brings it to the parent
+        controller.createLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        ILoanSubaccount(subaccount).sweepNativeToParent();
+        assertEq(personalAccount.balance, 1 ether);
     }
 
     //
@@ -797,7 +948,6 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createSubaccountFor(xrplOwner);
         fxrp.mint(subaccount, 100e6);
         _configureLoanBridge();
-        _mockRedeemAmount(100e6);
 
         address pauser = makeAddr("pauser");
         address[] memory pausers = new address[](1);
@@ -1011,21 +1161,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid);
     }
 
-    function _mockRedeemAmount(uint256 _redeemedAmount) private {
-        vm.mockCall(
-            assetManagerFxrpMock,
-            abi.encodeWithSelector(IRedeemExtended.redeemAmount.selector),
-            abi.encode(_redeemedAmount)
-        );
-    }
-
     function _deploySubaccount() private returns (LoanSubaccount) {
         LoanSubaccountProxy proxy = new LoanSubaccountProxy(
             address(controller),
             parentPersonalAccount,
             SUBACCOUNT_TYPE_LOAN
         );
-        return LoanSubaccount(address(proxy));
+        return LoanSubaccount(payable(address(proxy)));
     }
 
     function _mockGetContractAddressByHash(string memory _name, address _addr) private {
@@ -1063,19 +1205,15 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function _mockGetFAsset() private {
-        vm.mockCall(
-            assetManagerFxrpMock,
-            abi.encodeWithSelector(IAssetManager.fAsset.selector),
-            abi.encode(address(fxrp))
-        );
-    }
-
     function _mockGetDirectMintingExecutorFeeUBA(uint256 _fee) private {
         vm.mockCall(
             assetManagerFxrpMock,
             abi.encodeWithSignature("getDirectMintingExecutorFeeUBA()"),
             abi.encode(_fee)
         );
+    }
+
+    function _personalAccountOf(string memory _xrplOwner) private view returns (address) {
+        return controller.getPersonalAccount(_xrplOwner);
     }
 }

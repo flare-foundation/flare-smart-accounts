@@ -48,6 +48,9 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         controllerAddress = EMPTY_ADDRESS;
     }
 
+    /// @dev Native can arrive as a bridge or redemption refund; {sweepNativeToParent} is its exit.
+    receive() external payable {}
+
     /// @inheritdoc ILoanSubaccount
     function initialize(
         address _controllerAddress,
@@ -77,6 +80,9 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
         _amount = assetManager.fAsset().balanceOf(address(this));
         require(_amount > 0, NothingToRedeem());
+        // a residual below the FAssets minimum cannot be redeemed; it leaves via sweepToParent
+        uint256 minimumRedeemAmount = assetManager.minimumRedeemAmountUBA();
+        require(_amount >= minimumRedeemAmount, BelowMinimumRedemption(minimumRedeemAmount));
 
         (address payable executor, uint256 executorFee) =
             IExecutorsFacet(controllerAddress).getExecutorInfo();
@@ -93,7 +99,7 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
             _amount,
             _redeemedAmount,
             executor,
-            executorFee
+            msg.value
         );
     }
 
@@ -156,6 +162,54 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         }
 
         emit FXrpSweptToLoan(parentPersonalAccount, _amount, destinationEid, receipt.guid);
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function sweepToParent(
+        address _token
+    )
+        external
+        nonReentrant
+        returns (uint256 _amount)
+    {
+        IERC20 token = IERC20(_token);
+        _amount = token.balanceOf(address(this));
+        require(_amount > 0, NothingToSweep());
+
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
+        if (_token == address(assetManager.fAsset())) {
+            // the loan asset has its own two directions (sweepRedeem, sweepToLoan); recovery to
+            // the parent only takes residuals that FAssets cannot redeem, so this method cannot
+            // become a third direction for it
+            uint256 minimumRedeemAmount = assetManager.minimumRedeemAmountUBA();
+            require(
+                _amount < minimumRedeemAmount,
+                FXrpAboveMinimumRedemption(_amount, minimumRedeemAmount)
+            );
+        }
+
+        token.safeTransfer(parentPersonalAccount, _amount);
+        emit TokenSweptToParent(parentPersonalAccount, _token, _amount);
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function sweepNativeToParent()
+        external
+        nonReentrant
+        returns (uint256 _amount)
+    {
+        _amount = address(this).balance;
+        require(_amount > 0, NothingToSweep());
+
+        // false positive (arbitrary-send-eth): the recipient is the parent Personal Account,
+        // fixed at initialization and part of this account's CREATE2 address — not caller-chosen;
+        // the parent accepts native (it has a receive function)
+        // slither-disable-start arbitrary-send-eth
+        // solhint-disable-next-line avoid-low-level-calls
+        (bool success, ) = parentPersonalAccount.call{value: _amount}("");
+        // slither-disable-end arbitrary-send-eth
+        require(success, NativeSweepFailed());
+        emit NativeSweptToParent(parentPersonalAccount, _amount);
     }
 
     /// @inheritdoc ILoanSubaccount
