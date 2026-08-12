@@ -788,6 +788,67 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(mockAssetManager.lastDefaultRequestId(), requestId);
     }
 
+    function testRedemptionDefaultRelayViaXrplInstruction() public {
+        // the full production path: XRPL memo -> controller -> parent PA -> relay
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
+        mockAssetManager.setDefaultPayout(stableCoin, 500e18);
+
+        fxrp.mint(subaccount, 100e6);
+        vm.deal(address(this), executorFee);
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        uint256 requestId = mockAssetManager.lastRequestId();
+
+        IReferencedPaymentNonexistence.Proof memory proof;
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: subaccount,
+            value: 0,
+            data: abi.encodeCall(ILoanSubaccount.redemptionPaymentDefault, (proof, requestId))
+        });
+        _executeUserOp(personalAccount, calls, bytes32("dmDefaultRelay"));
+
+        assertEq(mockAssetManager.lastDefaultCaller(), subaccount);
+        assertEq(mockAssetManager.lastDefaultRequestId(), requestId);
+        assertEq(stableCoin.balanceOf(subaccount), 500e18);
+    }
+
+    function testRedemptionDefaultRelayIsUnreachableWhilePaused() public {
+        // characterizes the documented liveness limitation: the parent acts only through the
+        // instruction pipeline, which is notPaused, so a paused controller blocks the user's
+        // relay; the appointed executor's direct asset manager path is unaffected by the pause
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+
+        fxrp.mint(subaccount, 100e6);
+        vm.deal(address(this), executorFee);
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        uint256 requestId = mockAssetManager.lastRequestId();
+
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+        vm.prank(governance);
+        controller.addPausers(pausers);
+        vm.prank(pauser);
+        controller.pause();
+
+        IReferencedPaymentNonexistence.Proof memory proof;
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: subaccount,
+            value: 0,
+            data: abi.encodeCall(ILoanSubaccount.redemptionPaymentDefault, (proof, requestId))
+        });
+        _executeUserOpExpectRevert(
+            personalAccount,
+            calls,
+            bytes32("dmDefaultPaused"),
+            abi.encodeWithSelector(IPauseFacet.IsPaused.selector)
+        );
+    }
+
     function testXrpRedemptionDefaultRelayRevertOnlyParent() public {
         address subaccount = _createSubaccountFor(xrplOwner);
 

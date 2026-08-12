@@ -119,6 +119,22 @@ FAssets intends: the user (through the parent account), the appointed executor (
 asset manager), and the agent (directly). The payout always lands on this account, where
 `sweepToParent` recovers it.
 
+Two costs of the relay to be aware of:
+
+- **Any relayed default forfeits the funded executor fee** — including a parent-driven one. The
+  asset manager pays the fee only when the executor is its *immediate caller*, and through the
+  relay the caller is always this account, so the fee funded at `sweepRedeem` time is burned.
+  Relaying is the user's fallback, not the cheap path; the executor calling the asset manager
+  directly is.
+- **The relay is unreachable while the controller is paused**: the parent only acts through the
+  instruction pipeline, which is `notPaused`. The appointed executor's direct path is unaffected
+  by our pause, so defaults still have their normal operational trigger during an incident — but
+  a pause held open across FDC's attestation window, combined with an unavailable executor,
+  recreates the executor dependency the relay removes. Operationally: unpause promptly, and keep
+  executor monitoring alive during incidents. A grace-period public fallback on the relay (open
+  to anyone once a request is old enough) is planned together with the sweep-direction
+  lifecycle, which introduces the same timeout machinery.
+
 Integration note: the XRP proof's `proofOwner` must be requested as zero or **this account's
 address** — the asset manager sees this account as the caller, not the parent or any relayer.
 
@@ -134,4 +150,5 @@ Caveats specific to the EVM disbursement option, for the front end rather than t
 ## Open design items (decide with the asset-moving methods)
 
 - **Stuck RLUSD on the Ethereum side has only one move: repay.** RLUSD arriving there is indistinguishable between an inbound repayment and a borrow whose outbound leg failed, and a borrow may name an arbitrary destination, so a permissionless "send onward" would let anyone redirect a repayment to a third party. Repay is safe under every interpretation, since its target is the account's own position. The cost is that a failed disbursement silently unwinds the loan the user asked for. A bounded retry is possible if the account records the pending disbursement (amount plus destination) at borrow time, so the retry is driven by stored state rather than calldata; that is likely the same state needed to prevent double borrows when a LayerZero message stalls. Product decision, to settle before the Ethereum-side work.
+- **Grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above). When the sweep-direction lifecycle introduces its timeout machinery, extend it to the relays: parent-only until a request is old enough, public afterwards — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable.
 - ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.

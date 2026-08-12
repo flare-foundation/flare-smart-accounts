@@ -226,7 +226,10 @@ interface ILoanSubaccount {
      * appointed executor: with it, the parties able to default are exactly the three FAssets
      * intends - the user (through the parent account), the appointed executor and the agent. The
      * default payout (vault collateral and/or pool WNat) is always paid to this account, where
-     * {sweepToParent} recovers it.
+     * {sweepToParent} recovers it. Note that any relayed default forfeits the funded executor
+     * fee (the asset manager pays it only to the executor as immediate caller), and that the
+     * relay is unreachable while the controller is paused, since the parent acts through the
+     * paused instruction pipeline; the executor's direct path is unaffected by the pause.
      * @param _proof Proof that the agent's payment did not happen in the required window.
      * @param _redemptionRequestId The redemption request id.
      */
