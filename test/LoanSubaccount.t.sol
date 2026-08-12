@@ -5,6 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IRedeemExtended} from "flare-periphery/src/flare/IRedeemExtended.sol";
+import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
+import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
@@ -715,6 +717,43 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         uint256 recovered = ILoanSubaccount(subaccount).sweepToParent(address(fxrp));
         assertEq(recovered, 50e6);
         assertEq(fxrp.balanceOf(parent), 50e6);
+    }
+
+    function testRedemptionDefaultRelayIsPermissionlessAndPayoutRecoverable() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address parent = _personalAccountOf(xrplOwner);
+        // the default pays the redeemer in vault collateral / pool WNat, modeled by the mock
+        MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
+        mockAssetManager.setDefaultPayout(stableCoin, 500e18);
+
+        // anyone can relay the default: FAssets validates the proof, and the relay makes this
+        // account - the recorded redeemer - the caller, so it does not depend on the executor
+        IReferencedPaymentNonexistence.Proof memory proof;
+        address caller = makeAddr("randomCaller");
+        vm.expectEmit();
+        emit ILoanSubaccount.RedemptionPaymentDefaulted(42);
+        vm.prank(caller);
+        ILoanSubaccount(subaccount).redemptionPaymentDefault(proof, 42);
+
+        assertEq(mockAssetManager.lastDefaultCaller(), subaccount);
+        assertEq(mockAssetManager.lastDefaultRequestId(), 42);
+        assertEq(stableCoin.balanceOf(subaccount), 500e18);
+
+        // the payout then leaves through the fixed-destination recovery
+        ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
+        assertEq(stableCoin.balanceOf(parent), 500e18);
+    }
+
+    function testXrpRedemptionDefaultRelay() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+
+        IXRPPaymentNonexistence.Proof memory proof;
+        vm.expectEmit();
+        emit ILoanSubaccount.XrpRedemptionPaymentDefaulted(7);
+        ILoanSubaccount(subaccount).xrpRedemptionPaymentDefault(proof, 7);
+
+        assertEq(mockAssetManager.lastDefaultCaller(), subaccount);
+        assertEq(mockAssetManager.lastDefaultRequestId(), 7);
     }
 
     function testImplementationContractRejectsNativeAndRecovery() public {

@@ -101,10 +101,15 @@ Account, which accepts any asset and is fully under the user's control:
 - **`sweepNativeToParent()`** — recovers the native balance.
 
 Both stay available while the controller is paused: the parent is the safest possible
-destination, and an incident should not trap assets. A redemption default itself needs no relay
-on this account — the protocol executor is appointed in the redeem call, and FAssets lets an
-appointed executor trigger the default directly on the asset manager; only the payout lands here
-and is then recovered.
+destination, and an incident should not trap assets.
+
+When the agent does not pay the underlying XRP for a redemption, someone must trigger the
+**redemption payment default**. FAssets permits that only from the recorded redeemer (this
+account), the appointed executor, or the agent owner — so relying on the appointed executor
+alone would make it a single point of failure. The account therefore exposes permissionless
+relays, `redemptionPaymentDefault` and `xrpRedemptionPaymentDefault` (mirroring
+`FAssetRedeemerAccount`): FAssets validates the proof and the request, the relay acts as the
+redeemer, and the payout always lands on this account, where `sweepToParent` recovers it.
 
 ## Who may choose a destination
 

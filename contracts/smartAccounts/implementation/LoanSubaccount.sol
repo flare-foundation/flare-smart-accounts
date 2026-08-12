@@ -3,6 +3,8 @@ pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
+import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
+import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -172,6 +174,30 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         }
 
         emit FXrpSweptToLoan(parentPersonalAccount, _amount, destinationEid, receipt.guid);
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function redemptionPaymentDefault(
+        IReferencedPaymentNonexistence.Proof calldata _proof,
+        uint256 _redemptionRequestId
+    )
+        external
+    {
+        // permissionless relay: FAssets validates the proof and the request, this account is the
+        // recorded redeemer, and the payout always lands here, where sweepToParent recovers it
+        ContractRegistry.getAssetManagerFXRP().redemptionPaymentDefault(_proof, _redemptionRequestId);
+        emit RedemptionPaymentDefaulted(_redemptionRequestId);
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function xrpRedemptionPaymentDefault(
+        IXRPPaymentNonexistence.Proof calldata _proof,
+        uint256 _redemptionRequestId
+    )
+        external
+    {
+        ContractRegistry.getAssetManagerFXRP().xrpRedemptionPaymentDefault(_proof, _redemptionRequestId);
+        emit XrpRedemptionPaymentDefaulted(_redemptionRequestId);
     }
 
     /// @inheritdoc ILoanSubaccount

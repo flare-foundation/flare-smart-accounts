@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
+import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
+import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
+
 /**
  * @title ILoanSubaccount
  * @notice User interface for deterministic loan subaccounts.
@@ -56,6 +59,22 @@ interface ILoanSubaccount {
     event NativeSweptToParent(
         address indexed parentPersonalAccount,
         uint256 amount
+    );
+
+    /**
+     * @notice Emitted when a redemption payment default is relayed to the asset manager.
+     * @param redemptionRequestId The redemption request that defaulted.
+     */
+    event RedemptionPaymentDefaulted(
+        uint256 redemptionRequestId
+    );
+
+    /**
+     * @notice Emitted when an XRP redemption payment default is relayed to the asset manager.
+     * @param redemptionRequestId The redemption request that defaulted.
+     */
+    event XrpRedemptionPaymentDefaulted(
+        uint256 redemptionRequestId
     );
 
     /**
@@ -196,6 +215,33 @@ interface ILoanSubaccount {
     function sweepToLoan()
         external payable
         returns (uint256 _amount);
+
+    /**
+     * @notice Relays a redemption payment default to the asset manager, when the agent did not
+     * pay the underlying XRP for a redemption this account created.
+     * @dev Permissionless: FAssets validates the proof and the request, this account is the
+     * recorded redeemer on whose behalf the relay acts, and the default payout (vault collateral
+     * and/or pool WNat) is always paid to this account, where {sweepToParent} recovers it. The
+     * relay exists so a default does not depend on the availability of the appointed executor.
+     * @param _proof Proof that the agent's payment did not happen in the required window.
+     * @param _redemptionRequestId The redemption request id.
+     */
+    function redemptionPaymentDefault(
+        IReferencedPaymentNonexistence.Proof calldata _proof,
+        uint256 _redemptionRequestId
+    )
+        external;
+
+    /**
+     * @notice Same as {redemptionPaymentDefault}, for the XRP payment-nonexistence proof type.
+     * @param _proof Proof that the agent's payment did not happen in the required window.
+     * @param _redemptionRequestId The redemption request id.
+     */
+    function xrpRedemptionPaymentDefault(
+        IXRPPaymentNonexistence.Proof calldata _proof,
+        uint256 _redemptionRequestId
+    )
+        external;
 
     /**
      * @notice Recovers a token balance to the parent Personal Account.
