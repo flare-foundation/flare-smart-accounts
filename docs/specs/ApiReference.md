@@ -8,6 +8,7 @@ Pointer index from each module to its public interfaces. All user-facing types a
 
 - [`IMasterAccountController`](../../contracts/userInterfaces/IMasterAccountController.sol) — union of every facet interface plus the standard `IDiamondCut`, `IDiamondLoupe`, `IERC165`, `IERC173`. Use this when typing a reference to the deployed diamond.
 - [`IPersonalAccount`](../../contracts/userInterfaces/IPersonalAccount.sol) — public ABI of a deployed Personal Account proxy (the `xrplOwner()`, `controllerAddress()`, `implementation()` views, `executeUserOp` entry point, plus all the events and errors).
+- [`ILoanSubaccount`](../../contracts/userInterfaces/ILoanSubaccount.sol) — public ABI of a deployed loan subaccount proxy (the views, the permissionless sweeps `sweepRedeem`/`sweepToLoan`/`sweepToParent`/`sweepNativeToParent`, and the parent-only `executeLayerZeroCall` and redemption-default relays, plus all the events and errors).
 
 ### Per-facet
 

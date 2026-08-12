@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The LayerZero call (`executeLayerZeroCall`) is still to come; a sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place; the Ethereum-side account (`lzCompose`) is still to come. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
 
 ## Typed subaccounts
 
@@ -147,6 +147,40 @@ Two costs of the relay to be aware of:
 
 Integration note: the XRP proof's `proofOwner` must be requested as zero or **this account's
 address** — the asset manager sees this account as the caller, not the parent or any relayer.
+
+## The loan instruction: `executeLayerZeroCall`
+
+The forward moves come in two shapes. `sweepToLoan` is cleanup: permissionless, no payload, the
+assets just cross over. `executeLayerZeroCall(composeMsg, extraOptions)` is the **loan action**:
+it bridges the whole idle FXRP balance to this account's own address on the loan chain with a
+**composed call** attached, which the destination-side account executes on arrival (deposit as
+collateral, borrow, disburse). Both share one bridging core in the contract, so the guards are
+identical by construction: a paused controller blocks it, the governance-pinned settings name
+the route, and the OFT's live peer is re-checked against the pinned one on every call. What
+differs is authorization and inputs:
+
+- **Restricted to the parent Personal Account** (`onlyParent`): the payload names a loan action
+  and, for a borrow, a user-chosen destination for the proceeds, so it must carry the user's
+  XRPL signature. This is the instruction-destination rule below, in contract form.
+- **The payload (`composeMsg`) is opaque** to this repo. Its schema belongs to the
+  destination-side account's `lzCompose` and is pinned down with the Ethereum-side work. It
+  must be non-empty: an empty payload would degrade to a plain transfer, which is
+  `sweepToLoan`'s job.
+- **The execution options (`extraOptions`) are caller-supplied.** The FXRP OFT adapter enforces
+  options only for plain sends (`SEND`, 100k destination gas). For composed sends
+  (`SEND_AND_CALL`) its enforced options are empty — which does not block the send (verified
+  against the live adapter) but leaves the caller responsible for the complete options:
+  destination `lzReceive` gas plus `lzCompose` gas. Should the adapter's owner later enforce
+  msgType-2 options, they get prepended to the caller's — worst case a small overpay, never a
+  break.
+- The quoted messaging fee is forwarded and any excess `msg.value` returns to the caller (the
+  parent), same as the sweeps.
+
+Destination-side mechanics: the compose receiver is the token recipient — this account's own
+address on the loan chain — which must implement `ILayerZeroComposer` (the Ethereum-side
+implementation of this same account). Token credit and compose execution are separate steps in
+LayerZero: if `lzCompose` fails, the FXRP is already on the destination account, and the
+compose call can be retried permissionlessly through the endpoint.
 
 ## Who may choose a destination
 

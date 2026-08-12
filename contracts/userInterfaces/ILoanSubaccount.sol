@@ -92,6 +92,22 @@ interface ILoanSubaccount {
     );
 
     /**
+     * @notice Emitted when idle FXRP is bridged to the loan chain with a composed call attached.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param amount Amount of FXRP bridged.
+     * @param destinationEid The LayerZero endpoint id it was bridged to.
+     * @param guid The LayerZero message id.
+     * @param composeMsgHash keccak256 of the composed payload.
+     */
+    event LayerZeroCallExecuted(
+        address indexed parentPersonalAccount,
+        uint256 amount,
+        uint32 destinationEid,
+        bytes32 guid,
+        bytes32 composeMsgHash
+    );
+
+    /**
      * @notice Reverts if the contract is already initialized.
      */
     error AlreadyInitialized();
@@ -186,6 +202,12 @@ interface ILoanSubaccount {
     );
 
     /**
+     * @notice Reverts if the composed payload passed to {executeLayerZeroCall} is empty. A
+     * plain transfer without a call is {sweepToLoan}'s job.
+     */
+    error EmptyComposeMessage();
+
+    /**
      * @notice Redeems all idle FXRP to the parent Personal Account's XRPL owner.
      * @dev Permissionless: this is the backward cleanup move, so anyone may trigger it. The
      * destination is read on-chain from the parent Personal Account and cannot be chosen by the
@@ -213,6 +235,31 @@ interface ILoanSubaccount {
      * @return _amount Amount of FXRP bridged.
      */
     function sweepToLoan()
+        external payable
+        returns (uint256 _amount);
+
+    /**
+     * @notice Bridges all idle FXRP to this account's address on the loan chain with a composed
+     * call attached, which the destination-side account executes on arrival — the loan action.
+     * @dev Restricted to the parent Personal Account: unlike the parameterless sweeps this is
+     * not cleanup — the payload names a loan action and, for a borrow, a user-chosen destination
+     * for the proceeds — so it must carry the user's XRPL signature. The payload is opaque to
+     * this contract; its schema is defined by the destination-side account's `lzCompose`. The
+     * bridge destination is this account's own cross-chain address, exactly as in {sweepToLoan},
+     * and all of {sweepToLoan}'s guards apply: reverts while the controller is paused, requires
+     * configured bridge settings, and re-checks the OFT's live peer against the pinned one.
+     * The FXRP OFT adapter enforces execution options only for plain sends, so `_extraOptions`
+     * must carry both the destination `lzReceive` gas and the `lzCompose` gas. `msg.value` must
+     * cover the LayerZero messaging fee; any excess is returned to the caller (the parent).
+     * @param _composeMsg The composed payload, delivered to this account's `lzCompose` on the
+     * destination chain. Must not be empty.
+     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
+     * @return _amount Amount of FXRP bridged.
+     */
+    function executeLayerZeroCall(
+        bytes calldata _composeMsg,
+        bytes calldata _extraOptions
+    )
         external payable
         returns (uint256 _amount);
 

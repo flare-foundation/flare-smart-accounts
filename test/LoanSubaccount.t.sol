@@ -1237,6 +1237,184 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(amount, 100e6);
     }
 
+    //
+    // the loan instruction: executeLayerZeroCall (forward move with a composed call)
+    //
+
+    function testExecuteLayerZeroCallBridgesWholeBalanceWithPayload() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        uint256 balance = 250e6;
+        fxrp.mint(subaccount, balance);
+        _configureLoanBridge();
+
+        bytes memory composeMsg = abi.encode(uint8(1), makeAddr("exchangeDeposit"), 100e6);
+        bytes memory extraOptions = hex"0003aabbcc";
+        vm.deal(personalAccount, messagingFee);
+        vm.expectEmit();
+        emit ILoanSubaccount.LayerZeroCallExecuted(
+            personalAccount, balance, destinationEid, fxrpOft.GUID(), keccak256(composeMsg)
+        );
+        vm.prank(personalAccount);
+        uint256 amount = ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(
+            composeMsg, extraOptions
+        );
+
+        assertEq(amount, balance);
+        // the FXRP left the subaccount, the adapter locked it, and no standing approval remains
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertEq(fxrp.balanceOf(address(fxrpOft)), balance);
+        assertEq(fxrp.allowance(subaccount, address(fxrpOft)), 0);
+
+        // destination is this account's own address; payload and options pass through untouched
+        (uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,,,) = fxrpOft.lastSendParam();
+        assertEq(dstEid, destinationEid);
+        assertEq(to, bytes32(uint256(uint160(subaccount))));
+        assertEq(amountLD, balance);
+        assertEq(minAmountLD, balance);
+        (,,,, bytes memory extraOptionsSent, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
+        assertEq(extraOptionsSent, extraOptions);
+        assertEq(composeMsgSent, composeMsg);
+        assertEq(fxrpOft.lastValue(), messagingFee);
+    }
+
+    function testExecuteLayerZeroCallRevertOnlyParent() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        // the payload names the loan action and its destination, so only the user - through
+        // the parent Personal Account - may send it
+        vm.deal(address(this), messagingFee);
+        vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+    }
+
+    function testExecuteLayerZeroCallRevertEmptyComposeMessage() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        // an empty payload would degrade to a plain transfer, which is sweepToLoan's job
+        vm.deal(personalAccount, messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(ILoanSubaccount.EmptyComposeMessage.selector);
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}("", "");
+    }
+
+    function testExecuteLayerZeroCallRefundsExcessToParent() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        uint256 sent = messagingFee + 1 ether;
+        vm.deal(personalAccount, sent);
+        vm.prank(personalAccount);
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: sent}(hex"01", "");
+
+        // only the fee was forwarded; the excess came back to the parent, not stranded here
+        assertEq(fxrpOft.lastValue(), messagingFee);
+        assertEq(fxrpOft.lastRefundAddress(), personalAccount);
+        assertEq(personalAccount.balance, sent - messagingFee);
+        assertEq(subaccount.balance, 0);
+    }
+
+    function testExecuteLayerZeroCallViaXrplInstruction() public {
+        // the full production path: XRPL memo -> controller -> parent PA -> loan instruction
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        bytes memory composeMsg = abi.encode(uint8(1), makeAddr("exchangeDeposit"), 100e6);
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: subaccount,
+            value: messagingFee,
+            data: abi.encodeCall(ILoanSubaccount.executeLayerZeroCall, (composeMsg, ""))
+        });
+        _executeUserOpWithValue(personalAccount, calls, bytes32("dmLoanCall"), messagingFee);
+
+        assertEq(fxrp.balanceOf(address(fxrpOft)), 100e6);
+        (,,,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
+        assertEq(composeMsgSent, composeMsg);
+    }
+
+    function testExecuteLayerZeroCallRevertWhenPaused() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+        vm.prank(governance);
+        controller.addPausers(pausers);
+        vm.prank(pauser);
+        controller.pause();
+
+        // even on a direct parent call, outside the paused instruction pipeline, the forward
+        // move is blocked: it is the incident-containment surface, like sweepToLoan
+        vm.deal(personalAccount, messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(IPauseFacet.IsPaused.selector);
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+    }
+
+    function testExecuteLayerZeroCallRevertLoanBridgeNotConfigured() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+
+        vm.deal(personalAccount, messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+    }
+
+    function testExecuteLayerZeroCallRevertWhenPeerMutatedAfterConfiguration() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        // same fail-closed behavior as sweepToLoan: the guards are shared by construction
+        fxrpOft.setPeer(destinationEid, bytes32(uint256(0xbad)));
+
+        vm.deal(personalAccount, messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(ILoanSubaccount.WrongDestinationPeer.selector);
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+    }
+
+    function testExecuteLayerZeroCallRevertInsufficientFundsForSweep() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        vm.deal(personalAccount, messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccount.InsufficientFundsForSweep.selector, messagingFee)
+        );
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee - 1}(hex"01", "");
+    }
+
+    function testExecuteLayerZeroCallRevertNothingToSweep() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        _configureLoanBridge();
+
+        vm.deal(personalAccount, messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(ILoanSubaccount.NothingToSweep.selector);
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+    }
+
     function testGetLoanSubaccountDifferentOwnersGetDifferentAddresses() public view {
         address subaccount1 = controller.getLoanSubaccount(
             "rOwner1",
