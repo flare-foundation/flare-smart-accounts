@@ -34,6 +34,7 @@ interface ILoanSubaccountsFacet {
      * @notice Emitted when the loan bridge settings are set.
      * @param fxrpOft The FXRP OFT used to bridge FXRP to the loan chain.
      * @param destinationEid The LayerZero endpoint id of the loan chain.
+     * @param destinationPeer The expected remote OApp (peer) on the loan chain.
      */
     event LoanBridgeSettingsSet(
         address fxrpOft,

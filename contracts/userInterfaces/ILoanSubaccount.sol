@@ -219,10 +219,14 @@ interface ILoanSubaccount {
     /**
      * @notice Relays a redemption payment default to the asset manager, when the agent did not
      * pay the underlying XRP for a redemption this account created.
-     * @dev Permissionless: FAssets validates the proof and the request, this account is the
-     * recorded redeemer on whose behalf the relay acts, and the default payout (vault collateral
-     * and/or pool WNat) is always paid to this account, where {sweepToParent} recovers it. The
-     * relay exists so a default does not depend on the availability of the appointed executor.
+     * @dev Restricted to the parent Personal Account: whether and when to default is the user's
+     * decision (after the payment window a late XRP payment may be preferable to the collateral
+     * payout), and a public relay would let anyone front-run the appointed executor's own call,
+     * which burns the funded executor fee. The relay exists so a default does not depend on the
+     * appointed executor: with it, the parties able to default are exactly the three FAssets
+     * intends - the user (through the parent account), the appointed executor and the agent. The
+     * default payout (vault collateral and/or pool WNat) is always paid to this account, where
+     * {sweepToParent} recovers it.
      * @param _proof Proof that the agent's payment did not happen in the required window.
      * @param _redemptionRequestId The redemption request id.
      */
@@ -234,6 +238,8 @@ interface ILoanSubaccount {
 
     /**
      * @notice Same as {redemptionPaymentDefault}, for the XRP payment-nonexistence proof type.
+     * @dev The proof's `proofOwner` must be zero or this account's address: the asset manager
+     * sees this account as the caller, not the parent or any outer relayer.
      * @param _proof Proof that the agent's payment did not happen in the required window.
      * @param _redemptionRequestId The redemption request id.
      */

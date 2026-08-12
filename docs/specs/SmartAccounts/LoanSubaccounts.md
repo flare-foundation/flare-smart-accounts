@@ -104,12 +104,23 @@ Both stay available while the controller is paused: the parent is the safest pos
 destination, and an incident should not trap assets.
 
 When the agent does not pay the underlying XRP for a redemption, someone must trigger the
-**redemption payment default**. FAssets permits that only from the recorded redeemer (this
-account), the appointed executor, or the agent owner — so relying on the appointed executor
-alone would make it a single point of failure. The account therefore exposes permissionless
-relays, `redemptionPaymentDefault` and `xrpRedemptionPaymentDefault` (mirroring
-`FAssetRedeemerAccount`): FAssets validates the proof and the request, the relay acts as the
-redeemer, and the payout always lands on this account, where `sweepToParent` recovers it.
+**redemption payment default**, which seizes the agent's locked collateral and pays it to the
+redeemer. FAssets permits that only from the recorded redeemer (this account), the appointed
+executor, or the agent owner — so relying on the appointed executor alone would make it a single
+point of failure. The account exposes relays, `redemptionPaymentDefault` and
+`xrpRedemptionPaymentDefault`, **restricted to the parent Personal Account** (`onlyParent`, so
+the user drives them through an XRPL instruction). They are deliberately not permissionless,
+unlike the sweeps: defaulting is not cleanup along fixed rails but a *decision* — after the
+payment window expires, the user may prefer waiting for a late XRP payment over taking the
+collateral payout — and a public relay would let anyone front-run the appointed executor's own
+call, which burns the funded executor fee (FAssets pays it only when the executor is the
+immediate caller). With parent-driven relays, the parties able to default are exactly the three
+FAssets intends: the user (through the parent account), the appointed executor (directly on the
+asset manager), and the agent (directly). The payout always lands on this account, where
+`sweepToParent` recovers it.
+
+Integration note: the XRP proof's `proofOwner` must be requested as zero or **this account's
+address** — the asset manager sees this account as the caller, not the parent or any relayer.
 
 ## Who may choose a destination
 

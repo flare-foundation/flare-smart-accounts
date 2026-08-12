@@ -16,6 +16,12 @@ import {MintableERC20} from "./MintableERC20.sol";
  */
 contract MockAssetManager {
 
+    struct RedemptionRequest {
+        address redeemer;
+        bool active;
+        uint256 amount;
+    }
+
     MintableERC20 public immutable fAssetToken;
     uint256 public minimumRedeemAmount;
     /// @notice Cap on how much a single `redeemAmount` call redeems; 0 means "no cap".
@@ -27,6 +33,10 @@ contract MockAssetManager {
     uint256 public defaultPayoutAmount;
     uint256 public lastDefaultRequestId;
     address public lastDefaultCaller;
+
+    /// @notice Redemption requests by id, as real FAssets records them.
+    mapping(uint256 requestId => RedemptionRequest) public requests;
+    uint256 public lastRequestId;
 
     constructor(MintableERC20 _fAssetToken) {
         fAssetToken = _fAssetToken;
@@ -47,9 +57,13 @@ contract MockAssetManager {
             // partial fill: only part of the request is redeemed, the rest stays with the caller
             _redeemedAmountUBA = maxRedeemPerCall;
         }
-        // the redeemed FAssets are burned from the redeemer
+        // the redeemed FAssets are burned from the redeemer, and a request is recorded with
+        // the redeemer identity that authorizes a later payment default
         fAssetToken.burn(msg.sender, _redeemedAmountUBA);
         lastRedeemValue = msg.value;
+        lastRequestId += 1;
+        requests[lastRequestId] =
+            RedemptionRequest({redeemer: msg.sender, active: true, amount: _redeemedAmountUBA});
     }
 
     function redemptionPaymentDefault(
@@ -62,11 +76,15 @@ contract MockAssetManager {
     }
 
     function xrpRedemptionPaymentDefault(
-        IXRPPaymentNonexistence.Proof calldata /* _proof */,
+        IXRPPaymentNonexistence.Proof calldata _proof,
         uint256 _redemptionRequestId
     )
         external
     {
+        // the XRP-specific path additionally binds the proof to its authorized user; the asset
+        // manager's caller is the relay's account, so proofOwner must be zero or that account
+        address proofOwner = _proof.data.requestBody.proofOwner;
+        require(proofOwner == address(0) || proofOwner == msg.sender, "only proof owner");
         _payOutDefault(_redemptionRequestId);
     }
 
@@ -91,13 +109,20 @@ contract MockAssetManager {
         return minimumRedeemAmount;
     }
 
-    /// @dev The default payout goes to the caller, which real FAssets only permits to be the
-    /// redeemer, the appointed executor, or the agent owner.
+    /// @dev Models the real FAssets checks that matter to these tests: the request must exist
+    /// and be active (no replay), the caller must be authorized (only the recorded redeemer is
+    /// modeled; the appointed executor and agent owner are not), and the payout goes to the
+    /// stored redeemer, not to the caller.
     function _payOutDefault(uint256 _redemptionRequestId) private {
+        RedemptionRequest storage request = requests[_redemptionRequestId];
+        require(request.active, "invalid request id");
+        require(msg.sender == request.redeemer, "only redeemer, executor or agent");
+        request.active = false;
+
         lastDefaultRequestId = _redemptionRequestId;
         lastDefaultCaller = msg.sender;
         if (address(defaultPayoutToken) != address(0)) {
-            defaultPayoutToken.mint(msg.sender, defaultPayoutAmount);
+            defaultPayoutToken.mint(request.redeemer, defaultPayoutAmount);
         }
     }
 }

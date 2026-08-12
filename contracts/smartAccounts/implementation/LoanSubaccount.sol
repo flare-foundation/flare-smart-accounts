@@ -126,7 +126,10 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
 
         (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
             ILoanSubaccountsFacet(controllerAddress).getLoanBridgeSettings();
-        require(fxrpOft != address(0) && destinationEid != 0, LoanBridgeNotConfigured());
+        require(
+            fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
+            LoanBridgeNotConfigured()
+        );
         // a peer mutation on the OFT after configuration must fail closed, not deliver the
         // locked FXRP to an unknown remote OApp
         require(
@@ -182,9 +185,11 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         uint256 _redemptionRequestId
     )
         external
+        onlyParent
     {
-        // permissionless relay: FAssets validates the proof and the request, this account is the
-        // recorded redeemer, and the payout always lands here, where sweepToParent recovers it
+        // parent-driven relay: whether and when to default is the user's decision, and a public
+        // relay would let anyone front-run the appointed executor's own call, which burns the
+        // funded executor fee; the payout lands here, where sweepToParent recovers it
         ContractRegistry.getAssetManagerFXRP().redemptionPaymentDefault(_proof, _redemptionRequestId);
         emit RedemptionPaymentDefaulted(_redemptionRequestId);
     }
@@ -195,6 +200,7 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         uint256 _redemptionRequestId
     )
         external
+        onlyParent
     {
         ContractRegistry.getAssetManagerFXRP().xrpRedemptionPaymentDefault(_proof, _redemptionRequestId);
         emit XrpRedemptionPaymentDefaulted(_redemptionRequestId);

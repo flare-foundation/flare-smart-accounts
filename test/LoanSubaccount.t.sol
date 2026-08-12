@@ -719,41 +719,81 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(parent), 50e6);
     }
 
-    function testRedemptionDefaultRelayIsPermissionlessAndPayoutRecoverable() public {
+    function testRedemptionDefaultRelayByParentAndPayoutRecoverable() public {
         address subaccount = _createSubaccountFor(xrplOwner);
-        address parent = _personalAccountOf(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
         // the default pays the redeemer in vault collateral / pool WNat, modeled by the mock
         MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
         mockAssetManager.setDefaultPayout(stableCoin, 500e18);
 
-        // anyone can relay the default: FAssets validates the proof, and the relay makes this
-        // account - the recorded redeemer - the caller, so it does not depend on the executor
+        // a real redemption first: it records this subaccount as the redeemer of the request
+        fxrp.mint(subaccount, 100e6);
+        vm.deal(address(this), executorFee);
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        uint256 requestId = mockAssetManager.lastRequestId();
+
+        // whether and when to default is the user's decision: a third party cannot relay
+        vm.prank(makeAddr("randomCaller"));
+        vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
         IReferencedPaymentNonexistence.Proof memory proof;
-        address caller = makeAddr("randomCaller");
+        ILoanSubaccount(subaccount).redemptionPaymentDefault(proof, requestId);
+
+        // the parent Personal Account relays; the account is the recorded redeemer, so the
+        // asset manager authorizes it and pays the collateral payout to it
         vm.expectEmit();
-        emit ILoanSubaccount.RedemptionPaymentDefaulted(42);
-        vm.prank(caller);
-        ILoanSubaccount(subaccount).redemptionPaymentDefault(proof, 42);
+        emit ILoanSubaccount.RedemptionPaymentDefaulted(requestId);
+        vm.prank(personalAccount);
+        ILoanSubaccount(subaccount).redemptionPaymentDefault(proof, requestId);
 
         assertEq(mockAssetManager.lastDefaultCaller(), subaccount);
-        assertEq(mockAssetManager.lastDefaultRequestId(), 42);
+        assertEq(mockAssetManager.lastDefaultRequestId(), requestId);
         assertEq(stableCoin.balanceOf(subaccount), 500e18);
+
+        // a defaulted request cannot be defaulted again
+        vm.prank(personalAccount);
+        vm.expectRevert(bytes("invalid request id"));
+        ILoanSubaccount(subaccount).redemptionPaymentDefault(proof, requestId);
 
         // the payout then leaves through the fixed-destination recovery
         ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
-        assertEq(stableCoin.balanceOf(parent), 500e18);
+        assertEq(stableCoin.balanceOf(personalAccount), 500e18);
     }
 
-    function testXrpRedemptionDefaultRelay() public {
+    function testXrpRedemptionDefaultRelayChecksProofOwner() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+
+        fxrp.mint(subaccount, 100e6);
+        vm.deal(address(this), executorFee);
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        uint256 requestId = mockAssetManager.lastRequestId();
+
+        IXRPPaymentNonexistence.Proof memory proof;
+
+        // the asset manager sees the subaccount as the caller, so a proof requested with the
+        // parent (or any relayer) as proofOwner is unusable - an easy integration mistake
+        proof.data.requestBody.proofOwner = personalAccount;
+        vm.prank(personalAccount);
+        vm.expectRevert(bytes("only proof owner"));
+        ILoanSubaccount(subaccount).xrpRedemptionPaymentDefault(proof, requestId);
+
+        // proofOwner must be zero or the subaccount itself
+        proof.data.requestBody.proofOwner = subaccount;
+        vm.expectEmit();
+        emit ILoanSubaccount.XrpRedemptionPaymentDefaulted(requestId);
+        vm.prank(personalAccount);
+        ILoanSubaccount(subaccount).xrpRedemptionPaymentDefault(proof, requestId);
+
+        assertEq(mockAssetManager.lastDefaultCaller(), subaccount);
+        assertEq(mockAssetManager.lastDefaultRequestId(), requestId);
+    }
+
+    function testXrpRedemptionDefaultRelayRevertOnlyParent() public {
         address subaccount = _createSubaccountFor(xrplOwner);
 
         IXRPPaymentNonexistence.Proof memory proof;
-        vm.expectEmit();
-        emit ILoanSubaccount.XrpRedemptionPaymentDefaulted(7);
-        ILoanSubaccount(subaccount).xrpRedemptionPaymentDefault(proof, 7);
-
-        assertEq(mockAssetManager.lastDefaultCaller(), subaccount);
-        assertEq(mockAssetManager.lastDefaultRequestId(), 7);
+        vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
+        ILoanSubaccount(subaccount).xrpRedemptionPaymentDefault(proof, 1);
     }
 
     function testImplementationContractRejectsNativeAndRecovery() public {
