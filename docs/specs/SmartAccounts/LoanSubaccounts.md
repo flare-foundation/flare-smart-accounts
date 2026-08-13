@@ -345,8 +345,24 @@ clamping), the deposit rail for idle FXRP, the bridge-back sweep, and the native
   (`0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA`) — confirm that key is still controlled
   before relying on an Ethereum deployment. The Ethereum cut installs `LoanSubaccountsFacet`,
   `TimelockFacet`, `PauseFacet`, and `EthereumLoanSettingsFacet` through the standard cut flow
-  (`deployment/cuts/ethereum/`, seeded `deployment/deploys/ethereum.json`), and the
-  implementation ships with `pnpm deploy_ethereum_loan_subaccount_implementation`.
+  (the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
+  `deployment/deploys/ethereum.json` is seeded with the pinned contracts), and the
+  implementation ships with `pnpm deploy_ethereum_loan_subaccount_implementation`. There is
+  deliberately no `deployment/chain-config/ethereum.json`: the generic full-deploy script must
+  not run against Ethereum — operators go through the pinned bootstrap and the scripts above.
+
+  **Before the first Ethereum cut, still to be built and rehearsed:**
+
+  - a minimal Ethereum-side init contract for the cut: `MasterAccountControllerInit` is
+    Flare-specific and is skipped, so ERC-165 interface flags (and nothing else) must be set
+    explicitly;
+  - post-cut verification: loupe/selector layout, owner, and ERC-165 answers checked against
+    the expected Ethereum facet set (the bootstrap itself already verifies init-code hashes,
+    CREATE2 addresses, and runtime code against the pinned Flare fixtures, in CI and at
+    deploy time);
+  - a signed ownership-control rehearsal from the historical owner EOA before anything
+    depends on the deployment;
+  - the real Endpoint/OFT compose-delivery integration harness (also a step-6 release gate).
 - **`setLoanBridgeSettings` comes last, and only once the loan-chain side exists.** Its
   validation reads the OFT's live peer for the destination endpoint, so it cannot be configured
   before the destination route is wired; until then the forward moves revert with

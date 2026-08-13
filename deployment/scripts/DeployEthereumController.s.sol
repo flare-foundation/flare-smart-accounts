@@ -27,22 +27,26 @@ contract DeployEthereumController is Script {
         _deployPinned(
             "DiamondCutFacet",
             PinnedControllerInitCode.DIAMOND_CUT_FACET_INIT_CODE_HASH,
-            PinnedControllerInitCode.DIAMOND_CUT_FACET
+            PinnedControllerInitCode.DIAMOND_CUT_FACET,
+            PinnedControllerInitCode.DIAMOND_CUT_FACET_RUNTIME_CODE_HASH
         );
         _deployPinned(
             "DiamondLoupeFacet",
             PinnedControllerInitCode.DIAMOND_LOUPE_FACET_INIT_CODE_HASH,
-            PinnedControllerInitCode.DIAMOND_LOUPE_FACET
+            PinnedControllerInitCode.DIAMOND_LOUPE_FACET,
+            PinnedControllerInitCode.DIAMOND_LOUPE_FACET_RUNTIME_CODE_HASH
         );
         _deployPinned(
             "OwnershipFacet",
             PinnedControllerInitCode.OWNERSHIP_FACET_INIT_CODE_HASH,
-            PinnedControllerInitCode.OWNERSHIP_FACET
+            PinnedControllerInitCode.OWNERSHIP_FACET,
+            PinnedControllerInitCode.OWNERSHIP_FACET_RUNTIME_CODE_HASH
         );
         _deployPinned(
             "MasterAccountController",
             PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER_INIT_CODE_HASH,
-            PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER
+            PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER,
+            PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER_RUNTIME_CODE_HASH
         );
         vm.stopBroadcast();
 
@@ -56,7 +60,8 @@ contract DeployEthereumController is Script {
     function _deployPinned(
         string memory _name,
         bytes32 _expectedInitCodeHash,
-        address _expectedAddress
+        address _expectedAddress,
+        bytes32 _expectedRuntimeCodeHash
     )
         private
     {
@@ -88,6 +93,12 @@ contract DeployEthereumController is Script {
                 string.concat(_name, ": deployment failed")
             );
         }
+        // postcondition, whether freshly deployed or skipped: the runtime code must be
+        // byte-identical to the Flare production deployment - never trust existing code
+        require(
+            _expectedAddress.codehash == _expectedRuntimeCodeHash,
+            string.concat(_name, ": runtime code does not match the Flare production fixture")
+        );
         console2.log(
             string.concat("DEPLOYED: ", _name, ", ", _name, ".sol: "),
             vm.toString(_expectedAddress)

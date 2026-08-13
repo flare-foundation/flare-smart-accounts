@@ -122,7 +122,14 @@ library LoanSubaccounts {
         }
         require(_fxrpOft.code.length > 0, ILoanSubaccountsFacet.InvalidFxrpOft());
         require(_destinationEid != 0, ILoanSubaccountsFacet.InvalidDestinationEid());
-        require(_destinationPeer != bytes32(0), ILoanSubaccountsFacet.InvalidDestinationPeer());
+        // the destination peer is an EVM OApp address and must be cleanly zero-padded: the
+        // source-computed GUID commits to the full bytes32 receiver, and the destination-side
+        // compose authentication recomputes it from the clean local address, so dirty upper
+        // bits would route correctly yet fail every delivery
+        require(
+            _destinationPeer != bytes32(0) && uint256(_destinationPeer) >> 160 == 0,
+            ILoanSubaccountsFacet.InvalidDestinationPeer()
+        );
         // the OFT must actually be an FXRP bridge: it must wrap the FXRP token, share its
         // decimals (sweeps send with minAmountLD == amountLD, so any shared-decimal dust would
         // make them revert), and its peer for the destination chain must be exactly the intended

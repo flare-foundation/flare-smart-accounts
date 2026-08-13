@@ -1196,6 +1196,14 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(governance);
         vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, bytes32(0));
+
+        // a peer with dirty upper bits would route to the same EVM address but change the
+        // source-computed GUID, failing the destination-side compose authentication
+        bytes32 dirtyPeer = bytes32(uint256(destinationPeer) | (uint256(1) << 200));
+        fxrpOft.setPeer(destinationEid, dirtyPeer);
+        vm.prank(governance);
+        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
+        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, dirtyPeer);
     }
 
     function testSweepToLoanRevertWhenPeerMutatedAfterConfiguration() public {

@@ -54,7 +54,7 @@ interface StaleSelector {
 }
 
 const ZERO_CODE = "0x";
-const SUPPORTED_BASE_NETWORKS = ["coston2", "coston", "flare", "songbird", "scdev"];
+const SUPPORTED_BASE_NETWORKS = ["coston2", "coston", "flare", "songbird", "scdev", "ethereum"];
 const FACETS_ABI = {
   type: "tuple[]",
   components: [

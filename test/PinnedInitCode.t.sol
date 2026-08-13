@@ -28,6 +28,42 @@ contract PinnedInitCodeTest is Test {
     address private constant GOLDEN_PERSONAL_ACCOUNT = 0x3A5AE0e715593e617b74B0f4705C3934b0116B3c;
     address private constant GOLDEN_LOAN_SUBACCOUNT = 0x56b897CA71D515e3324037f64AC2d849DE5CB013;
 
+    function testPinnedInitCodeDeploysToPinnedRuntimeCode() public {
+        // the pinned init code must actually deploy, and what it deploys must be
+        // byte-identical to the Flare production runtime (EXTCODEHASH fixtures). The base
+        // facets are etched to their production addresses first, because the controller's
+        // constructor cuts them and requires their code there.
+        address cutFacet = _create(_readInitCode("DiamondCutFacet"));
+        assertEq(
+            cutFacet.codehash,
+            PinnedControllerInitCode.DIAMOND_CUT_FACET_RUNTIME_CODE_HASH,
+            "DiamondCutFacet runtime drifted"
+        );
+        address loupeFacet = _create(_readInitCode("DiamondLoupeFacet"));
+        assertEq(
+            loupeFacet.codehash,
+            PinnedControllerInitCode.DIAMOND_LOUPE_FACET_RUNTIME_CODE_HASH,
+            "DiamondLoupeFacet runtime drifted"
+        );
+        address ownershipFacet = _create(_readInitCode("OwnershipFacet"));
+        assertEq(
+            ownershipFacet.codehash,
+            PinnedControllerInitCode.OWNERSHIP_FACET_RUNTIME_CODE_HASH,
+            "OwnershipFacet runtime drifted"
+        );
+
+        vm.etch(PinnedControllerInitCode.DIAMOND_CUT_FACET, cutFacet.code);
+        vm.etch(PinnedControllerInitCode.DIAMOND_LOUPE_FACET, loupeFacet.code);
+        vm.etch(PinnedControllerInitCode.OWNERSHIP_FACET, ownershipFacet.code);
+
+        address controller = _create(_readInitCode("MasterAccountController"));
+        assertEq(
+            controller.codehash,
+            PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER_RUNTIME_CODE_HASH,
+            "MasterAccountController runtime drifted"
+        );
+    }
+
     function testPinnedMasterAccountControllerInitCode() public view {
         _checkPinned(
             "MasterAccountController",
@@ -100,6 +136,16 @@ contract PinnedInitCodeTest is Test {
             GOLDEN_LOAN_SUBACCOUNT,
             "loan subaccount golden vector drifted"
         );
+    }
+
+    function _create(bytes memory _initCode) private returns (address _deployed) {
+        // plain CREATE: the runtime hash is address-independent, so the CREATE2 factory is
+        // not needed to verify what the pinned bytes deploy
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            _deployed := create(0, add(_initCode, 32), mload(_initCode))
+        }
+        require(_deployed != address(0), "pinned init code failed to deploy");
     }
 
     function _checkPinned(
