@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place; the Ethereum-side account (`lzCompose`) is still to come. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place. The Ethereum-side account exists as a step-1 skeleton (initialization and per-chain resolution); its authenticated compose entry point and the repay/cleanup rails are still to come. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
 
 ## Typed subaccounts
 
@@ -227,6 +227,29 @@ Two different rules apply, and the difference is the signature:
 
 Caveats specific to the EVM disbursement option, for the front end rather than the contracts: RLUSD is a regulated stablecoin and can freeze or blacklist addresses, so a transfer can revert and turn a borrow into a stuck disbursement; some exchange deposit addresses are not credited when the sender is a contract, or need a tag an ERC-20 transfer cannot carry; and a wrong address is unrecoverable, since nothing is checked.
 
+## The Ethereum-side account
+
+The same frozen proxy bytecode and the same derivation give the subaccount one address on every
+chain, and the per-type implementation registry is what makes that useful: each chain's diamond
+registers its **own** implementation for the loan type. Flare registers
+[`LoanSubaccount`](../../../contracts/smartAccounts/implementation/LoanSubaccount.sol) (FAssets
+redemption, the forward bridge, the parent-driven relays); Ethereum registers
+[`EthereumLoanSubaccount`](../../../contracts/smartAccounts/implementation/EthereumLoanSubaccount.sol).
+The implementation never enters the CREATE2 derivation, so the registration choice cannot move
+the address (a test pins this).
+
+The defining difference on Ethereum: **there are no parent-driven methods.** The parent Personal
+Account exists only on Flare — on Ethereum its address has no code — so `onlyParent` methods could
+never be called. Every authorized action instead arrives as an authenticated LayerZero compose
+payload sent by this same account on Flare (`executeLayerZeroCall`), and everything else is
+permissionless movement along fixed rails, the same invariant as everywhere: anyone may move
+the assets, nobody may redirect them.
+
+Step 1 carries only initialization, the implementation self-lock, and beacon resolution. The
+next steps add, against the release gates recorded above: the `lzCompose` entry point with the
+full authentication checklist, the borrow action against the governance-configured Morpho
+market, the permissionless repay rail, and the bridge-back cleanup sweep.
+
 ## Deployment
 
 - **Fresh deployments** (`pnpm deploy_contracts` → `DeploySmartAccounts`): the loan module is
@@ -252,5 +275,6 @@ Caveats specific to the EVM disbursement option, for the front end rather than t
 ## Open design items (decide with the asset-moving methods)
 
 - **Stuck RLUSD on the Ethereum side has only one move: repay.** RLUSD arriving there is indistinguishable between an inbound repayment and a borrow whose outbound leg failed, and a borrow may name an arbitrary destination, so a permissionless "send onward" would let anyone redirect a repayment to a third party. Repay is safe under every interpretation, since its target is the account's own position. The cost is that a failed disbursement silently unwinds the loan the user asked for. A bounded retry is possible if the account records the pending disbursement (amount plus destination) at borrow time, so the retry is driven by stored state rather than calldata; that is likely the same state needed to prevent double borrows when a LayerZero message stalls. Product decision, to settle before the Ethereum-side work.
+- **Subaccount creation on Ethereum.** `createLoanSubaccount` requires the parent Personal Account to be *deployed*, which is never true on Ethereum. The PA address is computable there (same diamond address, same PA derivation, frozen PA creation code), so the check should accept the computed address on the Ethereum side — to be decided deliberately, since it touches shared code (chain-aware branch vs. an Ethereum variant of the facet).
 - **TODO, parked: grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above), so a pause held across FDC's attestation window combined with an unavailable executor recreates the executor dependency. The designed fix: relays stay parent-only until the request's `lastUnderlyingTimestamp` (read per-request from `redemptionRequestInfo`, no stored clock) is a grace period past, then open to anyone — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable. Implemented and tested, then parked; **must be decided before the first production deployment**, rather than left to incident-time executor availability.
 - ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.

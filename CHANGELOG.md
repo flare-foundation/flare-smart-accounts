@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Recovery to the parent Personal Account: `sweepToParent(token)` and `sweepNativeToParent()`, plus `receive()`; FXRP is recoverable only below the FAssets minimum redemption amount (the exact complement of `sweepRedeem`).
     - Redemption payment default relays (`redemptionPaymentDefault`, `xrpRedemptionPaymentDefault`), restricted to the parent Personal Account.
     - `executeLayerZeroCall(composeMsg, extraOptions)` — the parent-driven loan instruction: bridges all idle FXRP to this account's own address on the loan chain with an opaque composed payload and caller-supplied type-3 execution options.
+    - `EthereumLoanSubaccount` (step 1) — the Ethereum-side implementation behind the same frozen proxy and address, registered per chain through the type registry. Initialization and resolution only; it has no parent-driven methods (the parent Personal Account exists only on Flare), and the authenticated LayerZero compose entry point and repay/cleanup rails follow in later steps.
   - `@layerzerolabs-oapp-evm` dependency, for LayerZero's canonical `IOFT` interface.
   - Spellcheck: `pnpm spellcheck` (cspell over contracts, tests, deployment, and docs) with an advisory `spellcheck` CI job.
 
