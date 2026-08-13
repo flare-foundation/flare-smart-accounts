@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {LoanSubaccount} from "../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
 import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {DiamondArgs} from "../../contracts/diamond/implementation/Diamond.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
@@ -11,6 +12,7 @@ import {IIMasterAccountController} from "../../contracts/smartAccounts/interface
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.sol";
+import {SUBACCOUNT_TYPE_LOAN} from "../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
@@ -21,6 +23,7 @@ import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFace
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
 import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
+import {LoanSubaccountsFacet} from "../../contracts/smartAccounts/facets/LoanSubaccountsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
@@ -66,6 +69,8 @@ contract DeploySmartAccounts is Script {
 
     PersonalAccount private personalAccountImpl;
     address private personalAccountImplAddress;
+    LoanSubaccount private loanSubaccountImpl;
+    address private loanSubaccountImplAddress;
     IIMasterAccountController private masterAccountController;
     address private masterAccountControllerAddress;
 
@@ -85,6 +90,7 @@ contract DeploySmartAccounts is Script {
     TimelockFacet private timelockFacet;
     PauseFacet private pauseFacet;
     ReaderFacet private readerFacet;
+    LoanSubaccountsFacet private loanSubaccountsFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
@@ -139,6 +145,10 @@ contract DeploySmartAccounts is Script {
         // (re)deploy personal account implementation
         personalAccountImpl = new PersonalAccount();
         personalAccountImplAddress = address(personalAccountImpl);
+
+        // (re)deploy loan subaccount implementation
+        loanSubaccountImpl = new LoanSubaccount();
+        loanSubaccountImplAddress = address(loanSubaccountImpl);
 
         bytes32 salt = bytes32(0);
         // bytes32 salt = keccak256(abi.encodePacked("salt", block.timestamp)); // only for testing
@@ -295,6 +305,13 @@ contract DeploySmartAccounts is Script {
                 vm.toString(personalAccountImplAddress)
             )
         );
+        console2.log(
+            string.concat(
+                "DEPLOYED: LoanSubaccountImplementation, ",
+                "LoanSubaccount.sol: ",
+                vm.toString(loanSubaccountImplAddress)
+            )
+        );
 
         if (_fullDeploy) {
             console2.log("Adding XRPL provider wallets");
@@ -328,6 +345,12 @@ contract DeploySmartAccounts is Script {
                 console2.log("Adding unpausers");
                 masterAccountController.addUnpausers(params.unpausers);
             }
+
+            console2.log("Registering loan subaccount implementation");
+            // executes immediately: the timelock duration is still zero at this point
+            masterAccountController.setLoanSubaccountImplementation(
+                SUBACCOUNT_TYPE_LOAN, loanSubaccountImplAddress
+            );
 
             console2.log("Setting timelock duration");
             masterAccountController.setTimelockDuration(params.timelockDurationSeconds);
@@ -383,8 +406,9 @@ contract DeploySmartAccounts is Script {
         readerFacet = new ReaderFacet();
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
+        loanSubaccountsFacet = new LoanSubaccountsFacet();
 
-        smartAccountsFacets = new IDiamond.FacetCut[](12);
+        smartAccountsFacets = new IDiamond.FacetCut[](13);
         // v1.0.0 facets (keep original order)
         smartAccountsFacets[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
         smartAccountsFacets[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
@@ -399,6 +423,7 @@ contract DeploySmartAccounts is Script {
         smartAccountsFacets[9] = _addFacet(address(memoInstructionsFacet), "MemoInstructionsFacet");
         smartAccountsFacets[10] = _addFacet(address(pauseFacet), "PauseFacet");
         smartAccountsFacets[11] = _addFacet(address(readerFacet), "ReaderFacet");
+        smartAccountsFacets[12] = _addFacet(address(loanSubaccountsFacet), "LoanSubaccountsFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {
@@ -464,6 +489,13 @@ contract DeploySmartAccounts is Script {
                 "DEPLOYED: XrplProviderWalletsFacet, ",
                 "XrplProviderWalletsFacet.sol: ",
                 vm.toString(address(xrplProviderWalletsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: LoanSubaccountsFacet, ",
+                "LoanSubaccountsFacet.sol: ",
+                vm.toString(address(loanSubaccountsFacet))
             )
         );
     }

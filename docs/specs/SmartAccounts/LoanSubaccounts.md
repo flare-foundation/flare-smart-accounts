@@ -227,6 +227,28 @@ Two different rules apply, and the difference is the signature:
 
 Caveats specific to the EVM disbursement option, for the front end rather than the contracts: RLUSD is a regulated stablecoin and can freeze or blacklist addresses, so a transfer can revert and turn a borrow into a stuck disbursement; some exchange deposit addresses are not credited when the sender is a contract, or need a tag an ERC-20 transfer cannot carry; and a wrong address is unrecoverable, since nothing is checked.
 
+## Deployment
+
+- **Fresh deployments** (`pnpm deploy_contracts` → `DeploySmartAccounts`): the loan module is
+  part of the standard cut — `LoanSubaccountsFacet` is deployed with the other smart-accounts
+  facets, a `LoanSubaccount` implementation is deployed alongside the Personal Account
+  implementation, and type `1` is registered with `setLoanSubaccountImplementation` before
+  `setTimelockDuration`, while the timelock is still zero.
+- **Existing deployments** (flare, songbird, coston2): the facet needs no dedicated deploy
+  step — naming `LoanSubaccountsFacet` in a cut plan
+  (`deployment/cuts/<network>/cuts-<date>.json`, verified with `pnpm check_cut`, executed with
+  `pnpm diamond_cut`) deploys it from the artifact as part of the cut flow. The implementation
+  is deployed with `pnpm deploy_loan_subaccount_implementation <network>` and registered by
+  governance with the timelocked
+  `setLoanSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, <address>)`.
+- **`setLoanBridgeSettings` comes last, and only once the loan-chain side exists.** Its
+  validation reads the OFT's live peer for the destination endpoint, so it cannot be configured
+  before the destination route is wired; until then the forward moves revert with
+  `LoanBridgeNotConfigured` while creation, the backward sweep, the relays, and recovery
+  already work. The Ethereum-side account (same diamond address, same derivation) must be
+  deployed before the forward moves are enabled, since bridged FXRP lands on the subaccount's
+  own address there.
+
 ## Open design items (decide with the asset-moving methods)
 
 - **Stuck RLUSD on the Ethereum side has only one move: repay.** RLUSD arriving there is indistinguishable between an inbound repayment and a borrow whose outbound leg failed, and a borrow may name an arbitrary destination, so a permissionless "send onward" would let anyone redirect a repayment to a third party. Repay is safe under every interpretation, since its target is the account's own position. The cost is that a failed disbursement silently unwinds the loan the user asked for. A bounded retry is possible if the account records the pending disbursement (amount plus destination) at borrow time, so the retry is driven by stored state rather than calldata; that is likely the same state needed to prevent double borrows when a LayerZero message stalls. Product decision, to settle before the Ethereum-side work.
