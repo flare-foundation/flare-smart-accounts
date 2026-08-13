@@ -208,6 +208,16 @@ interface ILoanSubaccount {
     error EmptyComposeMessage();
 
     /**
+     * @notice Reverts if the requested bridge amount exceeds the account's FXRP balance.
+     * @param amount The requested amount.
+     * @param balance The account's FXRP balance.
+     */
+    error AmountExceedsBalance(
+        uint256 amount,
+        uint256 balance
+    );
+
+    /**
      * @notice Redeems all idle FXRP to the parent Personal Account's XRPL owner.
      * @dev Permissionless: this is the backward cleanup move, so anyone may trigger it. The
      * destination is read on-chain from the parent Personal Account and cannot be chosen by the
@@ -239,8 +249,9 @@ interface ILoanSubaccount {
         returns (uint256 _amount);
 
     /**
-     * @notice Bridges all idle FXRP to this account's address on the loan chain with a composed
-     * call attached, which the destination-side account executes on arrival — the loan action.
+     * @notice Bridges exactly `_amount` FXRP to this account's address on the loan chain with
+     * a composed call attached, which the destination-side account executes on arrival — the
+     * loan action.
      * @dev Restricted to the parent Personal Account: unlike the parameterless sweeps this is
      * not cleanup — the payload names a loan action and, for a borrow, a user-chosen destination
      * for the proceeds — so it must carry the user's XRPL signature. The payload is opaque to
@@ -248,22 +259,28 @@ interface ILoanSubaccount {
      * bridge destination is this account's own cross-chain address, exactly as in {sweepToLoan},
      * and all of {sweepToLoan}'s guards apply: reverts while the controller is paused, requires
      * configured bridge settings, and re-checks the OFT's live peer against the pinned one.
+     * The amount is explicit rather than the whole balance: what travels becomes the
+     * authenticated collateral figure on the destination (the OFT's `amountLD`), so the user
+     * signs exactly how much is collateralized, and idle residue on the account stays for the
+     * cleanup rails. A zero amount is a message-only send, used by actions that carry no
+     * tokens (withdraw, configuration).
      * The FXRP OFT adapter enforces execution options only for plain sends, so `_extraOptions`
      * must be type-3 options carrying both the destination `lzReceive` gas and the `lzCompose`
      * gas; enforced options, if the adapter's owner later configures them, are prepended by
      * LayerZero and raise the quoted fee. `msg.value` must cover the LayerZero messaging fee;
      * any excess is returned to the caller (the parent).
+     * @param _amount Amount of FXRP to bridge with the message; may be zero, at most the
+     * account's balance.
      * @param _composeMsg The composed payload, delivered to this account's `lzCompose` on the
      * destination chain. Must not be empty.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
-     * @return _amount Amount of FXRP bridged.
      */
     function executeLayerZeroCall(
+        uint256 _amount,
         bytes calldata _composeMsg,
         bytes calldata _extraOptions
     )
-        external payable
-        returns (uint256 _amount);
+        external payable;
 
     /**
      * @notice Relays a redemption payment default to the asset manager, when the agent did not

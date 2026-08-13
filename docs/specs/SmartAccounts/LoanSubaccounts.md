@@ -164,10 +164,16 @@ address** — the asset manager sees this account as the caller, not the parent 
 ## The loan instruction: `executeLayerZeroCall`
 
 The forward moves come in two shapes. `sweepToLoan` is cleanup: permissionless, no payload, the
-assets just cross over. `executeLayerZeroCall(composeMsg, extraOptions)` is the **loan action**:
-it bridges the whole idle FXRP balance to this account's own address on the loan chain with a
-**composed call** attached, which the destination-side account executes on arrival (deposit as
-collateral, borrow, disburse). Both share one bridging core in the contract, so the guards are
+assets just cross over. `executeLayerZeroCall(amount, composeMsg, extraOptions)` is the **loan
+action**: it bridges exactly the signed `amount` of FXRP to this account's own address on the
+loan chain with a **composed call** attached, which the destination-side account executes on
+arrival (deposit as collateral, borrow, disburse). The amount is explicit rather than the whole
+balance: what travels becomes the authenticated collateral figure on the destination (the OFT's
+`amountLD`), so the user signs exactly what is collateralized, and idle residue — donations,
+strands from skipped deliveries — stays behind for the cleanup rails. A **zero amount is a
+message-only send** (verified against the live adapter), used by actions that carry no tokens:
+withdraw, and configuration actions to come. Only the cleanup sweep keeps whole-balance
+semantics, because sweeping everything is what cleanup means. Both share one bridging core in the contract, so the guards are
 identical by construction: a paused controller blocks it, the governance-pinned settings name
 the route, and the OFT's live peer is re-checked against the pinned one on every call. What
 differs is authorization and inputs:
@@ -214,8 +220,9 @@ side):
 - **Idle FXRP on the Ethereum account needs an exit.** Plain `sweepToLoan` cleanup delivers
   FXRP with no payload by design, and a failed `lzCompose` leaves credited FXRP behind — the
   Ethereum side must offer cleanup for that state under the same invariant (anyone may move,
-  nobody may redirect), because the Flare side cannot instruct on it (`executeLayerZeroCall`
-  needs a non-zero Flare-side balance).
+  nobody may redirect), because a compose instruction cannot
+  attach tokens that are already on the destination chain — acting on idle FXRP there is a
+  separate deliberate rail.
 - **A real Endpoint/OFT compose-delivery simulation** belongs to the Ethereum-side test suite
   as a regression test; the live-adapter verification recorded here is evidence, not a test.
 

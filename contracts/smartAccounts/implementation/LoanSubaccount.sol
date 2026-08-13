@@ -115,34 +115,34 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         nonReentrant
         returns (uint256 _amount)
     {
-        // no compose message and no options: this is cleanup, just moving the assets across;
-        // acting on them on the destination side is the loan instruction's job
-        (uint256 amount, uint32 destinationEid, bytes32 guid) = _bridgeToSelf("", "");
-        emit FXrpSweptToLoan(parentPersonalAccount, amount, destinationEid, guid);
-        _amount = amount;
+        // cleanup sweeps the whole balance; no compose message and no options - acting on the
+        // assets on the destination side is the loan instruction's job
+        _amount = ContractRegistry.getAssetManagerFXRP().fAsset().balanceOf(address(this));
+        require(_amount > 0, NothingToSweep());
+        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, "", "");
+        emit FXrpSweptToLoan(parentPersonalAccount, _amount, destinationEid, guid);
     }
 
     /// @inheritdoc ILoanSubaccount
     function executeLayerZeroCall(
+        uint256 _amount,
         bytes calldata _composeMsg,
         bytes calldata _extraOptions
     )
         external payable
         onlyParent
         nonReentrant
-        returns (uint256 _amount)
     {
         // an empty payload would degrade to a plain transfer, which is sweepToLoan's job
         require(_composeMsg.length > 0, EmptyComposeMessage());
-        (uint256 amount, uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_extraOptions, _composeMsg);
+        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, _extraOptions, _composeMsg);
         emit LayerZeroCallExecuted(
             parentPersonalAccount,
-            amount,
+            _amount,
             destinationEid,
             guid,
             keccak256(_composeMsg)
         );
-        _amount = amount;
     }
 
     /// @inheritdoc ILoanSubaccount
@@ -234,20 +234,22 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         return ILoanSubaccountsFacet(controllerAddress).loanImplementationForType(subaccountType);
     }
 
-    /// @dev Shared forward-move core of {sweepToLoan} and {executeLayerZeroCall}: bridges the
-    /// whole idle FXRP balance over LayerZero to this account's own address on the loan chain,
-    /// so both entry points share the same guards by construction. Only the composed payload
-    /// and the execution options vary; the destination is never caller-chosen.
+    /// @dev Shared forward-move core of {sweepToLoan} and {executeLayerZeroCall}: bridges
+    /// exactly `_amount` FXRP over LayerZero to this account's own address on the loan chain,
+    /// so both entry points share the same guards by construction. A zero amount is a
+    /// message-only send (the loan instruction's withdraw and configuration actions carry no
+    /// tokens); the destination is never caller-chosen.
     function _bridgeToSelf(
+        uint256 _amount,
         bytes memory _extraOptions,
         bytes memory _composeMsg
     )
         private
-        returns (uint256 _amount, uint32 _destinationEid, bytes32 _guid)
+        returns (uint32 _destinationEid, bytes32 _guid)
     {
         IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
-        _amount = fxrp.balanceOf(address(this));
-        require(_amount > 0, NothingToSweep());
+        uint256 balance = fxrp.balanceOf(address(this));
+        require(_amount <= balance, AmountExceedsBalance(_amount, balance));
 
         // the forward move is the incident-containment surface: pausing the controller stops
         // bridging out immediately, while the backward sweep stays available so assets can
@@ -284,7 +286,9 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         require(msg.value >= fee.nativeFee, InsufficientFundsForSweep(fee.nativeFee));
 
         // the OFT is a lock/unlock adapter, so it must be approved to pull the FXRP
-        fxrp.forceApprove(fxrpOft, _amount);
+        if (_amount > 0) {
+            fxrp.forceApprove(fxrpOft, _amount);
+        }
         // two false positives on this call: slither arbitrary-send-eth (recipient is the
         // governance-set OFT, value capped by the msg.value check above) and solhint
         // check-send-result (this is the OFT's `send`, not address.send; it reverts on failure)
@@ -296,7 +300,9 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
             msg.sender
         );
         // slither-disable-end arbitrary-send-eth
-        fxrp.forceApprove(fxrpOft, 0);
+        if (_amount > 0) {
+            fxrp.forceApprove(fxrpOft, 0);
+        }
 
         // return the caller's excess, so it is not stranded on an account with no native exit
         uint256 excess = msg.value - fee.nativeFee;

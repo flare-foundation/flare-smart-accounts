@@ -1271,11 +1271,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     // the loan instruction: executeLayerZeroCall (forward move with a composed call)
     //
 
-    function testExecuteLayerZeroCallBridgesWholeBalanceWithPayload() public {
+    function testExecuteLayerZeroCallBridgesExactAmountWithPayload() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
-        uint256 balance = 250e6;
-        fxrp.mint(subaccount, balance);
+        // more on the balance than the signed amount: the residue stays for the cleanup rails
+        fxrp.mint(subaccount, 250e6);
+        uint256 amount = 100e6;
         _configureLoanBridge();
 
         bytes memory composeMsg = abi.encode(uint8(1), makeAddr("exchangeDeposit"), 100e6);
@@ -1283,29 +1284,60 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.expectEmit();
         emit ILoanSubaccount.LayerZeroCallExecuted(
-            personalAccount, balance, destinationEid, fxrpOft.GUID(), keccak256(composeMsg)
+            personalAccount, amount, destinationEid, fxrpOft.GUID(), keccak256(composeMsg)
         );
         vm.prank(personalAccount);
-        uint256 amount = ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(
-            composeMsg, extraOptions
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(
+            amount, composeMsg, extraOptions
         );
 
-        assertEq(amount, balance);
-        // the FXRP left the subaccount, the adapter locked it, and no standing approval remains
-        assertEq(fxrp.balanceOf(subaccount), 0);
-        assertEq(fxrp.balanceOf(address(fxrpOft)), balance);
+        // exactly the signed amount left; the adapter locked it; no standing approval remains
+        assertEq(fxrp.balanceOf(subaccount), 150e6);
+        assertEq(fxrp.balanceOf(address(fxrpOft)), amount);
         assertEq(fxrp.allowance(subaccount, address(fxrpOft)), 0);
 
         // destination is this account's own address; payload and options pass through untouched
         (uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,,,) = fxrpOft.lastSendParam();
         assertEq(dstEid, destinationEid);
         assertEq(to, bytes32(uint256(uint160(subaccount))));
-        assertEq(amountLD, balance);
-        assertEq(minAmountLD, balance);
+        assertEq(amountLD, amount);
+        assertEq(minAmountLD, amount);
         (,,,, bytes memory extraOptionsSent, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
         assertEq(extraOptionsSent, extraOptions);
         assertEq(composeMsgSent, composeMsg);
         assertEq(fxrpOft.lastValue(), messagingFee);
+    }
+
+    function testExecuteLayerZeroCallMessageOnly() public {
+        // a zero amount carries only the instruction - used by actions that move no tokens
+        // (withdraw, configuration); the account's balance is untouched
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        vm.deal(personalAccount, messagingFee);
+        vm.prank(personalAccount);
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(0, hex"01", "");
+
+        assertEq(fxrp.balanceOf(subaccount), 100e6);
+        assertEq(fxrp.balanceOf(address(fxrpOft)), 0);
+        (,, uint256 amountLD,,,,) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 0);
+    }
+
+    function testExecuteLayerZeroCallRevertAmountExceedsBalance() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 40e6);
+        _configureLoanBridge();
+
+        vm.deal(personalAccount, messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccount.AmountExceedsBalance.selector, 100e6, 40e6)
+        );
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(100e6, hex"01", "");
     }
 
     function testExecuteLayerZeroCallRevertOnlyParent() public {
@@ -1317,7 +1349,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // the parent Personal Account - may send it
         vm.deal(address(this), messagingFee);
         vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
-        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(100e6, hex"01", "");
     }
 
     function testExecuteLayerZeroCallRevertEmptyComposeMessage() public {
@@ -1330,7 +1362,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(ILoanSubaccount.EmptyComposeMessage.selector);
-        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}("", "");
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(0, "", "");
     }
 
     function testExecuteLayerZeroCallRefundsExcessToParent() public {
@@ -1342,7 +1374,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         uint256 sent = messagingFee + 1 ether;
         vm.deal(personalAccount, sent);
         vm.prank(personalAccount);
-        ILoanSubaccount(subaccount).executeLayerZeroCall{value: sent}(hex"01", "");
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: sent}(100e6, hex"01", "");
 
         // only the fee was forwarded; the excess came back to the parent, not stranded here
         assertEq(fxrpOft.lastValue(), messagingFee);
@@ -1363,7 +1395,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         calls[0] = IPersonalAccount.Call({
             target: subaccount,
             value: messagingFee,
-            data: abi.encodeCall(ILoanSubaccount.executeLayerZeroCall, (composeMsg, _canonicalLoanOptions()))
+            data: abi.encodeCall(ILoanSubaccount.executeLayerZeroCall, (100e6, composeMsg, _canonicalLoanOptions()))
         });
         _executeUserOpWithValue(personalAccount, calls, bytes32("dmLoanCall"), messagingFee);
 
@@ -1401,7 +1433,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             target: subaccount,
             value: messagingFee,
             data: abi.encodeCall(
-                ILoanSubaccount.executeLayerZeroCall, (composeMsg, _canonicalLoanOptions())
+                ILoanSubaccount.executeLayerZeroCall,
+                (loanAmount, composeMsg, _canonicalLoanOptions())
             )
         });
 
@@ -1455,7 +1488,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(100e6, hex"01", "");
     }
 
     function testExecuteLayerZeroCallRevertLoanBridgeNotConfigured() public {
@@ -1466,7 +1499,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
-        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(100e6, hex"01", "");
     }
 
     function testExecuteLayerZeroCallRevertWhenPeerMutatedAfterConfiguration() public {
@@ -1481,7 +1514,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(ILoanSubaccount.WrongDestinationPeer.selector);
-        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(100e6, hex"01", "");
     }
 
     function testExecuteLayerZeroCallRevertInsufficientFundsForSweep() public {
@@ -1495,18 +1528,22 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(ILoanSubaccount.InsufficientFundsForSweep.selector, messagingFee)
         );
-        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee - 1}(hex"01", "");
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee - 1}(100e6, hex"01", "");
     }
 
-    function testExecuteLayerZeroCallRevertNothingToSweep() public {
+    function testExecuteLayerZeroCallRevertOnEmptyBalance() public {
+        // an empty account can still send message-only instructions, but any positive amount
+        // exceeds the balance
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         _configureLoanBridge();
 
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
-        vm.expectRevert(ILoanSubaccount.NothingToSweep.selector);
-        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(hex"01", "");
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccount.AmountExceedsBalance.selector, 100e6, 0)
+        );
+        ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(100e6, hex"01", "");
     }
 
     function testGetLoanSubaccountDifferentOwnersGetDifferentAddresses() public view {
