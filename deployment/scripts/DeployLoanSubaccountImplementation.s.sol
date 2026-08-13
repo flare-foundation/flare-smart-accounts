@@ -39,6 +39,8 @@ contract DeployLoanSubaccountImplementation is Script {
             return "coston";
         } else if (_chainId == 114) {
             return "coston2";
+        } else if (_chainId == 1) {
+            return "ethereum";
         } else {
             return "scdev";
         }

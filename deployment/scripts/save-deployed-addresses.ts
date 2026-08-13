@@ -32,7 +32,7 @@ if (network === "unknown") {
   throw new Error("Network name not found in output");
 }
 
-const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev"];
+const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev", "ethereum"];
 const isValidNetwork =
   allowedBaseNetworks.includes(network) ||
   (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));

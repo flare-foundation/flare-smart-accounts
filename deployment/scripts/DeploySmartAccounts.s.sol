@@ -110,6 +110,8 @@ contract DeploySmartAccounts is Script {
             network = "coston";
         } else if (chainId == 114) {
             network = "coston2";
+        } else if (chainId == 1) {
+            network = "ethereum";
         } else {
             network = "scdev";
         }

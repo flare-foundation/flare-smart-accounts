@@ -285,6 +285,22 @@ cleanup sweep.
   is deployed with `pnpm deploy_loan_subaccount_implementation <network>` and registered by
   governance with the timelocked
   `setLoanSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, <address>)`.
+- **Ethereum bootstrap.** Rebuilding today's sources does **not** reproduce the production
+  diamond address — source drift changes the base facets' bytecode, their CREATE2 addresses,
+  the diamond's constructor arguments, and with them its address. The historical init code of
+  the diamond and its three base facets is therefore pinned as raw bytes under
+  `deployment/pinned-init-code/` (recovered from the Flare creation transactions and verified:
+  its CREATE2 derivation reproduces the live addresses exactly; `test/PinnedInitCode.t.sol`
+  asserts the hashes, the derivation, and a golden xrplOwner → Personal Account → subaccount
+  address vector in CI). `pnpm deploy_ethereum_controller` reproduces all four contracts on
+  Ethereum at the production addresses — permissionless, since CREATE2 through the EIP-2470
+  factory is sender-independent. **The follow-up facet cut is not permissionless**: the fresh
+  diamond is owned by the historical `DiamondArgs.owner` EOA
+  (`0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA`) — confirm that key is still controlled
+  before relying on an Ethereum deployment. The Ethereum cut installs `LoanSubaccountsFacet`,
+  `TimelockFacet`, `PauseFacet`, and `EthereumLoanSettingsFacet` through the standard cut flow
+  (`deployment/cuts/ethereum/`, seeded `deployment/deploys/ethereum.json`), and the
+  implementation ships with `pnpm deploy_ethereum_loan_subaccount_implementation`.
 - **`setLoanBridgeSettings` comes last, and only once the loan-chain side exists.** Its
   validation reads the OFT's live peer for the destination endpoint, so it cannot be configured
   before the destination route is wired; until then the forward moves revert with
