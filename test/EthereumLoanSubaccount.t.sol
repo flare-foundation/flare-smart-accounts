@@ -15,8 +15,24 @@ import {
     EthereumLoanSubaccount
 } from "../contracts/smartAccounts/implementation/EthereumLoanSubaccount.sol";
 import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol";
+import {
+    EthereumLoanSettingsFacet
+} from "../contracts/smartAccounts/facets/EthereumLoanSettingsFacet.sol";
 import {IEthereumLoanSubaccount} from "../contracts/userInterfaces/IEthereumLoanSubaccount.sol";
-import {SUBACCOUNT_TYPE_LOAN} from "../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {
+    IEthereumLoanSettingsFacet
+} from "../contracts/userInterfaces/facets/IEthereumLoanSettingsFacet.sol";
+import {
+    IIEthereumLoanSettingsFacet
+} from "../contracts/smartAccounts/interface/IIEthereumLoanSettingsFacet.sol";
+import {IMorpho} from "../contracts/smartAccounts/interface/IMorpho.sol";
+import {
+    ILoanSubaccountsFacet,
+    SUBACCOUNT_TYPE_LOAN
+} from "../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
+import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
+import {MockOft} from "../contracts/mock/MockOft.sol";
 
 /**
  * @title EthereumLoanSubaccountTest
@@ -26,6 +42,7 @@ import {SUBACCOUNT_TYPE_LOAN} from "../contracts/userInterfaces/facets/ILoanSuba
  * the implementation self-lock, resolution and upgrade routing, and address invariance
  * across implementations.
  */
+// solhint-disable-next-line max-states-count
 contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
 
@@ -43,6 +60,14 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
     uint256 private paymentProofValidityDurationSeconds;
     uint256 private defaultInstructionFee;
 
+    MintableERC20 private fxrp;
+    MintableERC20 private rlusd;
+    MockOft private fxrpOft;
+    address private lzEndpoint;
+    address private morpho;
+    uint32 private originEid;
+    bytes32 private originPeer;
+
     // base facets are CREATE2-deployed with a fixed salt, so they are deployed once and shared
     IDiamond.FacetCut[] private baseCuts;
 
@@ -58,8 +83,29 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         paymentProofValidityDurationSeconds = 1 days;
         defaultInstructionFee = 1_000_000;
 
+        fxrp = new MintableERC20("F-XRPL", "fXRP", 6);
+        rlusd = new MintableERC20("RLUSD", "RLUSD", 18);
+        fxrpOft = new MockOft(fxrp, 0.01 ether);
+        // the settings validate that these are contracts; their behavior is not needed yet
+        lzEndpoint = makeAddr("lzEndpoint");
+        vm.etch(lzEndpoint, hex"00");
+        morpho = makeAddr("morpho");
+        vm.etch(morpho, hex"00");
+        originEid = 30295; // Flare
+        originPeer = bytes32(uint256(uint160(makeAddr("flareSideAdapter"))));
+
         personalAccountImplementation = address(new PersonalAccount());
         controller = _deployDiamond();
+
+        // the Ethereum-side diamond additionally carries the loan settings facet
+        IDiamond.FacetCut[] memory settingsCut = new IDiamond.FacetCut[](1);
+        settingsCut[0] = _buildFacetCut(
+            address(new EthereumLoanSettingsFacet()),
+            "EthereumLoanSettingsFacet",
+            IDiamond.FacetCutAction.Add
+        );
+        vm.prank(governance);
+        controller.diamondCut(settingsCut, address(0), "");
 
         // register the Ethereum-side implementation for the loan type (timelock is 0 in tests)
         ethereumImpl = new EthereumLoanSubaccount();
@@ -172,8 +218,185 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
     }
 
     //
+    // step 2: the Ethereum loan settings
+    //
+
+    function testSetEthereumLoanSettings() public {
+        _configureSettings();
+
+        IEthereumLoanSettingsFacet.Settings memory stored =
+            IEthereumLoanSettingsFacet(address(controller)).getEthereumLoanSettings();
+        assertEq(stored.lzEndpoint, lzEndpoint);
+        assertEq(stored.fxrpOft, address(fxrpOft));
+        assertEq(stored.originEid, originEid);
+        assertEq(stored.originPeer, originPeer);
+        assertEq(stored.morpho, morpho);
+        assertEq(stored.marketParams.loanToken, address(rlusd));
+        assertEq(stored.marketParams.collateralToken, address(fxrp));
+        assertEq(stored.marketParams.lltv, 0.77e18);
+    }
+
+    function testSetEthereumLoanSettingsRevertNotOwner() public {
+        address notOwner = makeAddr("notOwner");
+        vm.prank(notOwner);
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
+        );
+        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(
+            _defaultSettings()
+        );
+    }
+
+    function testSetEthereumLoanSettingsRevertInvalidValues() public {
+        fxrpOft.setPeer(originEid, originPeer);
+        IEthereumLoanSettingsFacet.Settings memory settings;
+
+        // the endpoint, Morpho and the OFT must be contracts
+        settings = _defaultSettings();
+        settings.lzEndpoint = makeAddr("noCode");
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidLzEndpoint.selector);
+
+        settings = _defaultSettings();
+        settings.morpho = makeAddr("noCode");
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidMorpho.selector);
+
+        settings = _defaultSettings();
+        settings.fxrpOft = makeAddr("noCode");
+        _setSettingsExpectRevert(settings, ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+
+        settings = _defaultSettings();
+        settings.originEid = 0;
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidOriginEid.selector);
+
+        settings = _defaultSettings();
+        settings.originPeer = bytes32(0);
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidOriginPeer.selector);
+
+        // the market must name both tokens and a non-zero LLTV
+        settings = _defaultSettings();
+        settings.marketParams.loanToken = address(0);
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidMarketParams.selector);
+
+        settings = _defaultSettings();
+        settings.marketParams.collateralToken = address(0);
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidMarketParams.selector);
+
+        settings = _defaultSettings();
+        settings.marketParams.lltv = 0;
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidMarketParams.selector);
+    }
+
+    function testSetEthereumLoanSettingsRevertWrongToken() public {
+        // an OFT wrapping some other token than the market's collateral must be rejected
+        MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
+        MockOft otherOft = new MockOft(otherToken, 0.01 ether);
+        otherOft.setPeer(originEid, originPeer);
+
+        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
+        settings.fxrpOft = address(otherOft);
+        _setSettingsExpectRevert(settings, ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+    }
+
+    function testSetEthereumLoanSettingsRevertWrongSharedDecimals() public {
+        // the bridge-back sweep sends with minAmountLD == amountLD, so shared-decimal dust
+        // would make it revert; such an OFT must be rejected up front
+        fxrpOft.setPeer(originEid, originPeer);
+        fxrpOft.setSharedDecimals(4);
+        _setSettingsExpectRevert(
+            _defaultSettings(), ILoanSubaccountsFacet.InvalidFxrpOft.selector
+        );
+    }
+
+    function testSetEthereumLoanSettingsRevertWrongOftVersion() public {
+        // the compose authentication depends on the canonical composeFrom encoding, so only
+        // the canonical interface id and message-codec version 1 are accepted
+        fxrpOft.setPeer(originEid, originPeer);
+
+        fxrpOft.setOftVersion(0x02e49c2c, 2);
+        _setSettingsExpectRevert(
+            _defaultSettings(), ILoanSubaccountsFacet.InvalidFxrpOft.selector
+        );
+
+        fxrpOft.setOftVersion(0xdeadbeef, 1);
+        _setSettingsExpectRevert(
+            _defaultSettings(), ILoanSubaccountsFacet.InvalidFxrpOft.selector
+        );
+
+        fxrpOft.setOftVersion(0x02e49c2c, 1);
+        vm.prank(governance);
+        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(
+            _defaultSettings()
+        );
+    }
+
+    function testSetEthereumLoanSettingsRevertPeerMismatch() public {
+        // the live peer for the origin endpoint must be exactly the pinned remote OApp
+        fxrpOft.setPeer(originEid, bytes32(uint256(0xbad)));
+        _setSettingsExpectRevert(
+            _defaultSettings(), IEthereumLoanSettingsFacet.InvalidOriginPeer.selector
+        );
+    }
+
+    function testClearEthereumLoanSettings() public {
+        _configureSettings();
+
+        // clearing with all-zero settings disables the loan module until reconfigured
+        IEthereumLoanSettingsFacet.Settings memory cleared;
+        vm.prank(governance);
+        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(cleared);
+
+        IEthereumLoanSettingsFacet.Settings memory stored =
+            IEthereumLoanSettingsFacet(address(controller)).getEthereumLoanSettings();
+        assertEq(stored.lzEndpoint, address(0));
+        assertEq(stored.fxrpOft, address(0));
+        assertEq(stored.originEid, 0);
+        assertEq(stored.originPeer, bytes32(0));
+        assertEq(stored.morpho, address(0));
+        assertEq(stored.marketParams.loanToken, address(0));
+    }
+
+    //
     // helpers
     //
+
+    function _defaultSettings()
+        private
+        returns (IEthereumLoanSettingsFacet.Settings memory)
+    {
+        return IEthereumLoanSettingsFacet.Settings({
+            lzEndpoint: lzEndpoint,
+            fxrpOft: address(fxrpOft),
+            originEid: originEid,
+            originPeer: originPeer,
+            morpho: morpho,
+            marketParams: IMorpho.MarketParams({
+                loanToken: address(rlusd),
+                collateralToken: address(fxrp),
+                oracle: makeAddr("oracle"),
+                irm: makeAddr("irm"),
+                lltv: 0.77e18
+            })
+        });
+    }
+
+    function _configureSettings() private {
+        fxrpOft.setPeer(originEid, originPeer);
+        vm.prank(governance);
+        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(
+            _defaultSettings()
+        );
+    }
+
+    function _setSettingsExpectRevert(
+        IEthereumLoanSettingsFacet.Settings memory _settings,
+        bytes4 _selector
+    )
+        private
+    {
+        vm.prank(governance);
+        vm.expectRevert(_selector);
+        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(_settings);
+    }
 
     function _deployDiamond() private returns (IIMasterAccountController _controller) {
         if (baseCuts.length == 0) {

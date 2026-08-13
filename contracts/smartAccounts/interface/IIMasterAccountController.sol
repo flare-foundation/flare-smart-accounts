@@ -7,6 +7,7 @@ import {IERC165} from "../../diamond/interfaces/IERC165.sol";
 import {IERC173} from "../../diamond/interfaces/IERC173.sol";
 
 import {IIAgentVaultsFacet} from "./IIAgentVaultsFacet.sol";
+import {IIEthereumLoanSettingsFacet} from "./IIEthereumLoanSettingsFacet.sol";
 import {IIExecutorsFacet} from "./IIExecutorsFacet.sol";
 import {IIInstructionFeesFacet} from "./IIInstructionFeesFacet.sol";
 import {IIInstructionsFacet} from "./IIInstructionsFacet.sol";
@@ -31,6 +32,7 @@ interface IIMasterAccountController is
     IERC165,
     IERC173,
     IIAgentVaultsFacet,
+    IIEthereumLoanSettingsFacet,
     IIExecutorsFacet,
     IIInstructionFeesFacet,
     IIInstructionsFacet,

@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place. The Ethereum-side account exists as a step-1 skeleton (initialization and per-chain resolution); its authenticated compose entry point and the repay/cleanup rails are still to come. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place. The Ethereum-side account exists as a skeleton (initialization and per-chain resolution) with its governance configuration (`EthereumLoanSettingsFacet`); its authenticated compose entry point and the repay/cleanup rails are still to come. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
 
 ## Typed subaccounts
 
@@ -245,10 +245,22 @@ payload sent by this same account on Flare (`executeLayerZeroCall`), and everyth
 permissionless movement along fixed rails, the same invariant as everywhere: anyone may move
 the assets, nobody may redirect them.
 
-Step 1 carries only initialization, the implementation self-lock, and beacon resolution. The
-next steps add, against the release gates recorded above: the `lzCompose` entry point with the
-full authentication checklist, the borrow action against the governance-configured Morpho
-market, the permissionless repay rail, and the bridge-back cleanup sweep.
+The account's configuration lives in
+[`EthereumLoanSettingsFacet`](../../../contracts/smartAccounts/facets/EthereumLoanSettingsFacet.sol),
+cut **only on the Ethereum-side diamond**: the LayerZero endpoint (the only allowed `lzCompose`
+caller), the FXRP OFT on this chain (the only allowed compose sender, and the vehicle for the
+bridge-back sweep), the pinned origin route back to Flare (`originEid`/`originPeer`), and the
+Morpho contract with its market (`loanToken` = RLUSD, `collateralToken` = FXRP). The timelocked
+`setEthereumLoanSettings` validates the OFT exactly as the Flare-side `setLoanBridgeSettings`
+does — it must wrap the market's collateral token, share its decimals, report the canonical
+`oftVersion`, and its live peer for the origin endpoint must equal the pinned one — and
+all-zero settings clear the configuration, disabling the loan module until reconfigured.
+
+Built so far: initialization, the implementation self-lock, beacon resolution (step 1), and the
+governance configuration (step 2). The next steps add, against the release gates recorded
+above: the `lzCompose` entry point with the full authentication checklist, the borrow action
+against the configured Morpho market, the permissionless repay rail, and the bridge-back
+cleanup sweep.
 
 ## Deployment
 
