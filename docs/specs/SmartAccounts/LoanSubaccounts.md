@@ -6,7 +6,7 @@ Status: in progress. The account, its proxy, the per-type implementation registr
 
 ## Typed subaccounts
 
-Subaccounts are typed by a raw `uint256` identifier (`0` is reserved and invalid; `1` is the loan type — see the `SUBACCOUNT_TYPE_*` constants in [`ILoanSubaccountsFacet`](../../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol)). It is deliberately not a Solidity enum: the proxy creation code — and with it the constructor ABI — gets frozen for deterministic CREATE2 addresses (see below; still pending), and a compiled enum decoder rejects values outside the range it was compiled with, which would make future types undeployable through the frozen artifact. With a raw integer, a new type needs only a registered implementation. Each type has its own implementation contract, registered per type in [`LoanSubaccounts.State.typeImplementation`](../../../contracts/smartAccounts/library/LoanSubaccounts.sol) and managed by the timelocked `setLoanSubaccountImplementation`.
+Subaccounts are typed by a raw `uint256` identifier (`0` is reserved and invalid; `1` is the loan type — see the `SUBACCOUNT_TYPE_*` constants in [`ILoanSubaccountsFacet`](../../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol)). It is deliberately not a Solidity enum: the proxy creation code — and with it the constructor ABI — is frozen for deterministic CREATE2 addresses (see below), and a compiled enum decoder rejects values outside the range it was compiled with, which would make future types undeployable through the frozen artifact. With a raw integer, a new type needs only a registered implementation. Each type has its own implementation contract, registered per type in [`LoanSubaccounts.State.typeImplementation`](../../../contracts/smartAccounts/library/LoanSubaccounts.sol) and managed by the timelocked `setLoanSubaccountImplementation`.
 
 ## Deployment model
 
@@ -33,14 +33,14 @@ Like PAs, subaccounts are deployed via the [EIP-2470 Singleton Factory](https://
 
 ```solidity
 abi.encodePacked(
-    type(LoanSubaccountProxy).creationCode,
+    PROXY_CREATION_CODE, // frozen type(LoanSubaccountProxy).creationCode
     abi.encode(address(this) /* diamond */, _parentPersonalAccount, _subaccountType)
 )
 ```
 
 with `salt = bytes32(0)`. The subaccount address is therefore a pure function of `(diamond, parentPersonalAccount, subaccountType)` — per-type and per-account unique, and identical on every chain where the diamond has the same address. No implementation or beacon address enters the derivation, so implementation upgrades never move addresses.
 
-> **Freeze before first use:** the derivation currently uses `type(LoanSubaccountProxy).creationCode`. Before the first production deployment — or the first time a predicted address is handed out — this must be frozen to a hex constant with a pinned-hash test, exactly like [`PersonalAccounts.PROXY_CREATION_CODE`](./PersonalAccounts.md#frozen-proxy_creation_code). Until then, any change to the proxy source shifts all predicted addresses.
+> **Frozen:** the derivation uses the frozen `LoanSubaccounts.PROXY_CREATION_CODE` hex constant, exactly like [`PersonalAccounts.PROXY_CREATION_CODE`](./PersonalAccounts.md#frozen-proxy_creation_code). Its hash is pinned in `test/LoanSubaccountsLibrary.t.sol`, and two further tests compare it against a fresh compilation of the proxy source (by length, and byte-exact modulo CBOR metadata), so any drift fails CI. Editing the constant or the proxy source is a cross-chain coordination event: all predicted-but-not-deployed subaccount addresses would shift.
 
 ## Creation and prediction
 
