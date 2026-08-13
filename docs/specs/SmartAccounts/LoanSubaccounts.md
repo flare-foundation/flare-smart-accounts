@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place. The Ethereum-side account exists as a skeleton (initialization and per-chain resolution) with its governance configuration (`EthereumLoanSettingsFacet`); its authenticated compose entry point and the repay/cleanup rails are still to come. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place. The Ethereum-side account has its authenticated compose entry point (`lzCompose` with the borrow and withdraw actions), its governance configuration (`EthereumLoanSettingsFacet`), and its creation route; the permissionless repay/cleanup rails are still to come. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
 
 ## Typed subaccounts
 
@@ -208,8 +208,9 @@ side):
   `composeFrom == address(this)` — only the account itself calls `send` on the Flare side, and
   it has the same address on both chains, so the check is self-referential. The credited
   amount must be read from the codec (`amountLD`), never from the payload; the executor and
-  any extra data are untrusted. A payload failing these checks is ignored (the tokens are
-  simply a donation); it must not execute.
+  any extra data are untrusted. A payload failing these checks must not execute: the
+  delivery reverts (retriable through the endpoint) and the attached tokens stay on the
+  account.
 - **Idle FXRP on the Ethereum account needs an exit.** Plain `sweepToLoan` cleanup delivers
   FXRP with no payload by design, and a failed `lzCompose` leaves credited FXRP behind — the
   Ethereum side must offer cleanup for that state under the same invariant (anyone may move,
@@ -265,11 +266,56 @@ anything. Also noted for later: the pause is a single global switch today; separ
 domains for the Morpho actions and the bridge would give cleaner containment if one ever needs
 stopping without the other.
 
-Built so far: initialization, the implementation self-lock, beacon resolution (step 1), and the
-governance configuration (step 2). The next steps add, against the release gates recorded
-above: the `lzCompose` entry point with the full authentication checklist, the borrow action
-against the configured Morpho market, the permissionless repay rail, and the bridge-back
-cleanup sweep.
+**The compose entry point.** `lzCompose` authenticates a message down to the LayerZero packet
+header before acting on it: the caller must be the configured endpoint, `_from` the configured
+FXRP OFT, the source EID the pinned origin chain, `composeFrom` this account's own address —
+and, because the compose wrapper alone does not commit to the source OApp, the delivered GUID
+must equal the one recomputed from the pinned origin peer
+(`GUID.generate(nonce, srcEid, originPeer, dstEid, fxrpOft)`). The endpoint computes the real
+GUID from the true packet header, so even an OFT whose peer is temporarily swapped to a
+malicious OApp cannot forge a message that passes: this closes the change-send-restore attack
+against accumulated positions. Compose value is rejected (`NonZeroComposeValue`) — the flow
+never sends any, and the account has no native exit yet. The executor and extra data are
+untrusted and ignored. A failing delivery reverts and stays retriable through the endpoint;
+the credited FXRP is already on the account either way.
+
+**The payload, version 1** — `abi.encode(uint8 version, uint8 action, bytes actionData)`. Every
+action carries `(bytes32 operationId, uint64 deadline, bytes32 expectedMarketId, …)`:
+
+- **Operation ids make retries safe**: a user retrying a stalled instruction produces a new
+  LayerZero packet, and distinct deliveries of the same intent must not double-execute. An
+  already-consumed id completes the delivery without effect (`LoanActionSkipped`). Ids are
+  consumed only on execution, so a skipped intent can retry under the same id. Ids must be
+  non-zero and globally unique per subaccount across action types; a retry keeps its economic
+  fields and refreshes only the deadline.
+- **Deadlines expire stale intent**: an old queued action completes without effect instead of
+  creating debt long after the user signed it.
+- **The market id binds the action to the market it was signed for**
+  (`keccak256(abi.encode(marketParams))`, Morpho's canonical id): a settings change between
+  signing and delivery **reverts** the delivery instead of reinterpreting — deliberately not a
+  skip, since a mismatch is temporary and a permissionless delivery during the window must not
+  consume the packet. The delivery stays retriable until its deadline expires.
+- Skipped deliveries leave their bridged FXRP on the account for the fixed rails.
+
+`ACTION_BORROW` supplies **exactly the authenticated bridged amount** (the codec's `amountLD`,
+never the idle balance, which can commingle donations and unrelated transfers) as collateral,
+and for a non-zero `borrowAmount` borrows against the account's own position and pays the
+destination — EVM kind only, clean zero-padded address, Wormhole kind reserved. If the credited
+tokens were moved before delivery (the accepted race above), the action fails closed with
+`InsufficientComposeBalance` — a cap rather than provenance, since every balance on the account
+is the user's own, but it stops a signed action from absorbing more than its own credit. `ACTION_WITHDRAW` withdraws
+collateral from the account's own position **to the account itself**, where only the fixed
+rails can move it; Morpho enforces position health.
+
+**Creation route.** `createEthereumLoanSubaccount(xrplOwner, type)` on the settings facet is
+the Ethereum counterpart of `createLoanSubaccount` — permissionless and idempotent, but the
+parent Personal Account resolves to its **computed** address (PAs exist only on Flare, and the
+PA derivation is chain-independent), so it materializes exactly the account the Flare side
+predicts. Because the facet is cut only on the Ethereum-side diamond, the relaxed route exists
+only where it is needed.
+
+Still to come, against the release gates above: the permissionless repay rail (with debt
+clamping), the deposit rail for idle FXRP, the bridge-back sweep, and the native exit.
 
 ## Deployment
 
@@ -312,6 +358,5 @@ cleanup sweep.
 ## Open design items (decide with the asset-moving methods)
 
 - **Stuck RLUSD on the Ethereum side has only one move: repay.** RLUSD arriving there is indistinguishable between an inbound repayment and a borrow whose outbound leg failed, and a borrow may name an arbitrary destination, so a permissionless "send onward" would let anyone redirect a repayment to a third party. Repay is safe under every interpretation, since its target is the account's own position. The cost is that a failed disbursement silently unwinds the loan the user asked for. A bounded retry is possible if the account records the pending disbursement (amount plus destination) at borrow time, so the retry is driven by stored state rather than calldata; that is likely the same state needed to prevent double borrows when a LayerZero message stalls. Product decision, to settle before the Ethereum-side work.
-- **Subaccount creation on Ethereum.** `createLoanSubaccount` requires the parent Personal Account to be *deployed*, which is never true on Ethereum. The PA address is computable there (same diamond address, same PA derivation, frozen PA creation code), so the check should accept the computed address on the Ethereum side — to be decided deliberately, since it touches shared code (chain-aware branch vs. an Ethereum variant of the facet).
 - **TODO, parked: grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above), so a pause held across FDC's attestation window combined with an unavailable executor recreates the executor dependency. The designed fix: relays stay parent-only until the request's `lastUnderlyingTimestamp` (read per-request from `redemptionRequestInfo`, no stored clock) is a grace period past, then open to anyone — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable. Implemented and tested, then parked; **must be decided before the first production deployment**, rather than left to incident-time executor availability.
 - ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.

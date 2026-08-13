@@ -53,6 +53,21 @@ interface IMorpho {
         returns (uint256 assetsBorrowed, uint256 sharesBorrowed);
 
     /**
+     * @notice Withdraws collateral from the caller's position.
+     * @param marketParams The market to withdraw collateral from.
+     * @param assets The amount of collateral to withdraw.
+     * @param onBehalf The account that owns the reduced collateral position.
+     * @param receiver The receiver of the withdrawn collateral.
+     */
+    function withdrawCollateral(
+        MarketParams memory marketParams,
+        uint256 assets,
+        address onBehalf,
+        address receiver
+    )
+        external;
+
+    /**
      * @notice Repays assets on behalf of a borrow position.
      * @param marketParams The market to repay to.
      * @param assets The amount of assets to repay (exactly one of assets/shares is non-zero).

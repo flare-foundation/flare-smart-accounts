@@ -78,6 +78,25 @@ interface IEthereumLoanSettingsFacet {
     error InvalidMarketParams();
 
     /**
+     * @notice Creates the loan subaccount for an XRPL owner on this chain.
+     * @dev Permissionless and idempotent, like the Flare-side `createLoanSubaccount` — but the
+     * parent Personal Account is resolved to its **computed** address instead of requiring a
+     * deployment: Personal Accounts exist only on Flare, and their address is a pure function
+     * of the diamond (same on every chain) and the XRPL owner, so the subaccount created here
+     * is exactly the one the Flare side predicts. Because this facet is cut only on the
+     * Ethereum-side diamond, the relaxed route exists only where it is needed.
+     * @param _xrplOwner The XRPL owner.
+     * @param _subaccountType The subaccount type.
+     * @return The loan subaccount address.
+     */
+    function createEthereumLoanSubaccount(
+        string calldata _xrplOwner,
+        uint256 _subaccountType
+    )
+        external
+        returns (address);
+
+    /**
      * @notice Returns the Ethereum loan settings.
      * @return The settings; all-zero when not configured.
      */
