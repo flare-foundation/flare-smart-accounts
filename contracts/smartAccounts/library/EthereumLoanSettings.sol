@@ -28,9 +28,18 @@ library EthereumLoanSettings {
         if (
             _settings.lzEndpoint == address(0) &&
             _settings.fxrpOft == address(0) &&
-            _settings.morpho == address(0)
+            _settings.morpho == address(0) &&
+            _settings.originEid == 0 &&
+            _settings.originPeer == bytes32(0) &&
+            _settings.marketParams.loanToken == address(0) &&
+            _settings.marketParams.collateralToken == address(0) &&
+            _settings.marketParams.oracle == address(0) &&
+            _settings.marketParams.irm == address(0) &&
+            _settings.marketParams.lltv == 0
         ) {
-            // explicit clear: disables lzCompose and the bridge-back sweep until reconfigured
+            // explicit clear, only for a fully zero struct: disables lzCompose and the
+            // bridge-back sweep until reconfigured; a partially zero struct falls through to
+            // the validation below and reverts, so a malformed clear cannot wipe the settings
             delete state.settings;
             emit IEthereumLoanSettingsFacet.EthereumLoanSettingsSet(
                 address(0), address(0), 0, bytes32(0), address(0), bytes32(0)
@@ -40,7 +49,12 @@ library EthereumLoanSettings {
         require(_settings.lzEndpoint.code.length > 0, IEthereumLoanSettingsFacet.InvalidLzEndpoint());
         require(_settings.morpho.code.length > 0, IEthereumLoanSettingsFacet.InvalidMorpho());
         require(_settings.originEid != 0, IEthereumLoanSettingsFacet.InvalidOriginEid());
-        require(_settings.originPeer != bytes32(0), IEthereumLoanSettingsFacet.InvalidOriginPeer());
+        // the origin peer is the Flare-side adapter, an EVM address: it must be non-zero and
+        // cleanly zero-padded
+        require(
+            _settings.originPeer != bytes32(0) && uint256(_settings.originPeer) >> 160 == 0,
+            IEthereumLoanSettingsFacet.InvalidOriginPeer()
+        );
         IMorpho.MarketParams memory marketParams = _settings.marketParams;
         require(
             marketParams.loanToken != address(0) &&
@@ -66,6 +80,12 @@ library EthereumLoanSettings {
         require(
             interfaceId == type(IOFT).interfaceId && version == 1,
             ILoanSubaccountsFacet.InvalidFxrpOft()
+        );
+        // the OFT must be wired to the same endpoint that will deliver lzCompose calls;
+        // otherwise a wrong (or malicious) endpoint could fabricate every callback parameter
+        require(
+            address(IOAppCore(_settings.fxrpOft).endpoint()) == _settings.lzEndpoint,
+            IEthereumLoanSettingsFacet.InvalidLzEndpoint()
         );
         // the live peer for the origin endpoint must be exactly the pinned remote OApp
         require(

@@ -98,10 +98,10 @@ may redirect them.
 
 The same openness is an **accepted risk** against the loan instruction: a stranded balance awaiting a parent-signed `executeLayerZeroCall` can be swept
 out from under it, aborting the requested loan action. Two bounds keep this accepted rather
-than fixed. First, the **primary loan flow is atomic and immune**: one `handleMintedFAssets`
+than fixed. First, the **primary loan flow is atomic and immune on the Flare leg**: one `handleMintedFAssets`
 transaction mints the FXRP, funds the Personal Account, creates the subaccount, transfers, and
 bridges with the payload — the subaccount balance never exists outside that transaction, so
-there is nothing to front-run (a test covers the five steps in one transaction). Only
+there is nothing to front-run on this chain (a test covers the five steps in one transaction; the destination side has its own, separately accepted window — see the Ethereum-side section). Only
 *retry-after-strand* is exposed: FXRP already sitting on the subaccount while the user signs a
 fresh instruction. Second, in that window the funds can only be pushed to the user's own
 addresses. The griefing asymmetry is real, though — the attacker pays a fixed executor or
@@ -255,6 +255,15 @@ Morpho contract with its market (`loanToken` = RLUSD, `collateralToken` = FXRP).
 does — it must wrap the market's collateral token, share its decimals, report the canonical
 `oftVersion`, and its live peer for the origin endpoint must equal the pinned one — and
 all-zero settings clear the configuration, disabling the loan module until reconfigured.
+
+One race is accepted on this side, mirroring the Flare-side decision: LayerZero credits the
+bridged tokens and executes the composed action in two separate steps, so a permissionless
+bridge-back sweep will be able to bounce newly credited FXRP to the user's own Flare address
+before its composed action executes; the action then cannot execute and the loan is retried.
+As on Flare, the front-runner pays real fees per attempt, gains nothing, and cannot redirect
+anything. Also noted for later: the pause is a single global switch today; separate pause
+domains for the Morpho actions and the bridge would give cleaner containment if one ever needs
+stopping without the other.
 
 Built so far: initialization, the implementation self-lock, beacon resolution (step 1), and the
 governance configuration (step 2). The next steps add, against the release gates recorded

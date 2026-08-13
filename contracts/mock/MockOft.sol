@@ -28,6 +28,8 @@ contract MockOft is IOFT {
     uint8 public sharedDecimalsValue = 6;
     bytes4 public oftInterfaceId = 0x02e49c2c;
     uint64 public oftMessageVersion = 1;
+    /// @notice The endpoint this OFT is wired to, as `IOAppCore.endpoint()` reports it.
+    address public endpoint;
     mapping(uint32 eid => bytes32 peer) public peers;
 
     SendParam public lastSendParam;
@@ -54,6 +56,10 @@ contract MockOft is IOFT {
     function setOftVersion(bytes4 _interfaceId, uint64 _version) external {
         oftInterfaceId = _interfaceId;
         oftMessageVersion = _version;
+    }
+
+    function setEndpoint(address _endpoint) external {
+        endpoint = _endpoint;
     }
 
     /// @inheritdoc IOFT

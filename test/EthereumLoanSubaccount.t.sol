@@ -89,6 +89,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         // the settings validate that these are contracts; their behavior is not needed yet
         lzEndpoint = makeAddr("lzEndpoint");
         vm.etch(lzEndpoint, hex"00");
+        fxrpOft.setEndpoint(lzEndpoint);
         morpho = makeAddr("morpho");
         vm.etch(morpho, hex"00");
         originEid = 30295; // Flare
@@ -335,6 +336,47 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         _setSettingsExpectRevert(
             _defaultSettings(), IEthereumLoanSettingsFacet.InvalidOriginPeer.selector
         );
+    }
+
+    function testClearEthereumLoanSettingsRevertPartialZero() public {
+        _configureSettings();
+
+        // a struct with the addresses zeroed but a route or market still set is not a clear:
+        // it falls through to validation and reverts, so a malformed clear cannot silently
+        // wipe the settings
+        IEthereumLoanSettingsFacet.Settings memory partialZero;
+        partialZero.marketParams.lltv = 0.77e18;
+        vm.prank(governance);
+        vm.expectRevert(IEthereumLoanSettingsFacet.InvalidLzEndpoint.selector);
+        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(partialZero);
+
+        // the configured settings are untouched
+        assertEq(
+            IEthereumLoanSettingsFacet(address(controller)).getEthereumLoanSettings().lzEndpoint,
+            lzEndpoint
+        );
+    }
+
+    function testSetEthereumLoanSettingsRevertWrongEndpointAssociation() public {
+        // the OFT must be wired to the same endpoint that delivers lzCompose calls; a wrong
+        // (or malicious) endpoint could fabricate every callback parameter
+        fxrpOft.setPeer(originEid, originPeer);
+        address otherEndpoint = makeAddr("otherEndpoint");
+        vm.etch(otherEndpoint, hex"00");
+
+        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
+        settings.lzEndpoint = otherEndpoint;
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidLzEndpoint.selector);
+    }
+
+    function testSetEthereumLoanSettingsRevertDirtyOriginPeer() public {
+        // the origin peer is an EVM address and must be cleanly zero-padded
+        bytes32 dirtyPeer = bytes32(uint256(originPeer) | (uint256(1) << 200));
+        fxrpOft.setPeer(originEid, dirtyPeer);
+
+        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
+        settings.originPeer = dirtyPeer;
+        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidOriginPeer.selector);
     }
 
     function testClearEthereumLoanSettings() public {
