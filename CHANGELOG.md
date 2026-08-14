@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `@layerzerolabs-oapp-evm` dependency, for LayerZero's canonical `IOFT` interface.
   - Spellcheck: `pnpm spellcheck` (cspell over contracts, tests, deployment, and docs) with an advisory `spellcheck` CI job.
 
+### Changed
+  - `removeUnpausers` is immediate (`onlyOwner`) instead of timelocked — the remedy against a compromised unpauser, which could otherwise undo every pause for the whole timelock window; abusing it can only keep the system paused. Pauser removal stays timelocked (that delay keeps the circuit breaker alive under an owner-key compromise). Mirrors the same change in `flare-dvn-contracts`.
+
 ### Fixed
   - Misspelled `newWallet` variable name in `MasterAccountControllerTest`.
 

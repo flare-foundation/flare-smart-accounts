@@ -3858,6 +3858,36 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(masterAccountController.isUnpauser(unpauser), false);
     }
 
+    function testRemoveUnpausersIsImmediateEvenUnderTimelock() public {
+        // a compromised unpauser can instantly undo every emergency pause; its removal is the
+        // only remedy and must not wait out the timelock (removal is fail-safe - abusing it
+        // can only keep the system paused). Pauser removal, by contrast, stays timelocked.
+        address unpauser = makeAddr("unpauser");
+        address[] memory unpausers = new address[](1);
+        unpausers[0] = unpauser;
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+
+        vm.prank(governance);
+        masterAccountController.addUnpausers(unpausers);
+        vm.prank(governance);
+        masterAccountController.addPausers(pausers);
+
+        vm.prank(governance);
+        masterAccountController.setTimelockDuration(2 days);
+
+        // unpauser removal executes immediately
+        vm.prank(governance);
+        masterAccountController.removeUnpausers(unpausers);
+        assertEq(masterAccountController.isUnpauser(unpauser), false);
+
+        // pauser removal is only recorded; the pauser is still active
+        vm.prank(governance);
+        masterAccountController.removePausers(pausers);
+        assertEq(masterAccountController.isPauser(pauser), true);
+    }
+
     function testAddPausersRevertOnlyOwner() public {
         address[] memory pausers = new address[](1);
         pausers[0] = makeAddr("pauser");
