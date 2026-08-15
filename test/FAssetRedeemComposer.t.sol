@@ -1209,6 +1209,33 @@ contract FAssetRedeemComposerTest is Test {
         composer.upgradeToAndCall(address(newImpl), "");
     }
 
+    // --- OwnableWithTimelock: renounce disabled, no value on queueing ---
+
+    function testRenounceOwnershipDisabled() public {
+        vm.prank(owner);
+        vm.expectRevert(IOwnableWithTimelock.RenounceDisabled.selector);
+        composer.renounceOwnership();
+        assertEq(composer.owner(), owner, "owner orphaned");
+    }
+
+    function testRenounceOwnershipDisabledForNonOwner() public {
+        vm.expectRevert(IOwnableWithTimelock.RenounceDisabled.selector);
+        composer.renounceOwnership();
+    }
+
+    function testQueueingWithValueReverts() public {
+        // Execution replays only calldata via a zero-value self-call, so a
+        // payable upgradeToAndCall queued with value would trap that value.
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+        FAssetRedeemComposer newImpl = new FAssetRedeemComposer();
+        vm.deal(owner, 1 ether);
+
+        vm.prank(owner);
+        vm.expectRevert(IOwnableWithTimelock.TimelockValueNotAllowed.selector);
+        composer.upgradeToAndCall{value: 1}(address(newImpl), "");
+    }
+
     // --- OwnableWithTimelock: setTimelockDuration ---
 
     function testTimelockDurationInitiallyZero() public view {

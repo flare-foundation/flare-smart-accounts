@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.35;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {IOwnableWithTimelock} from "../../userInterfaces/IOwnableWithTimelock.sol";
 
 /**
  * @title OwnableWithTimelock
- * @notice Ownable extension that timelocks selected owner calls using dedicated storage slot.
+ * @notice Ownable extension that timelocks selected owner calls using a dedicated storage slot.
+ * @dev Upgradeable: built on `OwnableUpgradeable`; the concrete contract calls
+ *      `__Ownable_init` from its `initialize`. Ownership transfer is one-step, atomic, and
+ *      immediate; callers must validate the nonzero target because an incorrect target cannot be
+ *      recovered by this contract. Its own state lives at a fixed ERC-7201 slot, independent
+ *      of the inherited namespaced storage.
+ *
+ *      Queued calls are keyed by calldata hash alone: they carry no proposer and are not
+ *      cleared by `transferOwnership`, so a call queued by a previous owner stays executable
+ *      under the new owner - anyone can execute that exact operation, carrying its original
+ *      owner authorization. Cancel every outstanding queued call before transferring
+ *      ownership.
  */
 abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimelock {
 
@@ -19,9 +30,7 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
 
     uint256 internal constant MAX_TIMELOCK_DURATION_SECONDS = 7 days;
 
-    bytes32 internal constant STATE_POSITION = keccak256(
-        abi.encode(uint256(keccak256("utils.OwnableWithTimelock.State")) - 1)
-    ) & ~bytes32(uint256(0xff));
+    bytes32 internal constant STATE_POSITION = bytes32(erc7201("utils.OwnableWithTimelock.State"));
 
     modifier onlyOwnerWithTimelock() {
         if (_timeToExecuteTimelockedCall()) {
@@ -108,6 +117,18 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
         require(_allowedAfterTimestamp != 0, TimelockInvalidSelector());
     }
 
+    /**
+     * @notice Disabled to prevent permanently frozen administration; rotate
+     *         governance through `transferOwnership`.
+     */
+    function renounceOwnership()
+        public
+        pure
+        override
+    {
+        revert RenounceDisabled();
+    }
+
     function _beforeExecuteTimelockedCall()
         internal
         virtual
@@ -121,6 +142,15 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
         }
     }
 
+    /// @dev An upsert keyed solely by `keccak256(_encodedCall)`: queuing
+    ///      calldata that is already pending replaces its ETA — including
+    ///      pushing a matured call's ETA forward — and emits a regular
+    ///      `CallTimelocked`, indistinguishable from a fresh queueing. The
+    ///      latest emitted (and stored) ETA is the authoritative one, and two
+    ///      identical calls can never be pending concurrently. Only the owner
+    ///      queues, so an overwrite is always governance's own act — a double
+    ///      submission or a deliberate re-schedule — never a third party's,
+    ///      and no normal workflow queues identical calldata twice.
     function _recordTimelockedCall(
         bytes calldata _encodedCall
     )
@@ -129,6 +159,9 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
     {
         State storage state = getState();
         _checkOwner();
+        // Execution replays only calldata via a zero-value self-call, so value
+        // sent when queuing would be trapped; duration 0 still forwards it.
+        require(msg.value == 0, TimelockValueNotAllowed());
         bytes32 encodedCallHash = keccak256(_encodedCall);
         uint256 allowedAt = block.timestamp + state.timelockDurationSeconds;
         state.timelockedCalls[encodedCallHash] = allowedAt;
@@ -153,7 +186,7 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
         virtual
     {
         //solhint-disable-next-line no-inline-assembly
-        assembly {
+        assembly ("memory-safe") {
             let size := returndatasize()
             let ptr := mload(0x40)
             mstore(0x40, add(ptr, size))
