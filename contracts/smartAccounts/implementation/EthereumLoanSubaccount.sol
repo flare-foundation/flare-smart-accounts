@@ -467,9 +467,11 @@ contract EthereumLoanSubaccount is IEthereumLoanSubaccount, ReentrancyGuardTrans
     }
 
     /// @dev Withdraws collateral from the account's own position to the account itself; the
-    /// idle FXRP can then be redeposited or bridged back along the fixed rails. Works against
-    /// any registered route, so positions stay withdrawable however the active configuration
-    /// changes. Morpho enforces the resulting position health.
+    /// idle FXRP then leaves along the fixed rails, and which rail runs first is permissionless
+    /// (the accepted ordering race - a redeposit can undo the withdrawal at gas cost; see
+    /// {IEthereumLoanSubaccount.depositIdleFxrp}). Works against any registered route, so
+    /// positions stay withdrawable however the active configuration changes. Morpho enforces
+    /// the resulting position health.
     function _executeWithdraw(
         bytes memory _actionData,
         bytes32 _guid

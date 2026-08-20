@@ -26,8 +26,9 @@ uint8 constant ACTION_BORROW = 1;
 /// bytes32 routeId, uint256 withdrawAmount)`. The route may be **any registered route** -
 /// positions must stay withdrawable however the active configuration changes. Withdraws
 /// collateral from the account's own position to the account itself; the idle FXRP leaves
-/// only along the fixed rails (redeposit or bridge-back). Position health is enforced by
-/// Morpho.
+/// only along the fixed rails, and which rail runs first is permissionless (redeposit or
+/// bridge-back - the accepted ordering race, see `depositIdleFxrp`). Position health is
+/// enforced by Morpho.
 uint8 constant ACTION_WITHDRAW = 2;
 
 /// @dev Set-recovery action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
