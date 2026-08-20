@@ -3,26 +3,76 @@ pragma solidity ^0.8.27;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IMorpho} from "../smartAccounts/interface/IMorpho.sol";
 import {MintableERC20} from "./MintableERC20.sol";
 
 /**
  * @title MockMorpho
- * @notice Behavioral Morpho mock: collateral is actually pulled and held, borrows mint the
- * loan token to the receiver and record debt, and repays pull and burn the loan token against
- * the recorded debt (over-repaying reverts, as real Morpho does), so tests exercise real
- * balance and position invariants instead of stubbed return values.
+ * @notice Behavioral Morpho mock with canonical accounting: positions and totals are kept per
+ * market id, borrowing and repayment convert between assets and shares with Morpho's virtual
+ * offsets, interest can be accrued between calls, and repaying more shares than owed reverts
+ * (as real Morpho's share-math underflow does) — so the repay clamp is exercised against real
+ * share math instead of stubbed values. Position health and liquidation eligibility are not
+ * modeled; tests exercise flows, not liquidation math.
  */
 contract MockMorpho is IMorpho {
     using SafeERC20 for IERC20;
 
-    struct Position {
-        uint256 collateral;
-        uint256 debt;
+    struct MarketState {
+        uint128 totalBorrowAssets;
+        uint128 totalBorrowShares;
+        uint128 lastUpdate;
     }
 
-    /// @notice Positions by account, standing in for real Morpho's per-market positions.
-    mapping(address account => Position) public positions;
+    struct PositionState {
+        uint128 borrowShares;
+        uint128 collateral;
+    }
+
+    uint256 private constant VIRTUAL_SHARES = 1e6;
+    uint256 private constant VIRTUAL_ASSETS = 1;
+
+    /// @notice Interest waiting to be applied on the next `accrueInterest` call, per market.
+    mapping(bytes32 marketId => uint256 assets) public pendingInterest;
+
+    mapping(bytes32 marketId => MarketState) private _markets;
+    mapping(bytes32 marketId => mapping(address account => PositionState)) private _positions;
+
+    /// @notice Creates a market, as real Morpho's permissionless `createMarket` does; the
+    /// settings validation requires a non-zero `lastUpdate`.
+    function createMarket(MarketParams calldata marketParams) external {
+        _markets[_id(marketParams)].lastUpdate = uint128(block.timestamp);
+    }
+
+    /// @notice Queues interest on a market's debt, applied on the next `accrueInterest`.
+    function addPendingInterest(bytes32 marketId, uint256 assets) external {
+        pendingInterest[marketId] += assets;
+    }
+
+    /// @notice Simulates a full external liquidation: a third party repays the account's
+    /// whole debt and seizes its collateral, without the account observing it - exactly the
+    /// case the lazily-cleared debt-route pointer must handle.
+    function simulateLiquidation(bytes32 marketId, address account) external {
+        _simulateLiquidation(marketId, account, _positions[marketId][account].borrowShares);
+    }
+
+    /// @notice Simulates a partial external liquidation of `shares` borrow shares, seizing
+    /// proportional collateral; the position keeps its remaining debt.
+    function simulatePartialLiquidation(bytes32 marketId, address account, uint128 shares) external {
+        _simulateLiquidation(marketId, account, shares);
+    }
+
+    /// @inheritdoc IMorpho
+    function accrueInterest(MarketParams calldata marketParams) external {
+        bytes32 id = _id(marketParams);
+        MarketState storage m = _markets[id];
+        require(m.lastUpdate != 0, "market not created");
+        m.totalBorrowAssets += SafeCast.toUint128(pendingInterest[id]);
+        pendingInterest[id] = 0;
+        m.lastUpdate = uint128(block.timestamp);
+    }
 
     /// @inheritdoc IMorpho
     function supplyCollateral(
@@ -33,8 +83,26 @@ contract MockMorpho is IMorpho {
     )
         external
     {
+        bytes32 id = _id(marketParams);
+        require(_markets[id].lastUpdate != 0, "market not created");
         IERC20(marketParams.collateralToken).safeTransferFrom(msg.sender, address(this), assets);
-        positions[onBehalf].collateral += assets;
+        _positions[id][onBehalf].collateral += uint128(assets);
+    }
+
+    /// @inheritdoc IMorpho
+    function withdrawCollateral(
+        MarketParams calldata marketParams,
+        uint256 assets,
+        address onBehalf,
+        address receiver
+    )
+        external
+    {
+        bytes32 id = _id(marketParams);
+        require(msg.sender == onBehalf, "unauthorized");
+        require(assets <= _positions[id][onBehalf].collateral, "withdraw exceeds collateral");
+        _positions[id][onBehalf].collateral -= uint128(assets);
+        IERC20(marketParams.collateralToken).safeTransfer(receiver, assets);
     }
 
     /// @inheritdoc IMorpho
@@ -48,28 +116,19 @@ contract MockMorpho is IMorpho {
         external
         returns (uint256, uint256)
     {
-        require(shares == 0, "shares not modeled");
+        require(shares == 0, "borrow by shares not modeled");
         require(msg.sender == onBehalf, "unauthorized");
-        positions[onBehalf].debt += assets;
+        bytes32 id = _id(marketParams);
+        MarketState storage m = _markets[id];
+        require(m.lastUpdate != 0, "market not created");
+
+        uint256 sharesUp = _toSharesUp(assets, m.totalBorrowAssets, m.totalBorrowShares);
+        m.totalBorrowAssets += uint128(assets);
+        m.totalBorrowShares += uint128(sharesUp);
+        _positions[id][onBehalf].borrowShares += uint128(sharesUp);
         // stands in for market liquidity leaving the pool
         MintableERC20(marketParams.loanToken).mint(receiver, assets);
-        return (assets, 0);
-    }
-
-    /// @inheritdoc IMorpho
-    /// @dev Position health is not modeled; tests exercise flows, not liquidation math.
-    function withdrawCollateral(
-        MarketParams calldata marketParams,
-        uint256 assets,
-        address onBehalf,
-        address receiver
-    )
-        external
-    {
-        require(msg.sender == onBehalf, "unauthorized");
-        require(assets <= positions[onBehalf].collateral, "withdraw exceeds collateral");
-        positions[onBehalf].collateral -= assets;
-        IERC20(marketParams.collateralToken).safeTransfer(receiver, assets);
+        return (assets, sharesUp);
     }
 
     /// @inheritdoc IMorpho
@@ -83,12 +142,116 @@ contract MockMorpho is IMorpho {
         external
         returns (uint256, uint256)
     {
-        require(shares == 0, "shares not modeled");
-        // real Morpho reverts when repaying more than the outstanding debt
-        require(assets <= positions[onBehalf].debt, "repay exceeds debt");
-        positions[onBehalf].debt -= assets;
+        require((assets == 0) != (shares == 0), "exactly one of assets/shares");
+        bytes32 id = _id(marketParams);
+        MarketState storage m = _markets[id];
+        require(m.lastUpdate != 0, "market not created");
+
+        if (shares == 0) {
+            shares = _toSharesDown(assets, m.totalBorrowAssets, m.totalBorrowShares);
+        } else {
+            assets = _toAssetsUp(shares, m.totalBorrowAssets, m.totalBorrowShares);
+        }
+        // real Morpho underflows here when repaying more shares than the position owes
+        require(
+            shares <= _positions[id][onBehalf].borrowShares,
+            "repay exceeds debt"
+        );
+        _positions[id][onBehalf].borrowShares -= uint128(shares);
+        m.totalBorrowShares -= uint128(shares);
+        m.totalBorrowAssets = assets >= m.totalBorrowAssets
+            ? 0
+            : m.totalBorrowAssets - uint128(assets);
         IERC20(marketParams.loanToken).safeTransferFrom(msg.sender, address(this), assets);
         MintableERC20(marketParams.loanToken).burn(address(this), assets);
-        return (assets, 0);
+        return (assets, shares);
+    }
+
+    /// @inheritdoc IMorpho
+    function position(
+        bytes32 id,
+        address user
+    )
+        external view
+        returns (uint256, uint128, uint128)
+    {
+        PositionState storage p = _positions[id][user];
+        return (0, p.borrowShares, p.collateral);
+    }
+
+    /// @inheritdoc IMorpho
+    function market(
+        bytes32 id
+    )
+        external view
+        returns (uint128, uint128, uint128, uint128, uint128, uint128)
+    {
+        MarketState storage m = _markets[id];
+        return (0, 0, m.totalBorrowAssets, m.totalBorrowShares, m.lastUpdate, 0);
+    }
+
+    /// @dev Liquidation accounting stays canonical: interest accrues first (as real Morpho's
+    /// liquidate does), a debt-free position cannot be liquidated, and totals shrink by the
+    /// assets the repaid shares represent, so later borrows and repayments on the market
+    /// convert correctly.
+    function _simulateLiquidation(bytes32 marketId, address account, uint128 shares) private {
+        PositionState storage p = _positions[marketId][account];
+        MarketState storage m = _markets[marketId];
+        require(shares > 0 && shares <= p.borrowShares, "no debt to liquidate");
+        m.totalBorrowAssets += SafeCast.toUint128(pendingInterest[marketId]);
+        pendingInterest[marketId] = 0;
+        uint256 assets = _toAssetsUp(shares, m.totalBorrowAssets, m.totalBorrowShares);
+        uint128 seized = shares == p.borrowShares
+            ? p.collateral
+            : uint128(Math.mulDiv(p.collateral, shares, p.borrowShares));
+        p.borrowShares -= shares;
+        m.totalBorrowShares -= shares;
+        m.totalBorrowAssets = assets >= m.totalBorrowAssets
+            ? 0
+            : m.totalBorrowAssets - uint128(assets);
+        p.collateral -= seized;
+    }
+
+    function _id(MarketParams calldata marketParams) private pure returns (bytes32) {
+        return keccak256(abi.encode(marketParams));
+    }
+
+    function _toSharesUp(
+        uint256 _assets,
+        uint256 _totalAssets,
+        uint256 _totalShares
+    )
+        private pure
+        returns (uint256)
+    {
+        return Math.mulDiv(
+            _assets, _totalShares + VIRTUAL_SHARES, _totalAssets + VIRTUAL_ASSETS,
+            Math.Rounding.Ceil
+        );
+    }
+
+    function _toSharesDown(
+        uint256 _assets,
+        uint256 _totalAssets,
+        uint256 _totalShares
+    )
+        private pure
+        returns (uint256)
+    {
+        return Math.mulDiv(_assets, _totalShares + VIRTUAL_SHARES, _totalAssets + VIRTUAL_ASSETS);
+    }
+
+    function _toAssetsUp(
+        uint256 _shares,
+        uint256 _totalAssets,
+        uint256 _totalShares
+    )
+        private pure
+        returns (uint256)
+    {
+        return Math.mulDiv(
+            _shares, _totalAssets + VIRTUAL_ASSETS, _totalShares + VIRTUAL_SHARES,
+            Math.Rounding.Ceil
+        );
     }
 }

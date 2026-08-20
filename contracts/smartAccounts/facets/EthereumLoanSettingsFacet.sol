@@ -55,4 +55,48 @@ contract EthereumLoanSettingsFacet is IIEthereumLoanSettingsFacet, FacetBase {
     {
         return EthereumLoanSettings.getEthereumLoanSettings();
     }
+
+    /// @inheritdoc IEthereumLoanSettingsFacet
+    function getActiveRouteId()
+        external view
+        returns (bytes32)
+    {
+        return EthereumLoanSettings.getActiveRouteId();
+    }
+
+    /// @inheritdoc IEthereumLoanSettingsFacet
+    function getRoute(
+        bytes32 _routeId
+    )
+        external view
+        returns (IEthereumLoanSettingsFacet.Route memory)
+    {
+        return EthereumLoanSettings.getRoute(_routeId);
+    }
+
+    /// @inheritdoc IEthereumLoanSettingsFacet
+    function getRouteIds()
+        external view
+        returns (bytes32[] memory)
+    {
+        return EthereumLoanSettings.getRouteIds();
+    }
+
+    /// @inheritdoc IEthereumLoanSettingsFacet
+    function getPinnedTokens()
+        external view
+        returns (address _loanToken, address _collateralToken)
+    {
+        return EthereumLoanSettings.getPinnedTokens();
+    }
+
+    /// @inheritdoc IEthereumLoanSettingsFacet
+    function isProtectedToken(
+        address _token
+    )
+        external view
+        returns (bool)
+    {
+        return EthereumLoanSettings.isProtectedToken(_token);
+    }
 }

@@ -95,6 +95,13 @@ contract DeploySmartAccounts is Script {
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
     function run(bool _fullDeploy, bool _staging) external {
+        // Ethereum is reproduced from pinned historical bytes, never deployed from current
+        // source: the generic deployment would derive different addresses and its recorder
+        // would overwrite the pinned deployment records
+        require(
+            block.chainid != 1,
+            "Ethereum uses the pinned bootstrap (DeployEthereumController), never this script"
+        );
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 

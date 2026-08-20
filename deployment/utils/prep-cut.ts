@@ -1,6 +1,7 @@
 import fs from "fs";
 import Web3, { AbiFunctionFragment, AbiItem } from "web3";
 import { DiamondSelectors, type DiamondCut } from "./diamond";
+import { validateContractName } from "./pinned-constants";
 
 const web3 = new Web3();
 
@@ -216,6 +217,9 @@ function isCanonicalElementaryAbiType(type: string): boolean {
 }
 
 export function loadAbi(contractName: string): AbiItem[] {
+  // the name becomes a path component: reject anything that is not a plain identifier and
+  // any non-canonical casing of a protected Ethereum name before touching the filesystem
+  validateContractName(contractName);
   const raw = fs.readFileSync(`artifacts/${contractName}.sol/${contractName}.json`, "utf8");
   const parsed = JSON.parse(raw) as { abi: AbiItem[] };
   return parsed.abi;

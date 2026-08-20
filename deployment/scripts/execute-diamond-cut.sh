@@ -21,6 +21,12 @@ if [[ "$NETWORK" == *-staging ]]; then
   BASE_NETWORK="${NETWORK%-staging}"
 fi
 
+# Ethereum has only the pinned production deployment (the executor rejects this too)
+if [[ "$BASE_NETWORK" == "ethereum" && "$STAGING" == "true" ]]; then
+  echo "ethereum-staging is not supported: Ethereum has only the pinned production deployment" >&2
+  exit 2
+fi
+
 # Convert base network to uppercase and build env var name
 NETWORK_UPPER=$(echo "$BASE_NETWORK" | tr '[:lower:]' '[:upper:]')
 RPC_ENV_VAR="${NETWORK_UPPER}_RPC_URL"

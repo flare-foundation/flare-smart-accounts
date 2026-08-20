@@ -1796,16 +1796,18 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         return controller.getPersonalAccount(_xrplOwner);
     }
 
-    /// Canonical type-3 options as a production loan instruction would carry them: destination
-    /// lzReceive gas plus index-0 lzCompose gas. Byte-identical to LayerZero's
-    /// `OptionsBuilder.newOptions().addExecutorLzReceiveOption(100_000, 0)
-    /// .addExecutorLzComposeOption(0, 200_000, 0)` (not imported: it pulls two extra packages),
-    /// validated against the live FXRP adapter's `quoteSend`.
+    /// Canonically encoded type-3 options: destination lzReceive gas plus index-0 lzCompose
+    /// gas. Byte-identical to LayerZero's `OptionsBuilder.newOptions()
+    /// .addExecutorLzReceiveOption(150_000, 0).addExecutorLzComposeOption(0, 700_000, 0)`
+    /// (not imported: it pulls two extra packages); the encoding was validated against the
+    /// live FXRP adapter's `quoteSend`. The gas VALUES are illustrative headroom for the mock
+    /// path only - production options must be profiled per action against the real Morpho,
+    /// oracle and token contracts before deployment (release checklist).
     function _canonicalLoanOptions() private pure returns (bytes memory) {
         // worker id 1 = executor; option type 1 = lzReceive (gas), type 3 = lzCompose
         // (index ++ gas); each option is [workerId ++ size ++ optionType ++ payload]
-        bytes memory lzReceivePayload = abi.encodePacked(uint128(100_000));
-        bytes memory lzComposePayload = abi.encodePacked(uint16(0), uint128(200_000));
+        bytes memory lzReceivePayload = abi.encodePacked(uint128(150_000));
+        bytes memory lzComposePayload = abi.encodePacked(uint16(0), uint128(700_000));
         return abi.encodePacked(
             uint16(3),
             uint8(1), uint16(1 + lzReceivePayload.length), uint8(1), lzReceivePayload,

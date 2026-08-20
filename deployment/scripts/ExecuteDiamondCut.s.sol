@@ -6,6 +6,7 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {IDiamondCut} from "../../contracts/diamond/interfaces/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../contracts/diamond/interfaces/IDiamondLoupe.sol";
+import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
 
 // solhint-disable no-console
 contract ExecuteDiamondCut is Script {
@@ -40,6 +41,9 @@ contract ExecuteDiamondCut is Script {
             network = "coston2";
         } else if (chainId == 1) {
             network = "ethereum";
+            // Ethereum has only the pinned production deployment: a staging alias would
+            // sidestep the mandatory check-cut-plan preview, which rejects it too
+            require(!_staging, "Ethereum has no staging deployment");
         } else {
             network = "scdev";
         }
@@ -62,12 +66,38 @@ contract ExecuteDiamondCut is Script {
         }
 
         address diamond = abi.decode(json.parseRaw(".diamond"), (address));
+        // on Ethereum the cut target is the pinned controller, nothing else: with all four
+        // record checks passing, a cut file could otherwise aim the cut at another diamond
+        if (chainId == 1) {
+            require(
+                diamond == PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER,
+                "the Ethereum cut target must be the pinned MasterAccountController"
+            );
+        }
         string[] memory facetNames = abi.decode(json.parseRaw(".facets"), (string[]));
 
         address[] memory facetAddrs = new address[](facetNames.length);
         // deploy facets
         vm.startBroadcast();
         for (uint256 i = 0; i < facetNames.length; i++) {
+            // on Ethereum the historical base facets are pinned: they are never deployed or
+            // replaced through the generic path, and their live code must match the Flare
+            // production runtime exactly (mirrors check-cut-plan; constants are shared via
+            // PinnedControllerInitCode)
+            _validateFacetName(facetNames[i]);
+            (address pinnedAddr, bytes32 pinnedCodeHash, bool isPinned) =
+                _pinnedBaseFacet(facetNames[i]);
+            if (isPinned) {
+                require(
+                    pinnedAddr.codehash == pinnedCodeHash,
+                    string.concat(
+                        facetNames[i],
+                        ": on-chain code does not match the pinned historical runtime"
+                    )
+                );
+                facetAddrs[i] = pinnedAddr;
+                continue;
+            }
             // check deployed facets; if bytecode matches, reuse; else deploy new
             address candidate = _findDeployedAddressFromFile(deployedContractsFile, facetNames[i]);
             string memory artifactPath = string.concat(
@@ -123,7 +153,7 @@ contract ExecuteDiamondCut is Script {
         bytes memory rawInitName = _json.parseRaw(".init.contract");
         require(rawInitName.length > 0, "init.contract is required if init object exists");
         string memory initName = abi.decode(rawInitName, (string));
-        require(bytes(initName).length > 0, "init.contract cannot be empty");
+        _validateInitName(initName);
         for (uint256 i = 0; i < _facetNames.length; i++) {
             if (_stringEq(_facetNames[i], initName)) {
                 return _facetAddrs[i];
@@ -506,6 +536,85 @@ contract ExecuteDiamondCut is Script {
         return keccak256(bytes(_a)) == keccak256(bytes(_b));
     }
 
+    /// Facet and initializer names become artifact path components, so anything beyond a
+    /// plain Solidity identifier (`./OwnershipFacet`) could resolve a protected artifact
+    /// while evading the exact-match guards.
+    function _requireIdentifier(
+        string memory _name
+    )
+        internal pure
+    {
+        bytes memory b = bytes(_name);
+        require(b.length > 0, "contract names must be Solidity identifiers");
+        for (uint256 i = 0; i < b.length; i++) {
+            bytes1 c = b[i];
+            bool wordChar = (c >= "A" && c <= "Z") || (c >= "a" && c <= "z") || c == "_";
+            bool digit = c >= "0" && c <= "9";
+            require(wordChar || (i > 0 && digit), "contract names must be Solidity identifiers");
+        }
+    }
+
+    /// keccak256 of the ASCII-lowercased name: development filesystems are often
+    /// case-insensitive, so protected names must be recognized in any casing. Works on a
+    /// copy - `bytes(_name)` aliases the caller's string, which must stay unmodified.
+    function _lowercaseHash(
+        string memory _name
+    )
+        internal pure
+        returns (bytes32)
+    {
+        bytes memory source = bytes(_name);
+        bytes memory lowered = new bytes(source.length);
+        for (uint256 i = 0; i < source.length; i++) {
+            bytes1 c = source[i];
+            lowered[i] = (c >= "A" && c <= "Z") ? bytes1(uint8(c) + 32) : c;
+        }
+        return keccak256(lowered);
+    }
+
+    function _validateFacetName(
+        string memory _name
+    )
+        internal pure
+    {
+        _requireIdentifier(_name);
+        bytes32 lower = _lowercaseHash(_name);
+        // the controller itself is never a facet; rejecting the name in any casing closes a
+        // path that could rewrite its pinned deployment record through the generic recorder
+        require(
+            lower != keccak256("masteraccountcontroller"),
+            "MasterAccountController is not a facet"
+        );
+        // a non-canonical casing of a pinned base facet name would skip the pinned branch
+        // yet can resolve the same artifact on a case-insensitive filesystem
+        bool aliasOfPinned = (
+            lower == keccak256("diamondcutfacet") && !_stringEq(_name, "DiamondCutFacet")
+        ) || (
+            lower == keccak256("diamondloupefacet") && !_stringEq(_name, "DiamondLoupeFacet")
+        ) || (
+            lower == keccak256("ownershipfacet") && !_stringEq(_name, "OwnershipFacet")
+        );
+        require(!aliasOfPinned, "pinned base facet names must use their canonical spelling");
+    }
+
+    /// Pinned names must never pass through the generic initializer path, in any casing: it
+    /// can deploy today's artifact and rewrite the protected deployment record.
+    function _validateInitName(
+        string memory _name
+    )
+        internal pure
+    {
+        _requireIdentifier(_name);
+        bytes32 lower = _lowercaseHash(_name);
+        require(
+            lower != keccak256("masteraccountcontroller") &&
+                lower != keccak256("diamondcutfacet") &&
+                lower != keccak256("diamondloupefacet") &&
+                lower != keccak256("ownershipfacet"),
+            "pinned names cannot be used as the init contract"
+        );
+    }
+
     function _toHex(bytes4 _selector) internal pure returns (string memory) {
         bytes memory b = abi.encodePacked(_selector);
         bytes memory hexChars = "0123456789abcdef";
@@ -525,5 +634,36 @@ contract ExecuteDiamondCut is Script {
             str[i * 2 + 1] = hexChars[uint8(_data[i] & 0x0f)];
         }
         return string(str);
+    }
+    function _pinnedBaseFacet(
+        string memory _name
+    )
+        private view
+        returns (address _addr, bytes32 _codeHash, bool _isPinned)
+    {
+        if (block.chainid != 1) return (address(0), bytes32(0), false);
+        bytes32 nameHash = keccak256(bytes(_name));
+        if (nameHash == keccak256("DiamondCutFacet")) {
+            return (
+                PinnedControllerInitCode.DIAMOND_CUT_FACET,
+                PinnedControllerInitCode.DIAMOND_CUT_FACET_RUNTIME_CODE_HASH,
+                true
+            );
+        }
+        if (nameHash == keccak256("DiamondLoupeFacet")) {
+            return (
+                PinnedControllerInitCode.DIAMOND_LOUPE_FACET,
+                PinnedControllerInitCode.DIAMOND_LOUPE_FACET_RUNTIME_CODE_HASH,
+                true
+            );
+        }
+        if (nameHash == keccak256("OwnershipFacet")) {
+            return (
+                PinnedControllerInitCode.OWNERSHIP_FACET,
+                PinnedControllerInitCode.OWNERSHIP_FACET_RUNTIME_CODE_HASH,
+                true
+            );
+        }
+        return (address(0), bytes32(0), false);
     }
 }

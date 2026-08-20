@@ -129,6 +129,17 @@ typecheck:
   - corepack enable pnpm
   - pnpm typecheck
 
+test-tooling:
+  image: node:24
+  stage: test
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm test:tooling
+
 format-check:
   image: node:24
   needs:

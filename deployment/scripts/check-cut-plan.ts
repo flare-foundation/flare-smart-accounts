@@ -5,6 +5,7 @@ import { existsSync, globSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import Web3, { type AbiFunctionFragment } from "web3";
 import { isFunctionFragment, loadAbi, toSelector } from "../utils/prep-cut";
+import { loadPinnedEthereumAddresses, validateContractName } from "../utils/pinned-constants";
 
 interface DeployedContract {
   name: string;
@@ -87,7 +88,48 @@ async function main() {
 
   const deployedFacets = deployedContracts.filter((contract) => contract.name.endsWith("Facet"));
   const deployedByName = new Map(deployedFacets.map((contract) => [contract.name, contract]));
+  if (network === "ethereum") {
+    // the complete pin set (controller + three base facets) must be present and correctly
+    // recorded before any planning: an omitted or renamed record would otherwise dodge the
+    // pinned branch and let a same-named cut entry through the generic ADD path
+    const pins = loadPinnedEthereumAddresses();
+    for (const [pinnedName, pin] of pins.baseFacets) {
+      const record = deployedByName.get(pinnedName);
+      if (!record) {
+        throw new Error(
+          `${pinnedName}: pinned base facet missing from deployment/deploys/ethereum.json — ` +
+            `restore the pinned record before planning a cut`
+        );
+      }
+      if (record.address.toLowerCase() !== pin.address) {
+        throw new Error(
+          `${pinnedName}: recorded address ${record.address} does not match the pinned ` +
+            `historical address ${pin.address} — investigate before cutting`
+        );
+      }
+    }
+    const controller = deployedContracts.find((c) => c.name === "MasterAccountController");
+    if (!controller || controller.address.toLowerCase() !== pins.controllerAddress) {
+      throw new Error(
+        `MasterAccountController: the deployment record is missing or does not match the ` +
+          `pinned historical address ${pins.controllerAddress} — investigate before cutting`
+      );
+    }
+    // the cut target is the pinned controller, nothing else: with all four record checks
+    // passing, a cut file could otherwise aim the cut at another diamond
+    if (diamond.toLowerCase() !== pins.controllerAddress) {
+      throw new Error(
+        `the Ethereum cut target ${diamond} must be the pinned MasterAccountController ` + `${pins.controllerAddress}`
+      );
+    }
+  }
   const cutFacetNames = cutConfig?.facets ?? [];
+  for (const name of cutFacetNames) {
+    // path aliases and non-canonical casings of protected names must never reach planning
+    if (validateContractName(name) === "MasterAccountController") {
+      throw new Error("MasterAccountController is not a facet");
+    }
+  }
 
   console.log(`Diamond cut plan for ${network}`);
   console.log(
@@ -99,7 +141,7 @@ async function main() {
   console.log(noBuild ? "Build: skipped (--no-build)" : "Build: forge build");
   console.log("");
 
-  const facetPlans = await buildFacetPlans(web3, deployedFacets, deployedByName, cutFacetNames);
+  const facetPlans = await buildFacetPlans(web3, network, deployedFacets, deployedByName, cutFacetNames);
   printFacetPlan(facetPlans);
 
   const staleSelectors = await buildStaleSelectors(
@@ -120,8 +162,17 @@ async function main() {
 
 // --- Section 1: which facet contracts need (re)deploying ---
 
+// The Ethereum bootstrap reproduces the diamond's base facets from pinned historical init
+// code, not from current-source artifacts (see deployment/scripts/PinnedControllerInitCode.sol
+// and deployment/pinned-init-code/). Comparing them against today's build would wrongly
+// propose replacing them; instead they are verified against the pinned Flare runtime-code
+// hashes (keccak256 of the deployed code) and reported as intentional reuse. Applies only on
+// the "ethereum" network. The pinned values are parsed lazily from PinnedControllerInitCode.sol
+// via deployment/utils/pinned-constants.ts, shared with the recorder.
+
 async function buildFacetPlans(
   web3: Web3,
+  network: string,
   deployedFacets: DeployedContract[],
   deployedByName: Map<string, DeployedContract>,
   cutFacetNames: string[]
@@ -131,6 +182,39 @@ async function buildFacetPlans(
   const plans: FacetPlan[] = [];
 
   for (const facet of deployedFacets) {
+    // the pinned branch runs before all generic planning: a pinned base facet must never be
+    // classified by source/artifact/code heuristics, and missing on-chain code is a fatal
+    // bootstrap requirement, not an actionable ADD
+    const pinned = network === "ethereum" ? loadPinnedEthereumAddresses().baseFacets.get(facet.name) : undefined;
+    if (pinned !== undefined) {
+      if (facet.address.toLowerCase() !== pinned.address) {
+        throw new Error(
+          `${facet.name}: recorded address ${facet.address} does not match the pinned ` +
+            `historical address ${pinned.address} — investigate before cutting`
+        );
+      }
+      const pinnedCodeHex = await web3.eth.getCode(facet.address);
+      if (pinnedCodeHex === ZERO_CODE) {
+        throw new Error(
+          `${facet.name}: no code at the pinned address — run the Ethereum bootstrap ` +
+            `(DeployEthereumController) before planning a cut`
+        );
+      }
+      if (Web3.utils.keccak256(pinnedCodeHex).toLowerCase() !== pinned.runtimeCodeHash) {
+        throw new Error(
+          `${facet.name}: on-chain code does not match the pinned historical runtime hash — ` +
+            `investigate before cutting`
+        );
+      }
+      plans.push({
+        name: facet.name,
+        address: facet.address,
+        action: "REUSE",
+        reason: "pinned historical runtime (byte-identical to the Flare production deployment); intentional reuse",
+      });
+      continue;
+    }
+
     const artifactPath = artifactPathFor(facet.name);
     // Source presence — not artifact presence — is the source of truth for "still exists".
     // A stale artifact (forge does not prune artifacts of deleted sources) must not mask a removal.
@@ -790,6 +874,11 @@ function validateNetwork(network: string) {
   if (!SUPPORTED_BASE_NETWORKS.includes(baseNetwork)) {
     throw new Error(`Invalid network: ${network}`);
   }
+  if (baseNetwork === "ethereum" && network !== "ethereum") {
+    // the pin logic keys on the exact "ethereum" network while the executor keys on
+    // chain id 1; a staging alias would skip every preview pin check yet execute pinned
+    throw new Error(`Unsupported network: ${network} — Ethereum has only the pinned production deployment`);
+  }
 }
 
 function baseNetworkName(network: string): string {
@@ -804,6 +893,9 @@ function loadDeployedContracts(network: string): DeployedContract[] {
   }
   return raw.map((item) => {
     if (isDeployedContract(item)) {
+      // record names become artifact path components later: a path or case alias in the
+      // deploys file must fail here, not resolve a protected artifact during planning
+      validateContractName(item.name);
       return item;
     }
     throw new Error(`Invalid deployed contract item in ${path}`);

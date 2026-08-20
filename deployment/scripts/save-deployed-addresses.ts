@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { PROTECTED_ETHEREUM_NAMES, loadPinnedEthereumAddresses, validateContractName } from "../utils/pinned-constants";
 
 // Read Forge output from a output file
 const outputPath = "forge-deploy-output.txt";
@@ -40,6 +41,26 @@ if (!isValidNetwork) {
   throw new Error(`Invalid network: ${network}`);
 }
 
+// the four pinned Ethereum records are chain-recovered facts, not build outputs: on ethereum
+// a protected name (in any casing - development filesystems can be case-insensitive) may only
+// ever be recorded with its canonical spelling and canonical pinned address, whether or not a
+// record already exists (the bootstrap never routes through this recorder)
+function checkProtectedEthereumRecord(record: ContractInfo): void {
+  const canonical = PROTECTED_ETHEREUM_NAMES.find(
+    (protectedName) => protectedName.toLowerCase() === record.name.toLowerCase()
+  );
+  if (!canonical) return;
+  const pins = loadPinnedEthereumAddresses();
+  const pinnedAddress =
+    canonical === "MasterAccountController" ? pins.controllerAddress : pins.baseFacets.get(canonical)?.address;
+  if (record.name !== canonical || record.address.toLowerCase() !== pinnedAddress) {
+    throw new Error(
+      `${record.name}: only the canonical pinned Ethereum record ` +
+        `(${canonical} @ ${pinnedAddress}) may be written — refusing ${record.address}`
+    );
+  }
+}
+
 fs.mkdirSync("deployment/deploys", { recursive: true });
 const isMock = process.argv[2] === "mock";
 const filePath = `deployment/deploys/${network}${isMock ? "_mock" : ""}.json`;
@@ -69,6 +90,13 @@ if (fs.existsSync(filePath)) {
 }
 
 for (const deployed of contracts) {
+  // every record name must be a plain identifier in canonical spelling on every network:
+  // record names become artifact path components downstream, and a path or case alias
+  // (`./OwnershipFacet`) would not equal a protected name under whole-string comparison
+  validateContractName(deployed.name);
+  if (network === "ethereum") {
+    checkProtectedEthereumRecord(deployed);
+  }
   const index = existingContracts.findIndex((item) => item.name === deployed.name);
   if (index >= 0) {
     existingContracts[index] = deployed;

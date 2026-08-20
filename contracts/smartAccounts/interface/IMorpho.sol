@@ -53,6 +53,15 @@ interface IMorpho {
         returns (uint256 assetsBorrowed, uint256 sharesBorrowed);
 
     /**
+     * @notice Accrues interest for a market, updating its totals.
+     * @param marketParams The market to accrue interest for.
+     */
+    function accrueInterest(
+        MarketParams memory marketParams
+    )
+        external;
+
+    /**
      * @notice Withdraws collateral from the caller's position.
      * @param marketParams The market to withdraw collateral from.
      * @param assets The amount of collateral to withdraw.
@@ -86,4 +95,41 @@ interface IMorpho {
     )
         external
         returns (uint256 assetsRepaid, uint256 sharesRepaid);
+    /**
+     * @notice Returns an account's position in a market.
+     * @param id The market id (`keccak256(abi.encode(marketParams))`).
+     * @param user The account.
+     * @return supplyShares The account's supply shares.
+     * @return borrowShares The account's borrow shares.
+     * @return collateral The account's collateral.
+     */
+    function position(
+        bytes32 id,
+        address user
+    )
+        external view
+        returns (uint256 supplyShares, uint128 borrowShares, uint128 collateral);
+
+    /**
+     * @notice Returns a market's state.
+     * @param id The market id.
+     * @return totalSupplyAssets The market's total supplied assets.
+     * @return totalSupplyShares The market's total supply shares.
+     * @return totalBorrowAssets The market's total borrowed assets.
+     * @return totalBorrowShares The market's total borrow shares.
+     * @return lastUpdate The last accrual timestamp; zero means the market was never created.
+     * @return fee The market's fee.
+     */
+    function market(
+        bytes32 id
+    )
+        external view
+        returns (
+            uint128 totalSupplyAssets,
+            uint128 totalSupplyShares,
+            uint128 totalBorrowAssets,
+            uint128 totalBorrowShares,
+            uint128 lastUpdate,
+            uint128 fee
+        );
 }
