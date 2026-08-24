@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 import {IIEthereumLoanSettingsFacet} from "../interface/IIEthereumLoanSettingsFacet.sol";
 import {IEthereumLoanSettingsFacet} from "../../userInterfaces/facets/IEthereumLoanSettingsFacet.sol";
 import {EthereumLoanSettings} from "../library/EthereumLoanSettings.sol";
-import {LoanSubaccounts} from "../library/LoanSubaccounts.sol";
+import {Subaccounts} from "../library/Subaccounts.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
 import {Pause} from "../library/Pause.sol";
 import {FacetBase} from "./FacetBase.sol";
@@ -34,7 +34,7 @@ contract EthereumLoanSettingsFacet is IIEthereumLoanSettingsFacet, FacetBase {
         // derivation the Flare side uses, so this materializes exactly the predicted account
         address parentPersonalAccount = PersonalAccounts.computePersonalAccountAddress(_xrplOwner);
         return address(
-            LoanSubaccounts.getOrCreateLoanSubaccount(parentPersonalAccount, _subaccountType)
+            Subaccounts.getOrCreateSubaccount(parentPersonalAccount, _subaccountType)
         );
     }
 

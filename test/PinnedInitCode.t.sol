@@ -5,8 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {PinnedControllerInitCode} from "../deployment/scripts/PinnedControllerInitCode.sol";
 import {PersonalAccounts} from "../contracts/smartAccounts/library/PersonalAccounts.sol";
-import {LoanSubaccounts} from "../contracts/smartAccounts/library/LoanSubaccounts.sol";
-import {SUBACCOUNT_TYPE_LOAN} from "../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {Subaccounts} from "../contracts/smartAccounts/library/Subaccounts.sol";
+import {SUBACCOUNT_TYPE_LOAN} from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
 
 /**
  * @title PinnedInitCodeTest
@@ -26,7 +26,8 @@ contract PinnedInitCodeTest is Test {
     /// from the frozen proxy creation codes; any drift in the derivation inputs breaks this.
     string private constant GOLDEN_XRPL_OWNER = "rGoldenVectorXrplOwner";
     address private constant GOLDEN_PERSONAL_ACCOUNT = 0x3A5AE0e715593e617b74B0f4705C3934b0116B3c;
-    address private constant GOLDEN_LOAN_SUBACCOUNT = 0x56b897CA71D515e3324037f64AC2d849DE5CB013;
+    /// @dev Re-derived 2026-08-21 for the `implementationForType` refreeze (pre-deployment).
+    address private constant GOLDEN_LOAN_SUBACCOUNT = 0x2412732cF0360c2554daFf670994007acACab392;
 
     function testPinnedInitCodeDeploysToPinnedRuntimeCode() public {
         // the pinned init code must actually deploy, and what it deploys must be
@@ -120,7 +121,7 @@ contract PinnedInitCodeTest is Test {
         );
 
         bytes memory subaccountInitCode = abi.encodePacked(
-            LoanSubaccounts.PROXY_CREATION_CODE,
+            Subaccounts.PROXY_CREATION_CODE,
             abi.encode(
                 PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER,
                 personalAccount,

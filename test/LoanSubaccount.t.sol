@@ -22,15 +22,18 @@ import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSuba
 import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol";
 import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
 import {MockLoanSubaccount} from "../contracts/mock/MockLoanSubaccount.sol";
+import {MockGenericSubaccount} from "../contracts/mock/MockGenericSubaccount.sol";
+import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
 import {MockOft} from "../contracts/mock/MockOft.sol";
 import {MockAssetManager} from "../contracts/mock/MockAssetManager.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
 import {
-    ILoanSubaccountsFacet,
+    ISubaccountsFacet,
     SUBACCOUNT_TYPE_LOAN,
     SUBACCOUNT_TYPE_NONE
-} from "../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
+} from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {IMemoInstructionsFacet} from "../contracts/userInterfaces/facets/IMemoInstructionsFacet.sol";
@@ -109,7 +112,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // deploy and register the loan subaccount implementation (timelock duration is 0 in tests)
         loanImpl = new LoanSubaccount();
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(loanImpl)
         );
@@ -172,7 +175,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         LoanSubaccount newImpl = new LoanSubaccount();
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(newImpl)
         );
@@ -182,32 +185,32 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(subaccount.parentPersonalAccount(), parentPersonalAccount);
     }
 
-    function testSetLoanSubaccountImplementationRevertNotOwner() public {
+    function testSetSubaccountImplementationRevertNotOwner() public {
         address notOwner = makeAddr("notOwner");
         vm.prank(notOwner);
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(loanImpl)
         );
     }
 
-    function testSetLoanSubaccountImplementationRevertInvalidImplementation() public {
+    function testSetSubaccountImplementationRevertInvalidImplementation() public {
         address notAContract = makeAddr("notAContract");
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidLoanSubaccountImplementation.selector);
-        controller.setLoanSubaccountImplementation(
+        vm.expectRevert(ISubaccountsFacet.InvalidSubaccountImplementation.selector);
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             notAContract
         );
     }
 
-    function testSetLoanSubaccountImplementationRevertInvalidType() public {
+    function testSetSubaccountImplementationRevertInvalidType() public {
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidSubaccountType.selector);
-        controller.setLoanSubaccountImplementation(
+        vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_NONE,
             address(loanImpl)
         );
@@ -217,21 +220,21 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     // step 2: controller-side creation and prediction
     //
 
-    function testCreateLoanSubaccount() public {
+    function testCreateSubaccount() public {
         address personalAccount = _createPersonalAccount(xrplOwner);
-        address predicted = controller.getLoanSubaccount(
+        address predicted = controller.getSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
         assertEq(predicted.code.length, 0);
 
         vm.expectEmit();
-        emit ILoanSubaccountsFacet.LoanSubaccountCreated(
+        emit ISubaccountsFacet.SubaccountCreated(
             predicted,
             personalAccount,
             SUBACCOUNT_TYPE_LOAN
         );
-        address created = controller.createLoanSubaccount(
+        address created = controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -240,7 +243,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(created, predicted);
         assertNotEq(created.code.length, 0);
         assertEq(
-            controller.getLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN),
+            controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN),
             created
         );
 
@@ -251,13 +254,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(subaccount.implementation(), address(loanImpl));
     }
 
-    function testCreateLoanSubaccountIdempotent() public {
+    function testCreateSubaccountIdempotent() public {
         _createPersonalAccount(xrplOwner);
-        address first = controller.createLoanSubaccount(
+        address first = controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
-        address second = controller.createLoanSubaccount(
+        address second = controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -265,12 +268,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(first, second);
     }
 
-    function testCreateLoanSubaccountCanBeCalledByAnyone() public {
+    function testCreateSubaccountCanBeCalledByAnyone() public {
         address personalAccount = _createPersonalAccount(xrplOwner);
         address caller = makeAddr("caller");
 
         vm.prank(caller);
-        address created = controller.createLoanSubaccount(
+        address created = controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -278,31 +281,31 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(LoanSubaccount(payable(created)).parentPersonalAccount(), personalAccount);
     }
 
-    function testCreateLoanSubaccountRevertPersonalAccountNotDeployed() public {
+    function testCreateSubaccountRevertPersonalAccountNotDeployed() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountsFacet.PersonalAccountNotDeployed.selector,
+                ISubaccountsFacet.PersonalAccountNotDeployed.selector,
                 xrplOwner
             )
         );
-        controller.createLoanSubaccount(
+        controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
     }
 
-    function testCreateLoanSubaccountOfFutureType() public {
+    function testCreateSubaccountOfFutureType() public {
         // the type is a raw uint256, not an enum, so a type unknown at compile time of the proxy
         // and facet works as soon as governance registers an implementation for it — no new proxy
         // creation code, facet redeploy, or diamond cut
         uint256 futureType = 2;
         address futureImpl = address(new LoanSubaccount());
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(futureType, futureImpl);
+        controller.setSubaccountImplementation(futureType, futureImpl);
 
         address personalAccount = _createPersonalAccount(xrplOwner);
-        address loanTypeSubaccount = controller.createLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
-        address futureTypeSubaccount = controller.createLoanSubaccount(xrplOwner, futureType);
+        address loanTypeSubaccount = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address futureTypeSubaccount = controller.createSubaccount(xrplOwner, futureType);
 
         // distinct account per type, both functional, each resolving its own implementation
         assertNotEq(futureTypeSubaccount, loanTypeSubaccount);
@@ -312,17 +315,36 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(LoanSubaccount(payable(loanTypeSubaccount)).implementation(), address(loanImpl));
     }
 
-    function testCreateLoanSubaccountRevertInvalidSubaccountType() public {
+    function testCreateSubaccountOfNonLoanType() public {
+        // the generic boundary holds without the loan contracts: an implementation carrying
+        // only the ISubaccount surface (the ABI frozen into the proxy) registers, deploys
+        // through the frozen proxy, and initializes - a future type needs nothing more
+        uint256 genericType = 2;
+        address genericImpl = address(new MockGenericSubaccount());
+        vm.prank(governance);
+        controller.setSubaccountImplementation(genericType, genericImpl);
+
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        address subaccount = controller.createSubaccount(xrplOwner, genericType);
+
+        assertEq(subaccount, controller.getSubaccount(xrplOwner, genericType));
+        assertEq(ISubaccount(subaccount).controllerAddress(), address(controller));
+        assertEq(ISubaccount(subaccount).parentPersonalAccount(), personalAccount);
+        assertEq(ISubaccount(subaccount).subaccountType(), genericType);
+        assertEq(ISubaccount(subaccount).implementation(), genericImpl);
+    }
+
+    function testCreateSubaccountRevertInvalidSubaccountType() public {
         _createPersonalAccount(xrplOwner);
 
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidSubaccountType.selector);
-        controller.createLoanSubaccount(
+        vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
+        controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_NONE
         );
     }
 
-    function testCreateLoanSubaccountRevertImplementationNotSet() public {
+    function testCreateSubaccountRevertImplementationNotSet() public {
         // fresh diamond without the loan subaccount implementation configured
         IIMasterAccountController freshController = _deployDiamond();
         _addAgentVault(freshController);
@@ -330,19 +352,19 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountsFacet.LoanSubaccountImplementationNotSet.selector,
+                ISubaccountsFacet.SubaccountImplementationNotSet.selector,
                 SUBACCOUNT_TYPE_LOAN
             )
         );
-        freshController.createLoanSubaccount(
+        freshController.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
     }
 
-    function testCreateLoanSubaccountRevertNotSuccessfullyDeployed() public {
+    function testCreateSubaccountRevertNotSuccessfullyDeployed() public {
         _createPersonalAccount(xrplOwner);
-        address predicted = controller.getLoanSubaccount(
+        address predicted = controller.getSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -353,17 +375,17 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountsFacet.LoanSubaccountNotSuccessfullyDeployed.selector,
+                ISubaccountsFacet.SubaccountNotSuccessfullyDeployed.selector,
                 predicted
             )
         );
-        controller.createLoanSubaccount(
+        controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
     }
 
-    function testCreateLoanSubaccountRevertWhenPaused() public {
+    function testCreateSubaccountRevertWhenPaused() public {
         _createPersonalAccount(xrplOwner);
 
         address pauser = makeAddr("pauser");
@@ -375,20 +397,20 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         controller.pause();
 
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        controller.createLoanSubaccount(
+        controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
     }
 
-    function testGetLoanSubaccountPredictionStableAcrossPersonalAccountCreation() public {
+    function testGetSubaccountPredictionStableAcrossPersonalAccountCreation() public {
         // prediction works before the Personal Account exists and does not shift when it is created
-        address predictedBefore = controller.getLoanSubaccount(
+        address predictedBefore = controller.getSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
         _createPersonalAccount(xrplOwner);
-        address predictedAfter = controller.getLoanSubaccount(
+        address predictedAfter = controller.getSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -396,9 +418,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(predictedBefore, predictedAfter);
     }
 
-    function testGetLoanSubaccountRevertInvalidSubaccountType() public {
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidSubaccountType.selector);
-        controller.getLoanSubaccount(
+    function testGetSubaccountRevertInvalidSubaccountType() public {
+        vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
+        controller.getSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_NONE
         );
@@ -411,13 +433,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     function testDispatchFromXrplInstructionReachesSubaccount() public {
         // the loan subaccount implementation for this type exposes a parent-restricted method
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(new MockLoanSubaccount())
         );
 
         address personalAccount = _createPersonalAccount(xrplOwner);
-        address subaccount = controller.getLoanSubaccount(
+        address subaccount = controller.getSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -429,7 +451,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             target: address(controller),
             value: 0,
             data: abi.encodeCall(
-                ILoanSubaccountsFacet.createLoanSubaccount,
+                ISubaccountsFacet.createSubaccount,
                 (xrplOwner, SUBACCOUNT_TYPE_LOAN)
             )
         });
@@ -452,12 +474,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testDispatchForwardsValueToSubaccount() public {
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(new MockLoanSubaccount())
         );
         address personalAccount = _createPersonalAccount(xrplOwner);
-        address subaccount = controller.getLoanSubaccount(
+        address subaccount = controller.getSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -470,7 +492,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             target: address(controller),
             value: 0,
             data: abi.encodeCall(
-                ILoanSubaccountsFacet.createLoanSubaccount,
+                ISubaccountsFacet.createSubaccount,
                 (xrplOwner, SUBACCOUNT_TYPE_LOAN)
             )
         });
@@ -488,12 +510,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testDispatchToUncreatedSubaccountSilentlyDoesNothing() public {
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(new MockLoanSubaccount())
         );
         address personalAccount = _createPersonalAccount(xrplOwner);
-        address subaccount = controller.getLoanSubaccount(
+        address subaccount = controller.getSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -515,7 +537,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testDispatchRevertWhenCallingAnotherAccountsSubaccount() public {
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(new MockLoanSubaccount())
         );
@@ -524,7 +546,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // another XRPL owner's subaccount, created and owned by their Personal Account
         string memory otherOwner = "rOtherXrplAddress";
         _createPersonalAccount(otherOwner);
-        address otherSubaccount = controller.createLoanSubaccount(
+        address otherSubaccount = controller.createSubaccount(
             otherOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -555,12 +577,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testSubaccountMethodRevertOnlyParent() public {
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(new MockLoanSubaccount())
         );
         _createPersonalAccount(xrplOwner);
-        address subaccount = controller.createLoanSubaccount(
+        address subaccount = controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
@@ -880,13 +902,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         IMasterAccountController publicController = IMasterAccountController(address(controller));
         _createPersonalAccount(xrplOwner);
         address subaccount =
-            publicController.createLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+            publicController.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(
-            publicController.getLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN),
+            publicController.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN),
             subaccount
         );
         assertEq(
-            publicController.loanImplementationForType(SUBACCOUNT_TYPE_LOAN),
+            publicController.implementationForType(SUBACCOUNT_TYPE_LOAN),
             address(loanImpl)
         );
     }
@@ -1007,7 +1029,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testValueSentToUncreatedSubaccountIsRecoverableAfterCreation() public {
         address personalAccount = _createPersonalAccount(xrplOwner);
-        address subaccount = controller.getLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address subaccount = controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
 
         // an instruction that carries value to a not-yet-created subaccount does not revert:
         // the call to the codeless address succeeds and the value lands there
@@ -1022,7 +1044,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(subaccount.balance, 1 ether);
 
         // once the subaccount is created, the native recovery path brings it to the parent
-        controller.createLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         ILoanSubaccount(subaccount).sweepNativeToParent();
         assertEq(personalAccount.balance, 1 ether);
     }
@@ -1124,11 +1146,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testSetLoanBridgeSettingsRevertInvalidValues() public {
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
         controller.setLoanBridgeSettings(makeAddr("notAContract"), destinationEid, destinationPeer);
 
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationEid.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationEid.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), 0, destinationPeer);
     }
 
@@ -1139,7 +1161,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         otherOft.setPeer(destinationEid, bytes32(uint256(1)));
 
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
         controller.setLoanBridgeSettings(address(otherOft), destinationEid, bytes32(uint256(1)));
     }
 
@@ -1150,7 +1172,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         fxrpOft.setSharedDecimals(4);
 
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
     }
 
@@ -1161,13 +1183,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // the canonical codec, so only version 1 is accepted
         fxrpOft.setOftVersion(0x02e49c2c, 2);
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
 
         // wrong interface id
         fxrpOft.setOftVersion(0xdeadbeef, 1);
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
 
         // the canonical pair is accepted
@@ -1179,7 +1201,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     function testSetLoanBridgeSettingsRevertNoPeerForDestination() public {
         // no peer wired for the destination endpoint: the route does not exist
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationPeer.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
     }
 
@@ -1188,13 +1210,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         fxrpOft.setPeer(destinationEid, bytes32(uint256(0xbad)));
 
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationPeer.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
 
         // a zero expected peer is never valid
         fxrpOft.setPeer(destinationEid, destinationPeer);
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationPeer.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, bytes32(0));
 
         // a peer with dirty upper bits would route to the same EVM address but change the
@@ -1202,7 +1224,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         bytes32 dirtyPeer = bytes32(uint256(destinationPeer) | (uint256(1) << 200));
         fxrpOft.setPeer(destinationEid, dirtyPeer);
         vm.prank(governance);
-        vm.expectRevert(ILoanSubaccountsFacet.InvalidDestinationPeer.selector);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationPeer.selector);
         controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, dirtyPeer);
     }
 
@@ -1411,7 +1433,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // transaction, so the permissionless sweeps have nothing to front-run.
         address personalAccount = _createPersonalAccount(xrplOwner);
         _configureLoanBridge();
-        address subaccount = controller.getLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address subaccount = controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(subaccount.code.length, 0);
 
         uint256 loanAmount = 100e6;
@@ -1421,7 +1443,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             target: address(controller),
             value: 0,
             data: abi.encodeCall(
-                ILoanSubaccountsFacet.createLoanSubaccount, (xrplOwner, SUBACCOUNT_TYPE_LOAN)
+                ISubaccountsFacet.createSubaccount, (xrplOwner, SUBACCOUNT_TYPE_LOAN)
             )
         });
         calls[1] = IPersonalAccount.Call({
@@ -1546,12 +1568,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         ILoanSubaccount(subaccount).executeLayerZeroCall{value: messagingFee}(100e6, hex"01", "");
     }
 
-    function testGetLoanSubaccountDifferentOwnersGetDifferentAddresses() public view {
-        address subaccount1 = controller.getLoanSubaccount(
+    function testGetSubaccountDifferentOwnersGetDifferentAddresses() public view {
+        address subaccount1 = controller.getSubaccount(
             "rOwner1",
             SUBACCOUNT_TYPE_LOAN
         );
-        address subaccount2 = controller.getLoanSubaccount(
+        address subaccount2 = controller.getSubaccount(
             "rOwner2",
             SUBACCOUNT_TYPE_LOAN
         );
@@ -1561,14 +1583,14 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testLoanImplementationForTypeReturnsConfiguredImplementation() public view {
         assertEq(
-            controller.loanImplementationForType(SUBACCOUNT_TYPE_LOAN),
+            controller.implementationForType(SUBACCOUNT_TYPE_LOAN),
             address(loanImpl)
         );
     }
 
     function testLoanImplementationForTypeReturnsZeroForUnconfiguredType() public view {
         assertEq(
-            controller.loanImplementationForType(SUBACCOUNT_TYPE_NONE),
+            controller.implementationForType(SUBACCOUNT_TYPE_NONE),
             address(0)
         );
     }
@@ -1728,7 +1750,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function _createSubaccountFor(string memory _xrplOwner) private returns (address) {
         _createPersonalAccount(_xrplOwner);
-        return controller.createLoanSubaccount(
+        return controller.createSubaccount(
             _xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );

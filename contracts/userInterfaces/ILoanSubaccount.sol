@@ -4,11 +4,13 @@ pragma solidity >=0.8.4 <0.9;
 import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
 import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
 
+import {ISubaccount} from "./ISubaccount.sol";
+
 /**
  * @title ILoanSubaccount
  * @notice User interface for deterministic loan subaccounts.
  */
-interface ILoanSubaccount {
+interface ILoanSubaccount is ISubaccount {
 
     /**
      * @notice Emitted when a loan subaccount is initialized.
@@ -347,48 +349,4 @@ interface ILoanSubaccount {
         external
         returns (uint256 _amount);
 
-    /**
-     * @notice Initializes the loan subaccount.
-     * @param _controllerAddress MasterAccountController address.
-     * @param _parentPersonalAccount Parent Personal Account address.
-     * @param _subaccountType The subaccount type.
-     */
-    function initialize(
-        address _controllerAddress,
-        address _parentPersonalAccount,
-        uint256 _subaccountType
-    )
-        external;
-
-    /**
-     * @notice Returns the controller address associated with this subaccount.
-     * @return The controller address.
-     */
-    function controllerAddress()
-        external view
-        returns (address);
-
-    /**
-     * @notice Returns the parent Personal Account address for this subaccount.
-     * @return The parent Personal Account address.
-     */
-    function parentPersonalAccount()
-        external view
-        returns (address);
-
-    /**
-     * @notice Returns the subaccount type.
-     * @return The subaccount type.
-     */
-    function subaccountType()
-        external view
-        returns (uint256);
-
-    /**
-     * @notice Returns the implementation address of the subaccount.
-     * @return The implementation address.
-     */
-    function implementation()
-        external view
-        returns (address);
 }

@@ -35,4 +35,4 @@ contracts/diamond/
 └── libraries/       # LibDiamond
 ```
 
-Public interfaces — 13 `I*.sol` files under [`contracts/userInterfaces/facets/`](../../../contracts/userInterfaces/) plus the top-level [`IMasterAccountController`](../../../contracts/userInterfaces/IMasterAccountController.sol) and [`IPersonalAccount`](../../../contracts/userInterfaces/IPersonalAccount.sol).
+Public interfaces — 15 `I*.sol` files under [`contracts/userInterfaces/facets/`](../../../contracts/userInterfaces/) plus the top-level [`IMasterAccountController`](../../../contracts/userInterfaces/IMasterAccountController.sol) and [`IPersonalAccount`](../../../contracts/userInterfaces/IPersonalAccount.sol).

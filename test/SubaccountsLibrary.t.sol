@@ -2,12 +2,12 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {LoanSubaccounts} from "../contracts/smartAccounts/library/LoanSubaccounts.sol";
+import {Subaccounts} from "../contracts/smartAccounts/library/Subaccounts.sol";
 import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol";
 
 /**
- * @title LoanSubaccountsLibraryTest
- * @notice Pins the frozen {LoanSubaccounts.PROXY_CREATION_CODE} constant so any accidental edit
+ * @title SubaccountsLibraryTest
+ * @notice Pins the frozen {Subaccounts.PROXY_CREATION_CODE} constant so any accidental edit
  * fails CI.
  *
  * The constant is `type(LoanSubaccountProxy).creationCode` as compiled when the loan subaccount
@@ -20,10 +20,11 @@ import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccou
  * but not yet deployed" loan subaccount addresses will shift to a new derivation moment. Do not
  * update fixtures in this file without explicit cross-chain alignment.
  */
-contract LoanSubaccountsLibraryTest is Test {
-    /// @dev keccak256 of `PROXY_CREATION_CODE` as frozen (2026-08-12, pre-deployment).
+contract SubaccountsLibraryTest is Test {
+    /// @dev keccak256 of `PROXY_CREATION_CODE` as frozen (2026-08-21, pre-deployment;
+    /// re-frozen for the `implementationForType` rename while no subaccount was deployed).
     bytes32 private constant EXPECTED_PROXY_CREATION_CODE_HASH =
-        0x4a85b225afdc1b8a95c4de6c23e040398d342700422d4e7a80465ece16d58d7b;
+        0x5b1310fed87d02a1408c9553c237d8f3a532b578a750584ce84770148db88cf4;
 
     /// @dev Not runnable under `forge coverage` — coverage disables via-IR and `type(...).creationCode`
     /// comes out structurally different from the via-IR build the constant was frozen against.
@@ -33,7 +34,7 @@ contract LoanSubaccountsLibraryTest is Test {
         // the proxy's runtime size changed and the frozen constant no longer represents the live
         // source. The deeper check below covers same-length semantic drift.
         assertEq(
-            LoanSubaccounts.PROXY_CREATION_CODE.length,
+            Subaccounts.PROXY_CREATION_CODE.length,
             type(LoanSubaccountProxy).creationCode.length,
             "PROXY_CREATION_CODE length must match the current LoanSubaccountProxy creationCode"
         );
@@ -46,7 +47,7 @@ contract LoanSubaccountsLibraryTest is Test {
         // creation bytecode. Catches same-length semantic edits to `LoanSubaccountProxy.sol` that
         // the length check misses (e.g. swapping opcodes / changing constants in the constructor
         // logic while preserving total bytecode size).
-        bytes memory frozen = _stripMetadata(LoanSubaccounts.PROXY_CREATION_CODE);
+        bytes memory frozen = _stripMetadata(Subaccounts.PROXY_CREATION_CODE);
         bytes memory fresh = _stripMetadata(type(LoanSubaccountProxy).creationCode);
         assertEq(
             keccak256(frozen),
@@ -58,7 +59,7 @@ contract LoanSubaccountsLibraryTest is Test {
     function testProxyCreationCodeHashFrozen() public pure {
         // Catches any edit to the constant itself. This is the load-bearing cross-chain fixture.
         assertEq(
-            keccak256(LoanSubaccounts.PROXY_CREATION_CODE),
+            keccak256(Subaccounts.PROXY_CREATION_CODE),
             EXPECTED_PROXY_CREATION_CODE_HASH,
             "PROXY_CREATION_CODE hash drifted from the frozen fixture"
         );

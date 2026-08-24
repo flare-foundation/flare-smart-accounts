@@ -11,7 +11,7 @@ import {IMorpho} from "../../smartAccounts/interface/IMorpho.sol";
  * diamond; the Flare-side diamond does not carry it.
  * @dev An invalid FXRP OFT (not a contract, wrapping a token other than the market's
  * collateral token, mismatched shared decimals, or a non-canonical interface/message-codec
- * version) reverts with `ILoanSubaccountsFacet.InvalidFxrpOft`, the same error the Flare-side
+ * version) reverts with `ILoanBridgeSettingsFacet.InvalidFxrpOft`, the same error the Flare-side
  * bridge settings use.
  */
 interface IEthereumLoanSettingsFacet {
@@ -109,7 +109,7 @@ interface IEthereumLoanSettingsFacet {
 
     /**
      * @notice Creates the loan subaccount for an XRPL owner on this chain.
-     * @dev Permissionless and idempotent, like the Flare-side `createLoanSubaccount` — but the
+     * @dev Permissionless and idempotent, like the Flare-side `createSubaccount` — but the
      * parent Personal Account is resolved to its **computed** address instead of requiring a
      * deployment: Personal Accounts exist only on Flare, and their address is a pure function
      * of the diamond (same on every chain) and the XRPL owner, so the subaccount created here

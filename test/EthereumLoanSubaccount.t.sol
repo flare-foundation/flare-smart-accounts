@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 import {Test} from "forge-std/Test.sol";
 import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
 import {IDiamond} from "../contracts/diamond/interfaces/IDiamond.sol";
-import {DiamondArgs} from "../contracts/diamond/implementation/Diamond.sol";
+import {DiamondArgs, FunctionNotFound} from "../contracts/diamond/implementation/Diamond.sol";
 import {IISingletonFactory} from "../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {MasterAccountController} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {IIMasterAccountController} from "../contracts/smartAccounts/interface/IIMasterAccountController.sol";
@@ -18,6 +18,9 @@ import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccou
 import {
     EthereumLoanSettingsFacet
 } from "../contracts/smartAccounts/facets/EthereumLoanSettingsFacet.sol";
+import {SubaccountsFacet} from "../contracts/smartAccounts/facets/SubaccountsFacet.sol";
+import {TimelockFacet} from "../contracts/smartAccounts/facets/TimelockFacet.sol";
+import {PauseFacet} from "../contracts/smartAccounts/facets/PauseFacet.sol";
 import {IEthereumLoanSubaccount} from "../contracts/userInterfaces/IEthereumLoanSubaccount.sol";
 import {
     IEthereumLoanSettingsFacet
@@ -26,10 +29,8 @@ import {
     IIEthereumLoanSettingsFacet
 } from "../contracts/smartAccounts/interface/IIEthereumLoanSettingsFacet.sol";
 import {IMorpho} from "../contracts/smartAccounts/interface/IMorpho.sol";
-import {
-    ILoanSubaccountsFacet,
-    SUBACCOUNT_TYPE_LOAN
-} from "../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {SUBACCOUNT_TYPE_LOAN} from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MockOft} from "../contracts/mock/MockOft.sol";
@@ -126,7 +127,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         // register the Ethereum-side implementation for the loan type (timelock is 0 in tests)
         ethereumImpl = new EthereumLoanSubaccount();
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(ethereumImpl)
         );
@@ -168,7 +169,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         EthereumLoanSubaccount newImpl = new EthereumLoanSubaccount();
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(newImpl)
         );
@@ -188,7 +189,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         LoanSubaccount flareImpl = new LoanSubaccount();
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(flareImpl)
         );
@@ -202,18 +203,18 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         // the implementation never enters the CREATE2 derivation, so the predicted address
         // is identical whichever implementation - Flare's or Ethereum's - is registered;
         // this is what makes the account its own bridge destination across chains
-        address predictedWithEthereumImpl = controller.getLoanSubaccount(
+        address predictedWithEthereumImpl = controller.getSubaccount(
             "rOwner",
             SUBACCOUNT_TYPE_LOAN
         );
 
         LoanSubaccount flareImpl = new LoanSubaccount();
         vm.prank(governance);
-        controller.setLoanSubaccountImplementation(
+        controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
             address(flareImpl)
         );
-        address predictedWithFlareImpl = controller.getLoanSubaccount(
+        address predictedWithFlareImpl = controller.getSubaccount(
             "rOwner",
             SUBACCOUNT_TYPE_LOAN
         );
@@ -280,7 +281,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         settings = _defaultSettings();
         settings.fxrpOft = makeAddr("noCode");
-        _setSettingsExpectRevert(settings, ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        _setSettingsExpectRevert(settings, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
 
         settings = _defaultSettings();
         settings.originEid = 0;
@@ -312,7 +313,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
         settings.fxrpOft = address(otherOft);
-        _setSettingsExpectRevert(settings, ILoanSubaccountsFacet.InvalidFxrpOft.selector);
+        _setSettingsExpectRevert(settings, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
     }
 
     function testSetEthereumLoanSettingsRevertWrongSharedDecimals() public {
@@ -321,7 +322,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         fxrpOft.setPeer(originEid, originPeer);
         fxrpOft.setSharedDecimals(4);
         _setSettingsExpectRevert(
-            _defaultSettings(), ILoanSubaccountsFacet.InvalidFxrpOft.selector
+            _defaultSettings(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
         );
     }
 
@@ -332,12 +333,12 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         fxrpOft.setOftVersion(0x02e49c2c, 2);
         _setSettingsExpectRevert(
-            _defaultSettings(), ILoanSubaccountsFacet.InvalidFxrpOft.selector
+            _defaultSettings(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
         );
 
         fxrpOft.setOftVersion(0xdeadbeef, 1);
         _setSettingsExpectRevert(
-            _defaultSettings(), ILoanSubaccountsFacet.InvalidFxrpOft.selector
+            _defaultSettings(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
         );
 
         fxrpOft.setOftVersion(0x02e49c2c, 1);
@@ -1029,7 +1030,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         // the production creation route on this chain: no Personal Account exists or ever
         // will, the parent is resolved to its computed address
         string memory xrplOwner = "rEthereumOnlyOwner";
-        address predicted = controller.getLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address predicted = controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(predicted.code.length, 0);
 
         address created = IEthereumLoanSettingsFacet(address(controller))
@@ -1620,6 +1621,65 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
     //
     // helpers
     //
+
+    function testMinimalEthereumDiamondTopology() public {
+        // the intended Ethereum cut is the generic subaccount surface plus the Ethereum
+        // settings facet - never the Flare-only LoanBridgeSettingsFacet. The full-suite
+        // diamond carries every Flare facet, which could hide an accidental dependency;
+        // this minimal diamond proves the Ethereum loan flow needs none of them
+        // reuse the base facets cached by setUp (their CREATE2 salts are fixed, so a second
+        // deployBaseFacets() would collide on the singleton factory)
+        DiamondArgs memory args = DiamondArgs({
+            owner: initialOwner,
+            initAddress: address(0),
+            initCalldata: ""
+        });
+        MasterAccountController minimal = new MasterAccountController(baseCuts, args);
+
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](4);
+        cuts[0] = _buildFacetCut(
+            address(new SubaccountsFacet()), "SubaccountsFacet", IDiamond.FacetCutAction.Add
+        );
+        cuts[1] = _buildFacetCut(
+            address(new TimelockFacet()), "TimelockFacet", IDiamond.FacetCutAction.Add
+        );
+        cuts[2] = _buildFacetCut(
+            address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add
+        );
+        cuts[3] = _buildFacetCut(
+            address(new EthereumLoanSettingsFacet()),
+            "EthereumLoanSettingsFacet",
+            IDiamond.FacetCutAction.Add
+        );
+        IIMasterAccountController minimalController =
+            IIMasterAccountController(address(minimal));
+        vm.prank(initialOwner);
+        minimalController.diamondCut(cuts, address(0), "");
+
+        // the loan flow works on the minimal topology: register the implementation,
+        // configure the settings, create the subaccount (timelock duration defaults to 0)
+        morpho.createMarket(_defaultSettings().marketParams);
+        fxrpOft.setPeer(originEid, originPeer);
+        vm.startPrank(initialOwner);
+        minimalController.setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, address(ethereumImpl));
+        IIEthereumLoanSettingsFacet(address(minimal)).setEthereumLoanSettings(
+            _defaultSettings()
+        );
+        vm.stopPrank();
+        string memory xrplOwner = "rMinimalTopologyOwner";
+        address subaccount = IIEthereumLoanSettingsFacet(address(minimal))
+            .createEthereumLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        assertGt(subaccount.code.length, 0);
+
+        // the Flare-only bridge settings are not routable on this diamond
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FunctionNotFound.selector,
+                ILoanBridgeSettingsFacet.getLoanBridgeSettings.selector
+            )
+        );
+        ILoanBridgeSettingsFacet(address(minimal)).getLoanBridgeSettings();
+    }
 
     function _defaultSettings()
         private

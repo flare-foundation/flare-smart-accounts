@@ -6,7 +6,7 @@ Status: in progress. The account, its proxy, the per-type implementation registr
 
 ## Typed subaccounts
 
-Subaccounts are typed by a raw `uint256` identifier (`0` is reserved and invalid; `1` is the loan type — see the `SUBACCOUNT_TYPE_*` constants in [`ILoanSubaccountsFacet`](../../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol)). It is deliberately not a Solidity enum: the proxy creation code — and with it the constructor ABI — is frozen for deterministic CREATE2 addresses (see below), and a compiled enum decoder rejects values outside the range it was compiled with, which would make future types undeployable through the frozen artifact. With a raw integer, a new type needs only a registered implementation. Each type has its own implementation contract, registered per type in [`LoanSubaccounts.State.typeImplementation`](../../../contracts/smartAccounts/library/LoanSubaccounts.sol) and managed by the timelocked `setLoanSubaccountImplementation`.
+Subaccounts are typed by a raw `uint256` identifier (`0` is reserved and invalid; `1` is the loan type — see the `SUBACCOUNT_TYPE_*` constants in [`ISubaccountsFacet`](../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol)). It is deliberately not a Solidity enum: the proxy creation code — and with it the constructor ABI — is frozen for deterministic CREATE2 addresses (see below), and a compiled enum decoder rejects values outside the range it was compiled with, which would make future types undeployable through the frozen artifact. With a raw integer, a new type needs only a registered implementation. Each type has its own implementation contract, registered per type in [`Subaccounts.State.typeImplementation`](../../../contracts/smartAccounts/library/Subaccounts.sol) and managed by the timelocked `setSubaccountImplementation`.
 
 ## Deployment model
 
@@ -18,18 +18,18 @@ contract LoanSubaccountProxy is Proxy {
     uint256 private immutable subaccountType;
 
     function _implementation() internal view override returns (address) {
-        return ILoanSubaccountsFacet(controller).loanImplementationForType(subaccountType);
+        return ISubaccountsFacet(controller).implementationForType(subaccountType);
     }
 }
 ```
 
-The controller (diamond) is still the beacon in spirit — it answers the implementation lookup and upgrades all subaccounts of a type in one timelocked call — but the proxy asks the type-aware question `loanImplementationForType(type)` instead of the parameterless `IBeacon.implementation()`. The parameterless selector on the diamond is already claimed by [`PersonalAccountsFacet`](../../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol) for Personal Account proxies, and a diamond routes one selector to exactly one facet; the typed variant lets both account families share the diamond as their upgrade authority without touching the PA path.
+The controller (diamond) is still the beacon in spirit — it answers the implementation lookup and upgrades all subaccounts of a type in one timelocked call — but the proxy asks the type-aware question `implementationForType(type)` instead of the parameterless `IBeacon.implementation()`. The parameterless selector on the diamond is already claimed by [`PersonalAccountsFacet`](../../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol) for Personal Account proxies, and a diamond routes one selector to exactly one facet; the typed variant lets both account families share the diamond as their upgrade authority without touching the PA path.
 
 The proxy's constructor delegate-calls `initialize(controller, parentPersonalAccount, subaccountType)` on the implementation. The implementation contract locks itself in its own constructor, so only proxies can be initialized.
 
 ## CREATE2 derivation
 
-Like PAs, subaccounts are deployed via the [EIP-2470 Singleton Factory](https://eips.ethereum.org/EIPS/eip-2470). [`LoanSubaccounts.createLoanSubaccount`](../../../contracts/smartAccounts/library/LoanSubaccounts.sol) builds the init code as:
+Like PAs, subaccounts are deployed via the [EIP-2470 Singleton Factory](https://eips.ethereum.org/EIPS/eip-2470). [`Subaccounts.createSubaccount`](../../../contracts/smartAccounts/library/Subaccounts.sol) builds the init code as:
 
 ```solidity
 abi.encodePacked(
@@ -40,16 +40,16 @@ abi.encodePacked(
 
 with `salt = bytes32(0)`. The subaccount address is therefore a pure function of `(diamond, parentPersonalAccount, subaccountType)` — per-type and per-account unique, and identical on every chain where the diamond has the same address. No implementation or beacon address enters the derivation, so implementation upgrades never move addresses.
 
-> **Frozen:** the derivation uses the frozen `LoanSubaccounts.PROXY_CREATION_CODE` hex constant, exactly like [`PersonalAccounts.PROXY_CREATION_CODE`](./PersonalAccounts.md#frozen-proxy_creation_code). Its hash is pinned in `test/LoanSubaccountsLibrary.t.sol`, and two further tests compare it against a fresh compilation of the proxy source (by length, and byte-exact modulo CBOR metadata), so any drift fails CI. Editing the constant or the proxy source is a cross-chain coordination event: all predicted-but-not-deployed subaccount addresses would shift.
+> **Frozen:** the derivation uses the frozen `Subaccounts.PROXY_CREATION_CODE` hex constant, exactly like [`PersonalAccounts.PROXY_CREATION_CODE`](./PersonalAccounts.md#frozen-proxy_creation_code). Its hash is pinned in `test/SubaccountsLibrary.t.sol`, and two further tests compare it against a fresh compilation of the proxy source (by length, and byte-exact modulo CBOR metadata), so any drift fails CI. Editing the constant or the proxy source is a cross-chain coordination event: all predicted-but-not-deployed subaccount addresses would shift. Re-frozen once pre-deployment (2026-08-21), when the beacon query was renamed to `implementationForType`; no subaccount address had shipped, so nothing moved on chain.
 
 ## Creation and prediction
 
-- `getLoanSubaccount(xrplOwner, type)` — view; returns the registered subaccount, or the computed address if not yet deployed. Works even before the parent PA exists (the PA address itself is deterministic).
-- `createLoanSubaccount(xrplOwner, type)` — permissionless, `notPaused`; creates the subaccount for an **existing** Personal Account (reverts with `PersonalAccountNotDeployed` otherwise). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
+- `getSubaccount(xrplOwner, type)` — view; returns the registered subaccount, or the computed address if not yet deployed. Works even before the parent PA exists (the PA address itself is deterministic).
+- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; creates the subaccount for an **existing** Personal Account (reverts with `PersonalAccountNotDeployed` otherwise). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
 
 Unlike Personal Accounts, which are only ever created as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points), a loan subaccount needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily.
 
-Created subaccounts are recorded in `LoanSubaccounts.State.loanSubaccounts[parentPersonalAccount][subaccountType]` and announced with `LoanSubaccountCreated`.
+Created subaccounts are recorded in `Subaccounts.State.subaccounts[parentPersonalAccount][subaccountType]` and announced with `SubaccountCreated`.
 
 ## Reaching a subaccount's restricted methods
 
@@ -65,11 +65,11 @@ XRPL memo → MemoInstructionsFacet.handleMintedFAssets → MemoInstructions.exe
 
 The subaccount type does not need encoding in the instruction: the address already commits to `(parentPersonalAccount, subaccountType)`, so *which* subaccount is called is *which* type is meant. Adding subaccount methods or types therefore needs no controller change, no new memo opcode, and no diamond cut. The controller still enforces pause, nonce, replay protection, executor, and fee on the way in, because that all happens in `handleMintedFAssets` before the user operation runs.
 
-Calling a subaccount that is not deployed yet would **silently succeed** — a call to an address with no code returns success, so `executeUserOp` would not revert. The instruction does nothing, except that any native value it carried is transferred to the codeless address, where it sits until the subaccount is created and `sweepNativeToParent` recovers it. User operations must therefore create the subaccount first. `createLoanSubaccount` is permissionless and idempotent, so it can be the first call of every such operation:
+Calling a subaccount that is not deployed yet would **silently succeed** — a call to an address with no code returns success, so `executeUserOp` would not revert. The instruction does nothing, except that any native value it carried is transferred to the codeless address, where it sits until the subaccount is created and `sweepNativeToParent` recovers it. User operations must therefore create the subaccount first. `createSubaccount` is permissionless and idempotent, so it can be the first call of every such operation:
 
 ```text
 executeUserOp([
-  { target: controller,  data: createLoanSubaccount(xrplOwner, Loan) },
+  { target: controller,  data: createSubaccount(xrplOwner, Loan) },
   { target: subaccount,  data: <restricted method> }
 ])
 ```
@@ -325,7 +325,7 @@ collateral from the account's own position **to the account itself**, where only
 rails can move it; Morpho enforces position health.
 
 **Creation route.** `createEthereumLoanSubaccount(xrplOwner, type)` on the settings facet is
-the Ethereum counterpart of `createLoanSubaccount` — permissionless and idempotent, but the
+the Ethereum counterpart of `createSubaccount` — permissionless and idempotent, but the
 parent Personal Account resolves to its **computed** address (PAs exist only on Flare, and the
 PA derivation is chain-independent), so it materializes exactly the account the Flare side
 predicts. Because the facet is cut only on the Ethereum-side diamond, the relaxed route exists
@@ -435,17 +435,17 @@ Flare-side invariant:
 ## Deployment
 
 - **Fresh deployments** (`pnpm deploy_contracts` → `DeploySmartAccounts`): the loan module is
-  part of the standard cut — `LoanSubaccountsFacet` is deployed with the other smart-accounts
+  part of the standard cut — `SubaccountsFacet` and `LoanBridgeSettingsFacet` are deployed with the other smart-accounts
   facets, a `LoanSubaccount` implementation is deployed alongside the Personal Account
-  implementation, and type `1` is registered with `setLoanSubaccountImplementation` before
+  implementation, and type `1` is registered with `setSubaccountImplementation` before
   `setTimelockDuration`, while the timelock is still zero.
 - **Existing deployments** (flare, songbird, coston2): the facet needs no dedicated deploy
-  step — naming `LoanSubaccountsFacet` in a cut plan
+  step — naming `SubaccountsFacet` and `LoanBridgeSettingsFacet` in a cut plan
   (`deployment/cuts/<network>/cuts-<date>.json`, verified with `pnpm check_cut`, executed with
   `pnpm diamond_cut`) deploys it from the artifact as part of the cut flow. The implementation
   is deployed with `pnpm deploy_loan_subaccount_implementation <network>` and registered by
   governance with the timelocked
-  `setLoanSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, <address>)`.
+  `setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, <address>)`.
 - **Ethereum bootstrap.** Rebuilding today's sources does **not** reproduce the production
   diamond address — source drift changes the base facets' bytecode, their CREATE2 addresses,
   the diamond's constructor arguments, and with them its address. The historical init code of
@@ -458,7 +458,7 @@ Flare-side invariant:
   factory is sender-independent. **The follow-up facet cut is not permissionless**: the fresh
   diamond is owned by the historical `DiamondArgs.owner` EOA
   (`0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA`) — confirm that key is still controlled
-  before relying on an Ethereum deployment. The Ethereum cut installs `LoanSubaccountsFacet`,
+  before relying on an Ethereum deployment. The Ethereum cut installs `SubaccountsFacet`,
   `TimelockFacet`, `PauseFacet`, and `EthereumLoanSettingsFacet` through the standard cut flow
   (the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
   `deployment/deploys/ethereum.json` is seeded with the pinned contracts), and the

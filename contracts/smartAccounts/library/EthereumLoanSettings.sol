@@ -6,7 +6,7 @@ import {IOFT} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {IEthereumLoanSettingsFacet} from "../../userInterfaces/facets/IEthereumLoanSettingsFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
-import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {ILoanBridgeSettingsFacet} from "../../userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 
 library EthereumLoanSettings {
 
@@ -102,20 +102,20 @@ library EthereumLoanSettings {
         // token, share its decimals (the bridge-back sweep sends with minAmountLD == amountLD),
         // and report the canonical interface and message-codec version - the compose
         // authentication in the subaccount depends on the canonical composeFrom encoding
-        require(_settings.fxrpOft.code.length > 0, ILoanSubaccountsFacet.InvalidFxrpOft());
+        require(_settings.fxrpOft.code.length > 0, ILoanBridgeSettingsFacet.InvalidFxrpOft());
         require(
             IOFT(_settings.fxrpOft).token() == marketParams.collateralToken,
-            ILoanSubaccountsFacet.InvalidFxrpOft()
+            ILoanBridgeSettingsFacet.InvalidFxrpOft()
         );
         require(
             IOFT(_settings.fxrpOft).sharedDecimals() ==
                 IERC20Metadata(marketParams.collateralToken).decimals(),
-            ILoanSubaccountsFacet.InvalidFxrpOft()
+            ILoanBridgeSettingsFacet.InvalidFxrpOft()
         );
         (bytes4 interfaceId, uint64 version) = IOFT(_settings.fxrpOft).oftVersion();
         require(
             interfaceId == type(IOFT).interfaceId && version == 1,
-            ILoanSubaccountsFacet.InvalidFxrpOft()
+            ILoanBridgeSettingsFacet.InvalidFxrpOft()
         );
         // the OFT must be wired to the same endpoint that will deliver lzCompose calls;
         // otherwise a wrong (or malicious) endpoint could fabricate every callback parameter

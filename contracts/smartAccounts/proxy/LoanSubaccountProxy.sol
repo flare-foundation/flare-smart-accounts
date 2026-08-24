@@ -3,13 +3,13 @@ pragma solidity ^0.8.27;
 
 import {Proxy} from "@openzeppelin/contracts/proxy/Proxy.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
-import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
-import {ILoanSubaccountsFacet} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
+import {ISubaccountsFacet} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 
 /**
  * @title LoanSubaccountProxy contract
  * @notice Per-Personal-Account loan subaccount proxy. The controller is the beacon:
- * the implementation is resolved per subaccount type through {loanImplementationForType},
+ * the implementation is resolved per subaccount type through {implementationForType},
  * so upgrades happen on the controller and the type is fixed at deployment.
  */
 contract LoanSubaccountProxy is Proxy {
@@ -33,11 +33,11 @@ contract LoanSubaccountProxy is Proxy {
         controller = _controller;
         subaccountType = _subaccountType;
 
-        address impl = ILoanSubaccountsFacet(_controller).loanImplementationForType(_subaccountType);
+        address impl = ISubaccountsFacet(_controller).implementationForType(_subaccountType);
         Address.functionDelegateCall(
             impl,
             abi.encodeCall(
-                ILoanSubaccount.initialize,
+                ISubaccount.initialize,
                 (_controller, _parentPersonalAccount, _subaccountType)
             )
         );
@@ -49,6 +49,6 @@ contract LoanSubaccountProxy is Proxy {
         override
         returns (address)
     {
-        return ILoanSubaccountsFacet(controller).loanImplementationForType(subaccountType);
+        return ISubaccountsFacet(controller).implementationForType(subaccountType);
     }
 }

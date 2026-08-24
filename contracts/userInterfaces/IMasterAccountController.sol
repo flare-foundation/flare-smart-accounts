@@ -11,7 +11,8 @@ import {IExecutorsFacet} from "./facets/IExecutorsFacet.sol";
 import {IInstructionFeesFacet} from "./facets/IInstructionFeesFacet.sol";
 import {IInstructionsFacet} from "./facets/IInstructionsFacet.sol";
 import {IEthereumLoanSettingsFacet} from "./facets/IEthereumLoanSettingsFacet.sol";
-import {ILoanSubaccountsFacet} from "./facets/ILoanSubaccountsFacet.sol";
+import {ISubaccountsFacet} from "./facets/ISubaccountsFacet.sol";
+import {ILoanBridgeSettingsFacet} from "./facets/ILoanBridgeSettingsFacet.sol";
 import {IMemoInstructionsFacet} from "./facets/IMemoInstructionsFacet.sol";
 import {IPaymentProofsFacet} from "./facets/IPaymentProofsFacet.sol";
 import {IPersonalAccountsFacet} from "./facets/IPersonalAccountsFacet.sol";
@@ -36,7 +37,8 @@ interface IMasterAccountController is
     IInstructionFeesFacet,
     IInstructionsFacet,
     IEthereumLoanSettingsFacet,
-    ILoanSubaccountsFacet,
+    ISubaccountsFacet,
+    ILoanBridgeSettingsFacet,
     IMemoInstructionsFacet,
     IPauseFacet,
     IPaymentProofsFacet,

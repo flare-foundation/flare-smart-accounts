@@ -439,7 +439,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 13 // base facets + smart accounts facets
+            3 + 14 // base facets + smart accounts facets
         );
 
         IDiamond.FacetCut[] memory removeCuts = new IDiamond.FacetCut[](1);
@@ -469,7 +469,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         address[] memory currentCuts = masterAccountController.facetAddresses();
         assertEq(
             currentCuts.length,
-            3 + 13 // base facets + smart accounts facets
+            3 + 14 // base facets + smart accounts facets
         );
 
         // replace facets

@@ -27,9 +27,10 @@ import {
 } from "../../userInterfaces/IEthereumLoanSubaccount.sol";
 import {IEthereumLoanSettingsFacet} from "../../userInterfaces/facets/IEthereumLoanSettingsFacet.sol";
 import {
-    ILoanSubaccountsFacet,
+    ISubaccountsFacet,
     SUBACCOUNT_TYPE_NONE
-} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
+import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
 
@@ -83,7 +84,7 @@ contract EthereumLoanSubaccount is IEthereumLoanSubaccount, ReentrancyGuardTrans
         require(parentPersonalAccount != address(0), NotInitialized());
     }
 
-    /// @inheritdoc IEthereumLoanSubaccount
+    /// @inheritdoc ISubaccount
     function initialize(
         address _controllerAddress,
         address _parentPersonalAccount,
@@ -94,7 +95,7 @@ contract EthereumLoanSubaccount is IEthereumLoanSubaccount, ReentrancyGuardTrans
         require(controllerAddress == address(0), AlreadyInitialized());
         require(_controllerAddress != address(0), InvalidControllerAddress());
         require(_parentPersonalAccount != address(0), InvalidParentPersonalAccount());
-        require(_subaccountType != SUBACCOUNT_TYPE_NONE, ILoanSubaccountsFacet.InvalidSubaccountType());
+        require(_subaccountType != SUBACCOUNT_TYPE_NONE, ISubaccountsFacet.InvalidSubaccountType());
 
         controllerAddress = _controllerAddress;
         parentPersonalAccount = _parentPersonalAccount;
@@ -350,13 +351,13 @@ contract EthereumLoanSubaccount is IEthereumLoanSubaccount, ReentrancyGuardTrans
         return _borrowedRoutes;
     }
 
-    /// @inheritdoc IEthereumLoanSubaccount
+    /// @inheritdoc ISubaccount
     function implementation()
         external view
         returns (address)
     {
         // controller is the beacon; it resolves the implementation for this subaccount type
-        return ILoanSubaccountsFacet(controllerAddress).loanImplementationForType(subaccountType);
+        return ISubaccountsFacet(controllerAddress).implementationForType(subaccountType);
     }
 
     /// @dev Decodes and executes a borrow or pure collateral top-up: exactly the

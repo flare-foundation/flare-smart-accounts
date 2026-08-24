@@ -12,7 +12,7 @@ import {IIMasterAccountController} from "../../contracts/smartAccounts/interface
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.sol";
-import {SUBACCOUNT_TYPE_LOAN} from "../../contracts/userInterfaces/facets/ILoanSubaccountsFacet.sol";
+import {SUBACCOUNT_TYPE_LOAN} from "../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
@@ -23,7 +23,8 @@ import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFace
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
 import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
-import {LoanSubaccountsFacet} from "../../contracts/smartAccounts/facets/LoanSubaccountsFacet.sol";
+import {SubaccountsFacet} from "../../contracts/smartAccounts/facets/SubaccountsFacet.sol";
+import {LoanBridgeSettingsFacet} from "../../contracts/smartAccounts/facets/LoanBridgeSettingsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
@@ -90,7 +91,8 @@ contract DeploySmartAccounts is Script {
     TimelockFacet private timelockFacet;
     PauseFacet private pauseFacet;
     ReaderFacet private readerFacet;
-    LoanSubaccountsFacet private loanSubaccountsFacet;
+    SubaccountsFacet private subaccountsFacet;
+    LoanBridgeSettingsFacet private loanBridgeSettingsFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
@@ -357,7 +359,7 @@ contract DeploySmartAccounts is Script {
 
             console2.log("Registering loan subaccount implementation");
             // executes immediately: the timelock duration is still zero at this point
-            masterAccountController.setLoanSubaccountImplementation(
+            masterAccountController.setSubaccountImplementation(
                 SUBACCOUNT_TYPE_LOAN, loanSubaccountImplAddress
             );
 
@@ -415,9 +417,10 @@ contract DeploySmartAccounts is Script {
         readerFacet = new ReaderFacet();
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
-        loanSubaccountsFacet = new LoanSubaccountsFacet();
+        subaccountsFacet = new SubaccountsFacet();
+        loanBridgeSettingsFacet = new LoanBridgeSettingsFacet();
 
-        smartAccountsFacets = new IDiamond.FacetCut[](13);
+        smartAccountsFacets = new IDiamond.FacetCut[](14);
         // v1.0.0 facets (keep original order)
         smartAccountsFacets[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
         smartAccountsFacets[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
@@ -432,7 +435,8 @@ contract DeploySmartAccounts is Script {
         smartAccountsFacets[9] = _addFacet(address(memoInstructionsFacet), "MemoInstructionsFacet");
         smartAccountsFacets[10] = _addFacet(address(pauseFacet), "PauseFacet");
         smartAccountsFacets[11] = _addFacet(address(readerFacet), "ReaderFacet");
-        smartAccountsFacets[12] = _addFacet(address(loanSubaccountsFacet), "LoanSubaccountsFacet");
+        smartAccountsFacets[12] = _addFacet(address(subaccountsFacet), "SubaccountsFacet");
+        smartAccountsFacets[13] = _addFacet(address(loanBridgeSettingsFacet), "LoanBridgeSettingsFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {
@@ -502,9 +506,16 @@ contract DeploySmartAccounts is Script {
         );
         console2.log(
             string.concat(
-                "DEPLOYED: LoanSubaccountsFacet, ",
-                "LoanSubaccountsFacet.sol: ",
-                vm.toString(address(loanSubaccountsFacet))
+                "DEPLOYED: SubaccountsFacet, ",
+                "SubaccountsFacet.sol: ",
+                vm.toString(address(subaccountsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: LoanBridgeSettingsFacet, ",
+                "LoanBridgeSettingsFacet.sol: ",
+                vm.toString(address(loanBridgeSettingsFacet))
             )
         );
     }

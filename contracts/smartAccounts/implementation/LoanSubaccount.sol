@@ -12,10 +12,12 @@ import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
+import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {
-    ILoanSubaccountsFacet,
+    ISubaccountsFacet,
     SUBACCOUNT_TYPE_NONE
-} from "../../userInterfaces/facets/ILoanSubaccountsFacet.sol";
+} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
+import {ILoanBridgeSettingsFacet} from "../../userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
@@ -24,7 +26,7 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
  * @title LoanSubaccount contract
  * @notice Deterministic staging account for loan-related assets owned by a Personal Account.
  * @dev The controller (MasterAccountController Diamond) is the beacon: the proxy and this
- * contract resolve the implementation per subaccount type through {loanImplementationForType}.
+ * contract resolve the implementation per subaccount type through {implementationForType}.
  */
 contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
     using SafeERC20 for IERC20;
@@ -57,7 +59,7 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         require(parentPersonalAccount != address(0), NotInitialized());
     }
 
-    /// @inheritdoc ILoanSubaccount
+    /// @inheritdoc ISubaccount
     function initialize(
         address _controllerAddress,
         address _parentPersonalAccount,
@@ -68,7 +70,7 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         require(controllerAddress == address(0), AlreadyInitialized());
         require(_controllerAddress != address(0), InvalidControllerAddress());
         require(_parentPersonalAccount != address(0), InvalidParentPersonalAccount());
-        require(_subaccountType != SUBACCOUNT_TYPE_NONE, ILoanSubaccountsFacet.InvalidSubaccountType());
+        require(_subaccountType != SUBACCOUNT_TYPE_NONE, ISubaccountsFacet.InvalidSubaccountType());
 
         controllerAddress = _controllerAddress;
         parentPersonalAccount = _parentPersonalAccount;
@@ -225,13 +227,13 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         emit NativeSweptToParent(parentPersonalAccount, _amount);
     }
 
-    /// @inheritdoc ILoanSubaccount
+    /// @inheritdoc ISubaccount
     function implementation()
         external view
         returns (address)
     {
         // controller is the beacon; it resolves the implementation for this subaccount type
-        return ILoanSubaccountsFacet(controllerAddress).loanImplementationForType(subaccountType);
+        return ISubaccountsFacet(controllerAddress).implementationForType(subaccountType);
     }
 
     /// @dev Shared forward-move core of {sweepToLoan} and {executeLayerZeroCall}: bridges
@@ -257,7 +259,7 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
 
         (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
-            ILoanSubaccountsFacet(controllerAddress).getLoanBridgeSettings();
+            ILoanBridgeSettingsFacet(controllerAddress).getLoanBridgeSettings();
         require(
             fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
             LoanBridgeNotConfigured()

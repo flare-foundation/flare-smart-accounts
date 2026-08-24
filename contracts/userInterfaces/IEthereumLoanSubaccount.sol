@@ -2,6 +2,7 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
+import {ISubaccount} from "./ISubaccount.sol";
 
 /// @dev Compose payload schema version 1. The payload is
 /// `abi.encode(uint8 version, uint8 action, bytes actionData)`.
@@ -70,7 +71,7 @@ uint8 constant SKIP_REASON_STALE_EPOCH = 3;
  * compose payload sent by this same account on Flare, and everything else is permissionless
  * movement along fixed rails.
  */
-interface IEthereumLoanSubaccount is ILayerZeroComposer {
+interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
 
     /**
      * @notice Emitted when a loan subaccount is initialized.
@@ -441,19 +442,6 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer {
     );
 
     /**
-     * @notice Initializes the loan subaccount.
-     * @param _controllerAddress MasterAccountController address.
-     * @param _parentPersonalAccount Parent Personal Account address.
-     * @param _subaccountType The subaccount type.
-     */
-    function initialize(
-        address _controllerAddress,
-        address _parentPersonalAccount,
-        uint256 _subaccountType
-    )
-        external;
-
-    /**
      * @notice Repays a route's debt with the account's idle loan-token balance, clamped to
      * the live debt.
      * @dev Permissionless - repayment only reduces debt on the account's own position.
@@ -616,35 +604,4 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer {
         external view
         returns (bool);
 
-    /**
-     * @notice Returns the controller address associated with this subaccount.
-     * @return The controller address.
-     */
-    function controllerAddress()
-        external view
-        returns (address);
-
-    /**
-     * @notice Returns the parent Personal Account address for this subaccount.
-     * @return The parent Personal Account address.
-     */
-    function parentPersonalAccount()
-        external view
-        returns (address);
-
-    /**
-     * @notice Returns the subaccount type.
-     * @return The subaccount type.
-     */
-    function subaccountType()
-        external view
-        returns (uint256);
-
-    /**
-     * @notice Returns the implementation address of the subaccount.
-     * @return The implementation address.
-     */
-    function implementation()
-        external view
-        returns (address);
 }

@@ -80,7 +80,7 @@ void test("loads all six pins from the real constants file", () => {
 });
 
 void test("accepts ordinary and canonical protected contract names", () => {
-  assert.equal(validateContractName("LoanSubaccountsFacet"), undefined);
+  assert.equal(validateContractName("SubaccountsFacet"), undefined);
   assert.equal(validateContractName("OwnershipFacet"), "OwnershipFacet");
   assert.equal(validateContractName("MasterAccountControllerInit"), undefined);
 });
