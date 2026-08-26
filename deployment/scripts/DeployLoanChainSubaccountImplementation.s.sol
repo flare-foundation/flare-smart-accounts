@@ -2,10 +2,10 @@
 pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {EthereumLoanSubaccount} from "../../contracts/smartAccounts/implementation/EthereumLoanSubaccount.sol";
+import {LoanChainSubaccount} from "../../contracts/smartAccounts/implementation/LoanChainSubaccount.sol";
 
 // solhint-disable no-console
-contract DeployEthereumLoanSubaccountImplementation is Script {
+contract DeployLoanChainSubaccountImplementation is Script {
     function run(bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
@@ -15,17 +15,17 @@ contract DeployEthereumLoanSubaccountImplementation is Script {
         }
 
         vm.startBroadcast(deployerPrivateKey);
-        EthereumLoanSubaccount ethereumLoanSubaccountImpl = new EthereumLoanSubaccount();
+        LoanChainSubaccount loanChainSubaccountImpl = new LoanChainSubaccount();
         vm.stopBroadcast();
 
-        address ethereumLoanSubaccountImplAddress = address(ethereumLoanSubaccountImpl);
+        address loanChainSubaccountImplAddress = address(loanChainSubaccountImpl);
 
         console2.log(string.concat("NETWORK: ", network));
         console2.log(
             string.concat(
-                "DEPLOYED: EthereumLoanSubaccountImplementation, ",
-                "EthereumLoanSubaccount.sol: ",
-                vm.toString(ethereumLoanSubaccountImplAddress)
+                "DEPLOYED: LoanChainSubaccountImplementation, ",
+                "LoanChainSubaccount.sol: ",
+                vm.toString(loanChainSubaccountImplAddress)
             )
         );
     }

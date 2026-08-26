@@ -9,27 +9,24 @@ import {ISubaccount} from "./ISubaccount.sol";
 uint8 constant PAYLOAD_VERSION_1 = 1;
 
 /// @dev Borrow action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// bytes32 routeId, uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`. For
-/// a debt increase (`borrowAmount > 0`) the route id
-/// (`keccak256(abi.encode(morpho, marketParams))`) must be the **active** route; a pure
-/// collateral top-up (`borrowAmount == 0`) works against any registered route, and while the
-/// controller is paused only against the route carrying live debt (the defensive case).
+/// uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`. The market is not a
+/// payload field: the account operates on exactly one market — the one its subaccount type
+/// is bound to (write-once) — so the subaccount address itself commits to the pool.
 /// The operation id must be non-zero and globally unique per subaccount across all action
 /// types; clients retrying an expired intent must reuse its id only for the same intent
 /// with a fresh deadline (a convention, not contract-enforced). The authenticated bridged
 /// amount (the codec's `amountLD`, never the idle balance) is supplied as collateral; if
 /// `borrowAmount` is non-zero, that amount of the loan token is borrowed and sent to
 /// `destination`. A zero bridged amount borrows against the existing position; a pure
-/// top-up ignores the destination fields.
+/// top-up (`borrowAmount == 0`) ignores the destination fields, and while the controller is
+/// paused executes only when the position carries live debt (the defensive case).
 uint8 constant ACTION_BORROW = 1;
 
 /// @dev Withdraw action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// bytes32 routeId, uint256 withdrawAmount)`. The route may be **any registered route** -
-/// positions must stay withdrawable however the active configuration changes. Withdraws
-/// collateral from the account's own position to the account itself; the idle FXRP leaves
-/// only along the fixed rails, and which rail runs first is permissionless (redeposit or
-/// bridge-back - the accepted ordering race, see `depositIdleFxrp`). Position health is
-/// enforced by Morpho.
+/// uint256 withdrawAmount)`. Withdraws collateral from the account's one position to the
+/// account itself; the idle FXRP leaves only along the fixed rails, and which rail runs
+/// first is permissionless (redeposit or bridge-back - the accepted ordering race, see
+/// `depositIdleFxrp`). Position health is enforced by Morpho.
 uint8 constant ACTION_WITHDRAW = 2;
 
 /// @dev Set-recovery action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
@@ -63,15 +60,17 @@ uint8 constant SKIP_REASON_EXPIRED = 2;
 uint8 constant SKIP_REASON_STALE_EPOCH = 3;
 
 /**
- * @title IEthereumLoanSubaccount
- * @notice User interface for the Ethereum-side loan subaccount: the implementation registered
- * for the loan subaccount type on the Ethereum-side diamond, living at the same CREATE2 address
- * as its Flare counterpart. It has no parent-driven methods — the parent Personal Account
- * exists only on Flare — so every authorized action arrives as an authenticated LayerZero
- * compose payload sent by this same account on Flare, and everything else is permissionless
- * movement along fixed rails.
+ * @title ILoanChainSubaccount
+ * @notice User interface for the loan-chain-side subaccount: the implementation registered
+ * for a loan subaccount type on the loan-chain diamond (Ethereum, at launch), living at the
+ * same CREATE2 address
+ * as its Flare counterpart. The account operates on exactly one Morpho market for its whole
+ * life — the market its type is bound to — so the address itself commits to the pool. It has
+ * no parent-driven methods — the parent Personal Account exists only on Flare — so every
+ * authorized action arrives as an authenticated LayerZero compose payload sent by this same
+ * account on Flare, and everything else is permissionless movement along fixed rails.
  */
-interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
+interface ILoanChainSubaccount is ILayerZeroComposer, ISubaccount {
 
     /**
      * @notice Emitted when a loan subaccount is initialized.
@@ -90,8 +89,6 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
      * @notice Emitted when a borrow action executes.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
-     * @param routeId The route the action ran on: the active route when debt was opened,
-     * any registered route for a pure collateral top-up.
      * @param collateralSupplied FXRP supplied as collateral (the authenticated bridged amount).
      * @param borrowAmount Loan-token amount borrowed and disbursed; zero for a pure top-up.
      * @param destinationKind The destination kind (see the `DESTINATION_KIND_*` constants);
@@ -102,7 +99,6 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     event LoanOpened(
         address indexed parentPersonalAccount,
         bytes32 operationId,
-        bytes32 routeId,
         uint256 collateralSupplied,
         uint256 borrowAmount,
         uint8 destinationKind,
@@ -114,14 +110,12 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
      * @notice Emitted when a withdraw action executes.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
-     * @param routeId The route withdrawn from (any registered route).
      * @param amount Collateral withdrawn to this account.
      * @param guid The LayerZero message id the action arrived with.
      */
     event CollateralWithdrawn(
         address indexed parentPersonalAccount,
         bytes32 operationId,
-        bytes32 routeId,
         uint256 amount,
         bytes32 guid
     );
@@ -141,37 +135,32 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     );
 
     /**
-     * @notice Emitted when idle loan tokens are repaid into a route's position.
+     * @notice Emitted when idle loan tokens are repaid into the account's position.
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param routeId The route repaid.
      * @param assets The assets repaid (clamped to the live debt).
      */
     event LoanRepaid(
         address indexed parentPersonalAccount,
-        bytes32 routeId,
         uint256 assets
     );
 
     /**
-     * @notice Emitted when idle FXRP is deposited as collateral.
+     * @notice Emitted when idle FXRP is deposited as collateral into the account's position.
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param routeId The route deposited into: the live-debt route when one exists,
-     * otherwise the active route.
      * @param amount The amount deposited.
      */
     event IdleFxrpDeposited(
         address indexed parentPersonalAccount,
-        bytes32 routeId,
         uint256 amount
     );
 
     /**
      * @notice Emitted when idle FXRP is bridged back to this account's address on the origin
-     * chain (Flare).
+     * chain.
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param amount Amount of FXRP bridged.
-     * @param originEid The LayerZero endpoint id it was bridged to.
-     * @param guid The LayerZero message id.
+     * @param amount The amount bridged.
+     * @param originEid The origin chain's LayerZero endpoint id.
+     * @param guid The LayerZero message id of the bridge-back send.
      */
     event FXrpSweptToOrigin(
         address indexed parentPersonalAccount,
@@ -185,7 +174,7 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
      * @param parentPersonalAccount The parent Personal Account address.
      * @param token The recovered token.
      * @param amount The recovered amount.
-     * @param destination The recovery destination it went to.
+     * @param destination The recovery destination paid.
      */
     event TokenRecovered(
         address indexed parentPersonalAccount,
@@ -198,7 +187,7 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
      * @notice Emitted when the native balance is recovered to the recovery destination.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param amount The recovered amount.
-     * @param destination The recovery destination it went to.
+     * @param destination The recovery destination paid.
      */
     event NativeRecovered(
         address indexed parentPersonalAccount,
@@ -215,7 +204,7 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
      * expired skip leaves it unconsumed (the intent can retry under it); a stale-epoch skip
      * consumes it, since staleness cannot be cured without changing an economic field.
      * @param reason The skip reason (see the `SKIP_REASON_*` constants).
-     * @param guid The LayerZero message id.
+     * @param guid The LayerZero message id the action arrived with.
      */
     event LoanActionSkipped(
         address indexed parentPersonalAccount,
@@ -240,24 +229,19 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     error InvalidParentPersonalAccount();
 
     /**
-     * @notice Reverts if the Ethereum loan settings have not been configured on the controller.
-     */
-    error EthereumLoanSettingsNotConfigured();
-
-    /**
      * @notice Reverts if `lzCompose` is called by anything other than the LayerZero endpoint.
      */
     error OnlyEndpoint();
 
     /**
      * @notice Reverts if native value is attached to `lzCompose`. The loan flow never sends
-     * compose value; a rejected delivery is retriable through the endpoint without value.
+     * compose value, and rejecting it keeps a mistaken delivery retriable without value.
      */
     error NonZeroComposeValue();
 
     /**
      * @notice Reverts if the compose sender (`_from`) is not the configured FXRP OFT.
-     * @param from The actual compose sender.
+     * @param from The compose sender.
      */
     error WrongComposeSender(
         address from
@@ -265,7 +249,7 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
 
     /**
      * @notice Reverts if the composed message did not originate on the configured origin chain.
-     * @param srcEid The actual source endpoint id.
+     * @param srcEid The source endpoint id of the message.
      */
     error WrongSourceEid(
         uint32 srcEid
@@ -273,10 +257,8 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
 
     /**
      * @notice Reverts if the source-chain sender of the composed transfer is not this account
-     * itself. The account has the same address on the origin chain, and only it sends composed
-     * FXRP here; any other FXRP holder composing to this address is rejected (the attached
-     * tokens simply stay on the account as a donation).
-     * @param composeFrom The actual source-chain sender.
+     * itself (its own address on the origin chain).
+     * @param composeFrom The source-chain sender.
      */
     error WrongComposeFrom(
         bytes32 composeFrom
@@ -284,10 +266,8 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
 
     /**
      * @notice Reverts if the delivered GUID does not equal the one recomputed from the pinned
-     * origin peer. The compose wrapper alone does not commit to the source OApp, so without
-     * this check a temporarily swapped peer on the OFT could forge `composeFrom`; the GUID is
-     * computed by the endpoint from the true packet header and binds the message to the pinned
-     * peer.
+     * origin peer: the compose wrapper alone does not commit to the source OApp, so this
+     * check is what binds the message to the pinned peer.
      * @param guid The delivered GUID.
      */
     error WrongGuid(
@@ -300,31 +280,21 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     error InvalidOperationId();
 
     /**
-     * @notice Reverts if a borrow names a route other than the active one. Deliberately a
-     * revert, not a skip: the active route can change back, and a permissionless delivery
-     * during a temporary window must not consume the packet.
-     * @param routeId The route id the payload was signed for.
+     * @notice Reverts on a debt increase while new borrowing is disabled for this account's
+     * subaccount type — the routine way a pool is sunset. Deliberately a revert, not a skip:
+     * the condition is temporary-by-policy and a permissionless delivery must not consume
+     * the packet.
      */
-    error RouteNotActive(
-        bytes32 routeId
-    );
-
-    /**
-     * @notice Reverts if a route id was never registered.
-     * @param routeId The unknown route id.
-     */
-    error RouteNotRegistered(
-        bytes32 routeId
-    );
+    error BorrowingDisabled();
 
     /**
      * @notice Reverts on the implementation contract itself, which is never initialized: it
-     * must not accept native.
+     * holds no parent and must not accept native.
      */
     error NotInitialized();
 
     /**
-     * @notice Reverts if there are no idle loan tokens to repay, or the route has no debt.
+     * @notice Reverts if there are no idle loan tokens to repay, or the position has no debt.
      */
     error NothingToRepay();
 
@@ -350,9 +320,8 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     error RecoveryDestinationNotSet();
 
     /**
-     * @notice Reverts if generic recovery is attempted on a loan or collateral token of a
-     * registered route (those move only on their own rails), or {recoverLoanToken} is called
-     * with anything but the pinned loan token.
+     * @notice Reverts if generic recovery is attempted on the market's loan or collateral
+     * token; those move only on their own rails.
      * @param token The offending token.
      */
     error ProtectedToken(
@@ -360,26 +329,23 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     );
 
     /**
-     * @notice Reverts if a loan-token recovery is attempted while a route carries debt, or a
-     * borrow targets one route while another carries debt (one debt route at a time).
-     * @param routeId The route with outstanding debt.
+     * @notice Reverts if a loan-token recovery is attempted while the position carries debt:
+     * the balance is repayment material, not surplus.
      */
-    error OutstandingDebt(
-        bytes32 routeId
-    );
+    error OutstandingDebt();
 
     /**
      * @notice Reverts if the OFT's live peer for the origin chain no longer matches the pinned
-     * one.
+     * one; the sweep fails closed instead of bridging toward an unknown remote OApp.
      */
     error WrongOriginPeer();
 
     /**
      * @notice Reverts if the sent value does not cover the LayerZero messaging fee.
-     * @param messagingFee The required messaging fee.
+     * @param required The required fee.
      */
     error InsufficientFundsForSweep(
-        uint256 messagingFee
+        uint256 required
     );
 
     /**
@@ -409,8 +375,8 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     );
 
     /**
-     * @notice Reverts on a borrow with an unsupported destination kind (including the reserved
-     * Wormhole kind, until it is implemented).
+     * @notice Reverts on a borrow with an unsupported destination kind (the Wormhole-to-XRPL
+     * kind is reserved but not implemented).
      * @param destinationKind The unsupported destination kind.
      */
     error UnsupportedDestinationKind(
@@ -442,49 +408,33 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     );
 
     /**
-     * @notice Repays a route's debt with the account's idle loan-token balance, clamped to
-     * the live debt.
+     * @notice Repays the account's debt with its idle loan-token balance, clamped to the
+     * live debt.
      * @dev Permissionless - repayment only reduces debt on the account's own position.
-     * Works against **any registered route** and stays available while paused (it moves the
-     * position toward safety). Interest accrues first; a balance covering the full debt
-     * closes by exact borrow shares (no over-repay revert), a smaller one repays by assets.
-     * Surplus stays on the account for {recoverLoanToken}.
-     * @param _routeId The registered route to repay.
+     * Stays available while paused (it moves the position toward safety). Interest accrues
+     * first; a balance covering the full debt closes by exact borrow shares (no over-repay
+     * revert), a smaller one repays by assets. Surplus stays on the account for
+     * {recoverLoanToken}.
      * @return _assets The assets repaid.
      */
-    function repay(
-        bytes32 _routeId
-    )
+    function repay()
         external
         returns (uint256 _assets);
 
     /**
-     * @notice Deposits the whole idle FXRP balance as collateral: into the route carrying
-     * live debt when one exists, otherwise into the active route.
+     * @notice Deposits the whole idle FXRP balance as collateral into the account's position.
      * @dev Permissionless with a fixed destination (the account's own position): the retry
-     * rail for FXRP that arrived without a successful composed action. The live-debt route
-     * wins over the active one (a failed top-up credit must not be diverted from the
-     * position that may need it) and that defensive case survives a pause; the debt-free
-     * case is new exposure and reverts while paused. The direction race versus
-     * {sweepToOrigin} is accepted but asymmetric: redepositing costs only gas, while
-     * re-completing a withdrawal costs a new signed operation and bridge fee; an executor
-     * can narrow (not close) the race by bundling compose delivery with the sweep.
+     * rail for FXRP that arrived without a successful composed action. Defending an indebted
+     * position survives a pause, like repayment; the debt-free case is new exposure and
+     * reverts while paused. The direction race versus {sweepToOrigin} is accepted but
+     * asymmetric: redepositing costs only gas, while re-completing a withdrawal costs a new
+     * signed operation and bridge fee; an executor can narrow (not close) the race by
+     * bundling compose delivery with the sweep.
      * @return _amount The amount deposited.
      */
     function depositIdleFxrp()
         external
         returns (uint256 _amount);
-
-    /**
-     * @notice Synchronizes the debt-route pointer against the live Morpho position and
-     * returns the result: the pointed route while it still carries debt, or zero after
-     * clearing a pointer left stale by an external repayment or liquidation. Callable by
-     * anyone; performs no other state change.
-     * @return _routeId The route carrying live debt after synchronization, or zero.
-     */
-    function syncDebtRoute()
-        external
-        returns (bytes32 _routeId);
 
     /**
      * @notice Bridges all idle FXRP back to this account's own address on the origin chain
@@ -503,8 +453,8 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
     /**
      * @notice Recovers a token balance to the stored recovery destination.
      * @dev Permissionless with a fixed destination (the authenticated recovery destination;
-     * reverts until one is set). Loan and collateral tokens of registered routes are
-     * protected and rejected: they move only on their own rails. Reverts while paused.
+     * reverts until one is set). The market's loan and collateral tokens are protected and
+     * rejected: they move only on their own rails. Reverts while paused.
      * @param _token The token to recover.
      * @return _amount The recovered amount.
      */
@@ -515,81 +465,26 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
         returns (uint256 _amount);
 
     /**
-     * @notice Recovers a loan-token surplus (e.g. RLUSD left after a clamped repayment) to
-     * the stored recovery destination.
-     * @dev Permissionless with a fixed destination. Only possible when **every** registered
-     * route lending this token has zero outstanding borrow shares - before that, the balance
-     * is repayment material, not surplus. Collateral tokens (FXRP) never leave through
-     * recovery. Reverts while paused.
-     * @param _token The loan token to recover.
+     * @notice Recovers the loan-token surplus to the stored recovery destination, once the
+     * position carries no debt.
+     * @dev Permissionless with a fixed destination. While any debt exists the balance is
+     * repayment material and this reverts; the debt is read live from Morpho. Reverts while
+     * paused.
      * @return _amount The recovered amount.
      */
-    function recoverLoanToken(
-        address _token
-    )
+    function recoverLoanToken()
         external
         returns (uint256 _amount);
 
     /**
      * @notice Recovers the native balance to the stored recovery destination.
-     * @dev Permissionless with a fixed destination. Native can arrive as a bridge refund or
-     * be force-sent. Reverts while paused.
+     * @dev Permissionless with a fixed destination (native arrives as bridge refunds).
+     * Reverts while paused.
      * @return _amount The recovered amount.
      */
     function recoverNative()
         external
         returns (uint256 _amount);
-
-    /**
-     * @notice Returns the stored recovery destination; zero until an authenticated
-     * set-recovery action stores one.
-     * @return The recovery destination.
-     */
-    function recoveryDestination()
-        external view
-        returns (address);
-
-    /**
-     * @notice Returns the recovery epoch: set-recovery actions must carry a strictly greater
-     * one.
-     * @return The recovery epoch.
-     */
-    function recoveryEpoch()
-        external view
-        returns (uint64);
-
-    /**
-     * @notice Returns the route currently carrying the account's debt, or zero. One route may
-     * carry debt at a time; permissionless repayment callers can read this to know which
-     * route to repay. Cleared lazily against the live position, so it stays one observation
-     * behind an external repayment or liquidation until {syncDebtRoute} or a successful
-     * debt-gated operation synchronizes it.
-     * @return The debt route id.
-     */
-    function debtRouteId()
-        external view
-        returns (bytes32);
-
-    /**
-     * @notice Returns whether this account ever borrowed on a route.
-     * @param _routeId The route id.
-     * @return Whether the account borrowed on it.
-     */
-    function isBorrowedRoute(
-        bytes32 _routeId
-    )
-        external view
-        returns (bool);
-
-    /**
-     * @notice Returns every route this account ever borrowed on, append-only. Informational
-     * only: the debt checks behind borrowing and loan-token recovery read the scalar
-     * {debtRouteId} pointer, not this history.
-     * @return The route ids.
-     */
-    function getBorrowedRoutes()
-        external view
-        returns (bytes32[] memory);
 
     /**
      * @notice Returns whether an operation id has been consumed. An id is consumed on
@@ -604,4 +499,21 @@ interface IEthereumLoanSubaccount is ILayerZeroComposer, ISubaccount {
         external view
         returns (bool);
 
+    /**
+     * @notice Returns the recovery destination set by an authenticated set-recovery action,
+     * or zero when none was ever set.
+     * @return The recovery destination.
+     */
+    function recoveryDestination()
+        external view
+        returns (address);
+
+    /**
+     * @notice Returns the recovery epoch: set-recovery actions must carry a strictly greater
+     * one.
+     * @return The recovery epoch.
+     */
+    function recoveryEpoch()
+        external view
+        returns (uint64);
 }

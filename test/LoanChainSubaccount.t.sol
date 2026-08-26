@@ -12,24 +12,27 @@ import {MasterAccountControllerInit} from "../contracts/smartAccounts/facets/Mas
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSubaccount.sol";
 import {
-    EthereumLoanSubaccount
-} from "../contracts/smartAccounts/implementation/EthereumLoanSubaccount.sol";
+    LoanChainSubaccount
+} from "../contracts/smartAccounts/implementation/LoanChainSubaccount.sol";
 import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol";
 import {
-    EthereumLoanSettingsFacet
-} from "../contracts/smartAccounts/facets/EthereumLoanSettingsFacet.sol";
+    LoanChainSettingsFacet
+} from "../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol";
 import {SubaccountsFacet} from "../contracts/smartAccounts/facets/SubaccountsFacet.sol";
 import {TimelockFacet} from "../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {PauseFacet} from "../contracts/smartAccounts/facets/PauseFacet.sol";
-import {IEthereumLoanSubaccount} from "../contracts/userInterfaces/IEthereumLoanSubaccount.sol";
+import {ILoanChainSubaccount} from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
 import {
-    IEthereumLoanSettingsFacet
-} from "../contracts/userInterfaces/facets/IEthereumLoanSettingsFacet.sol";
+    ILoanChainSettingsFacet
+} from "../contracts/userInterfaces/facets/ILoanChainSettingsFacet.sol";
 import {
-    IIEthereumLoanSettingsFacet
-} from "../contracts/smartAccounts/interface/IIEthereumLoanSettingsFacet.sol";
+    IILoanChainSettingsFacet
+} from "../contracts/smartAccounts/interface/IILoanChainSettingsFacet.sol";
 import {IMorpho} from "../contracts/smartAccounts/interface/IMorpho.sol";
-import {SUBACCOUNT_TYPE_LOAN} from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {
+    ISubaccountsFacet,
+    SUBACCOUNT_TYPE_LOAN
+} from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
 import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
@@ -49,22 +52,22 @@ import {
     SKIP_REASON_DUPLICATE,
     SKIP_REASON_EXPIRED,
     SKIP_REASON_STALE_EPOCH
-} from "../contracts/userInterfaces/IEthereumLoanSubaccount.sol";
+} from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
 
 /**
- * @title EthereumLoanSubaccountTest
- * @notice The Ethereum-side loan subaccount, step 1: the same frozen proxy resolves a
- * per-chain implementation through the controller-as-beacon, so the account keeps its
- * cross-chain CREATE2 address while behaving differently per chain. Covers initialization,
+ * @title LoanChainSubaccountTest
+ * @notice The loan-chain-side subaccount (Ethereum, at launch), step 1: the same frozen
+ * proxy resolves a per-chain implementation through the controller-as-beacon, so the
+ * account keeps its cross-chain CREATE2 address while behaving differently per chain. Covers initialization,
  * the implementation self-lock, resolution and upgrade routing, and address invariance
  * across implementations.
  */
 // solhint-disable-next-line max-states-count
-contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
+contract LoanChainSubaccountTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
 
     IIMasterAccountController private controller;
-    EthereumLoanSubaccount private ethereumImpl;
+    LoanChainSubaccount private loanChainImpl;
 
     address private initialOwner;
     address private governance;
@@ -114,38 +117,38 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         personalAccountImplementation = address(new PersonalAccount());
         controller = _deployDiamond();
 
-        // the Ethereum-side diamond additionally carries the loan settings facet
+        // the loan-chain diamond additionally carries the loan settings facet
         IDiamond.FacetCut[] memory settingsCut = new IDiamond.FacetCut[](1);
         settingsCut[0] = _buildFacetCut(
-            address(new EthereumLoanSettingsFacet()),
-            "EthereumLoanSettingsFacet",
+            address(new LoanChainSettingsFacet()),
+            "LoanChainSettingsFacet",
             IDiamond.FacetCutAction.Add
         );
         vm.prank(governance);
         controller.diamondCut(settingsCut, address(0), "");
 
-        // register the Ethereum-side implementation for the loan type (timelock is 0 in tests)
-        ethereumImpl = new EthereumLoanSubaccount();
+        // register the loan-chain implementation for the loan type (timelock is 0 in tests)
+        loanChainImpl = new LoanChainSubaccount();
         vm.prank(governance);
         controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
-            address(ethereumImpl)
+            address(loanChainImpl)
         );
     }
 
     function testDeployAndInitialize() public {
-        EthereumLoanSubaccount subaccount = _deploySubaccount();
+        LoanChainSubaccount subaccount = _deploySubaccount();
 
         assertEq(subaccount.controllerAddress(), address(controller));
         assertEq(subaccount.parentPersonalAccount(), parentPersonalAccount);
         assertEq(subaccount.subaccountType(), SUBACCOUNT_TYPE_LOAN);
-        assertEq(subaccount.implementation(), address(ethereumImpl));
+        assertEq(subaccount.implementation(), address(loanChainImpl));
     }
 
     function testInitializeRevertAlreadyInitialized() public {
-        EthereumLoanSubaccount subaccount = _deploySubaccount();
+        LoanChainSubaccount subaccount = _deploySubaccount();
 
-        vm.expectRevert(IEthereumLoanSubaccount.AlreadyInitialized.selector);
+        vm.expectRevert(ILoanChainSubaccount.AlreadyInitialized.selector);
         subaccount.initialize(
             address(controller),
             parentPersonalAccount,
@@ -155,8 +158,8 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
         // the implementation contract locks itself in its own constructor
-        vm.expectRevert(IEthereumLoanSubaccount.AlreadyInitialized.selector);
-        ethereumImpl.initialize(
+        vm.expectRevert(ILoanChainSubaccount.AlreadyInitialized.selector);
+        loanChainImpl.initialize(
             address(controller),
             parentPersonalAccount,
             SUBACCOUNT_TYPE_LOAN
@@ -164,10 +167,10 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testUpgradeRoutesToNewImplementation() public {
-        EthereumLoanSubaccount subaccount = _deploySubaccount();
-        assertEq(subaccount.implementation(), address(ethereumImpl));
+        LoanChainSubaccount subaccount = _deploySubaccount();
+        assertEq(subaccount.implementation(), address(loanChainImpl));
 
-        EthereumLoanSubaccount newImpl = new EthereumLoanSubaccount();
+        LoanChainSubaccount newImpl = new LoanChainSubaccount();
         vm.prank(governance);
         controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
@@ -182,10 +185,10 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
     function testSameProxyResolvesPerChainImplementation() public {
         // the production setup in one test: the same proxy bytecode is deployed on every
         // chain, and each chain's diamond registers its own implementation for the type -
-        // Flare the FAssets one, Ethereum this one. Switching the registration stands in
+        // Flare the FAssets one, the loan chain this one. Switching the registration stands in
         // for looking at the other chain.
-        EthereumLoanSubaccount subaccount = _deploySubaccount();
-        assertEq(subaccount.implementation(), address(ethereumImpl));
+        LoanChainSubaccount subaccount = _deploySubaccount();
+        assertEq(subaccount.implementation(), address(loanChainImpl));
 
         LoanSubaccount flareImpl = new LoanSubaccount();
         vm.prank(governance);
@@ -201,9 +204,9 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
     function testPredictedAddressIsImplementationIndependent() public {
         // the implementation never enters the CREATE2 derivation, so the predicted address
-        // is identical whichever implementation - Flare's or Ethereum's - is registered;
+        // is identical whichever implementation - Flare's or the loan chain's - is registered;
         // this is what makes the account its own bridge destination across chains
-        address predictedWithEthereumImpl = controller.getSubaccount(
+        address predictedWithLoanChainImpl = controller.getSubaccount(
             "rOwner",
             SUBACCOUNT_TYPE_LOAN
         );
@@ -219,7 +222,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             SUBACCOUNT_TYPE_LOAN
         );
 
-        assertEq(predictedWithEthereumImpl, predictedWithFlareImpl);
+        assertEq(predictedWithLoanChainImpl, predictedWithFlareImpl);
     }
 
     function testReceiveGuard() public {
@@ -227,214 +230,354 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         // accept native; an initialized proxy accepts it (bridge refunds), and recoverNative
         // is its exit
         vm.deal(address(this), 1 ether);
-        (bool success, ) = address(ethereumImpl).call{value: 1}("");
+        (bool success, ) = address(loanChainImpl).call{value: 1}("");
         assertFalse(success);
 
-        EthereumLoanSubaccount subaccount = _deploySubaccount();
+        LoanChainSubaccount subaccount = _deploySubaccount();
         (success, ) = address(subaccount).call{value: 1}("");
         assertTrue(success);
         assertEq(address(subaccount).balance, 1);
     }
 
     //
-    // step 2: the Ethereum loan settings
+    // step 2: the loan-chain settings
     //
 
-    function testSetEthereumLoanSettings() public {
+    function testSetLoanChainTransportAndRegisterMarket() public {
         _configureSettings();
 
-        IEthereumLoanSettingsFacet.Settings memory stored =
-            IEthereumLoanSettingsFacet(address(controller)).getEthereumLoanSettings();
-        assertEq(stored.lzEndpoint, lzEndpoint);
-        assertEq(stored.fxrpOft, address(fxrpOft));
-        assertEq(stored.originEid, originEid);
-        assertEq(stored.originPeer, originPeer);
-        assertEq(stored.morpho, address(morpho));
-        assertEq(stored.marketParams.loanToken, address(rlusd));
-        assertEq(stored.marketParams.collateralToken, address(fxrp));
-        assertEq(stored.marketParams.lltv, 0.77e18);
+        ILoanChainSettingsFacet.Transport memory transport =
+            ILoanChainSettingsFacet(address(controller)).getLoanChainTransport();
+        assertEq(transport.lzEndpoint, lzEndpoint);
+        assertEq(transport.fxrpOft, address(fxrpOft));
+        assertEq(transport.originEid, originEid);
+        assertEq(transport.originPeer, originPeer);
+
+        ILoanChainSettingsFacet.Market memory market =
+            ILoanChainSettingsFacet(address(controller)).getLoanChainMarket(
+                SUBACCOUNT_TYPE_LOAN
+            );
+        assertEq(market.morpho, address(morpho));
+        assertEq(market.marketParams.loanToken, address(rlusd));
+        assertEq(market.marketParams.collateralToken, address(fxrp));
+        assertEq(market.marketParams.lltv, 0.77e18);
+        assertFalse(
+            ILoanChainSettingsFacet(address(controller)).isLoanChainBorrowingDisabled(
+                SUBACCOUNT_TYPE_LOAN
+            )
+        );
     }
 
-    function testSetEthereumLoanSettingsRevertNotOwner() public {
+    function testLoanChainSettingsRevertNotOwner() public {
         address notOwner = makeAddr("notOwner");
-        vm.prank(notOwner);
+        vm.startPrank(notOwner);
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(
-            _defaultSettings()
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
+            _defaultTransport()
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
+        );
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+            SUBACCOUNT_TYPE_LOAN, _defaultMarket()
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
+        );
+        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
+        );
+        IILoanChainSettingsFacet(address(controller)).enableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+        vm.stopPrank();
+    }
+
+    function testSetLoanChainTransportRevertInvalidValues() public {
+        fxrpOft.setPeer(originEid, originPeer);
+        ILoanChainSettingsFacet.Transport memory transport;
+
+        // the endpoint and the OFT must be contracts
+        transport = _defaultTransport();
+        transport.lzEndpoint = makeAddr("noCode");
+        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidLzEndpoint.selector);
+
+        transport = _defaultTransport();
+        transport.fxrpOft = makeAddr("noCode");
+        _setTransportExpectRevert(transport, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+
+        transport = _defaultTransport();
+        transport.originEid = 0;
+        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidOriginEid.selector);
+
+        transport = _defaultTransport();
+        transport.originPeer = bytes32(0);
+        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidOriginPeer.selector);
+    }
+
+    function testRegisterLoanChainMarketRevertInvalidValues() public {
+        _configureTransport();
+        ILoanChainSettingsFacet.Market memory market;
+
+        // Morpho must be a contract
+        market = _defaultMarket();
+        market.morpho = makeAddr("noCode");
+        _registerMarketExpectRevert(market, ILoanChainSettingsFacet.InvalidMorpho.selector);
+
+        // the market must name both tokens and a non-zero LLTV
+        market = _defaultMarket();
+        market.marketParams.loanToken = address(0);
+        _registerMarketExpectRevert(
+            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+        );
+
+        market = _defaultMarket();
+        market.marketParams.collateralToken = address(0);
+        _registerMarketExpectRevert(
+            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+        );
+
+        market = _defaultMarket();
+        market.marketParams.lltv = 0;
+        _registerMarketExpectRevert(
+            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+        );
+
+        // the reserved type 0 can never be bound
+        vm.prank(governance);
+        vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+            0, _defaultMarket()
         );
     }
 
-    function testSetEthereumLoanSettingsRevertInvalidValues() public {
-        fxrpOft.setPeer(originEid, originPeer);
-        IEthereumLoanSettingsFacet.Settings memory settings;
-
-        // the endpoint, Morpho and the OFT must be contracts
-        settings = _defaultSettings();
-        settings.lzEndpoint = makeAddr("noCode");
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidLzEndpoint.selector);
-
-        settings = _defaultSettings();
-        settings.morpho = makeAddr("noCode");
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidMorpho.selector);
-
-        settings = _defaultSettings();
-        settings.fxrpOft = makeAddr("noCode");
-        _setSettingsExpectRevert(settings, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
-
-        settings = _defaultSettings();
-        settings.originEid = 0;
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidOriginEid.selector);
-
-        settings = _defaultSettings();
-        settings.originPeer = bytes32(0);
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidOriginPeer.selector);
-
-        // the market must name both tokens and a non-zero LLTV
-        settings = _defaultSettings();
-        settings.marketParams.loanToken = address(0);
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidMarketParams.selector);
-
-        settings = _defaultSettings();
-        settings.marketParams.collateralToken = address(0);
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidMarketParams.selector);
-
-        settings = _defaultSettings();
-        settings.marketParams.lltv = 0;
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidMarketParams.selector);
+    function testRegisterLoanChainMarketRevertWithoutTransport() public {
+        // the transport pins FXRP's identity, which the market's collateral must match:
+        // markets cannot be registered before the transport is configured
+        morpho.createMarket(_defaultMarket().marketParams);
+        _registerMarketExpectRevert(
+            _defaultMarket(),
+            ILoanChainSettingsFacet.LoanChainTransportNotConfigured.selector
+        );
     }
 
-    function testSetEthereumLoanSettingsRevertWrongToken() public {
-        // an OFT wrapping some other token than the market's collateral must be rejected
+    function testRegisterLoanChainMarketRevertWrongCollateral() public {
+        // the market's collateral token must be exactly the OFT's own token
+        _configureTransport();
         MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
-        MockOft otherOft = new MockOft(otherToken, 0.01 ether);
-        otherOft.setPeer(originEid, originPeer);
-
-        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
-        settings.fxrpOft = address(otherOft);
-        _setSettingsExpectRevert(settings, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+        ILoanChainSettingsFacet.Market memory market = _defaultMarket();
+        market.marketParams.collateralToken = address(otherToken);
+        morpho.createMarket(market.marketParams);
+        _registerMarketExpectRevert(market, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
     }
 
-    function testSetEthereumLoanSettingsRevertWrongSharedDecimals() public {
+    function testSetLoanChainTransportRevertWrongSharedDecimals() public {
         // the bridge-back sweep sends with minAmountLD == amountLD, so shared-decimal dust
         // would make it revert; such an OFT must be rejected up front
         fxrpOft.setPeer(originEid, originPeer);
         fxrpOft.setSharedDecimals(4);
-        _setSettingsExpectRevert(
-            _defaultSettings(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
+        _setTransportExpectRevert(
+            _defaultTransport(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
         );
     }
 
-    function testSetEthereumLoanSettingsRevertWrongOftVersion() public {
+    function testSetLoanChainTransportRevertWrongOftVersion() public {
         // the compose authentication depends on the canonical composeFrom encoding, so only
         // the canonical interface id and message-codec version 1 are accepted
         fxrpOft.setPeer(originEid, originPeer);
 
         fxrpOft.setOftVersion(0x02e49c2c, 2);
-        _setSettingsExpectRevert(
-            _defaultSettings(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
+        _setTransportExpectRevert(
+            _defaultTransport(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
         );
 
         fxrpOft.setOftVersion(0xdeadbeef, 1);
-        _setSettingsExpectRevert(
-            _defaultSettings(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
+        _setTransportExpectRevert(
+            _defaultTransport(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
         );
 
         fxrpOft.setOftVersion(0x02e49c2c, 1);
-        morpho.createMarket(_defaultSettings().marketParams);
         vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(
-            _defaultSettings()
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
+            _defaultTransport()
         );
     }
 
-    function testSetEthereumLoanSettingsRevertPeerMismatch() public {
+    function testSetLoanChainTransportRevertPeerMismatch() public {
         // the live peer for the origin endpoint must be exactly the pinned remote OApp
         fxrpOft.setPeer(originEid, bytes32(uint256(0xbad)));
-        _setSettingsExpectRevert(
-            _defaultSettings(), IEthereumLoanSettingsFacet.InvalidOriginPeer.selector
+        _setTransportExpectRevert(
+            _defaultTransport(), ILoanChainSettingsFacet.InvalidOriginPeer.selector
         );
     }
 
-    function testGetPinnedTokens() public {
-        // zero until the first route registers; the pinned pair afterwards
-        (address loanToken, address collateralToken) =
-            IEthereumLoanSettingsFacet(address(controller)).getPinnedTokens();
-        assertEq(loanToken, address(0));
-        assertEq(collateralToken, address(0));
-
-        _configureSettings();
-        (loanToken, collateralToken) =
-            IEthereumLoanSettingsFacet(address(controller)).getPinnedTokens();
-        assertEq(loanToken, address(rlusd));
-        assertEq(collateralToken, address(fxrp));
-
-        // the registry stays enumerable for integrators and operations
-        bytes32[] memory routeIds =
-            IEthereumLoanSettingsFacet(address(controller)).getRouteIds();
-        assertEq(routeIds.length, 1);
-        assertEq(routeIds[0], _routeId());
-    }
-
-    function testClearEthereumLoanSettingsRevertPartialZero() public {
-        _configureSettings();
-
-        // a struct with the addresses zeroed but a route or market still set is not a clear:
-        // it falls through to validation and reverts, so a malformed clear cannot silently
-        // wipe the settings
-        IEthereumLoanSettingsFacet.Settings memory partialZero;
-        partialZero.marketParams.lltv = 0.77e18;
-        vm.prank(governance);
-        vm.expectRevert(IEthereumLoanSettingsFacet.InvalidLzEndpoint.selector);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(partialZero);
-
-        // the configured settings are untouched
-        assertEq(
-            IEthereumLoanSettingsFacet(address(controller)).getEthereumLoanSettings().lzEndpoint,
-            lzEndpoint
-        );
-    }
-
-    function testSetEthereumLoanSettingsRevertWrongEndpointAssociation() public {
+    function testSetLoanChainTransportRevertWrongEndpointAssociation() public {
         // the OFT must be wired to the same endpoint that delivers lzCompose calls; a wrong
         // (or malicious) endpoint could fabricate every callback parameter
         fxrpOft.setPeer(originEid, originPeer);
         address otherEndpoint = makeAddr("otherEndpoint");
         vm.etch(otherEndpoint, hex"00");
 
-        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
-        settings.lzEndpoint = otherEndpoint;
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidLzEndpoint.selector);
+        ILoanChainSettingsFacet.Transport memory transport = _defaultTransport();
+        transport.lzEndpoint = otherEndpoint;
+        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidLzEndpoint.selector);
     }
 
-    function testSetEthereumLoanSettingsRevertDirtyOriginPeer() public {
+    function testSetLoanChainTransportRevertDirtyOriginPeer() public {
         // the origin peer is an EVM address and must be cleanly zero-padded
         bytes32 dirtyPeer = bytes32(uint256(originPeer) | (uint256(1) << 200));
         fxrpOft.setPeer(originEid, dirtyPeer);
 
-        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
-        settings.originPeer = dirtyPeer;
-        _setSettingsExpectRevert(settings, IEthereumLoanSettingsFacet.InvalidOriginPeer.selector);
+        ILoanChainSettingsFacet.Transport memory transport = _defaultTransport();
+        transport.originPeer = dirtyPeer;
+        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidOriginPeer.selector);
     }
 
-    function testClearEthereumLoanSettings() public {
+    function testClearLoanChainTransportRevertPartialZero() public {
         _configureSettings();
 
-        // clearing with all-zero settings disables the transport-dependent surface until
-        // reconfigured; registered routes and repayment persist
-        IEthereumLoanSettingsFacet.Settings memory cleared;
+        // a struct with only some fields zeroed is not a clear: it falls through to
+        // validation and reverts, so a malformed clear cannot silently wipe the transport
+        ILoanChainSettingsFacet.Transport memory partialZero;
+        partialZero.originEid = 5;
         vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(cleared);
+        vm.expectRevert(ILoanChainSettingsFacet.InvalidLzEndpoint.selector);
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(partialZero);
 
-        IEthereumLoanSettingsFacet.Settings memory stored =
-            IEthereumLoanSettingsFacet(address(controller)).getEthereumLoanSettings();
+        // the configured transport is untouched
+        assertEq(
+            ILoanChainSettingsFacet(address(controller))
+                .getLoanChainTransport().lzEndpoint,
+            lzEndpoint
+        );
+    }
+
+    function testClearLoanChainTransport() public {
+        _configureSettings();
+
+        // clearing with an all-zero transport disables the transport-dependent surface until
+        // reconfigured; the registered market and repayment persist
+        ILoanChainSettingsFacet.Transport memory cleared;
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+
+        ILoanChainSettingsFacet.Transport memory stored =
+            ILoanChainSettingsFacet(address(controller)).getLoanChainTransport();
         assertEq(stored.lzEndpoint, address(0));
         assertEq(stored.fxrpOft, address(0));
         assertEq(stored.originEid, 0);
         assertEq(stored.originPeer, bytes32(0));
-        assertEq(stored.morpho, address(0));
-        assertEq(stored.marketParams.loanToken, address(0));
+
+        // the write-once market binding is not part of the transport and survives
+        assertEq(
+            ILoanChainSettingsFacet(address(controller))
+                .getLoanChainMarket(SUBACCOUNT_TYPE_LOAN).morpho,
+            address(morpho)
+        );
+    }
+
+    function testRegisterLoanChainMarketIsWriteOnce() public {
+        _configureSettings();
+
+        // the binding is permanent: a different market means a new subaccount type
+        ILoanChainSettingsFacet.Market memory other = _defaultMarket();
+        other.marketParams.lltv = 0.5e18;
+        morpho.createMarket(other.marketParams);
+        vm.prank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanChainSettingsFacet.MarketAlreadyRegistered.selector,
+                SUBACCOUNT_TYPE_LOAN
+            )
+        );
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+            SUBACCOUNT_TYPE_LOAN, other
+        );
+    }
+
+    function testBorrowSwitchRequiresRegisteredMarket() public {
+        vm.startPrank(governance);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanChainSettingsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
+            )
+        );
+        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanChainSettingsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
+            )
+        );
+        IILoanChainSettingsFacet(address(controller)).enableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+        vm.stopPrank();
+    }
+
+    function testSetLoanChainTransportRevertDifferentTokenAfterMarket() public {
+        // once a market is bound, the collateral token is pinned: a replacement transport
+        // wrapping a different token would strand the permanent binding and is rejected
+        _configureSettings();
+        MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
+        ILoanChainSettingsFacet.Transport memory transport = _defaultTransport();
+        transport.fxrpOft = address(_wiredOft(otherToken));
+        _setTransportExpectRevert(transport, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+    }
+
+    function testSetLoanChainTransportAllowsAdapterRotation() public {
+        // the pin freezes the token, not the adapter: a new OFT wrapping the same token passes
+        _configureSettings();
+        ILoanChainSettingsFacet.Transport memory transport = _defaultTransport();
+        transport.fxrpOft = address(_wiredOft(fxrp));
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(transport);
+        assertEq(
+            ILoanChainSettingsFacet(address(controller)).getLoanChainTransport().fxrpOft,
+            transport.fxrpOft
+        );
+    }
+
+    function testTransportClearAndRestoreKeepsCollateralPin() public {
+        // the pin is not transport state: it survives a clear, still rejects a wrong-token
+        // transport, and the original same-token transport restores cleanly
+        _configureSettings();
+        ILoanChainSettingsFacet.Transport memory cleared;
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+
+        MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
+        ILoanChainSettingsFacet.Transport memory wrongToken = _defaultTransport();
+        wrongToken.fxrpOft = address(_wiredOft(otherToken));
+        _setTransportExpectRevert(wrongToken, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
+            _defaultTransport()
+        );
+        assertEq(
+            ILoanChainSettingsFacet(address(controller)).getLoanChainTransport().fxrpOft,
+            address(fxrpOft)
+        );
+    }
+
+    function testRegisterSecondTypeRequiresPinnedCollateral() public {
+        // with the pin set by the first registration, a second type cannot bind a market on
+        // a different collateral token (rejected against the pinned transport's OFT)
+        _configureSettings();
+        MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
+        ILoanChainSettingsFacet.Market memory market = _defaultMarket();
+        market.marketParams.collateralToken = address(otherToken);
+        morpho.createMarket(market.marketParams);
+        vm.prank(governance);
+        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(2, market);
     }
 
     //
@@ -450,10 +593,9 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         bytes32 operationId = bytes32("op-1");
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.LoanOpened(
+        emit ILoanChainSubaccount.LoanOpened(
             parentPersonalAccount,
             operationId,
-            _routeId(),
             100e6,
             500e18,
             DESTINATION_KIND_EVM,
@@ -471,7 +613,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         assertEq(borrowShares, 500e18 * 1e6);
         assertEq(fxrp.balanceOf(subaccount), 5e6);
         assertEq(rlusd.balanceOf(destination), 500e18);
-        assertTrue(IEthereumLoanSubaccount(subaccount).usedOperations(operationId));
+        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(operationId));
     }
 
     function testLzComposeBorrowOnlyTopUp() public {
@@ -509,8 +651,8 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         bytes32 operationId = bytes32("op-2");
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.CollateralWithdrawn(
-            parentPersonalAccount, operationId, _routeId(), 30e6, _guidFor(2)
+        emit ILoanChainSubaccount.CollateralWithdrawn(
+            parentPersonalAccount, operationId, 30e6, _guidFor(2)
         );
         _deliver(subaccount, 2, 0, _withdrawPayload(operationId, 30e6));
 
@@ -528,8 +670,8 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
-        vm.expectRevert(IEthereumLoanSubaccount.NonZeroComposeValue.selector);
-        IEthereumLoanSubaccount(subaccount).lzCompose{value: 1}(
+        vm.expectRevert(ILoanChainSubaccount.NonZeroComposeValue.selector);
+        ILoanChainSubaccount(subaccount).lzCompose{value: 1}(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -540,8 +682,8 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             _composeMessage(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
 
         vm.prank(makeAddr("notTheEndpoint"));
-        vm.expectRevert(IEthereumLoanSubaccount.OnlyEndpoint.selector);
-        IEthereumLoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        vm.expectRevert(ILoanChainSubaccount.OnlyEndpoint.selector);
+        ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function testLzComposeRevertWrongComposeSender() public {
@@ -552,9 +694,9 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         address notTheOft = makeAddr("notTheOft");
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(IEthereumLoanSubaccount.WrongComposeSender.selector, notTheOft)
+            abi.encodeWithSelector(ILoanChainSubaccount.WrongComposeSender.selector, notTheOft)
         );
-        IEthereumLoanSubaccount(subaccount).lzCompose(notTheOft, guid, message, executor, "");
+        ILoanChainSubaccount(subaccount).lzCompose(notTheOft, guid, message, executor, "");
     }
 
     function testLzComposeRevertWrongSourceEid() public {
@@ -571,9 +713,9 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(IEthereumLoanSubaccount.WrongSourceEid.selector, originEid + 1)
+            abi.encodeWithSelector(ILoanChainSubaccount.WrongSourceEid.selector, originEid + 1)
         );
-        IEthereumLoanSubaccount(subaccount).lzCompose(
+        ILoanChainSubaccount(subaccount).lzCompose(
             address(fxrpOft), _guidFor(1), message, executor, ""
         );
     }
@@ -592,9 +734,9 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(IEthereumLoanSubaccount.WrongComposeFrom.selector, attacker)
+            abi.encodeWithSelector(ILoanChainSubaccount.WrongComposeFrom.selector, attacker)
         );
-        IEthereumLoanSubaccount(subaccount).lzCompose(
+        ILoanChainSubaccount(subaccount).lzCompose(
             address(fxrpOft), _guidFor(1), message, executor, ""
         );
     }
@@ -614,9 +756,9 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(IEthereumLoanSubaccount.WrongGuid.selector, forgedGuid)
+            abi.encodeWithSelector(ILoanChainSubaccount.WrongGuid.selector, forgedGuid)
         );
-        IEthereumLoanSubaccount(subaccount).lzCompose(
+        ILoanChainSubaccount(subaccount).lzCompose(
             address(fxrpOft), forgedGuid, message, executor, ""
         );
     }
@@ -635,19 +777,19 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         _pauseController();
         vm.prank(lzEndpoint);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        IEthereumLoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
 
         // the compose stays queued at the endpoint; the same delivery succeeds after unpausing
         _unpauseController();
         vm.prank(lzEndpoint);
-        IEthereumLoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
     }
 
     function testLzComposeTopUpWorksWhilePaused() public {
-        // a pure collateral top-up into the indebted route moves the position toward safety,
-        // like repayment: it must stay available during an incident so the position can be
+        // a pure collateral top-up into the indebted position moves it toward safety, like
+        // repayment: it must stay available during an incident so the position can be
         // defended against liquidation
         address subaccount = _borrowedSubaccount(500e18);
         fxrp.mint(subaccount, 50e6);
@@ -658,28 +800,28 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         assertEq(collateral, 150e6);
     }
 
-    function testDepositIdleFxrpDefendsIndebtedRouteWhilePaused() public {
+    function testDepositIdleFxrpDefendsIndebtedPositionWhilePaused() public {
         // the defensive case of the idle rail survives a pause: already-arrived collateral
         // can still protect the indebted position; the debt-free case stays gated
         address subaccount = _borrowedSubaccount(500e18);
         fxrp.mint(subaccount, 30e6);
         _pauseController();
 
-        IEthereumLoanSubaccount(subaccount).depositIdleFxrp();
+        ILoanChainSubaccount(subaccount).depositIdleFxrp();
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 130e6);
 
         // once the debt is gone, a paused deposit is new exposure and reverts
         rlusd.mint(subaccount, 600e18);
-        IEthereumLoanSubaccount(subaccount).repay(_routeId());
+        ILoanChainSubaccount(subaccount).repay();
         fxrp.mint(subaccount, 10e6);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        IEthereumLoanSubaccount(subaccount).depositIdleFxrp();
+        ILoanChainSubaccount(subaccount).depositIdleFxrp();
     }
 
     function testLzComposeTopUpWhilePausedRequiresLiveDebt() public {
-        // a paused composed top-up is allowed only into the route carrying live debt; into a
-        // debt-free route it is new exposure and waits out the pause
+        // a paused composed top-up is allowed only when the position carries live debt; a
+        // debt-free top-up is new exposure and waits out the pause
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         _pauseController();
@@ -690,49 +832,35 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testDebtRoutePointerClearsLazilyAfterExternalLiquidation() public {
-        // an external liquidation zeroes the debt without the account observing it: the next
-        // debt-gated call verifies the pointer against the live position and clears it
-        // (syncDebtRoute is the dedicated rescue; the pointed Morpho must answer)
+    function testExternalLiquidationImmediatelyUnblocksRecovery() public {
+        // debt is read live from Morpho on every check - nothing is cached, so an external
+        // liquidation is visible to the very next call with no synchronization step
         address subaccount = _borrowedSubaccount(500e18);
-        assertEq(IEthereumLoanSubaccount(subaccount).debtRouteId(), _routeId());
+        address destination = _setRecovery(subaccount);
+        rlusd.mint(subaccount, 100e18);
+
+        vm.expectRevert(ILoanChainSubaccount.OutstandingDebt.selector);
+        ILoanChainSubaccount(subaccount).recoverLoanToken();
 
         morpho.simulateLiquidation(_marketId(), subaccount);
 
-        // debt-free now: the idle deposit targets the active route and clears the pointer
-        fxrp.mint(subaccount, 20e6);
-        vm.expectEmit();
-        emit IEthereumLoanSubaccount.IdleFxrpDeposited(parentPersonalAccount, _routeId(), 20e6);
-        IEthereumLoanSubaccount(subaccount).depositIdleFxrp();
-        assertEq(IEthereumLoanSubaccount(subaccount).debtRouteId(), bytes32(0));
+        uint256 amount = ILoanChainSubaccount(subaccount).recoverLoanToken();
+        assertEq(amount, 100e18);
+        assertEq(rlusd.balanceOf(destination), 100e18);
     }
 
-    function testSyncDebtRouteClearsStalePointer() public {
-        // the permissionless synchronizer clears a stale pointer without needing any other
-        // rail: it verifies against the live position and performs no other state change
-        address subaccount = _borrowedSubaccount(500e18);
-        morpho.simulateLiquidation(_marketId(), subaccount);
-
-        assertEq(IEthereumLoanSubaccount(subaccount).debtRouteId(), _routeId());
-        assertEq(IEthereumLoanSubaccount(subaccount).syncDebtRoute(), bytes32(0));
-        assertEq(IEthereumLoanSubaccount(subaccount).debtRouteId(), bytes32(0));
-    }
-
-    function testDebtRoutePointerSurvivesPartialLiquidation() public {
-        // a partial liquidation leaves live borrow shares: the pointer must be retained so
-        // the remaining position stays defensible and recognized as outstanding debt
+    function testPartialLiquidationKeepsCanonicalAccounting() public {
+        // a partial liquidation leaves live borrow shares, seizes proportional collateral,
+        // and shrinks the market totals by the assets the repaid shares represent, so later
+        // conversions stay canonical
         address subaccount = _borrowedSubaccount(500e18);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         uint128 liquidated = borrowShares / 2;
         morpho.simulatePartialLiquidation(_marketId(), subaccount, liquidated);
 
-        assertEq(IEthereumLoanSubaccount(subaccount).syncDebtRoute(), _routeId());
-        assertEq(IEthereumLoanSubaccount(subaccount).debtRouteId(), _routeId());
         (, uint128 remainingShares, uint128 collateral) =
             morpho.position(_marketId(), subaccount);
         assertEq(remainingShares, borrowShares - liquidated);
-        // the liquidation seizes proportional collateral and shrinks the market totals by
-        // the assets the repaid shares represent, so later conversions stay canonical
         assertEq(collateral, 50e6);
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
             morpho.market(_marketId());
@@ -744,10 +872,9 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         // the remaining debt stays repayable with canonical share conversion afterwards
         rlusd.mint(subaccount, 500e18);
-        IEthereumLoanSubaccount(subaccount).repay(_routeId());
+        ILoanChainSubaccount(subaccount).repay();
         (, uint128 finalShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(finalShares, 0);
-        assertEq(IEthereumLoanSubaccount(subaccount).debtRouteId(), bytes32(0));
     }
 
     function testSimulateLiquidationAccruesPendingInterestFirst() public {
@@ -771,7 +898,6 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             totalBorrowAssets,
             repaidAssets >= accruedTotal ? 0 : accruedTotal - repaidAssets
         );
-        assertEq(IEthereumLoanSubaccount(subaccount).syncDebtRoute(), bytes32(0));
     }
 
     function testSimulateLiquidationRevertsOnDebtFreePosition() public {
@@ -785,39 +911,20 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         morpho.simulateLiquidation(_marketId(), subaccount);
     }
 
-    function testDepositIdleFxrpTargetsTheIndebtedRoute() public {
-        // a top-up credit whose compose failed must not be diverted into a debt-free route:
-        // the permissionless deposit targets the sole route with live debt
-        address subaccount = _borrowedSubaccount(500e18);
-        bytes32 routeA = _routeId();
-
-        IEthereumLoanSettingsFacet.Settings memory settingsB = _defaultSettings();
-        settingsB.marketParams.lltv = 0.5e18;
-        morpho.createMarket(settingsB.marketParams);
-        vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(settingsB);
-
-        fxrp.mint(subaccount, 30e6);
-        vm.expectEmit();
-        emit IEthereumLoanSubaccount.IdleFxrpDeposited(parentPersonalAccount, routeA, 30e6);
-        IEthereumLoanSubaccount(subaccount).depositIdleFxrp();
-
-        (, , uint128 collateralA) = morpho.position(_marketId(), subaccount);
-        assertEq(collateralA, 130e6);
-    }
-
-    function testLzComposeRevertNotConfigured() public {
+    function testLzComposeRevertTransportNotConfigured() public {
         address subaccount = _createConfiguredSubaccount();
         (bytes memory message, bytes32 guid) =
             _composeMessage(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
 
-        IEthereumLoanSettingsFacet.Settings memory cleared;
+        ILoanChainSettingsFacet.Transport memory cleared;
         vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(cleared);
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
 
         vm.prank(lzEndpoint);
-        vm.expectRevert(IEthereumLoanSubaccount.EthereumLoanSettingsNotConfigured.selector);
-        IEthereumLoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        vm.expectRevert(
+            ILoanChainSettingsFacet.LoanChainTransportNotConfigured.selector
+        );
+        ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function testLzComposeRevertUnsupportedPayloadShapes() public {
@@ -828,14 +935,14 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         bytes memory payload = abi.encode(uint8(2), ACTION_BORROW, bytes(""));
         _deliverExpectRevert(
             subaccount, 1, payload,
-            abi.encodeWithSelector(IEthereumLoanSubaccount.UnsupportedPayloadVersion.selector, 2)
+            abi.encodeWithSelector(ILoanChainSubaccount.UnsupportedPayloadVersion.selector, 2)
         );
 
         // unsupported action
         payload = abi.encode(PAYLOAD_VERSION_1, uint8(9), bytes(""));
         _deliverExpectRevert(
             subaccount, 1, payload,
-            abi.encodeWithSelector(IEthereumLoanSubaccount.UnsupportedAction.selector, 9)
+            abi.encodeWithSelector(ILoanChainSubaccount.UnsupportedAction.selector, 9)
         );
 
         // the reserved Wormhole destination kind
@@ -845,7 +952,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             subaccount, 1, payload,
             abi.encodeWithSelector(
-                IEthereumLoanSubaccount.UnsupportedDestinationKind.selector,
+                ILoanChainSubaccount.UnsupportedDestinationKind.selector,
                 DESTINATION_KIND_XRPL_WORMHOLE
             )
         );
@@ -853,12 +960,12 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         // a zero destination, and a destination with dirty upper bits
         payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(0), 500e18);
         _deliverExpectRevert(
-            subaccount, 1, payload, IEthereumLoanSubaccount.InvalidDestination.selector
+            subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
         );
         bytes32 dirty = bytes32(uint256(uint160(makeAddr("dest"))) | (uint256(1) << 200));
         payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dirty, 500e18);
         _deliverExpectRevert(
-            subaccount, 1, payload, IEthereumLoanSubaccount.InvalidDestination.selector
+            subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
         );
 
         // the two addresses already in scope when a payload is composed are never valid
@@ -868,7 +975,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(subaccount))), 500e18
         );
         _deliverExpectRevert(
-            subaccount, 1, payload, IEthereumLoanSubaccount.InvalidDestination.selector
+            subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
         );
         payload = _borrowPayload(
             bytes32("op-1"),
@@ -877,13 +984,13 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             500e18
         );
         _deliverExpectRevert(
-            subaccount, 1, payload, IEthereumLoanSubaccount.InvalidDestination.selector
+            subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
         );
 
         // a borrow that would neither supply nor borrow
         payload = _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0);
         _deliverExpectRevertZeroAmount(
-            subaccount, 1, payload, IEthereumLoanSubaccount.ZeroAmount.selector
+            subaccount, 1, payload, ILoanChainSubaccount.ZeroAmount.selector
         );
     }
 
@@ -897,7 +1004,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         // completes without effect and its bridged FXRP stays on the account
         fxrp.mint(subaccount, 100e6);
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.LoanActionSkipped(
+        emit ILoanChainSubaccount.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
         _deliver(subaccount, 2, 100e6, _borrowPayload(operationId, 0, bytes32(0), 0));
@@ -916,7 +1023,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         _deliver(subaccount, 1, 100e6, _borrowPayload(operationId, 0, bytes32(0), 0));
 
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.LoanActionSkipped(
+        emit ILoanChainSubaccount.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
         _deliver(subaccount, 2, 0, _withdrawPayload(operationId, 30e6));
@@ -924,13 +1031,13 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         assertEq(collateral, 100e6);
 
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.LoanActionSkipped(
+        emit ILoanChainSubaccount.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(3)
         );
         _deliver(subaccount, 3, 0, _setRecoveryPayload(
             operationId, 1, bytes32(uint256(uint160(makeAddr("recovery"))))
         ));
-        assertEq(IEthereumLoanSubaccount(subaccount).recoveryDestination(), address(0));
+        assertEq(ILoanChainSubaccount(subaccount).recoveryDestination(), address(0));
     }
 
     function testLzComposeSkipExpiredDeadlineWithoutConsumingTheOperation() public {
@@ -942,16 +1049,15 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             PAYLOAD_VERSION_1,
             ACTION_BORROW,
             abi.encode(
-                operationId, uint64(block.timestamp - 1), _routeId(), uint8(0), bytes32(0),
-                uint256(0)
+                operationId, uint64(block.timestamp - 1), uint8(0), bytes32(0), uint256(0)
             )
         );
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.LoanActionSkipped(
+        emit ILoanChainSubaccount.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_EXPIRED, _guidFor(1)
         );
         _deliver(subaccount, 1, 100e6, stale);
-        assertFalse(IEthereumLoanSubaccount(subaccount).usedOperations(operationId));
+        assertFalse(ILoanChainSubaccount(subaccount).usedOperations(operationId));
 
         // the same intent retries under the same operation id with a fresh deadline; the
         // retry is a real second packet, crediting its own amount - the first packet's stale
@@ -961,45 +1067,125 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
         assertEq(fxrp.balanceOf(subaccount), 100e6);
-        assertTrue(IEthereumLoanSubaccount(subaccount).usedOperations(operationId));
+        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(operationId));
     }
 
-    function testLzComposeRevertRouteNotActive() public {
-        address subaccount = _createConfiguredSubaccount();
+    function testLzComposeBorrowRevertBorrowingDisabled() public {
+        // the borrow switch sunsets a pool: a debt increase reverts (retriable - a reversible
+        // policy must not consume the packet); top-ups, repayment and withdrawals still work
+        address subaccount = _borrowedSubaccount(500e18);
+        vm.prank(governance);
+        vm.expectEmit();
+        emit ILoanChainSettingsFacet.LoanChainBorrowingDisabled(SUBACCOUNT_TYPE_LOAN);
+        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+
         fxrp.mint(subaccount, 100e6);
-        bytes32 otherRoute = keccak256("some other route");
-
-        // a debt increase signed for a route other than the active one: a temporary state,
-        // so the delivery reverts (staying retriable) rather than letting a permissionless
-        // deliverer consume the packet during the mismatch window
-        bytes memory payload = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(
-                bytes32("op-1"), uint64(block.timestamp + 1 hours), otherRoute,
-                DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))), 500e18
-            )
+        bytes memory borrowMore = _borrowPayload(
+            bytes32("op-2"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         );
         _deliverExpectRevert(
-            subaccount, 1, payload,
-            abi.encodeWithSelector(IEthereumLoanSubaccount.RouteNotActive.selector, otherRoute)
+            subaccount, 2, borrowMore, ILoanChainSubaccount.BorrowingDisabled.selector
         );
 
-        // a pure top-up is not bound to the active route, but the route must be registered
-        payload = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(
-                bytes32("op-1"), uint64(block.timestamp + 1 hours), otherRoute,
-                uint8(0), bytes32(0), uint256(0)
-            )
+        // a pure top-up is not a debt increase and still works (a real second packet,
+        // crediting its own amount; packet 2's credit stays idle for its later retry)
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 3, 100e6, _borrowPayload(bytes32("op-3"), 0, bytes32(0), 0));
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 200e6);
+
+        // re-enabling makes the exact same packet deliverable again
+        vm.prank(governance);
+        vm.expectEmit();
+        emit ILoanChainSettingsFacet.LoanChainBorrowingEnabled(SUBACCOUNT_TYPE_LOAN);
+        IILoanChainSettingsFacet(address(controller)).enableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
         );
+        _deliver(subaccount, 2, 100e6, borrowMore);
+        assertEq(rlusd.balanceOf(makeAddr("dest")), 100e18);
+    }
+
+    function testDuplicateFinalizesWhileBorrowingDisabled() public {
+        // terminal gates run before the borrow switch: a duplicate delivery finalizes
+        // without effect instead of reverting forever on a sunset pool
+        address subaccount = _borrowedSubaccount(500e18);
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+
+        fxrp.mint(subaccount, 100e6);
+        vm.expectEmit();
+        emit ILoanChainSubaccount.LoanActionSkipped(
+            parentPersonalAccount, bytes32("op-borrow"), SKIP_REASON_DUPLICATE, _guidFor(9)
+        );
+        _deliver(subaccount, 9, 100e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("exchangeDeposit")))), 500e18
+        ));
+    }
+
+    function testBorrowingDisabledLeavesExitsOpen() public {
+        // the switch stops exactly one thing - new debt; every exit stays open on the sunset
+        // pool: composed withdrawal, repayment, and recovery of the surplus
+        address subaccount = _borrowedSubaccount(500e18);
+        address destination = _setRecovery(subaccount);
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+
+        _deliver(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 30e6));
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 70e6);
+
+        rlusd.mint(subaccount, 600e18);
+        assertEq(ILoanChainSubaccount(subaccount).repay(), 500e18);
+
+        assertEq(ILoanChainSubaccount(subaccount).recoverLoanToken(), 100e18);
+        assertEq(rlusd.balanceOf(destination), 100e18);
+    }
+
+    function testBorrowingDisabledIsPerType() public {
+        // the switch isolates per type: sunsetting one pool leaves another borrowing
+        _configureSettings();
+        uint256 typeB = 2;
+        ILoanChainSettingsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.lltv = 0.5e18;
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+            typeB, marketB
+        );
+        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+        vm.stopPrank();
+
+        address subaccountA = address(_deploySubaccount());
+        fxrp.mint(subaccountA, 100e6);
         _deliverExpectRevert(
-            subaccount, 1, payload,
-            abi.encodeWithSelector(
-                IEthereumLoanSubaccount.RouteNotRegistered.selector, otherRoute
-            )
+            subaccountA, 1,
+            _borrowPayload(
+                bytes32("op-a"), DESTINATION_KIND_EVM,
+                bytes32(uint256(uint160(makeAddr("destA")))), 100e18
+            ),
+            ILoanChainSubaccount.BorrowingDisabled.selector
         );
+
+        address subaccountB = address(new LoanSubaccountProxy(
+            address(controller), parentPersonalAccount, typeB
+        ));
+        fxrp.mint(subaccountB, 100e6);
+        _deliver(subaccountB, 2, 100e6, _borrowPayload(
+            bytes32("op-b"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("destB")))), 100e18
+        ));
+        assertEq(rlusd.balanceOf(makeAddr("destB")), 100e18);
     }
 
     function testLzComposeRevertInvalidOperationId() public {
@@ -1008,7 +1194,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         _deliverExpectRevert(
             subaccount, 1, _borrowPayload(bytes32(0), 0, bytes32(0), 0),
-            IEthereumLoanSubaccount.InvalidOperationId.selector
+            ILoanChainSubaccount.InvalidOperationId.selector
         );
     }
 
@@ -1021,253 +1207,160 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             subaccount, 1, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0),
             abi.encodeWithSelector(
-                IEthereumLoanSubaccount.InsufficientComposeBalance.selector, 100e6, 40e6
+                ILoanChainSubaccount.InsufficientComposeBalance.selector, 100e6, 40e6
             )
         );
     }
 
-    function testCreateEthereumLoanSubaccountWithoutPersonalAccount() public {
+    function testCreateLoanChainSubaccountWithoutPersonalAccount() public {
         // the production creation route on this chain: no Personal Account exists or ever
         // will, the parent is resolved to its computed address
-        string memory xrplOwner = "rEthereumOnlyOwner";
+        string memory xrplOwner = "rLoanChainOnlyOwner";
         address predicted = controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(predicted.code.length, 0);
 
-        address created = IEthereumLoanSettingsFacet(address(controller))
-            .createEthereumLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address created = ILoanChainSettingsFacet(address(controller))
+            .createLoanChainSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(created, predicted);
         assertNotEq(created.code.length, 0);
 
         // idempotent
-        address again = IEthereumLoanSettingsFacet(address(controller))
-            .createEthereumLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address again = ILoanChainSettingsFacet(address(controller))
+            .createLoanChainSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(again, created);
     }
 
-    function testCreateEthereumLoanSubaccountRevertWhenPaused() public {
+    function testCreateLoanChainSubaccountRevertWhenPaused() public {
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        IEthereumLoanSettingsFacet(address(controller))
-            .createEthereumLoanSubaccount("rOwner", SUBACCOUNT_TYPE_LOAN);
+        ILoanChainSettingsFacet(address(controller))
+            .createLoanChainSubaccount("rOwner", SUBACCOUNT_TYPE_LOAN);
     }
 
     //
-    // step 4: routes, repayment, deposits, the bridge-back sweep and recovery
+    // step 4: repayment, deposits, the bridge-back sweep and recovery
     //
 
-    function testRoutesOutliveSettingsChanges() public {
-        // the core registry property: positions stay repayable and withdrawable against the
-        // route they were opened in, however the active configuration changes
-        address subaccount = _createConfiguredSubaccount();
-        bytes32 routeA = _routeId();
-        fxrp.mint(subaccount, 100e6);
-        address destination = makeAddr("exchangeDeposit");
-        _deliver(subaccount, 1, 100e6, _borrowPayload(
-            bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(destination))), 500e18
-        ));
-
-        // governance moves to a new market (different LLTV): a different route
-        IEthereumLoanSettingsFacet.Settings memory settingsB = _defaultSettings();
-        settingsB.marketParams.lltv = 0.5e18;
-        morpho.createMarket(settingsB.marketParams);
-        vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(settingsB);
-        bytes32 routeB = keccak256(abi.encode(address(morpho), settingsB.marketParams));
-        assertEq(
-            IEthereumLoanSettingsFacet(address(controller)).getActiveRouteId(), routeB
-        );
-
-        // a debt increase on the old route reverts - it is no longer the active one. Its
-        // packet's credit (the hardcoded 100e6 the helper claims) arrived with lzReceive and
-        // stays stranded on the account
-        fxrp.mint(subaccount, 100e6);
-        _deliverExpectRevert(
-            subaccount, 2,
-            abi.encode(
-                PAYLOAD_VERSION_1,
-                ACTION_BORROW,
-                abi.encode(
-                    bytes32("op-2"), uint64(block.timestamp + 1 hours), routeA,
-                    DESTINATION_KIND_EVM, bytes32(uint256(uint160(destination))), 100e18
-                )
-            ),
-            abi.encodeWithSelector(IEthereumLoanSubaccount.RouteNotActive.selector, routeA)
-        );
-
-        // but the old position stays fully serviceable: it can even be defended with a pure
-        // collateral top-up against liquidation... (a fresh intent: new operation id, new
-        // packet with its own credit - a real endpoint binds each GUID to one exact message)
-        fxrp.mint(subaccount, 10e6);
-        bytes memory topUpA = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(
-                bytes32("op-2b"), uint64(block.timestamp + 1 hours), routeA,
-                uint8(0), bytes32(0), uint256(0)
-            )
-        );
-        _deliver(subaccount, 3, 10e6, topUpA);
-        bytes32 marketA = _marketId();
-        (, , uint128 collateralTopped) = morpho.position(marketA, subaccount);
-        assertEq(collateralTopped, 110e6);
-        // the first packet's stranded credit stayed idle, untouched by the second action
-        assertEq(fxrp.balanceOf(subaccount), 100e6);
-
-        // ...repaid, and its collateral withdrawn
-        rlusd.mint(subaccount, 600e18);
-        IEthereumLoanSubaccount(subaccount).repay(routeA);
-        (, uint128 borrowShares, ) = morpho.position(marketA, subaccount);
-        assertEq(borrowShares, 0);
-
-        bytes memory withdrawA = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_WITHDRAW,
-            abi.encode(bytes32("op-4"), uint64(block.timestamp + 1 hours), routeA, uint256(110e6))
-        );
-        _deliver(subaccount, 4, 0, withdrawA);
-        (, , uint128 collateralA) = morpho.position(marketA, subaccount);
-        assertEq(collateralA, 0);
-        assertEq(fxrp.balanceOf(subaccount), 210e6);
-    }
-
-    function testBorrowRevertWhileOtherRouteHasDebt() public {
-        // one outstanding debt route at a time: otherwise a permissionless repayment could
-        // pick the safer route while the liquidation-sensitive one starves
-        address subaccount = _borrowedSubaccount(500e18);
-        bytes32 routeA = _routeId();
-
-        IEthereumLoanSettingsFacet.Settings memory settingsB = _defaultSettings();
-        settingsB.marketParams.lltv = 0.5e18;
-        morpho.createMarket(settingsB.marketParams);
-        vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(settingsB);
-        bytes32 routeB = keccak256(abi.encode(address(morpho), settingsB.marketParams));
-
-        fxrp.mint(subaccount, 100e6);
-        bytes memory borrowB = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(
-                bytes32("op-2"), uint64(block.timestamp + 1 hours), routeB,
-                DESTINATION_KIND_EVM,
-                bytes32(uint256(uint160(makeAddr("dest")))), uint256(100e18)
-            )
-        );
-        _deliverExpectRevert(
-            subaccount, 2, borrowB,
-            abi.encodeWithSelector(IEthereumLoanSubaccount.OutstandingDebt.selector, routeA)
-        );
-
-        // after closing the old loan, the SAME packet (identical wrapper: a real endpoint
-        // binds the GUID to one exact message, amountLD included) delivers successfully
-        rlusd.mint(subaccount, 600e18);
-        IEthereumLoanSubaccount(subaccount).repay(routeA);
-        _deliver(subaccount, 2, 100e6, borrowB);
-        assertTrue(IEthereumLoanSubaccount(subaccount).isBorrowedRoute(routeB));
-        bytes32[] memory borrowed = IEthereumLoanSubaccount(subaccount).getBorrowedRoutes();
-        assertEq(borrowed.length, 2);
-        assertEq(borrowed[0], routeA);
-        assertEq(borrowed[1], routeB);
-    }
-
-    function testDuplicateFinalizesOnInactiveRoute() public {
-        // terminal gates run before route checks: a duplicate delivery for a route that is no
-        // longer active finalizes without effect instead of reverting forever
-        address subaccount = _borrowedSubaccount(500e18);
-        bytes32 routeA = _routeId();
-
-        IEthereumLoanSettingsFacet.Settings memory settingsB = _defaultSettings();
-        settingsB.marketParams.lltv = 0.5e18;
-        morpho.createMarket(settingsB.marketParams);
-        vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(settingsB);
-
-        // redeliver the original borrow (same operation id, new packet) against inactive A
-        fxrp.mint(subaccount, 100e6);
-        vm.expectEmit();
-        emit IEthereumLoanSubaccount.LoanActionSkipped(
-            parentPersonalAccount, bytes32("op-borrow"), SKIP_REASON_DUPLICATE, _guidFor(9)
-        );
-        bytes memory replay = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(
-                bytes32("op-borrow"), uint64(block.timestamp + 1 hours), routeA,
-                DESTINATION_KIND_EVM,
-                bytes32(uint256(uint160(makeAddr("exchangeDeposit")))), uint256(500e18)
-            )
-        );
-        _deliver(subaccount, 9, 100e6, replay);
-    }
-
-    function testSetRecoveryWorksWhilePaused() public {
-        // rotating a compromised recovery destination is configuration toward safety and must
-        // not wait for (and race) an unpause; outward recovery stays paused meanwhile
-        address subaccount = _createConfiguredSubaccount();
-        _pauseController();
-
-        _deliver(subaccount, 1, 0, _setRecoveryPayload(
-            bytes32("op-1"), 1, bytes32(uint256(uint160(makeAddr("safeRecovery"))))
-        ));
-        assertEq(
-            IEthereumLoanSubaccount(subaccount).recoveryDestination(), makeAddr("safeRecovery")
-        );
-
-        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(subaccount, 1e18);
-        vm.expectRevert(IPauseFacet.IsPaused.selector);
-        IEthereumLoanSubaccount(subaccount).recoverToken(address(stray));
-    }
-
-    function testWithdrawWithAttachedCreditLeavesItIdle() public {
-        // a message-only action delivered with tokens attached executes normally; the credit
-        // simply stays idle on the account for the fixed rails
-        address subaccount = _createConfiguredSubaccount();
-        fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
-
-        fxrp.mint(subaccount, 5e6);
-        _deliver(subaccount, 2, 5e6, _withdrawPayload(bytes32("op-2"), 30e6));
-
-        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
-        assertEq(collateral, 70e6);
-        assertEq(fxrp.balanceOf(subaccount), 35e6);
-    }
-
-    function testSetEthereumLoanSettingsRevertCodelessToken() public {
-        // the first registration pins the tokens permanently, and a Morpho market can exist
-        // for an address with no code - so both tokens must be contracts
-        fxrpOft.setPeer(originEid, originPeer);
-        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
-        settings.marketParams.loanToken = makeAddr("codelessToken");
-        morpho.createMarket(settings.marketParams);
-        _setSettingsExpectRevert(
-            settings, IEthereumLoanSettingsFacet.InvalidMarketParams.selector
-        );
-    }
-
-    function testSetEthereumLoanSettingsRevertCodelessCollateralToken() public {
-        // the symmetric case: a codeless collateral token must be rejected too
-        fxrpOft.setPeer(originEid, originPeer);
-        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
-        settings.marketParams.collateralToken = makeAddr("codelessCollateral");
-        morpho.createMarket(settings.marketParams);
-        _setSettingsExpectRevert(
-            settings, IEthereumLoanSettingsFacet.InvalidMarketParams.selector
-        );
-    }
-
-    function testSetEthereumLoanSettingsRevertMismatchedRouteTokens() public {
+    function testSecondTypeBindsItsOwnMarket() public {
+        // a new pool is a new subaccount type: same implementation, own write-once market,
+        // own deterministic CREATE2 address for the same owner - positions on different
+        // pools never share an account
         _configureSettings();
-
-        // the token pair is pinned across routes: a different loan token must be rejected
-        IEthereumLoanSettingsFacet.Settings memory settings = _defaultSettings();
-        MintableERC20 otherLoanToken = new MintableERC20("Other", "OTH", 18);
-        settings.marketParams.loanToken = address(otherLoanToken);
-        morpho.createMarket(settings.marketParams);
-        _setSettingsExpectRevert(
-            settings, IEthereumLoanSettingsFacet.MismatchedRouteTokens.selector
+        uint256 typeB = 2;
+        ILoanChainSettingsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.lltv = 0.5e18;
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+            typeB, marketB
         );
+        vm.stopPrank();
+
+        // both accounts materialize through the production CREATE2 route, one per type
+        string memory xrplOwner = "rTwoPoolsOwner";
+        address subaccountA = ILoanChainSettingsFacet(address(controller))
+            .createLoanChainSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address subaccountB = ILoanChainSettingsFacet(address(controller))
+            .createLoanChainSubaccount(xrplOwner, typeB);
+        assertEq(subaccountA, controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN));
+        assertEq(subaccountB, controller.getSubaccount(xrplOwner, typeB));
+        assertNotEq(subaccountA, subaccountB);
+
+        // each account borrows on its own pool, independently
+        fxrp.mint(subaccountA, 100e6);
+        _deliver(subaccountA, 1, 100e6, _borrowPayload(
+            bytes32("op-a"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("destA")))), 300e18
+        ));
+        fxrp.mint(subaccountB, 50e6);
+        _deliver(subaccountB, 2, 50e6, _borrowPayload(
+            bytes32("op-b"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("destB")))), 100e18
+        ));
+
+        bytes32 marketIdB = keccak256(abi.encode(marketB.marketParams));
+        (, uint128 sharesA, uint128 collateralA) = morpho.position(_marketId(), subaccountA);
+        (, uint128 sharesB, uint128 collateralB) = morpho.position(marketIdB, subaccountB);
+        assertEq(collateralA, 100e6);
+        assertEq(collateralB, 50e6);
+        assertGt(sharesA, 0);
+        assertGt(sharesB, 0);
+        // neither account has any position on the other's market, in either direction
+        (, uint128 crossSharesA, uint128 crossCollateralA) =
+            morpho.position(marketIdB, subaccountA);
+        assertEq(crossSharesA, 0);
+        assertEq(crossCollateralA, 0);
+        (, uint128 crossSharesB, uint128 crossCollateralB) =
+            morpho.position(_marketId(), subaccountB);
+        assertEq(crossSharesB, 0);
+        assertEq(crossCollateralB, 0);
+    }
+
+    function testBorrowRevertMarketNotRegistered() public {
+        // mis-sync fail-safe: a type with no market yet cannot execute composed actions
+        // (retriable revert), but the transport-only bridge-back works - funds never strand
+        _configureSettings();
+        uint256 typeB = 2;
+        vm.prank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        LoanSubaccountProxy proxyB = new LoanSubaccountProxy(
+            address(controller), parentPersonalAccount, typeB
+        );
+        address subaccountB = address(proxyB);
+        fxrp.mint(subaccountB, 100e6);
+
+        _deliverExpectRevert(
+            subaccountB, 1, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0),
+            abi.encodeWithSelector(
+                ILoanChainSettingsFacet.MarketNotRegistered.selector, typeB
+            )
+        );
+        // the revert rolled the whole delivery back: the id stays unconsumed for a retry
+        assertFalse(ILoanChainSubaccount(subaccountB).usedOperations(bytes32("op-1")));
+
+        // the stranded credit exits over the transport without needing a market
+        uint256 messagingFee = 0.01 ether;
+        vm.deal(address(this), messagingFee);
+        uint256 amount =
+            ILoanChainSubaccount(subaccountB).sweepToOrigin{value: messagingFee}();
+        assertEq(amount, 100e6);
+    }
+
+    function testBorrowRetriesAfterMarketRegistration() public {
+        // the mis-sync revert is retriable: once governance registers the type's market,
+        // the exact same packet delivers
+        _configureSettings();
+        uint256 typeB = 2;
+        vm.prank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        address subaccountB = address(new LoanSubaccountProxy(
+            address(controller), parentPersonalAccount, typeB
+        ));
+        fxrp.mint(subaccountB, 100e6);
+
+        bytes memory payload = _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0);
+        _deliverExpectRevert(
+            subaccountB, 1, payload,
+            abi.encodeWithSelector(
+                ILoanChainSettingsFacet.MarketNotRegistered.selector, typeB
+            )
+        );
+        assertFalse(ILoanChainSubaccount(subaccountB).usedOperations(bytes32("op-1")));
+
+        ILoanChainSettingsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.lltv = 0.5e18;
+        morpho.createMarket(marketB.marketParams);
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+            typeB, marketB
+        );
+
+        _deliver(subaccountB, 1, 100e6, payload);
+        (, , uint128 collateral) =
+            morpho.position(keccak256(abi.encode(marketB.marketParams)), subaccountB);
+        assertEq(collateral, 100e6);
+        assertTrue(ILoanChainSubaccount(subaccountB).usedOperations(bytes32("op-1")));
     }
 
     function testRepayPartialByAssets() public {
@@ -1275,8 +1368,8 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 200e18);
 
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.LoanRepaid(parentPersonalAccount, _routeId(), 200e18);
-        uint256 assets = IEthereumLoanSubaccount(subaccount).repay(_routeId());
+        emit ILoanChainSubaccount.LoanRepaid(parentPersonalAccount, 200e18);
+        uint256 assets = ILoanChainSubaccount(subaccount).repay();
 
         assertEq(assets, 200e18);
         assertEq(rlusd.balanceOf(subaccount), 0);
@@ -1289,7 +1382,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         address subaccount = _borrowedSubaccount(500e18);
         rlusd.mint(subaccount, 600e18);
 
-        uint256 assets = IEthereumLoanSubaccount(subaccount).repay(_routeId());
+        uint256 assets = ILoanChainSubaccount(subaccount).repay();
 
         assertEq(assets, 500e18);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
@@ -1305,7 +1398,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         morpho.addPendingInterest(_marketId(), 25e18);
         rlusd.mint(subaccount, 600e18);
 
-        uint256 assets = IEthereumLoanSubaccount(subaccount).repay(_routeId());
+        uint256 assets = ILoanChainSubaccount(subaccount).repay();
 
         // full debt incl. accrued interest, repaid via exact shares (rounding up by at most 1)
         assertGe(assets, 525e18);
@@ -1318,26 +1411,26 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
 
         // no idle balance
-        vm.expectRevert(IEthereumLoanSubaccount.NothingToRepay.selector);
-        IEthereumLoanSubaccount(subaccount).repay(_routeId());
+        vm.expectRevert(ILoanChainSubaccount.NothingToRepay.selector);
+        ILoanChainSubaccount(subaccount).repay();
 
         // balance but no debt
         rlusd.mint(subaccount, 100e18);
-        vm.expectRevert(IEthereumLoanSubaccount.NothingToRepay.selector);
-        IEthereumLoanSubaccount(subaccount).repay(_routeId());
+        vm.expectRevert(ILoanChainSubaccount.NothingToRepay.selector);
+        ILoanChainSubaccount(subaccount).repay();
     }
 
-    function testRepayRevertRouteNotRegistered() public {
-        address subaccount = _createConfiguredSubaccount();
+    function testRepayRevertMarketNotRegistered() public {
+        // an unconfigured type has no market to repay into
+        address subaccount = address(_deploySubaccount());
         rlusd.mint(subaccount, 100e18);
 
-        bytes32 unknownRoute = keccak256("unknown");
         vm.expectRevert(
             abi.encodeWithSelector(
-                IEthereumLoanSubaccount.RouteNotRegistered.selector, unknownRoute
+                ILoanChainSettingsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
             )
         );
-        IEthereumLoanSubaccount(subaccount).repay(unknownRoute);
+        ILoanChainSubaccount(subaccount).repay();
     }
 
     function testRepayWorksWhilePaused() public {
@@ -1346,8 +1439,50 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 200e18);
         _pauseController();
 
-        uint256 assets = IEthereumLoanSubaccount(subaccount).repay(_routeId());
+        uint256 assets = ILoanChainSubaccount(subaccount).repay();
         assertEq(assets, 200e18);
+    }
+
+    function testRepayWorksWithClearedTransport() public {
+        // clearing the transport kills composed actions and the sweep, never repayment
+        address subaccount = _borrowedSubaccount(500e18);
+        ILoanChainSettingsFacet.Transport memory cleared;
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+
+        rlusd.mint(subaccount, 600e18);
+        uint256 assets = ILoanChainSubaccount(subaccount).repay();
+        assertEq(assets, 500e18);
+
+        // the defensive idle deposit needs no transport either
+        fxrp.mint(subaccount, 10e6);
+        ILoanChainSubaccount(subaccount).depositIdleFxrp();
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 110e6);
+    }
+
+    function testTransportClearRetainsRecoveryAndBorrowSwitch() public {
+        // the nuclear lever zeroes only the LayerZero surface: the configured recovery
+        // destination and the per-type borrow switch survive the clear
+        address subaccount = _createConfiguredSubaccount();
+        address destination = _setRecovery(subaccount);
+        vm.startPrank(governance);
+        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+            SUBACCOUNT_TYPE_LOAN
+        );
+        ILoanChainSettingsFacet.Transport memory cleared;
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+        vm.stopPrank();
+
+        assertTrue(
+            ILoanChainSettingsFacet(address(controller))
+                .isLoanChainBorrowingDisabled(SUBACCOUNT_TYPE_LOAN)
+        );
+        assertEq(ILoanChainSubaccount(subaccount).recoveryDestination(), destination);
+        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
+        stray.mint(subaccount, 1e18);
+        assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(stray)), 1e18);
+        assertEq(stray.balanceOf(destination), 1e18);
     }
 
     function testDepositIdleFxrp() public {
@@ -1355,8 +1490,8 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 70e6);
 
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.IdleFxrpDeposited(parentPersonalAccount, _routeId(), 70e6);
-        uint256 amount = IEthereumLoanSubaccount(subaccount).depositIdleFxrp();
+        emit ILoanChainSubaccount.IdleFxrpDeposited(parentPersonalAccount, 70e6);
+        uint256 amount = ILoanChainSubaccount(subaccount).depositIdleFxrp();
 
         assertEq(amount, 70e6);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
@@ -1368,22 +1503,14 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
 
         // nothing idle
-        vm.expectRevert(IEthereumLoanSubaccount.NothingToDeposit.selector);
-        IEthereumLoanSubaccount(subaccount).depositIdleFxrp();
+        vm.expectRevert(ILoanChainSubaccount.NothingToDeposit.selector);
+        ILoanChainSubaccount(subaccount).depositIdleFxrp();
 
         // new exposure is pause-gated
         fxrp.mint(subaccount, 70e6);
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        IEthereumLoanSubaccount(subaccount).depositIdleFxrp();
-        _unpauseController();
-
-        // cleared settings leave no active route
-        IEthereumLoanSettingsFacet.Settings memory cleared;
-        vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(cleared);
-        vm.expectRevert(IEthereumLoanSubaccount.EthereumLoanSettingsNotConfigured.selector);
-        IEthereumLoanSubaccount(subaccount).depositIdleFxrp();
+        ILoanChainSubaccount(subaccount).depositIdleFxrp();
     }
 
     function testSweepToOriginBridgesBackToOwnFlareAddress() public {
@@ -1395,14 +1522,14 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(caller, messagingFee + 1 ether);
         vm.prank(caller);
         uint256 amount =
-            IEthereumLoanSubaccount(subaccount).sweepToOrigin{value: messagingFee + 1 ether}();
+            ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee + 1 ether}();
 
         assertEq(amount, 100e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
         assertEq(fxrp.balanceOf(address(fxrpOft)), 100e6);
-        (uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,,,) =
+        (uint32 sentDstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,,,) =
             fxrpOft.lastSendParam();
-        assertEq(dstEid, originEid);
+        assertEq(sentDstEid, originEid);
         assertEq(to, bytes32(uint256(uint160(subaccount))));
         assertEq(amountLD, 100e6);
         assertEq(minAmountLD, 100e6);
@@ -1421,7 +1548,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         address caller = makeAddr("keeper");
         vm.deal(caller, messagingFee);
         vm.prank(caller);
-        IEthereumLoanSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
 
         assertEq(subaccount.balance, 5 ether);
         assertEq(caller.balance, 0);
@@ -1433,29 +1560,95 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(address(this), 1 ether);
 
         // nothing to sweep
-        vm.expectRevert(IEthereumLoanSubaccount.NothingToSweep.selector);
-        IEthereumLoanSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+        vm.expectRevert(ILoanChainSubaccount.NothingToSweep.selector);
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
 
         fxrp.mint(subaccount, 100e6);
 
         // insufficient fee
         vm.expectRevert(
             abi.encodeWithSelector(
-                IEthereumLoanSubaccount.InsufficientFundsForSweep.selector, messagingFee
+                ILoanChainSubaccount.InsufficientFundsForSweep.selector, messagingFee
             )
         );
-        IEthereumLoanSubaccount(subaccount).sweepToOrigin{value: messagingFee - 1}();
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee - 1}();
 
         // a peer mutation fails closed
         fxrpOft.setPeer(originEid, bytes32(uint256(0xbad)));
-        vm.expectRevert(IEthereumLoanSubaccount.WrongOriginPeer.selector);
-        IEthereumLoanSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+        vm.expectRevert(ILoanChainSubaccount.WrongOriginPeer.selector);
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
         fxrpOft.setPeer(originEid, originPeer);
 
         // every exit from this chain rides the OFT: the pause stops it
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        IEthereumLoanSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+    }
+
+    function testSetRecoveryWorksWhilePaused() public {
+        // rotating a compromised recovery destination is configuration toward safety and must
+        // not wait for (and race) an unpause; outward recovery stays paused meanwhile
+        address subaccount = _createConfiguredSubaccount();
+        _pauseController();
+
+        _deliver(subaccount, 1, 0, _setRecoveryPayload(
+            bytes32("op-1"), 1, bytes32(uint256(uint160(makeAddr("safeRecovery"))))
+        ));
+        assertEq(
+            ILoanChainSubaccount(subaccount).recoveryDestination(), makeAddr("safeRecovery")
+        );
+
+        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
+        stray.mint(subaccount, 1e18);
+        vm.expectRevert(IPauseFacet.IsPaused.selector);
+        ILoanChainSubaccount(subaccount).recoverToken(address(stray));
+    }
+
+    function testWithdrawWithAttachedCreditLeavesItIdle() public {
+        // a message-only action delivered with tokens attached executes normally; the credit
+        // simply stays idle on the account for the fixed rails
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+
+        fxrp.mint(subaccount, 5e6);
+        _deliver(subaccount, 2, 5e6, _withdrawPayload(bytes32("op-2"), 30e6));
+
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 70e6);
+        assertEq(fxrp.balanceOf(subaccount), 35e6);
+    }
+
+    function testRegisterLoanChainMarketRevertCodelessToken() public {
+        // the binding is permanent, and a Morpho market can exist for an address with no
+        // code - so both tokens must be contracts
+        _configureTransport();
+        ILoanChainSettingsFacet.Market memory market = _defaultMarket();
+        market.marketParams.loanToken = makeAddr("codelessToken");
+        morpho.createMarket(market.marketParams);
+        _registerMarketExpectRevert(
+            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+        );
+    }
+
+    function testRegisterLoanChainMarketRevertCodelessCollateralToken() public {
+        // the symmetric case: a codeless collateral token must be rejected too
+        _configureTransport();
+        ILoanChainSettingsFacet.Market memory market = _defaultMarket();
+        market.marketParams.collateralToken = makeAddr("codelessCollateral");
+        morpho.createMarket(market.marketParams);
+        _registerMarketExpectRevert(
+            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+        );
+    }
+
+    function testRegisterLoanChainMarketRevertNonexistentMarket() public {
+        // the market must actually exist on the Morpho contract, or every credited compose
+        // action against it would revert
+        _configureTransport();
+        _registerMarketExpectRevert(
+            _defaultMarket(), ILoanChainSettingsFacet.InvalidMarketParams.selector
+        );
     }
 
     function testSetRecoveryDestinationViaCompose() public {
@@ -1463,15 +1656,15 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         address destination = makeAddr("recovery");
 
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.RecoveryDestinationSet(
+        emit ILoanChainSubaccount.RecoveryDestinationSet(
             parentPersonalAccount, destination, 1, _guidFor(1)
         );
         _deliver(subaccount, 1, 0, _setRecoveryPayload(
             bytes32("op-1"), 1, bytes32(uint256(uint160(destination)))
         ));
 
-        assertEq(IEthereumLoanSubaccount(subaccount).recoveryDestination(), destination);
-        assertEq(IEthereumLoanSubaccount(subaccount).recoveryEpoch(), 1);
+        assertEq(ILoanChainSubaccount(subaccount).recoveryDestination(), destination);
+        assertEq(ILoanChainSubaccount(subaccount).recoveryEpoch(), 1);
     }
 
     function testSetRecoveryDestinationSkipsStaleEpoch() public {
@@ -1484,38 +1677,38 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         ));
 
         vm.expectEmit();
-        emit IEthereumLoanSubaccount.LoanActionSkipped(
+        emit ILoanChainSubaccount.LoanActionSkipped(
             parentPersonalAccount, bytes32("op-1"), SKIP_REASON_STALE_EPOCH, _guidFor(2)
         );
         _deliver(subaccount, 2, 0, _setRecoveryPayload(
             bytes32("op-1"), 1, bytes32(uint256(uint160(makeAddr("older"))))
         ));
 
-        assertEq(IEthereumLoanSubaccount(subaccount).recoveryDestination(), newer);
-        assertEq(IEthereumLoanSubaccount(subaccount).recoveryEpoch(), 2);
+        assertEq(ILoanChainSubaccount(subaccount).recoveryDestination(), newer);
+        assertEq(ILoanChainSubaccount(subaccount).recoveryEpoch(), 2);
         // staleness cannot be cured without changing the epoch itself, so the id is retired
-        assertTrue(IEthereumLoanSubaccount(subaccount).usedOperations(bytes32("op-1")));
+        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(bytes32("op-1")));
     }
 
     function testSetRecoveryDestinationRevertInvalidDestination() public {
         address subaccount = _createConfiguredSubaccount();
         _deliverExpectRevert(
             subaccount, 1, _setRecoveryPayload(bytes32("op-1"), 1, bytes32(0)),
-            IEthereumLoanSubaccount.InvalidDestination.selector
+            ILoanChainSubaccount.InvalidDestination.selector
         );
         // same rules as the borrow disbursement: the two addresses in scope when a payload
         // is composed are never valid recovery destinations
         _deliverExpectRevert(
             subaccount, 1,
             _setRecoveryPayload(bytes32("op-1"), 1, bytes32(uint256(uint160(subaccount)))),
-            IEthereumLoanSubaccount.InvalidDestination.selector
+            ILoanChainSubaccount.InvalidDestination.selector
         );
         _deliverExpectRevert(
             subaccount, 1,
             _setRecoveryPayload(
                 bytes32("op-1"), 1, bytes32(uint256(uint160(parentPersonalAccount)))
             ),
-            IEthereumLoanSubaccount.InvalidDestination.selector
+            ILoanChainSubaccount.InvalidDestination.selector
         );
     }
 
@@ -1525,7 +1718,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 42e18);
 
-        uint256 amount = IEthereumLoanSubaccount(subaccount).recoverToken(address(stray));
+        uint256 amount = ILoanChainSubaccount(subaccount).recoverToken(address(stray));
         assertEq(amount, 42e18);
         assertEq(stray.balanceOf(destination), 42e18);
     }
@@ -1536,33 +1729,33 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         stray.mint(subaccount, 42e18);
 
         // no destination stored yet
-        vm.expectRevert(IEthereumLoanSubaccount.RecoveryDestinationNotSet.selector);
-        IEthereumLoanSubaccount(subaccount).recoverToken(address(stray));
+        vm.expectRevert(ILoanChainSubaccount.RecoveryDestinationNotSet.selector);
+        ILoanChainSubaccount(subaccount).recoverToken(address(stray));
 
         address destination = _setRecovery(subaccount);
 
-        // route tokens never leave through generic recovery
+        // the market's tokens never leave through generic recovery
         vm.expectRevert(
-            abi.encodeWithSelector(IEthereumLoanSubaccount.ProtectedToken.selector, address(fxrp))
+            abi.encodeWithSelector(ILoanChainSubaccount.ProtectedToken.selector, address(fxrp))
         );
-        IEthereumLoanSubaccount(subaccount).recoverToken(address(fxrp));
+        ILoanChainSubaccount(subaccount).recoverToken(address(fxrp));
         vm.expectRevert(
             abi.encodeWithSelector(
-                IEthereumLoanSubaccount.ProtectedToken.selector, address(rlusd)
+                ILoanChainSubaccount.ProtectedToken.selector, address(rlusd)
             )
         );
-        IEthereumLoanSubaccount(subaccount).recoverToken(address(rlusd));
+        ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
 
         // outward recovery is pause-gated
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        IEthereumLoanSubaccount(subaccount).recoverToken(address(stray));
+        ILoanChainSubaccount(subaccount).recoverToken(address(stray));
         _unpauseController();
 
         // nothing to recover
         MintableERC20 empty = new MintableERC20("Empty", "EMP", 18);
-        vm.expectRevert(IEthereumLoanSubaccount.NothingToRecover.selector);
-        IEthereumLoanSubaccount(subaccount).recoverToken(address(empty));
+        vm.expectRevert(ILoanChainSubaccount.NothingToRecover.selector);
+        ILoanChainSubaccount(subaccount).recoverToken(address(empty));
         assertEq(stray.balanceOf(destination), 0);
     }
 
@@ -1572,37 +1765,13 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 600e18);
 
         // while debt is outstanding, the balance is repayment material
-        vm.expectRevert(
-            abi.encodeWithSelector(IEthereumLoanSubaccount.OutstandingDebt.selector, _routeId())
-        );
-        IEthereumLoanSubaccount(subaccount).recoverLoanToken(address(rlusd));
+        vm.expectRevert(ILoanChainSubaccount.OutstandingDebt.selector);
+        ILoanChainSubaccount(subaccount).recoverLoanToken();
 
-        IEthereumLoanSubaccount(subaccount).repay(_routeId());
-        uint256 amount = IEthereumLoanSubaccount(subaccount).recoverLoanToken(address(rlusd));
+        ILoanChainSubaccount(subaccount).repay();
+        uint256 amount = ILoanChainSubaccount(subaccount).recoverLoanToken();
         assertEq(amount, 100e18);
         assertEq(rlusd.balanceOf(destination), 100e18);
-    }
-
-    function testRecoverLoanTokenRejectsNonLoanTokens() public {
-        address subaccount = _createConfiguredSubaccount();
-        _setRecovery(subaccount);
-
-        // the collateral token never leaves through recovery
-        fxrp.mint(subaccount, 10e6);
-        vm.expectRevert(
-            abi.encodeWithSelector(IEthereumLoanSubaccount.ProtectedToken.selector, address(fxrp))
-        );
-        IEthereumLoanSubaccount(subaccount).recoverLoanToken(address(fxrp));
-
-        // a token that is no route's loan token belongs to recoverToken
-        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(subaccount, 1e18);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IEthereumLoanSubaccount.ProtectedToken.selector, address(stray)
-            )
-        );
-        IEthereumLoanSubaccount(subaccount).recoverLoanToken(address(stray));
     }
 
     function testRecoverNative() public {
@@ -1612,23 +1781,17 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         (bool success, ) = subaccount.call{value: 3 ether}("");
         assertTrue(success);
 
-        uint256 amount = IEthereumLoanSubaccount(subaccount).recoverNative();
+        uint256 amount = ILoanChainSubaccount(subaccount).recoverNative();
         assertEq(amount, 3 ether);
         assertEq(destination.balance, 3 ether);
         assertEq(subaccount.balance, 0);
     }
 
-    //
-    // helpers
-    //
-
-    function testMinimalEthereumDiamondTopology() public {
-        // the intended Ethereum cut is the generic subaccount surface plus the Ethereum
+    function testMinimalLoanChainDiamondTopology() public {
+        // the intended loan-chain cut: the generic subaccount surface plus the loan-chain
         // settings facet - never the Flare-only LoanBridgeSettingsFacet. The full-suite
-        // diamond carries every Flare facet, which could hide an accidental dependency;
-        // this minimal diamond proves the Ethereum loan flow needs none of them
-        // reuse the base facets cached by setUp (their CREATE2 salts are fixed, so a second
-        // deployBaseFacets() would collide on the singleton factory)
+        // diamond could hide an accidental dependency; this minimal one proves there is none
+        // (base facets reused from setUp - their fixed CREATE2 salts would collide again)
         DiamondArgs memory args = DiamondArgs({
             owner: initialOwner,
             initAddress: address(0),
@@ -1647,8 +1810,8 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add
         );
         cuts[3] = _buildFacetCut(
-            address(new EthereumLoanSettingsFacet()),
-            "EthereumLoanSettingsFacet",
+            address(new LoanChainSettingsFacet()),
+            "LoanChainSettingsFacet",
             IDiamond.FacetCutAction.Add
         );
         IIMasterAccountController minimalController =
@@ -1658,17 +1821,20 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
 
         // the loan flow works on the minimal topology: register the implementation,
         // configure the settings, create the subaccount (timelock duration defaults to 0)
-        morpho.createMarket(_defaultSettings().marketParams);
+        morpho.createMarket(_defaultMarket().marketParams);
         fxrpOft.setPeer(originEid, originPeer);
         vm.startPrank(initialOwner);
-        minimalController.setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, address(ethereumImpl));
-        IIEthereumLoanSettingsFacet(address(minimal)).setEthereumLoanSettings(
-            _defaultSettings()
+        minimalController.setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, address(loanChainImpl));
+        IILoanChainSettingsFacet(address(minimal)).setLoanChainTransport(
+            _defaultTransport()
+        );
+        IILoanChainSettingsFacet(address(minimal)).registerLoanChainMarket(
+            SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
         vm.stopPrank();
         string memory xrplOwner = "rMinimalTopologyOwner";
-        address subaccount = IIEthereumLoanSettingsFacet(address(minimal))
-            .createEthereumLoanSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address subaccount = IILoanChainSettingsFacet(address(minimal))
+            .createLoanChainSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertGt(subaccount.code.length, 0);
 
         // the Flare-only bridge settings are not routable on this diamond
@@ -1681,15 +1847,27 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         ILoanBridgeSettingsFacet(address(minimal)).getLoanBridgeSettings();
     }
 
-    function _defaultSettings()
+    //
+    // helpers
+    //
+
+    function _defaultTransport()
         private
-        returns (IEthereumLoanSettingsFacet.Settings memory)
+        returns (ILoanChainSettingsFacet.Transport memory)
     {
-        return IEthereumLoanSettingsFacet.Settings({
+        return ILoanChainSettingsFacet.Transport({
             lzEndpoint: lzEndpoint,
             fxrpOft: address(fxrpOft),
             originEid: originEid,
-            originPeer: originPeer,
+            originPeer: originPeer
+        });
+    }
+
+    function _defaultMarket()
+        private
+        returns (ILoanChainSettingsFacet.Market memory)
+    {
+        return ILoanChainSettingsFacet.Market({
             morpho: address(morpho),
             marketParams: IMorpho.MarketParams({
                 loanToken: address(rlusd),
@@ -1701,24 +1879,52 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         });
     }
 
-    function _configureSettings() private {
-        morpho.createMarket(_defaultSettings().marketParams);
+    /// A valid alternate OFT adapter wrapping `_token`, wired like the default one.
+    function _wiredOft(MintableERC20 _token) private returns (MockOft _oft) {
+        _oft = new MockOft(_token, 0.01 ether);
+        _oft.setEndpoint(lzEndpoint);
+        _oft.setPeer(originEid, originPeer);
+    }
+
+    function _configureTransport() private {
         fxrpOft.setPeer(originEid, originPeer);
         vm.prank(governance);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(
-            _defaultSettings()
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
+            _defaultTransport()
         );
     }
 
-    function _setSettingsExpectRevert(
-        IEthereumLoanSettingsFacet.Settings memory _settings,
+    function _configureSettings() private {
+        _configureTransport();
+        morpho.createMarket(_defaultMarket().marketParams);
+        vm.prank(governance);
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+            SUBACCOUNT_TYPE_LOAN, _defaultMarket()
+        );
+    }
+
+    function _setTransportExpectRevert(
+        ILoanChainSettingsFacet.Transport memory _transport,
         bytes4 _selector
     )
         private
     {
         vm.prank(governance);
         vm.expectRevert(_selector);
-        IIEthereumLoanSettingsFacet(address(controller)).setEthereumLoanSettings(_settings);
+        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(_transport);
+    }
+
+    function _registerMarketExpectRevert(
+        ILoanChainSettingsFacet.Market memory _market,
+        bytes4 _selector
+    )
+        private
+    {
+        vm.prank(governance);
+        vm.expectRevert(_selector);
+        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+            SUBACCOUNT_TYPE_LOAN, _market
+        );
     }
 
     function _createConfiguredSubaccount() private returns (address) {
@@ -1755,7 +1961,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) =
             _composeMessage(_subaccount, _nonce, _amountLD, _payload);
         vm.prank(lzEndpoint);
-        IEthereumLoanSubaccount(_subaccount).lzCompose(
+        ILoanChainSubaccount(_subaccount).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -1772,7 +1978,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             _composeMessage(_subaccount, _nonce, 100e6, _payload);
         vm.prank(lzEndpoint);
         vm.expectRevert(_expectedRevert);
-        IEthereumLoanSubaccount(_subaccount).lzCompose(
+        ILoanChainSubaccount(_subaccount).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -1799,7 +2005,7 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) = _composeMessage(_subaccount, _nonce, 0, _payload);
         vm.prank(lzEndpoint);
         vm.expectRevert(_selector);
-        IEthereumLoanSubaccount(_subaccount).lzCompose(
+        ILoanChainSubaccount(_subaccount).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -1819,7 +2025,6 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
             abi.encode(
                 _operationId,
                 uint64(block.timestamp + 1 hours),
-                _routeId(),
                 _destinationKind,
                 _destination,
                 _borrowAmount
@@ -1837,19 +2042,13 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         return abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
-            abi.encode(_operationId, uint64(block.timestamp + 1 hours), _routeId(), _amount)
+            abi.encode(_operationId, uint64(block.timestamp + 1 hours), _amount)
         );
     }
 
-
     function _marketId() private returns (bytes32) {
-        return keccak256(abi.encode(_defaultSettings().marketParams));
+        return keccak256(abi.encode(_defaultMarket().marketParams));
     }
-
-    function _routeId() private returns (bytes32) {
-        return keccak256(abi.encode(address(morpho), _defaultSettings().marketParams));
-    }
-
 
     function _pauseController() private {
         address pauser = makeAddr("pauser");
@@ -1870,7 +2069,6 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(unpauser);
         controller.unpause();
     }
-
 
     function _deployDiamond() private returns (IIMasterAccountController _controller) {
         if (baseCuts.length == 0) {
@@ -1916,13 +2114,13 @@ contract EthereumLoanSubaccountTest is Test, FacetsDeploy {
         _controller.transferOwnership(governance);
     }
 
-    function _deploySubaccount() private returns (EthereumLoanSubaccount) {
+    function _deploySubaccount() private returns (LoanChainSubaccount) {
         LoanSubaccountProxy proxy = new LoanSubaccountProxy(
             address(controller),
             parentPersonalAccount,
             SUBACCOUNT_TYPE_LOAN
         );
-        return EthereumLoanSubaccount(payable(address(proxy)));
+        return LoanChainSubaccount(payable(address(proxy)));
     }
 
     function _setRecoveryPayload(

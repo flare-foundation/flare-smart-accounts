@@ -52,8 +52,8 @@ contract MockMorpho is IMorpho {
     }
 
     /// @notice Simulates a full external liquidation: a third party repays the account's
-    /// whole debt and seizes its collateral, without the account observing it - exactly the
-    /// case the lazily-cleared debt-route pointer must handle.
+    /// whole debt and seizes its collateral, without the account observing it - visible to
+    /// the account only through its live position reads, which is what tests assert.
     function simulateLiquidation(bytes32 marketId, address account) external {
         _simulateLiquidation(marketId, account, _positions[marketId][account].borrowShares);
     }

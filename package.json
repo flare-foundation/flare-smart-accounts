@@ -23,7 +23,7 @@
     "deploy_personal_account_implementation": "bash deployment/scripts/deploy-personal-account-implementation.sh",
     "deploy_loan_subaccount_implementation": "bash deployment/scripts/deploy-loan-subaccount-implementation.sh",
     "deploy_ethereum_controller": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployEthereumController.s.sol:DeployEthereumController --rpc-url $ETHEREUM_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --offline --broadcast'",
-    "deploy_ethereum_loan_subaccount_implementation": "bash deployment/scripts/deploy-ethereum-loan-subaccount-implementation.sh",
+    "deploy_loan_chain_subaccount_implementation": "bash deployment/scripts/deploy-loan-chain-subaccount-implementation.sh",
     "deploy_my_erc4626_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --offline --broadcast'",
     "diamond_cut": "bash deployment/scripts/execute-diamond-cut.sh",
     "check_cut": "tsx deployment/scripts/check-cut-plan.ts",

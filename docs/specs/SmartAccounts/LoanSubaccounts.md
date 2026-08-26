@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place. The Ethereum-side account is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow, withdraw, and set-recovery actions), the route registry and governance configuration (`EthereumLoanSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, `syncDebtRoute`, recovery). A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instruction (`executeLayerZeroCall`) is in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow, withdraw, and set-recovery actions), the per-type market binding and governance configuration (`LoanChainSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
 
 ## Typed subaccounts
 
@@ -101,7 +101,7 @@ out from under it, aborting the requested loan action. Two bounds keep this acce
 than fixed. First, the **primary loan flow is atomic and immune on the Flare leg**: one `handleMintedFAssets`
 transaction mints the FXRP, funds the Personal Account, creates the subaccount, transfers, and
 bridges with the payload — the subaccount balance never exists outside that transaction, so
-there is nothing to front-run on this chain (a test covers the five steps in one transaction; the destination side has its own, separately accepted window — see the Ethereum-side section). Only
+there is nothing to front-run on this chain (a test covers the five steps in one transaction; the destination side has its own, separately accepted window — see the loan-chain-side section). Only
 *retry-after-strand* is exposed: FXRP already sitting on the subaccount while the user signs a
 fresh instruction. Second, in that window the funds can only be pushed to the user's own
 addresses. The griefing asymmetry is real, though — the attacker pays a fixed executor or
@@ -182,7 +182,7 @@ differs is authorization and inputs:
   and, for a borrow, a user-chosen destination for the proceeds, so it must carry the user's
   XRPL signature. This is the instruction-destination rule below, in contract form.
 - **The payload (`composeMsg`) is opaque** to this repo. Its schema belongs to the
-  destination-side account's `lzCompose` and is pinned down with the Ethereum-side work. It
+  destination-side account's `lzCompose` and is pinned down with the loan-chain-side work. It
   must be non-empty: an empty payload would degrade to a plain transfer, which is
   `sweepToLoan`'s job.
 - **The execution options (`extraOptions`) are caller-supplied.** The FXRP OFT adapter enforces
@@ -198,12 +198,12 @@ differs is authorization and inputs:
   parent), same as the sweeps.
 
 Destination-side mechanics: the compose receiver is the token recipient — this account's own
-address on the loan chain — which must implement `ILayerZeroComposer` (the Ethereum-side
+address on the loan chain — which must implement `ILayerZeroComposer` (the loan-chain-side
 implementation of this same account). Token credit and compose execution are separate steps in
 LayerZero: if `lzCompose` fails, the FXRP is already on the destination account, and the
 compose call can be retried permissionlessly through the endpoint.
 
-**Release gates for the Ethereum-side account** (none of this is enforceable from the Flare
+**Release gates for the loan-chain-side account** (none of this is enforceable from the Flare
 side):
 
 - **`lzCompose` must authenticate the composed payload.** Anyone holding FXRP can call the
@@ -217,11 +217,11 @@ side):
   any extra data are untrusted. A payload failing these checks must not execute: the
   delivery reverts (retriable through the endpoint) and the attached tokens stay on the
   account.
-- **Idle FXRP on the Ethereum account needs an exit** — satisfied: `depositIdleFxrp()`
+- **Idle FXRP on the loan-chain account needs an exit** — satisfied: `depositIdleFxrp()`
   (forward, into the account's own position) and `sweepToOrigin()` (backward, to the
   account's own Flare address) are the two rails, under the same invariant (anyone may move,
   nobody may redirect).
-- **A real Endpoint/OFT compose-delivery simulation** belongs to the Ethereum-side test suite
+- **A real Endpoint/OFT compose-delivery simulation** belongs to the loan-chain-side test suite
   as a regression test; the live-adapter verification recorded here is evidence, not a test.
   Still open.
 
@@ -234,36 +234,49 @@ Two different rules apply, and the difference is the signature:
 
 Caveats specific to the EVM disbursement option, for the front end rather than the contracts: RLUSD is a regulated stablecoin and can freeze or blacklist addresses, so a transfer can revert and turn a borrow into a stuck disbursement; some exchange deposit addresses are not credited when the sender is a contract, or need a tag an ERC-20 transfer cannot carry; and a wrong address is unrecoverable, since nothing is checked.
 
-## The Ethereum-side account
+## The loan-chain-side account
 
 The same frozen proxy bytecode and the same derivation give the subaccount one address on every
 chain, and the per-type implementation registry is what makes that useful: each chain's diamond
 registers its **own** implementation for the loan type. Flare registers
 [`LoanSubaccount`](../../../contracts/smartAccounts/implementation/LoanSubaccount.sol) (FAssets
-redemption, the forward bridge, the parent-driven relays); Ethereum registers
-[`EthereumLoanSubaccount`](../../../contracts/smartAccounts/implementation/EthereumLoanSubaccount.sol).
+redemption, the forward bridge, the parent-driven relays); the loan chain (Ethereum, at
+launch) registers
+[`LoanChainSubaccount`](../../../contracts/smartAccounts/implementation/LoanChainSubaccount.sol).
 The implementation never enters the CREATE2 derivation, so the registration choice cannot move
 the address (a test pins this).
 
-The defining difference on Ethereum: **there are no parent-driven methods.** The parent Personal
-Account exists only on Flare — on Ethereum its address has no code — so `onlyParent` methods could
+The defining difference on the loan chain: **there are no parent-driven methods.** The parent
+Personal Account exists only on Flare — on the loan chain its address has no code — so
+`onlyParent` methods could
 never be called. Every authorized action instead arrives as an authenticated LayerZero compose
 payload sent by this same account on Flare (`executeLayerZeroCall`), and everything else is
 permissionless movement along fixed rails, the same invariant as everywhere: anyone may move
 the assets, nobody may redirect them.
 
 The account's configuration lives in
-[`EthereumLoanSettingsFacet`](../../../contracts/smartAccounts/facets/EthereumLoanSettingsFacet.sol),
-cut **only on the Ethereum-side diamond**: the LayerZero endpoint (the only allowed `lzCompose`
-caller), the FXRP OFT on this chain (the only allowed compose sender, and the vehicle for the
-bridge-back sweep), the pinned origin route back to Flare (`originEid`/`originPeer`), and the
-Morpho contract with its market (`loanToken` = RLUSD, `collateralToken` = FXRP). The timelocked
-`setEthereumLoanSettings` validates the OFT exactly as the Flare-side `setLoanBridgeSettings`
-does — it must wrap the market's collateral token, share its decimals, report the canonical
-`oftVersion`, and its live peer for the origin endpoint must equal the pinned one — and
-all-zero settings clear the configuration, disabling the transport-dependent surface
-(composed actions and the bridge-back sweep) until reconfigured — repayment, live-debt idle
-deposits, `syncDebtRoute`, and configured recovery keep working against registered routes.
+[`LoanChainSettingsFacet`](../../../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol),
+cut **only on the loan-chain diamond** (Ethereum, at launch), in two parts. The **global transport**, shared by
+every loan type: the LayerZero endpoint (the only allowed `lzCompose` caller), the FXRP OFT on
+this chain (the only allowed compose sender, the authoritative FXRP identity, and the vehicle
+for the bridge-back sweep), and the pinned origin route back to Flare (`originEid`/`originPeer`).
+The timelocked `setLoanChainTransport` validates the OFT exactly as the Flare-side
+`setLoanBridgeSettings` does — canonical `oftVersion`, decimals shared with its own token,
+wired to the same endpoint, live peer equal to the pinned one — and an all-zero transport
+clears it, disabling the transport-dependent surface (composed actions and the bridge-back
+sweep) for all loan types until reconfigured — repayment, defensive idle deposits, and
+configured recovery keep working. And the **per-type market binding**: the timelocked
+`registerLoanChainMarket(type, market)` binds a subaccount type to one Morpho contract and
+market (`collateralToken` must be the OFT's token — enforced; the loan token is RLUSD by
+governance policy per registration, not an on-chain check), **write-once** — see below. The
+first registration permanently pins the collateral token: every later non-zero transport must
+wrap it (rotating to a different OFT adapter for the same token stays possible), so a
+transport replacement can never strand the write-once bindings; the pin survives a transport
+clear. One selected loan chain at a time: the Flare side stores a single global destination
+route and this side one global transport, so the deployment serves exactly one loan chain.
+Serving several loan chains simultaneously would need the transport bound per subaccount type
+(the type would then identify both the chain and the pool) and a per-type destination on the
+Flare side — a design change, not a configuration.
 
 One race is accepted on this side, mirroring the Flare-side decision: LayerZero credits the
 bridged tokens and executes the composed action in two separate steps, so a permissionless
@@ -288,8 +301,9 @@ untrusted and ignored. A failing delivery reverts and stays retriable through th
 the credited FXRP is already on the account either way.
 
 **The payload, version 1** — `abi.encode(uint8 version, uint8 action, bytes actionData)`. Every
-action carries `(bytes32 operationId, uint64 deadline, …)`; borrow and withdraw also carry the
-`routeId` they were signed for:
+action carries `(bytes32 operationId, uint64 deadline, …)`. The market is not a payload field:
+the account operates on exactly one market — the one its type is bound to — so the subaccount
+address itself commits to the pool:
 
 - **Operation ids make retries safe**: a user retrying a stalled instruction produces a new
   LayerZero packet, and distinct deliveries of the same intent must not double-execute. An
@@ -299,19 +313,19 @@ action carries `(bytes32 operationId, uint64 deadline, …)`; borrow and withdra
   execution; a stale-epoch skip **retires** its id, since staleness cannot be cured without
   changing an economic field. Ids must be non-zero and globally unique per subaccount across
   action types; retrying clients must reuse an expired id only for the same intent with a
-  fresh deadline (a convention, not contract-enforced). The terminal gates run before any route checks, so a duplicate or
-  expired packet finalizes even when its route is no longer active.
+  fresh deadline (a convention, not contract-enforced). The terminal gates run before the
+  borrow switch and the market lookup, so a duplicate or expired packet finalizes even on a
+  sunset pool or an unregistered market.
 - **Deadlines expire stale intent**: an old queued action completes without effect instead of
   creating debt long after the user signed it.
-- **The route id binds the action to the lending route it was signed for**
-  (`keccak256(abi.encode(morpho, marketParams))` — committing to the Morpho *contract*, not
-  just the market). A **debt increase** requires its route to be the **active** one and
-  reverts otherwise (deliberately not a skip, since a mismatch is temporary and a
-  permissionless delivery during the window must not consume the packet; it stays retriable
-  until the deadline expires). A pure collateral top-up and a withdraw work against **any
-  registered route**, so positions stay defensible and withdrawable however the configuration
-  changes (while paused, a top-up executes only against the route carrying live debt). A message-only action delivered with tokens attached executes normally; the credit
-  simply stays idle on the account for the fixed rails.
+- **A debt increase respects the per-type borrow switch** and reverts with
+  `BorrowingDisabled` while it is set (deliberately not a skip, since the switch is
+  temporary-by-policy and a permissionless delivery must not consume the packet; it stays
+  retriable until the deadline expires). Pure collateral top-ups, withdrawals, and repayment
+  are never gated by the switch, so a sunset pool's positions stay defensible and can always exit
+  (while paused, a top-up executes only when the position carries live debt). A message-only
+  action delivered with tokens attached executes normally; the credit simply stays idle on
+  the account for the fixed rails.
 - Skipped deliveries leave their bridged FXRP on the account for the fixed rails.
 
 `ACTION_BORROW` supplies **exactly the authenticated bridged amount** (the codec's `amountLD`,
@@ -324,79 +338,77 @@ is the user's own, but it stops a signed action from absorbing more than its own
 collateral from the account's own position **to the account itself**, where only the fixed
 rails can move it; Morpho enforces position health.
 
-**Creation route.** `createEthereumLoanSubaccount(xrplOwner, type)` on the settings facet is
-the Ethereum counterpart of `createSubaccount` — permissionless and idempotent, but the
+**Creation route.** `createLoanChainSubaccount(xrplOwner, type)` on the settings facet is
+the loan-chain counterpart of `createSubaccount` — permissionless and idempotent, but the
 parent Personal Account resolves to its **computed** address (PAs exist only on Flare, and the
 PA derivation is chain-independent), so it materializes exactly the account the Flare side
-predicts. Because the facet is cut only on the Ethereum-side diamond, the relaxed route exists
+predicts. Because the facet is cut only on the loan-chain diamond, the relaxed route exists
 only where it is needed.
 
-**The route registry.** Positions live in the route they were opened in, so exits must
-outlive configuration changes: every `(morpho, marketParams)` pair governance ever configures
-is registered **permanently** under its route id, with market existence validated against
-Morpho at configuration time, and one pointer marks the *active* route. Registration policy:
-**only canonical immutable Morpho Blue deployments** may be registered. This is a
+**One market per account, bound by the type.** Positions must outlive every configuration
+decision, so the market an account operates on is not mutable state at all: the timelocked
+`registerLoanChainMarket(type, market)` binds a subaccount type to one Morpho contract and
+market, **write-once** — registering a different market for the same type reverts, and a new
+pool is a new subaccount type (same implementation, one registry call per chain, its own
+deterministic addresses). Since the account's address commits to its type and the type
+commits to its market, *where the money is* is *which pool it is on*: payloads carry no
+market field, `repay` takes no argument, and every debt question is a single live `position()`
+read — nothing is cached, so an external liquidation is visible to the very next call with no
+synchronization step. Market registration validates that the market exists on the Morpho
+contract, both tokens carry code, and the collateral token is exactly the transport OFT's
+token; the first registration also pins the collateral token for every later transport and —
+transitively — every later market (see the configuration section). The loan token is
+deliberately not pinned: RLUSD is governance policy per registration, not an on-chain
+invariant. Registration policy: **only canonical immutable Morpho Blue deployments**. This is a
 pre-registration governance trust assumption enforced by review at the timelocked call — the
-contract itself checks only that the address carries code and the market exists. It matters
-because registration is permanent and the debt checks must be able to read the live position
-on the route carrying debt: a Morpho that could later change behavior or start reverting
-would block every debt-gated path (new borrowing, defensive deposits, loan-token recovery)
-for as long as the pointer stands. Immutability reduces that availability risk; it is not
-containment — it does not protect against a vulnerability in the immutable code itself, a
-malicious clone, or a compromised market oracle or interest model. The **token pair is
-pinned across every route**: routes may vary the market (oracle, interest model, LLTV) and
-even the Morpho contract, but never the loan or collateral token — the rails and recovery
-guards assume one of each, and a token-role change would strand collateral or let a rail
-consume repayment material. The pin is permanent for this storage namespace: the settings and
-route registry are one namespace per diamond, shared by every subaccount type, so migrating
-tokens is out of scope here — it would need a per-type settings namespace (future work, on
-both chains, since the Flare bridge settings are global too), not merely a new registered
-implementation. **Debt increases
-use only the active route, and only one route may carry debt at a time** (close the old loan
-before opening a new one — otherwise a permissionless repayment could pick the safer of two
-indebted routes while the liquidation-sensitive one starves). Everything defensive works
-against **any registered route**: repayment, withdrawal, and pure collateral top-ups, so an
-old position can still be defended against liquidation after a migration.
+contract itself checks only code-presence and market existence. It matters because the
+binding is permanent and the account's debt checks must be able to read its live position: a
+Morpho that could later change behavior or start reverting would block that account's
+debt-gated paths (borrowing, defensive deposits, loan-token recovery) — inherent to where the
+position lives. Immutability reduces that availability risk; it is not containment — it does
+not protect against a vulnerability in the immutable code itself, a malicious clone, or a
+compromised market oracle or interest model.
 
-Clearing the settings zeroes the active route and the LayerZero transport. Registered routes
-and the recovery configuration persist, and `repay` keeps working — but composed actions
-(including withdrawals and defensive top-ups) and the bridge-back sweep need the transport and
-wait until governance reconfigures it; with a live timelock that wait is real, which is why
-clearing is the nuclear incident lever. The routine way to stop new borrowing is the pause,
-which blocks debt increases, withdrawals, debt-free deposits, the bridge-back and outward
+**Sunsetting a pool.** The timelocked per-type `disableLoanChainBorrowing` stops new
+debt increases on a type (`enableLoanChainBorrowing` reverses it) — the routine migration
+lever: register the next pool as a new type, disable borrowing on the old one, and the old
+accounts remain fully exit-capable forever
+(repayment, top-ups, withdrawals, and recovery are never gated by the switch). Clearing the
+transport zeroes the LayerZero surface for **all** loan types — composed actions and the
+bridge-back sweep wait until governance reconfigures it; with a live timelock that wait is
+real, which is why the clear is the nuclear incident lever. Market bindings, `repay`,
+defensive idle deposits, and configured recovery persist through both levers. The global
+pause blocks debt increases, withdrawals, debt-free deposits, the bridge-back and outward
 recovery — while **repayment and defensive collateral top-ups stay available**: a composed
-top-up or an idle-rail deposit executes during a pause exactly when its target route carries
-live debt, so an endangered position can still be defended, while a top-up into a debt-free
-route is new exposure and waits out the pause like everything else. Accepted consequence:
-the global pause is **not a full Morpho quarantine**. While any borrow shares exist on a
-route — real debt or dust — anyone can time a defensive deposit of the account's whole idle
-FXRP balance into that route's Morpho during a pause, and permissionless repayment (also
-deliberately pause-exempt) likewise moves the account's idle loan-token balance into that
-Morpho. Neither rail can redirect funds, create debt, or pick a destination, but a
-compromised Morpho would receive both. There is no on-chain Morpho-**action** quarantine:
-the registration policy above lowers the odds of ever pointing at a Morpho that turns
-hostile or unreadable, but it is a trust assumption, not a containment control. Separate
-pause domains would be the actual containment improvement and remain future work.
+top-up or an idle-rail deposit executes during a pause exactly when the position carries
+live debt, so an endangered position can still be defended, while a debt-free deposit is new
+exposure and waits out the pause like everything else. Accepted consequence: the global pause
+is **not a full Morpho quarantine**. While any borrow shares exist — real debt or dust —
+anyone can time a defensive deposit of the account's whole idle FXRP balance into its
+market's Morpho during a pause, and permissionless repayment (also deliberately pause-exempt)
+likewise moves the account's idle loan-token balance into that Morpho. Neither rail can
+redirect funds, create debt, or pick a destination, but a compromised Morpho would receive
+both. There is no on-chain Morpho-**action** quarantine: the registration policy above lowers
+the odds of ever binding a Morpho that turns hostile or unreadable, but it is a trust
+assumption, not a containment control. Separate pause domains would be the actual containment
+improvement and remain future work.
 
 **The permissionless rails** — fixed destinations, no caller discretion, mirroring the
 Flare-side invariant:
 
-- **`repay(routeId)`** pushes the whole idle loan-token balance into the account's own
-  position on any registered route, clamped to the live debt: interest is accrued first, a
-  balance below the debt repays by assets, a balance covering it repays by **exact borrow
-  shares** (Morpho's canonical rounded-up conversion with virtual offsets), closing the
-  position without the over-repay revert. The documented user flow overfunds repayments to
-  cover in-flight interest, so the clamp is what makes that flow work; the surplus stays for
-  `recoverLoanToken`. Available while paused — repaying moves the position toward safety.
-- **`depositIdleFxrp()`** supplies the whole idle FXRP balance as collateral — the executor's
-  retry rail for FXRP that arrived without a successful composed action. Its target is the
-  route carrying live debt when one exists (a top-up credit whose compose failed must not be
-  diverted into a debt-free route), tracked by a lazily-cleared debt-route pointer (one route
-  may carry debt at a time; the pointer is verified against the live position, so external
-  liquidations are observed and no *unrelated* historical route is ever queried — the pointed
-  route itself must answer, see the registration policy). The defensive case
-  survives a pause; a debt-free account deposits into the active route, which is new exposure
-  and pause-gated. The direction race versus `sweepToOrigin` is accepted but carries an
+- **`repay()`** pushes the whole idle loan-token balance into the account's one position,
+  clamped to the live debt: interest is accrued first, a balance below the debt repays by
+  assets, a balance covering it repays by **exact borrow shares** (Morpho's canonical
+  rounded-up conversion with virtual offsets), closing the position without the over-repay
+  revert. The documented user flow overfunds repayments to cover in-flight interest, so the
+  clamp is what makes that flow work; the surplus stays for `recoverLoanToken`. Available
+  while paused — repaying moves the position toward safety.
+- **`depositIdleFxrp()`** supplies the whole idle FXRP balance as collateral into the
+  account's one position — the executor's retry rail for FXRP that arrived without a
+  successful composed action. Defending an indebted position survives a pause, like
+  repayment; a debt-free deposit is new exposure and pause-gated. Debt is read live from
+  Morpho on every check — nothing is cached, so an external liquidation is visible to the
+  very next call. The direction race versus `sweepToOrigin` is accepted but carries an
   asymmetry the Flare-side sweeps do not have: redepositing costs the griefer only gas, while
   completing the withdrawal again costs a new signed operation and a repeat bridge fee. A
   permissionless caller can even deliver a queued withdrawal compose and redeposit its FXRP in
@@ -404,11 +416,6 @@ Flare-side invariant:
   bundling delivery with `sweepToOrigin` (compose delivery is permissionless on the endpoint;
   private order flow helps), but cannot close it. Funds are never redirected — the impact is
   delay and the repeat cost.
-- **`syncDebtRoute()`** verifies the debt-route pointer against the live position and clears
-  it when the debt was externally repaid or liquidated, returning the route that still
-  carries debt (or zero). It performs no other state change, so a stale pointer never has to
-  wait for another rail to happen to run — and unlike a lazy clear inside a larger operation,
-  its result cannot be rolled back by that operation reverting.
 - **`sweepToOrigin()`** bridges the whole idle FXRP balance back to this account's own Flare
   address (the OFT's own `token()` is the authoritative FXRP identity). Exactly the quoted
   fee is spent and only the call's own excess refunded — pre-existing native never subsidizes
@@ -423,12 +430,12 @@ Flare-side invariant:
   rotating a compromised destination is configuration toward safety, and it must not have to
   wait for (and race) an unpause while outward recovery is stopped. The flip side: a pause
   does not contain a compromise of the compose-authentication root itself (endpoint, OFT,
-  pinned peer) — for that incident, clearing the settings is the containment, since it
+  pinned peer) — for that incident, clearing the transport is the containment, since it
   disables `lzCompose` entirely. `recoverToken`
-  moves stray assets (route tokens are protected and rejected); `recoverLoanToken` moves
-  loan-token surplus, but only while **no route carries live debt** — the check reads the
-  scalar debt-route pointer against the live position, so an external liquidation (which
-  zeroes debt without the account observing it) is recognized lazily; `recoverNative`
+  moves stray assets (the market's tokens are protected and rejected); `recoverLoanToken`
+  moves loan-token surplus, but only while **the position carries no debt** — read live from
+  Morpho, so an external liquidation (which zeroes debt without the account observing it) is
+  visible immediately; `recoverNative`
   moves the native balance (the account has `receive()` for bridge refunds). Outward recovery
   is pause-gated; an unset destination leaves assets waiting.
 
@@ -459,12 +466,21 @@ Flare-side invariant:
   diamond is owned by the historical `DiamondArgs.owner` EOA
   (`0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA`) — confirm that key is still controlled
   before relying on an Ethereum deployment. The Ethereum cut installs `SubaccountsFacet`,
-  `TimelockFacet`, `PauseFacet`, and `EthereumLoanSettingsFacet` through the standard cut flow
+  `TimelockFacet`, `PauseFacet`, and `LoanChainSettingsFacet` through the standard cut flow
   (the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
   `deployment/deploys/ethereum.json` is seeded with the pinned contracts), and the
-  implementation ships with `pnpm deploy_ethereum_loan_subaccount_implementation`. There is
+  implementation ships with `pnpm deploy_loan_chain_subaccount_implementation ethereum`. There is
   deliberately no `deployment/chain-config/ethereum.json`: the generic full-deploy script must
   not run against Ethereum — operators go through the pinned bootstrap and the scripts above.
+  One ordering constraint is absolute: the pool-per-type settings scheme redefined payload
+  version 1 relative to the earlier route-registry draft, which is safe **only** while no
+  loan-chain settings facet has ever been cut, no old-V1 packet is queued or in flight
+  anywhere in LayerZero, and no client or tooling holds prebuilt old-schema payloads — all
+  true today, `deployment/deploys/ethereum.json` holds only the pinned bootstrap contracts. An
+  environment that had shipped the old scheme would need a new payload version instead. (The
+  settings storage namespace is no longer shared: the rename to
+  `smartAccounts.LoanChainSettings.State` gave it a fresh slot — itself a pre-first-cut-only
+  move, covered by the same condition.)
 
   **Before the first Ethereum cut, still to be built and rehearsed:**
 
@@ -489,13 +505,13 @@ Flare-side invariant:
   validation reads the OFT's live peer for the destination endpoint, so it cannot be configured
   before the destination route is wired; until then the forward moves revert with
   `LoanBridgeNotConfigured` while creation, the backward sweep, the relays, and recovery
-  already work. The Ethereum-side account (same diamond address, same derivation) must be
+  already work. The loan-chain-side account (same diamond address, same derivation) must be
   deployed before the forward moves are enabled, since bridged FXRP lands on the subaccount's
   own address there.
 
 ## Open design items (decide with the asset-moving methods)
 
-- ~~Stuck RLUSD on the Ethereum side~~ — resolved: while any route lending the token has debt, the balance is repayment material (`repay` is its only move); once every such position is closed, the surplus leaves through `recoverLoanToken` to the authenticated recovery destination. Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
+- ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed, the surplus leaves through `recoverLoanToken` to the authenticated recovery destination. Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
 - **TODO, parked: atomic withdraw-and-bridge action.** If guaranteed withdrawal completion is ever required, the clean contract-level fix for the withdraw/redeposit ordering race (see the rails) is a single composed action that withdraws collateral and bridges it back in one execution. It is not free: it needs compose value (rejected today by `NonZeroComposeValue`, which exists to keep mistaken deliveries retriable), fee quoting inside the compose, and refund semantics for a permissionless deliverer. Decide if withdrawal-completion guarantees become a product requirement; until then, executor-side bundling of delivery with `sweepToOrigin` is the operational mitigation.
 - **TODO, parked: grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above), so a pause held across FDC's attestation window combined with an unavailable executor recreates the executor dependency. The designed fix: relays stay parent-only until the request's `lastUnderlyingTimestamp` (read per-request from `redemptionRequestInfo`, no stored clock) is a grace period past, then open to anyone — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable. Implemented and tested, then parked; **must be decided before the first production deployment**, rather than left to incident-time executor availability.
 - ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.
