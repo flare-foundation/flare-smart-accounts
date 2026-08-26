@@ -45,7 +45,7 @@ with `salt = bytes32(0)`. The subaccount address is therefore a pure function of
 ## Creation and prediction
 
 - `getSubaccount(xrplOwner, type)` — view; returns the registered subaccount, or the computed address if not yet deployed. Works even before the parent PA exists (the PA address itself is deterministic).
-- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; creates the subaccount for an **existing** Personal Account (reverts with `PersonalAccountNotDeployed` otherwise). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
+- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; the parent Personal Account resolves to the registered account when one exists, and to its computed address otherwise — the same fallback `getSubaccount` uses, so creation works before the Personal Account exists (and on chains where PAs never exist at all). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them — without waiting for the parent. A subaccount created before its PA is inert until the PA materializes (its `onlyParent` methods have no caller and the parent-reading sweeps revert); the PA later deploys at exactly the recorded parent address, since the derivation is frozen. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
 
 Unlike Personal Accounts, which are only ever created as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points), a loan subaccount needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily.
 
@@ -338,12 +338,12 @@ is the user's own, but it stops a signed action from absorbing more than its own
 collateral from the account's own position **to the account itself**, where only the fixed
 rails can move it; Morpho enforces position health.
 
-**Creation route.** `createLoanChainSubaccount(xrplOwner, type)` on the settings facet is
-the loan-chain counterpart of `createSubaccount` — permissionless and idempotent, but the
-parent Personal Account resolves to its **computed** address (PAs exist only on Flare, and the
-PA derivation is chain-independent), so it materializes exactly the account the Flare side
-predicts. Because the facet is cut only on the loan-chain diamond, the relaxed route exists
-only where it is needed.
+**Creation route.** The same generic `createSubaccount(xrplOwner, type)` serves this chain —
+there is no separate loan-chain creation function. The parent Personal Account resolves the
+way `getSubaccount` already predicts it: the registered account when one exists, its
+**computed** address otherwise (the PA derivation is frozen and chain-independent, so the two
+can never diverge). On this chain PAs never exist, so the computed branch always runs and
+materializes exactly the account the Flare side predicts.
 
 **One market per account, bound by the type.** Positions must outlive every configuration
 decision, so the market an account operates on is not mutable state at all: the timelocked

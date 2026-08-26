@@ -136,24 +136,6 @@ interface ILoanChainSettingsFacet {
     error LoanChainTransportNotConfigured();
 
     /**
-     * @notice Creates the loan subaccount for an XRPL owner on this chain.
-     * @dev Permissionless and idempotent, like the Flare-side `createSubaccount` — but the
-     * parent Personal Account resolves to its **computed** address: PAs exist only on Flare,
-     * and their address is a pure function of the diamond and the XRPL owner, so this
-     * materializes exactly the account the Flare side predicts. The relaxed route exists
-     * only on the loan-chain diamond, where it is needed.
-     * @param _xrplOwner The XRPL owner.
-     * @param _subaccountType The subaccount type.
-     * @return The loan subaccount address.
-     */
-    function createLoanChainSubaccount(
-        string calldata _xrplOwner,
-        uint256 _subaccountType
-    )
-        external
-        returns (address);
-
-    /**
      * @notice Returns the global loan transport.
      * @return The transport; all-zero when not configured.
      */

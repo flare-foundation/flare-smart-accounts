@@ -281,17 +281,21 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(LoanSubaccount(payable(created)).parentPersonalAccount(), personalAccount);
     }
 
-    function testCreateSubaccountRevertPersonalAccountNotDeployed() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ISubaccountsFacet.PersonalAccountNotDeployed.selector,
-                xrplOwner
-            )
-        );
-        controller.createSubaccount(
+    function testCreateSubaccountBeforePersonalAccount() public {
+        // the parent falls back to its computed address, so the subaccount can materialize
+        // first (assets on the predicted address can be swept without waiting for the PA);
+        // the Personal Account later deploys at exactly the parent the subaccount recorded
+        address created = controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_LOAN
         );
+        assertNotEq(created.code.length, 0);
+
+        address parent = LoanSubaccount(payable(created)).parentPersonalAccount();
+        assertEq(parent.code.length, 0);
+
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        assertEq(personalAccount, parent);
     }
 
     function testCreateSubaccountOfFutureType() public {

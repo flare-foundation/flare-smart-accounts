@@ -1212,29 +1212,26 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testCreateLoanChainSubaccountWithoutPersonalAccount() public {
-        // the production creation route on this chain: no Personal Account exists or ever
-        // will, the parent is resolved to its computed address
+    function testCreateSubaccountWithoutPersonalAccount() public {
+        // the generic creation route works on this chain: no Personal Account exists or
+        // ever will, the parent falls back to its computed address
         string memory xrplOwner = "rLoanChainOnlyOwner";
         address predicted = controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(predicted.code.length, 0);
 
-        address created = ILoanChainSettingsFacet(address(controller))
-            .createLoanChainSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address created = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(created, predicted);
         assertNotEq(created.code.length, 0);
 
         // idempotent
-        address again = ILoanChainSettingsFacet(address(controller))
-            .createLoanChainSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address again = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertEq(again, created);
     }
 
-    function testCreateLoanChainSubaccountRevertWhenPaused() public {
+    function testCreateSubaccountRevertWhenPaused() public {
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSettingsFacet(address(controller))
-            .createLoanChainSubaccount("rOwner", SUBACCOUNT_TYPE_LOAN);
+        controller.createSubaccount("rOwner", SUBACCOUNT_TYPE_LOAN);
     }
 
     //
@@ -1259,10 +1256,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         // both accounts materialize through the production CREATE2 route, one per type
         string memory xrplOwner = "rTwoPoolsOwner";
-        address subaccountA = ILoanChainSettingsFacet(address(controller))
-            .createLoanChainSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
-        address subaccountB = ILoanChainSettingsFacet(address(controller))
-            .createLoanChainSubaccount(xrplOwner, typeB);
+        address subaccountA = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address subaccountB = controller.createSubaccount(xrplOwner, typeB);
         assertEq(subaccountA, controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN));
         assertEq(subaccountB, controller.getSubaccount(xrplOwner, typeB));
         assertNotEq(subaccountA, subaccountB);
@@ -1833,8 +1828,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         );
         vm.stopPrank();
         string memory xrplOwner = "rMinimalTopologyOwner";
-        address subaccount = IILoanChainSettingsFacet(address(minimal))
-            .createLoanChainSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address subaccount = minimalController.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertGt(subaccount.code.length, 0);
 
         // the Flare-only bridge settings are not routable on this diamond

@@ -68,19 +68,14 @@ interface ISubaccountsFacet {
     );
 
     /**
-     * @notice Reverts if the Personal Account for the XRPL owner is not deployed yet.
-     * @param xrplOwner The XRPL owner address.
-     */
-    error PersonalAccountNotDeployed(
-        string xrplOwner
-    );
-
-    /**
-     * @notice Creates the subaccount for an XRPL owner's Personal Account if it does not exist yet.
+     * @notice Creates the subaccount for an XRPL owner if it does not exist yet.
      * @dev Permissionless: anyone can trigger creation. An executor uses it to materialize a
-     * subaccount whose predicted address already received assets, so that they can be swept; a user
-     * operation uses it as its first call, before calling a method on the subaccount. The Personal
-     * Account must already be deployed.
+     * subaccount whose predicted address already received assets, so that they can be swept; a
+     * user operation uses it as its first call, before calling a method on the subaccount. The
+     * parent Personal Account resolves to the registered account when one exists, and to its
+     * computed address otherwise (the derivation is frozen and chain-independent, so the two
+     * can never diverge) - creation therefore works before the Personal Account exists, and
+     * on chains where Personal Accounts never exist at all.
      * @param _xrplOwner The XRPL address of the owner.
      * @param _subaccountType The subaccount type.
      * @return The subaccount contract address.
