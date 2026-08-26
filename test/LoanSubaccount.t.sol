@@ -298,6 +298,67 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(personalAccount, parent);
     }
 
+    function testPrePersonalAccountRailMatrix() public {
+        // the pre-PA state is only PARTLY inert - this pins exactly which rails work:
+        // onlyParent and the parent-reading sweep revert; the forward bridge and the
+        // parking recoveries work
+        address subaccount = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
+        address parent = LoanSubaccount(payable(subaccount)).parentPersonalAccount();
+
+        // onlyParent methods have no possible caller: the parent address has no code
+        vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
+        ILoanSubaccount(subaccount).executeLayerZeroCall(0, "payload", "");
+
+        // sweepRedeem passes its balance checks, then reverts reading the XRPL owner
+        // from the codeless parent
+        fxrp.mint(subaccount, 250e6);
+        mockAssetManager.setMinimumRedeemAmountUBA(10e6);
+        vm.deal(address(this), executorFee);
+        vm.expectRevert();
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+
+        // sweepToLoan never reads the parent: the forward bridge works pre-PA
+        _configureLoanBridge();
+        vm.deal(address(this), messagingFee);
+        assertEq(ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}(), 250e6);
+
+        // token and native recovery park assets at the future PA address - the same
+        // owner's deterministic address
+        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
+        stray.mint(subaccount, 5e18);
+        assertEq(ILoanSubaccount(subaccount).sweepToParent(address(stray)), 5e18);
+        assertEq(stray.balanceOf(parent), 5e18);
+        vm.deal(address(this), 1 ether);
+        (bool ok, ) = subaccount.call{value: 1 ether}("");
+        assertTrue(ok);
+        assertEq(ILoanSubaccount(subaccount).sweepNativeToParent(), 1 ether);
+        assertEq(parent.balance, 1 ether);
+
+        // parked assets do not block the CREATE2 deployment: the PA still materializes
+        // at exactly the recorded parent, owning everything parked there
+        vm.deal(address(this), collateralReservationFee + executorFee);
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        assertEq(personalAccount, parent);
+        assertEq(stray.balanceOf(personalAccount), 5e18);
+        assertEq(personalAccount.balance, 1 ether);
+    }
+
+    function testCreateSubaccountEmptyOwnerIsPermanentOrphan() public {
+        // the generic route accepts any string, but PersonalAccount.initialize rejects an
+        // empty owner - an empty-owner subaccount is caller-funded junk whose parent can
+        // never materialize; no custody or address-collision impact
+        address subaccount = controller.createSubaccount("", SUBACCOUNT_TYPE_LOAN);
+        assertNotEq(subaccount.code.length, 0);
+
+        vm.deal(address(this), collateralReservationFee + executorFee);
+        vm.expectRevert();
+        controller.reserveCollateral{value: collateralReservationFee + executorFee}(
+            "",
+            (bytes32(uint256(1)) << 160) | (bytes32(uint256(1)) << 144),
+            bytes32("txEmptyOwner")
+        );
+    }
+
     function testCreateSubaccountOfFutureType() public {
         // the type is a raw uint256, not an enum, so a type unknown at compile time of the proxy
         // and facet works as soon as governance registers an implementation for it — no new proxy
