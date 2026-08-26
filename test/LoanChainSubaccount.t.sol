@@ -14,7 +14,7 @@ import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSuba
 import {
     LoanChainSubaccount
 } from "../contracts/smartAccounts/implementation/LoanChainSubaccount.sol";
-import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol";
+import {SubaccountProxy} from "../contracts/smartAccounts/proxy/SubaccountProxy.sol";
 import {
     LoanChainSettingsFacet
 } from "../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol";
@@ -1177,7 +1177,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             ILoanChainSubaccount.BorrowingDisabled.selector
         );
 
-        address subaccountB = address(new LoanSubaccountProxy(
+        address subaccountB = address(new SubaccountProxy(
             address(controller), parentPersonalAccount, typeB
         ));
         fxrp.mint(subaccountB, 100e6);
@@ -1299,7 +1299,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         uint256 typeB = 2;
         vm.prank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        LoanSubaccountProxy proxyB = new LoanSubaccountProxy(
+        SubaccountProxy proxyB = new SubaccountProxy(
             address(controller), parentPersonalAccount, typeB
         );
         address subaccountB = address(proxyB);
@@ -1329,7 +1329,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         uint256 typeB = 2;
         vm.prank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        address subaccountB = address(new LoanSubaccountProxy(
+        address subaccountB = address(new SubaccountProxy(
             address(controller), parentPersonalAccount, typeB
         ));
         fxrp.mint(subaccountB, 100e6);
@@ -2109,7 +2109,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     }
 
     function _deploySubaccount() private returns (LoanChainSubaccount) {
-        LoanSubaccountProxy proxy = new LoanSubaccountProxy(
+        SubaccountProxy proxy = new SubaccountProxy(
             address(controller),
             parentPersonalAccount,
             SUBACCOUNT_TYPE_LOAN

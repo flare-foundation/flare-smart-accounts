@@ -10,10 +10,10 @@ Subaccounts are typed by a raw `uint256` identifier (`0` is reserved and invalid
 
 ## Deployment model
 
-Subaccounts are deployed as [`LoanSubaccountProxy`](../../../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol) — a minimal proxy (OpenZeppelin `Proxy`) rather than a `BeaconProxy`:
+Subaccounts are deployed as [`SubaccountProxy`](../../../contracts/smartAccounts/proxy/SubaccountProxy.sol) — a minimal proxy (OpenZeppelin `Proxy`) rather than a `BeaconProxy`:
 
 ```solidity
-contract LoanSubaccountProxy is Proxy {
+contract SubaccountProxy is Proxy {
     address private immutable controller;
     uint256 private immutable subaccountType;
 
@@ -33,14 +33,14 @@ Like PAs, subaccounts are deployed via the [EIP-2470 Singleton Factory](https://
 
 ```solidity
 abi.encodePacked(
-    PROXY_CREATION_CODE, // frozen type(LoanSubaccountProxy).creationCode
+    PROXY_CREATION_CODE, // frozen type(SubaccountProxy).creationCode
     abi.encode(address(this) /* diamond */, _parentPersonalAccount, _subaccountType)
 )
 ```
 
 with `salt = bytes32(0)`. The subaccount address is therefore a pure function of `(diamond, parentPersonalAccount, subaccountType)` — per-type and per-account unique, and identical on every chain where the diamond has the same address. No implementation or beacon address enters the derivation, so implementation upgrades never move addresses.
 
-> **Frozen:** the derivation uses the frozen `Subaccounts.PROXY_CREATION_CODE` hex constant, exactly like [`PersonalAccounts.PROXY_CREATION_CODE`](./PersonalAccounts.md#frozen-proxy_creation_code). Its hash is pinned in `test/SubaccountsLibrary.t.sol`, and two further tests compare it against a fresh compilation of the proxy source (by length, and byte-exact modulo CBOR metadata), so any drift fails CI. Editing the constant or the proxy source is a cross-chain coordination event: all predicted-but-not-deployed subaccount addresses would shift. Re-frozen once pre-deployment (2026-08-21), when the beacon query was renamed to `implementationForType`; no subaccount address had shipped, so nothing moved on chain.
+> **Frozen:** the derivation uses the frozen `Subaccounts.PROXY_CREATION_CODE` hex constant, exactly like [`PersonalAccounts.PROXY_CREATION_CODE`](./PersonalAccounts.md#frozen-proxy_creation_code). Its hash is pinned in `test/SubaccountsLibrary.t.sol`, and two further tests compare it against a fresh compilation of the proxy source (by length, and byte-exact modulo CBOR metadata), so any drift fails CI. Editing the constant or the proxy source is a cross-chain coordination event: all predicted-but-not-deployed subaccount addresses would shift. Re-frozen twice pre-deployment: 2026-08-21, when the beacon query was renamed to `implementationForType`, and 2026-08-26, when the proxy contract was renamed to `SubaccountProxy` (the generic deployment vehicle had kept its loan-era name); no subaccount address had shipped either time, so nothing moved on chain.
 
 ## Creation and prediction
 

@@ -19,7 +19,7 @@ import {IIMasterAccountController} from "../contracts/smartAccounts/interface/II
 import {MasterAccountControllerInit} from "../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSubaccount.sol";
-import {LoanSubaccountProxy} from "../contracts/smartAccounts/proxy/LoanSubaccountProxy.sol";
+import {SubaccountProxy} from "../contracts/smartAccounts/proxy/SubaccountProxy.sol";
 import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
 import {MockLoanSubaccount} from "../contracts/mock/MockLoanSubaccount.sol";
 import {MockGenericSubaccount} from "../contracts/mock/MockGenericSubaccount.sol";
@@ -162,7 +162,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     function testDeployRevertWhenImplementationNotConfigured() public {
         // the reserved type 0 is never configured, so resolution returns address(0)
         vm.expectRevert();
-        new LoanSubaccountProxy(
+        new SubaccountProxy(
             address(controller),
             parentPersonalAccount,
             SUBACCOUNT_TYPE_NONE
@@ -1767,7 +1767,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function _deploySubaccount() private returns (LoanSubaccount) {
-        LoanSubaccountProxy proxy = new LoanSubaccountProxy(
+        SubaccountProxy proxy = new SubaccountProxy(
             address(controller),
             parentPersonalAccount,
             SUBACCOUNT_TYPE_LOAN

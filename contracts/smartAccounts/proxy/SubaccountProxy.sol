@@ -7,12 +7,13 @@ import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {ISubaccountsFacet} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 
 /**
- * @title LoanSubaccountProxy contract
- * @notice Per-Personal-Account loan subaccount proxy. The controller is the beacon:
+ * @title SubaccountProxy contract
+ * @notice Per-Personal-Account subaccount proxy, shared by every subaccount type. The
+ * controller is the beacon:
  * the implementation is resolved per subaccount type through {implementationForType},
  * so upgrades happen on the controller and the type is fixed at deployment.
  */
-contract LoanSubaccountProxy is Proxy {
+contract SubaccountProxy is Proxy {
 
     /// @notice MasterAccountController address used to resolve the implementation.
     address private immutable controller;
@@ -20,7 +21,7 @@ contract LoanSubaccountProxy is Proxy {
     uint256 private immutable subaccountType;
 
     /**
-     * @notice Deploys the proxy and initializes loan subaccount state.
+     * @notice Deploys the proxy and initializes the subaccount state.
      * @param _controller MasterAccountController address, used as the beacon.
      * @param _parentPersonalAccount Parent Personal Account address.
      * @param _subaccountType Subaccount type.

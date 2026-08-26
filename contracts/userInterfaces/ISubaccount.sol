@@ -4,7 +4,7 @@ pragma solidity >=0.8.4 <0.9;
 /**
  * @title ISubaccount
  * @notice The type-generic subaccount surface every implementation must expose. The frozen
- * `LoanSubaccountProxy` creation code embeds `initialize`'s exact selector and delegate-calls
+ * `SubaccountProxy` creation code embeds `initialize`'s exact selector and delegate-calls
  * it from the proxy constructor, so a new subaccount type is not merely "any contract with a
  * registered implementation": its implementation must implement this interface. The ABI is
  * frozen with the proxy — changing it shifts every predicted subaccount address.
