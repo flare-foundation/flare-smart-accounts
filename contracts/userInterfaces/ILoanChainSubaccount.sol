@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
-import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
+import {ILoanChainAccountBase} from "./ILoanChainAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
-
-/// @dev Compose payload schema version 1. The payload is
-/// `abi.encode(uint8 version, uint8 action, bytes actionData)`.
-uint8 constant PAYLOAD_VERSION_1 = 1;
 
 /// @dev Borrow action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
 /// uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`. The market is not a
@@ -47,16 +43,9 @@ uint8 constant DESTINATION_KIND_EVM = 1;
 /// pending); payloads using it revert.
 uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
 
-/// @dev Skip reason: the operation id was already consumed (a retried instruction delivered
-/// twice must not turn one intended action into two).
-uint8 constant SKIP_REASON_DUPLICATE = 1;
-
-/// @dev Skip reason: the deadline passed before delivery; the user's intent is stale. The
-/// operation id is not consumed, so the same intent can be retried with a fresh deadline.
-uint8 constant SKIP_REASON_EXPIRED = 2;
-
 /// @dev Skip reason: a set-recovery action carried an epoch not greater than the stored one -
-/// an older update delivered late must not overwrite a newer destination.
+/// an older update delivered late must not overwrite a newer destination. The id is consumed
+/// (staleness cannot be cured without changing an economic field).
 uint8 constant SKIP_REASON_STALE_EPOCH = 3;
 
 /**
@@ -66,17 +55,18 @@ uint8 constant SKIP_REASON_STALE_EPOCH = 3;
  * same CREATE2 address
  * as its Flare counterpart. The account operates on exactly one Morpho market for its whole
  * life — the market its type is bound to — so the address itself commits to the pool. It has
- * no parent-driven methods — the parent Personal Account exists only on Flare — so every
+ * no parent-driven methods — the parent Personal Account has no local key or
+ * controller-driven action on this chain; instructions exist only on Flare — so every
  * authorized action arrives as an authenticated LayerZero compose payload sent by this same
  * account on Flare, and everything else is permissionless movement along fixed rails.
  */
-interface ILoanChainSubaccount is ILayerZeroComposer, ISubaccount {
+interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when a loan subaccount is initialized.
      * @param controllerAddress The controller address.
-     * @param parentPersonalAccount The parent Personal Account address (a Flare-side address;
-     * it has no code on this chain).
+     * @param parentPersonalAccount The parent Personal Account address (the same address on
+     * every chain; codeless here until its compose-driven mirror is created).
      * @param subaccountType The subaccount type.
      */
     event LoanSubaccountInitialized(
@@ -214,70 +204,15 @@ interface ILoanChainSubaccount is ILayerZeroComposer, ISubaccount {
     );
 
     /**
-     * @notice Reverts if the contract is already initialized.
-     */
-    error AlreadyInitialized();
-
-    /**
-     * @notice Reverts if the controller address is invalid.
-     */
-    error InvalidControllerAddress();
-
-    /**
      * @notice Reverts if the parent Personal Account address is invalid.
      */
     error InvalidParentPersonalAccount();
 
     /**
-     * @notice Reverts if `lzCompose` is called by anything other than the LayerZero endpoint.
+     * @notice Reverts on the implementation contract itself, which is never initialized: it
+     * holds no parent and must not accept native (nothing could ever move it out again).
      */
-    error OnlyEndpoint();
-
-    /**
-     * @notice Reverts if native value is attached to `lzCompose`. The loan flow never sends
-     * compose value, and rejecting it keeps a mistaken delivery retriable without value.
-     */
-    error NonZeroComposeValue();
-
-    /**
-     * @notice Reverts if the compose sender (`_from`) is not the configured FXRP OFT.
-     * @param from The compose sender.
-     */
-    error WrongComposeSender(
-        address from
-    );
-
-    /**
-     * @notice Reverts if the composed message did not originate on the configured origin chain.
-     * @param srcEid The source endpoint id of the message.
-     */
-    error WrongSourceEid(
-        uint32 srcEid
-    );
-
-    /**
-     * @notice Reverts if the source-chain sender of the composed transfer is not this account
-     * itself (its own address on the origin chain).
-     * @param composeFrom The source-chain sender.
-     */
-    error WrongComposeFrom(
-        bytes32 composeFrom
-    );
-
-    /**
-     * @notice Reverts if the delivered GUID does not equal the one recomputed from the pinned
-     * origin peer: the compose wrapper alone does not commit to the source OApp, so this
-     * check is what binds the message to the pinned peer.
-     * @param guid The delivered GUID.
-     */
-    error WrongGuid(
-        bytes32 guid
-    );
-
-    /**
-     * @notice Reverts on a payload whose operation id is zero.
-     */
-    error InvalidOperationId();
+    error NotInitialized();
 
     /**
      * @notice Reverts on a debt increase while new borrowing is disabled for this account's
@@ -288,12 +223,6 @@ interface ILoanChainSubaccount is ILayerZeroComposer, ISubaccount {
     error BorrowingDisabled();
 
     /**
-     * @notice Reverts on the implementation contract itself, which is never initialized: it
-     * holds no parent and must not accept native.
-     */
-    error NotInitialized();
-
-    /**
      * @notice Reverts if there are no idle loan tokens to repay, or the position has no debt.
      */
     error NothingToRepay();
@@ -302,11 +231,6 @@ interface ILoanChainSubaccount is ILayerZeroComposer, ISubaccount {
      * @notice Reverts if there is no idle FXRP to deposit.
      */
     error NothingToDeposit();
-
-    /**
-     * @notice Reverts if there is no FXRP to sweep back to the origin chain.
-     */
-    error NothingToSweep();
 
     /**
      * @notice Reverts if there is nothing to recover.
@@ -320,19 +244,9 @@ interface ILoanChainSubaccount is ILayerZeroComposer, ISubaccount {
     error RecoveryDestinationNotSet();
 
     /**
-     * @notice Reverts if generic recovery is attempted on the market's loan or collateral
-     * token; those move only on their own rails.
-     * @param token The offending token.
+     * @notice Reverts if there is no FXRP to sweep back to the origin chain.
      */
-    error ProtectedToken(
-        address token
-    );
-
-    /**
-     * @notice Reverts if a loan-token recovery is attempted while the position carries debt:
-     * the balance is repayment material, not surplus.
-     */
-    error OutstandingDebt();
+    error NothingToSweep();
 
     /**
      * @notice Reverts if the OFT's live peer for the origin chain no longer matches the pinned
@@ -354,25 +268,24 @@ interface ILoanChainSubaccount is ILayerZeroComposer, ISubaccount {
     error RefundFailed();
 
     /**
+     * @notice Reverts if generic recovery is attempted on the market's loan or collateral
+     * token; those move only on their own rails.
+     * @param token The offending token.
+     */
+    error ProtectedToken(
+        address token
+    );
+
+    /**
+     * @notice Reverts if a loan-token recovery is attempted while the position carries debt:
+     * the balance is repayment material, not surplus.
+     */
+    error OutstandingDebt();
+
+    /**
      * @notice Reverts if the native balance could not be sent to the recovery destination.
      */
     error NativeRecoveryFailed();
-
-    /**
-     * @notice Reverts on a payload with an unsupported schema version.
-     * @param version The unsupported version.
-     */
-    error UnsupportedPayloadVersion(
-        uint8 version
-    );
-
-    /**
-     * @notice Reverts on a payload with an unsupported action.
-     * @param action The unsupported action.
-     */
-    error UnsupportedAction(
-        uint8 action
-    );
 
     /**
      * @notice Reverts on a borrow with an unsupported destination kind (the Wormhole-to-XRPL
@@ -486,18 +399,11 @@ interface ILoanChainSubaccount is ILayerZeroComposer, ISubaccount {
         external
         returns (uint256 _amount);
 
-    /**
-     * @notice Returns whether an operation id has been consumed. An id is consumed on
-     * execution and on a stale-epoch skip; an expired skip leaves it unconsumed, and a
-     * duplicate skip means it was already consumed.
-     * @param _operationId The operation id.
-     * @return Whether the operation id is consumed.
-     */
-    function usedOperations(
-        bytes32 _operationId
-    )
+    /// @inheritdoc ISubaccount
+    function controllerAddress()
         external view
-        returns (bool);
+        override(ILoanChainAccountBase, ISubaccount)
+        returns (address);
 
     /**
      * @notice Returns the recovery destination set by an authenticated set-recovery action,

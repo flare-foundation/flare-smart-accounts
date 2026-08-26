@@ -1200,6 +1200,157 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee - 1}();
     }
 
+    function testSendCrossChainInstruction() public {
+        // the user-signed cross-chain command channel: reached only through an executeUserOp
+        // multicall (a self-call), it sends a message-only compose to this same address on
+        // the loan chain, where the mirror Personal Account authenticates it back to here
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        _configureLoanBridge();
+        vm.deal(personalAccount, messagingFee);
+
+        bytes memory payload = abi.encode(uint8(1), uint8(1), bytes("mirror-command"));
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: personalAccount,
+            value: messagingFee,
+            data: abi.encodeCall(IPersonalAccount.sendCrossChainInstruction, (payload, ""))
+        });
+        vm.expectEmit();
+        emit IPersonalAccount.CrossChainInstructionSent(
+            destinationEid, fxrpOft.GUID(), keccak256(payload)
+        );
+        vm.prank(address(controller));
+        IPersonalAccount(personalAccount).executeUserOp(calls);
+
+        // message-only send to its own address on the loan chain, exactly the quoted fee
+        (uint32 sentDstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,,,) =
+            fxrpOft.lastSendParam();
+        assertEq(sentDstEid, destinationEid);
+        assertEq(to, bytes32(uint256(uint160(personalAccount))));
+        assertEq(amountLD, 0);
+        assertEq(minAmountLD, 0);
+        assertEq(fxrpOft.lastValue(), messagingFee);
+        // the excess never left: msg.value rode from the account's own balance
+        assertEq(personalAccount.balance, 0);
+    }
+
+    function testSendCrossChainInstructionExcessStaysAndOptionsPassThrough() public {
+        // the fee value rides from the account's own balance, so the excess never leaves it;
+        // the caller-supplied type-3 options and the payload reach the OFT verbatim
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        _configureLoanBridge();
+        vm.deal(personalAccount, 1 ether);
+        bytes memory payload = abi.encode(uint8(1), uint8(1), bytes("mirror-command"));
+        bytes memory options = hex"0003010011010000000000000000000000000000c350";
+
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: personalAccount,
+            value: messagingFee + 0.5 ether,
+            data: abi.encodeCall(IPersonalAccount.sendCrossChainInstruction, (payload, options))
+        });
+        vm.prank(address(controller));
+        IPersonalAccount(personalAccount).executeUserOp(calls);
+
+        assertEq(fxrpOft.lastValue(), messagingFee);
+        assertEq(personalAccount.balance, 1 ether - messagingFee);
+        (,,,, bytes memory sentOptions, bytes memory sentCompose,) = fxrpOft.lastSendParam();
+        assertEq(sentOptions, options);
+        assertEq(sentCompose, payload);
+    }
+
+    function testSendCrossChainInstructionViaMemo() public {
+        // end to end through the production path: XRPL memo -> handleMintedFAssets ->
+        // executeUserOp -> the account's own sendCrossChainInstruction
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        _configureLoanBridge();
+        bytes memory payload = abi.encode(uint8(1), uint8(1), bytes("mirror-command"));
+
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: personalAccount,
+            value: messagingFee,
+            data: abi.encodeCall(IPersonalAccount.sendCrossChainInstruction, (payload, ""))
+        });
+        _executeUserOpWithValue(personalAccount, calls, bytes32("tx-cross-chain"), messagingFee);
+        assertEq(fxrpOft.lastValue(), messagingFee);
+
+        (uint32 sentDstEid, bytes32 to, uint256 amountLD,,,,) = fxrpOft.lastSendParam();
+        assertEq(sentDstEid, destinationEid);
+        assertEq(to, bytes32(uint256(uint160(personalAccount))));
+        assertEq(amountLD, 0);
+    }
+
+    function testSendCrossChainInstructionRevertOnlySelf() public {
+        // not parent-driven, not controller-driven: only a self-call through executeUserOp,
+        // so the XRPL signature covers the payload end-to-end
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        _configureLoanBridge();
+        vm.deal(address(this), messagingFee);
+
+        vm.expectRevert(IPersonalAccount.OnlySelf.selector);
+        IPersonalAccount(personalAccount).sendCrossChainInstruction{value: messagingFee}(
+            "payload", ""
+        );
+
+        vm.prank(address(controller));
+        vm.expectRevert(IPersonalAccount.OnlySelf.selector);
+        IPersonalAccount(personalAccount).sendCrossChainInstruction("payload", "");
+    }
+
+    function testSendCrossChainInstructionReverts() public {
+        address personalAccount = _createPersonalAccount(xrplOwner);
+        // value in a pranked call rides from the pranked account - as in production, where
+        // it rides from the account's own balance through the multicall
+        vm.deal(personalAccount, 1 ether);
+
+        // empty payload: a message-only send must carry an instruction
+        vm.prank(personalAccount);
+        vm.expectRevert(IPersonalAccount.EmptyCrossChainPayload.selector);
+        IPersonalAccount(personalAccount).sendCrossChainInstruction("", "");
+
+        // bridge not configured yet
+        vm.prank(personalAccount);
+        vm.expectRevert(IPersonalAccount.LoanBridgeNotConfigured.selector);
+        IPersonalAccount(personalAccount).sendCrossChainInstruction("payload", "");
+
+        _configureLoanBridge();
+
+        // insufficient fee
+        vm.prank(personalAccount);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPersonalAccount.InsufficientFundsForInstruction.selector, messagingFee
+            )
+        );
+        IPersonalAccount(personalAccount).sendCrossChainInstruction{value: messagingFee - 1}(
+            "payload", ""
+        );
+
+        // a peer mutation fails closed
+        fxrpOft.setPeer(destinationEid, bytes32(uint256(0xbad)));
+        vm.prank(personalAccount);
+        vm.expectRevert(IPersonalAccount.WrongDestinationPeer.selector);
+        IPersonalAccount(personalAccount).sendCrossChainInstruction{value: messagingFee}(
+            "payload", ""
+        );
+        fxrpOft.setPeer(destinationEid, destinationPeer);
+
+        // a forward move: the pause stops it
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+        vm.prank(governance);
+        controller.addPausers(pausers);
+        vm.prank(pauser);
+        controller.pause();
+        vm.prank(personalAccount);
+        vm.expectRevert(IPauseFacet.IsPaused.selector);
+        IPersonalAccount(personalAccount).sendCrossChainInstruction{value: messagingFee}(
+            "payload", ""
+        );
+    }
+
     function testSetLoanBridgeSettingsRevertNotOwner() public {
         address notOwner = makeAddr("notOwner");
         vm.prank(notOwner);

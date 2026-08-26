@@ -52,7 +52,7 @@ The diamond is initialized by [`MasterAccountControllerInit`](../../../contracts
 
 ## Facets
 
-Fifteen facets are deployed. The first column links to the user-facing interface (`I*.sol`); the second to the on-chain facet contract; the third describes what it does.
+Seventeen facets are cut on Flare; the table is the cross-chain union, so it also lists the loan-chain-only `LoanChainSettingsFacet`, which is cut only on the loan-chain diamond. The first column links to the user-facing interface (`I*.sol`); the second to the on-chain facet contract; the third describes what it does.
 
 | Interface | Facet | Library | Subject |
 |-----------|-------|---------|---------|
@@ -70,7 +70,7 @@ Fifteen facets are deployed. The first column links to the user-facing interface
 | [`ITimelockFacet`](../../../contracts/userInterfaces/facets/ITimelockFacet.sol) | [`TimelockFacet`](../../../contracts/smartAccounts/facets/TimelockFacet.sol) | `Timelock` | Timelock lifecycle. `setTimelockDuration` (timelocked), `executeTimelockedCall`, `cancelTimelockedCall`, `getTimelockDurationSeconds`, `getExecuteTimelockedCallTimestamp`. Maximum duration 7 days. |
 | [`ISubaccountsFacet`](../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol) | [`SubaccountsFacet`](../../../contracts/smartAccounts/facets/SubaccountsFacet.sol) | `Subaccounts`, `PersonalAccounts`, `Pause` | Type-generic subaccount registry and creation route. `setSubaccountImplementation` (timelocked), `createSubaccount`, `getSubaccount`, `implementationForType` (the beacon query frozen into the subaccount proxy). |
 | [`ILoanBridgeSettingsFacet`](../../../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol) | [`LoanBridgeSettingsFacet`](../../../contracts/smartAccounts/facets/LoanBridgeSettingsFacet.sol) | `LoanBridgeSettings` | Flare-only loan bridge configuration. `setLoanBridgeSettings` (timelocked, validated against the FXRP token/OFT), `getLoanBridgeSettings`. |
-| [`ILoanChainSettingsFacet`](../../../contracts/userInterfaces/facets/ILoanChainSettingsFacet.sol) | [`LoanChainSettingsFacet`](../../../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol) | `LoanChainSettings` | Loan-chain-only configuration: global transport, write-once per-type markets, per-type borrow switch. Cut only on the loan-chain diamond (Ethereum, at launch). |
+| [`ILoanChainSettingsFacet`](../../../contracts/userInterfaces/facets/ILoanChainSettingsFacet.sol) | [`LoanChainSettingsFacet`](../../../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol) | `LoanChainSettings`, `PersonalAccounts`, `Pause` | Loan-chain-only configuration (global transport, write-once per-type markets, per-type borrow switch) plus `createLoanChainPersonalAccount` (the explicit PA creation route — no instruction machinery exists there). Cut only on the loan-chain diamond (Ethereum, at launch). |
 | `IDiamondCut` | [`DiamondCutFacet`](../../../contracts/smartAccounts/facets/DiamondCutFacet.sol) | `LibDiamond` | The `diamondCut(...)` entry point. Always `onlyOwnerWithTimelock`. |
 | `IDiamondLoupe` | [`DiamondLoupeFacet`](../../../contracts/diamond/facets/DiamondLoupeFacet.sol) | `LibDiamond` | EIP-2535 introspection. |
 | `IERC173` | [`OwnershipFacet`](../../../contracts/diamond/facets/OwnershipFacet.sol) | `LibDiamond` | `owner()`, `transferOwnership(newOwner)`. |

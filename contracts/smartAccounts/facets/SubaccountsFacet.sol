@@ -50,7 +50,8 @@ contract SubaccountsFacet is IISubaccountsFacet, FacetBase {
         // Account when one exists, its computed address otherwise - the PA derivation is
         // frozen and chain-independent, so the two can never diverge. The fallback is what
         // lets creation run before the Personal Account exists (materialize-to-sweep), and
-        // on the loan-chain diamond, where Personal Accounts never exist at all
+        // on the loan-chain diamond until the owner's compose-driven mirror PA is created
+        // through its explicit route
         address parentPersonalAccount =
             address(PersonalAccounts.getState().personalAccounts[_xrplOwner]);
         if (parentPersonalAccount == address(0)) {

@@ -19,6 +19,10 @@ import {
     LoanChainSettingsFacet
 } from "../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol";
 import {SubaccountsFacet} from "../contracts/smartAccounts/facets/SubaccountsFacet.sol";
+import {PersonalAccountsFacet} from "../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
+import {
+    LoanChainPersonalAccount
+} from "../contracts/smartAccounts/implementation/LoanChainPersonalAccount.sol";
 import {TimelockFacet} from "../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {PauseFacet} from "../contracts/smartAccounts/facets/PauseFacet.sol";
 import {ILoanChainSubaccount} from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
@@ -43,16 +47,19 @@ import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTCompo
 import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
 import {
-    PAYLOAD_VERSION_1,
     ACTION_BORROW,
     ACTION_WITHDRAW,
     DESTINATION_KIND_EVM,
     DESTINATION_KIND_XRPL_WORMHOLE,
     ACTION_SET_RECOVERY,
-    SKIP_REASON_DUPLICATE,
-    SKIP_REASON_EXPIRED,
     SKIP_REASON_STALE_EPOCH
 } from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
+import {
+    ILoanChainAccountBase,
+    PAYLOAD_VERSION_1,
+    SKIP_REASON_DUPLICATE,
+    SKIP_REASON_EXPIRED
+} from "../contracts/userInterfaces/ILoanChainAccountBase.sol";
 
 /**
  * @title LoanChainSubaccountTest
@@ -148,7 +155,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     function testInitializeRevertAlreadyInitialized() public {
         LoanChainSubaccount subaccount = _deploySubaccount();
 
-        vm.expectRevert(ILoanChainSubaccount.AlreadyInitialized.selector);
+        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
         subaccount.initialize(
             address(controller),
             parentPersonalAccount,
@@ -158,7 +165,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
         // the implementation contract locks itself in its own constructor
-        vm.expectRevert(ILoanChainSubaccount.AlreadyInitialized.selector);
+        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
         loanChainImpl.initialize(
             address(controller),
             parentPersonalAccount,
@@ -189,6 +196,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // for looking at the other chain.
         LoanChainSubaccount subaccount = _deploySubaccount();
         assertEq(subaccount.implementation(), address(loanChainImpl));
+        assertEq(subaccount.parentPersonalAccount(), parentPersonalAccount);
 
         LoanSubaccount flareImpl = new LoanSubaccount();
         vm.prank(governance);
@@ -197,9 +205,12 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             address(flareImpl)
         );
 
-        // same account address, same state, per-chain behavior behind it
-        assertEq(subaccount.implementation(), address(flareImpl));
-        assertEq(subaccount.parentPersonalAccount(), parentPersonalAccount);
+        // same account address, per-chain behavior behind it: the registry now resolves the
+        // type to the other chain's implementation. Reads through the account itself must go
+        // through the matching chain's implementation: storage belongs to each proxy, and the
+        // two chains share only the address - layouts may differ across chains, while every
+        // chain-local upgrade lineage must preserve its proxies' layout
+        assertEq(controller.implementationForType(SUBACCOUNT_TYPE_LOAN), address(flareImpl));
     }
 
     function testPredictedAddressIsImplementationIndependent() public {
@@ -670,7 +681,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
-        vm.expectRevert(ILoanChainSubaccount.NonZeroComposeValue.selector);
+        vm.expectRevert(ILoanChainAccountBase.NonZeroComposeValue.selector);
         ILoanChainSubaccount(subaccount).lzCompose{value: 1}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -682,7 +693,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             _composeMessage(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
 
         vm.prank(makeAddr("notTheEndpoint"));
-        vm.expectRevert(ILoanChainSubaccount.OnlyEndpoint.selector);
+        vm.expectRevert(ILoanChainAccountBase.OnlyEndpoint.selector);
         ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
@@ -694,7 +705,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address notTheOft = makeAddr("notTheOft");
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainSubaccount.WrongComposeSender.selector, notTheOft)
+            abi.encodeWithSelector(ILoanChainAccountBase.WrongComposeSender.selector, notTheOft)
         );
         ILoanChainSubaccount(subaccount).lzCompose(notTheOft, guid, message, executor, "");
     }
@@ -713,7 +724,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainSubaccount.WrongSourceEid.selector, originEid + 1)
+            abi.encodeWithSelector(ILoanChainAccountBase.WrongSourceEid.selector, originEid + 1)
         );
         ILoanChainSubaccount(subaccount).lzCompose(
             address(fxrpOft), _guidFor(1), message, executor, ""
@@ -734,7 +745,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainSubaccount.WrongComposeFrom.selector, attacker)
+            abi.encodeWithSelector(ILoanChainAccountBase.WrongComposeFrom.selector, attacker)
         );
         ILoanChainSubaccount(subaccount).lzCompose(
             address(fxrpOft), _guidFor(1), message, executor, ""
@@ -756,7 +767,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainSubaccount.WrongGuid.selector, forgedGuid)
+            abi.encodeWithSelector(ILoanChainAccountBase.WrongGuid.selector, forgedGuid)
         );
         ILoanChainSubaccount(subaccount).lzCompose(
             address(fxrpOft), forgedGuid, message, executor, ""
@@ -935,14 +946,14 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         bytes memory payload = abi.encode(uint8(2), ACTION_BORROW, bytes(""));
         _deliverExpectRevert(
             subaccount, 1, payload,
-            abi.encodeWithSelector(ILoanChainSubaccount.UnsupportedPayloadVersion.selector, 2)
+            abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedPayloadVersion.selector, 2)
         );
 
         // unsupported action
         payload = abi.encode(PAYLOAD_VERSION_1, uint8(9), bytes(""));
         _deliverExpectRevert(
             subaccount, 1, payload,
-            abi.encodeWithSelector(ILoanChainSubaccount.UnsupportedAction.selector, 9)
+            abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedAction.selector, 9)
         );
 
         // the reserved Wormhole destination kind
@@ -1194,7 +1205,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         _deliverExpectRevert(
             subaccount, 1, _borrowPayload(bytes32(0), 0, bytes32(0), 0),
-            ILoanChainSubaccount.InvalidOperationId.selector
+            ILoanChainAccountBase.InvalidOperationId.selector
         );
     }
 
@@ -1783,10 +1794,11 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     }
 
     function testMinimalLoanChainDiamondTopology() public {
-        // the intended loan-chain cut: the generic subaccount surface plus the loan-chain
-        // settings facet - never the Flare-only LoanBridgeSettingsFacet. The full-suite
-        // diamond could hide an accidental dependency; this minimal one proves there is none
-        // (base facets reused from setUp - their fixed CREATE2 salts would collide again)
+        // the intended loan-chain cut: the generic subaccount surface, the PA beacon
+        // surface, and the loan-chain settings facet - never the Flare-only
+        // LoanBridgeSettingsFacet. The full-suite diamond could hide an accidental
+        // dependency; this minimal one proves there is none (base facets reused from
+        // setUp - their fixed CREATE2 salts would collide again)
         DiamondArgs memory args = DiamondArgs({
             owner: initialOwner,
             initAddress: address(0),
@@ -1794,7 +1806,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         });
         MasterAccountController minimal = new MasterAccountController(baseCuts, args);
 
-        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](4);
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](5);
         cuts[0] = _buildFacetCut(
             address(new SubaccountsFacet()), "SubaccountsFacet", IDiamond.FacetCutAction.Add
         );
@@ -1807,6 +1819,11 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         cuts[3] = _buildFacetCut(
             address(new LoanChainSettingsFacet()),
             "LoanChainSettingsFacet",
+            IDiamond.FacetCutAction.Add
+        );
+        cuts[4] = _buildFacetCut(
+            address(new PersonalAccountsFacet()),
+            "PersonalAccountsFacet",
             IDiamond.FacetCutAction.Add
         );
         IIMasterAccountController minimalController =
@@ -1830,6 +1847,20 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         string memory xrplOwner = "rMinimalTopologyOwner";
         address subaccount = minimalController.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertGt(subaccount.code.length, 0);
+
+        // the mirror Personal Account also materializes on the minimal topology, behind the
+        // PA beacon, through the explicit loan-chain creation route - but only once the
+        // implementation is registered: the frozen BeaconProxy asks the beacon at
+        // construction, and an unset beacon fails the creation closed
+        vm.expectRevert();
+        ILoanChainSettingsFacet(address(minimal)).createLoanChainPersonalAccount(xrplOwner);
+        LoanChainPersonalAccount mirrorImpl = new LoanChainPersonalAccount();
+        vm.prank(initialOwner);
+        minimalController.setPersonalAccountImplementation(address(mirrorImpl));
+        address mirror = ILoanChainSettingsFacet(address(minimal))
+            .createLoanChainPersonalAccount(xrplOwner);
+        assertGt(mirror.code.length, 0);
+        assertEq(minimalController.getPersonalAccount(xrplOwner), mirror);
 
         // the Flare-only bridge settings are not routable on this diamond
         vm.expectRevert(

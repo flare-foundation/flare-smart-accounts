@@ -3,26 +3,16 @@ pragma solidity ^0.8.27;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
-import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
-import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
-import {IMessagingChannel} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/IMessagingChannel.sol";
-// import is needed for @inheritdoc
-// solhint-disable-next-line no-unused-import
-import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
 import {
     ILoanChainSubaccount,
-    PAYLOAD_VERSION_1,
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_SET_RECOVERY,
     DESTINATION_KIND_EVM,
-    SKIP_REASON_DUPLICATE,
-    SKIP_REASON_EXPIRED,
     SKIP_REASON_STALE_EPOCH
 } from "../../userInterfaces/ILoanChainSubaccount.sol";
 import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
@@ -33,6 +23,7 @@ import {
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
+import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
 
 /**
  * @title LoanChainSubaccount contract
@@ -41,36 +32,28 @@ import {IMorpho} from "../interface/IMorpho.sol";
  * controller-as-beacon.
  * The account operates on exactly **one Morpho market for its whole life** — the market its
  * subaccount type is bound to (write-once in the settings), so the address itself commits to
- * the pool. The parent Personal Account exists only on Flare, so every authorized action
- * arrives through {lzCompose}, and everything else is permissionless movement along fixed
- * rails — no caller ever chooses a destination, a market, or an amount source.
+ * the pool. The parent Personal Account has no local key or controller-driven action on
+ * this chain (instructions exist only on Flare), so every authorized action
+ * arrives through the authenticated `lzCompose` (see {LoanChainAccountBase}), and everything
+ * else is permissionless movement along fixed rails — no caller ever chooses a destination,
+ * a market, or an amount source.
  */
-contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
+contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
     using SafeERC20 for IERC20;
-    using OFTComposeMsgCodec for bytes;
 
-    address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
     /// @dev Morpho's virtual-share offsets for share/asset conversion.
     uint256 private constant VIRTUAL_SHARES = 1e6;
     uint256 private constant VIRTUAL_ASSETS = 1;
 
-    /// @notice MasterAccountController address.
-    address public controllerAddress;
-    /// @notice Parent Personal Account address (a Flare-side address; no code on this chain).
+    /// @notice Parent Personal Account address (the same address on every chain; on this
+    /// chain it carries no code until its compose-driven mirror is created).
     address public parentPersonalAccount;
     /// @notice Subaccount type.
     uint256 public subaccountType;
     /// @inheritdoc ILoanChainSubaccount
-    mapping(bytes32 operationId => bool used) public usedOperations;
-    /// @inheritdoc ILoanChainSubaccount
     address public recoveryDestination;
     /// @inheritdoc ILoanChainSubaccount
     uint64 public recoveryEpoch;
-
-    constructor() {
-        // ensure the implementation contract itself cannot be initialized/used
-        controllerAddress = EMPTY_ADDRESS;
-    }
 
     /// @dev Native can arrive as a bridge refund; {recoverNative} is its exit. The
     /// implementation contract itself (never initialized, no parent) rejects it.
@@ -86,57 +69,14 @@ contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
     )
         external
     {
-        require(controllerAddress == address(0), AlreadyInitialized());
-        require(_controllerAddress != address(0), InvalidControllerAddress());
+        _setController(_controllerAddress);
         require(_parentPersonalAccount != address(0), InvalidParentPersonalAccount());
         require(_subaccountType != SUBACCOUNT_TYPE_NONE, ISubaccountsFacet.InvalidSubaccountType());
 
-        controllerAddress = _controllerAddress;
         parentPersonalAccount = _parentPersonalAccount;
         subaccountType = _subaccountType;
 
         emit LoanSubaccountInitialized(_controllerAddress, _parentPersonalAccount, _subaccountType);
-    }
-
-    /// @inheritdoc ILayerZeroComposer
-    /// @dev The authenticated entry point for loan actions; {_authenticate} holds the full
-    /// checklist. The executor and extra data are untrusted and ignored. A failing message
-    /// reverts and stays retriable at the endpoint; its tokens are already on this account.
-    function lzCompose(
-        address _from,
-        bytes32 _guid,
-        bytes calldata _message,
-        address /* _executor */,
-        bytes calldata /* _extraData */
-    )
-        external payable
-        nonReentrant
-    {
-        // the loan flow never sends compose value; rejecting it keeps a mistaken delivery
-        // retriable through the endpoint without value
-        require(msg.value == 0, NonZeroComposeValue());
-
-        ILoanChainSettingsFacet.Transport memory transport = _getTransport();
-        _authenticate(transport, _from, _guid, _message);
-
-        (uint8 version, uint8 action, bytes memory actionData) =
-            abi.decode(_message.composeMsg(), (uint8, uint8, bytes));
-        require(version == PAYLOAD_VERSION_1, UnsupportedPayloadVersion(version));
-        if (action == ACTION_BORROW) {
-            _executeBorrow(actionData, _guid, _message.amountLD());
-        } else if (action == ACTION_WITHDRAW) {
-            // pause-gated; the compose stays queued at the endpoint and re-delivers after
-            // unpausing (the borrow action gates itself - its top-up form is pause-exempt)
-            _checkNotPaused();
-            _executeWithdraw(actionData, _guid);
-        } else if (action == ACTION_SET_RECOVERY) {
-            // deliberately allowed while paused: rotating a compromised recovery destination
-            // is configuration toward safety, and outward recovery is paused meanwhile - the
-            // rotation must not have to wait for (and race) an unpause
-            _executeSetRecovery(actionData, _guid);
-        } else {
-            revert UnsupportedAction(action);
-        }
     }
 
     /// @inheritdoc ILoanChainSubaccount
@@ -318,12 +258,47 @@ contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
     }
 
     /// @inheritdoc ISubaccount
+    function controllerAddress()
+        external view
+        override(ILoanChainSubaccount, LoanChainAccountBase)
+        returns (address)
+    {
+        return controller;
+    }
+
+    /// @inheritdoc ISubaccount
     function implementation()
         external view
         returns (address)
     {
         // controller is the beacon; it resolves the implementation for this subaccount type
-        return ISubaccountsFacet(controllerAddress).implementationForType(subaccountType);
+        return ISubaccountsFacet(controller).implementationForType(subaccountType);
+    }
+
+    /// @dev The subaccount's action set (see {LoanChainAccountBase._dispatch}).
+    function _dispatch(
+        uint8 _action,
+        bytes memory _actionData,
+        bytes32 _guid,
+        uint256 _amountLD
+    )
+        internal override
+    {
+        if (_action == ACTION_BORROW) {
+            _executeBorrow(_actionData, _guid, _amountLD);
+        } else if (_action == ACTION_WITHDRAW) {
+            // pause-gated; the compose stays queued at the endpoint and re-delivers after
+            // unpausing (the borrow action gates itself - its top-up form is pause-exempt)
+            _checkNotPaused();
+            _executeWithdraw(_actionData, _guid);
+        } else if (_action == ACTION_SET_RECOVERY) {
+            // deliberately allowed while paused: rotating a compromised recovery destination
+            // is configuration toward safety, and outward recovery is paused meanwhile - the
+            // rotation must not have to wait for (and race) an unpause
+            _executeSetRecovery(_actionData, _guid);
+        } else {
+            revert UnsupportedAction(_action);
+        }
     }
 
     /// @dev A borrow or pure collateral top-up on the account's one market: exactly the
@@ -358,7 +333,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
                 !_facet().isLoanChainBorrowingDisabled(subaccountType),
                 BorrowingDisabled()
             );
-        } else if (IPauseFacet(controllerAddress).isPaused()) {
+        } else if (IPauseFacet(controller).isPaused()) {
             require(_borrowSharesOf(_myMarket()) > 0, IPauseFacet.IsPaused());
         }
         usedOperations[operationId] = true;
@@ -404,7 +379,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
             );
             // a clean zero-padded, non-zero EVM address - and neither address in scope when
             // composing: not this account (the proceeds could only repay the new debt), not
-            // the parent Personal Account (no code and no key on this chain)
+            // the parent Personal Account (no local key on this chain - not a payout target)
             address destinationAddress = address(uint160(uint256(_destination)));
             require(
                 uint256(_destination) >> 160 == 0 &&
@@ -459,7 +434,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
             abi.decode(_actionData, (bytes32, uint64, uint64, bytes32));
         require(operationId != bytes32(0), InvalidOperationId());
         // same destination rules as the borrow disbursement: recovering to this account is
-        // a no-op, and the parent Personal Account holds no code and no key on this chain
+        // a no-op, and the parent Personal Account has no local key on this chain
         address destinationAddress = address(uint160(uint256(destination)));
         require(
             uint256(destination) >> 160 == 0 &&
@@ -485,9 +460,9 @@ contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
         emit RecoveryDestinationSet(parentPersonalAccount, recoveryDestination, epoch, _guid);
     }
 
-    /// @dev The soft gates shared by all actions: a duplicate (already-consumed) id or a
-    /// stale deadline completes the delivery without executing; the bridged FXRP stays for
-    /// the fixed rails. Expiry leaves the id unconsumed for a retry with a fresh deadline.
+    /// @dev The soft gates shared by all actions (see {LoanChainAccountBase._terminalSkipReason}):
+    /// a duplicate id or a stale deadline completes the delivery without executing; the
+    /// bridged FXRP stays for the fixed rails.
     function _skipped(
         bytes32 _operationId,
         uint64 _deadline,
@@ -496,52 +471,12 @@ contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
         private
         returns (bool)
     {
-        uint8 reason;
-        if (usedOperations[_operationId]) {
-            reason = SKIP_REASON_DUPLICATE;
-        } else if (block.timestamp > _deadline) {
-            reason = SKIP_REASON_EXPIRED;
-        } else {
+        uint8 reason = _terminalSkipReason(_operationId, _deadline);
+        if (reason == 0) {
             return false;
         }
         emit LoanActionSkipped(parentPersonalAccount, _operationId, reason, _guid);
         return true;
-    }
-
-    /// @dev The full authentication checklist: the caller must be the endpoint, the sender
-    /// the configured FXRP OFT, the source chain the origin, the source-chain sender this
-    /// account itself, and the delivered GUID must recompute from the pinned origin peer
-    /// (the compose wrapper alone does not commit to the source OApp, so this last check is
-    /// what defeats a temporarily swapped OFT peer).
-    function _authenticate(
-        ILoanChainSettingsFacet.Transport memory _transport,
-        address _from,
-        bytes32 _guid,
-        bytes calldata _message
-    )
-        private view
-    {
-        require(msg.sender == _transport.lzEndpoint, OnlyEndpoint());
-        require(_from == _transport.fxrpOft, WrongComposeSender(_from));
-        uint32 srcEid = _message.srcEid();
-        require(srcEid == _transport.originEid, WrongSourceEid(srcEid));
-        // the canonical OFT codec records the source-chain caller of `send`; only this account
-        // itself bridges composed FXRP here, so any other sender's payload must not execute
-        bytes32 composeFrom = _message.composeFrom();
-        require(
-            composeFrom == bytes32(uint256(uint160(address(this)))),
-            WrongComposeFrom(composeFrom)
-        );
-        // bind the message to the pinned origin peer: the endpoint computed the GUID from the
-        // true packet header, so it cannot match unless the sender was exactly the pinned peer
-        bytes32 expectedGuid = GUID.generate(
-            _message.nonce(),
-            srcEid,
-            address(uint160(uint256(_transport.originPeer))),
-            IMessagingChannel(_transport.lzEndpoint).eid(),
-            bytes32(uint256(uint160(_transport.fxrpOft)))
-        );
-        require(_guid == expectedGuid, WrongGuid(_guid));
     }
 
     /// @dev The account's one market, bound write-once to its type. If its Morpho stops
@@ -596,30 +531,11 @@ contract LoanChainSubaccount is ILoanChainSubaccount, ReentrancyGuardTransient {
         require(_destination != address(0), RecoveryDestinationNotSet());
     }
 
-    function _checkNotPaused()
-        private view
-    {
-        // outward and exposure-increasing moves stop while paused; repayment and defensive
-        // top-ups (indebted-position targets) never route through this gate
-        require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
-    }
-
-    function _getTransport()
-        private view
-        returns (ILoanChainSettingsFacet.Transport memory _transport)
-    {
-        _transport = _facet().getLoanChainTransport();
-        require(
-            _transport.lzEndpoint != address(0),
-            ILoanChainSettingsFacet.LoanChainTransportNotConfigured()
-        );
-    }
-
     function _facet()
         private view
         returns (ILoanChainSettingsFacet)
     {
-        return ILoanChainSettingsFacet(controllerAddress);
+        return ILoanChainSettingsFacet(controller);
     }
 
     function _toAssetsUp(

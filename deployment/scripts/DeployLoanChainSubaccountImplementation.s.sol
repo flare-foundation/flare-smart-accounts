@@ -3,6 +3,9 @@ pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {LoanChainSubaccount} from "../../contracts/smartAccounts/implementation/LoanChainSubaccount.sol";
+import {
+    LoanChainPersonalAccount
+} from "../../contracts/smartAccounts/implementation/LoanChainPersonalAccount.sol";
 
 // solhint-disable no-console
 contract DeployLoanChainSubaccountImplementation is Script {
@@ -16,16 +19,22 @@ contract DeployLoanChainSubaccountImplementation is Script {
 
         vm.startBroadcast(deployerPrivateKey);
         LoanChainSubaccount loanChainSubaccountImpl = new LoanChainSubaccount();
+        LoanChainPersonalAccount loanChainPersonalAccountImpl = new LoanChainPersonalAccount();
         vm.stopBroadcast();
-
-        address loanChainSubaccountImplAddress = address(loanChainSubaccountImpl);
 
         console2.log(string.concat("NETWORK: ", network));
         console2.log(
             string.concat(
                 "DEPLOYED: LoanChainSubaccountImplementation, ",
                 "LoanChainSubaccount.sol: ",
-                vm.toString(loanChainSubaccountImplAddress)
+                vm.toString(address(loanChainSubaccountImpl))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: LoanChainPersonalAccountImplementation, ",
+                "LoanChainPersonalAccount.sol: ",
+                vm.toString(address(loanChainPersonalAccountImpl))
             )
         );
     }

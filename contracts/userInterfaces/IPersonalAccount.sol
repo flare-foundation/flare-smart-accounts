@@ -140,6 +140,19 @@ interface IPersonalAccount {
     );
 
     /**
+     * @notice Emitted when a cross-chain instruction is sent to this account's own address
+     * on the loan chain.
+     * @param destinationEid The loan chain's LayerZero endpoint id.
+     * @param guid The LayerZero message id of the send.
+     * @param payloadHash keccak256 of the composed payload.
+     */
+    event CrossChainInstructionSent(
+        uint32 destinationEid,
+        bytes32 guid,
+        bytes32 payloadHash
+    );
+
+    /**
      * @notice Reverts if the sent value is insufficient for collateral reservation.
      * @param collateralReservationFee The required collateral reservation fee.
      * @param executorFee The required executor fee.
@@ -193,6 +206,60 @@ interface IPersonalAccount {
      * @param returnData The return data from the failed call.
      */
     error CallFailed(uint256 index, bytes returnData);
+
+    /**
+     * @notice Reverts if {sendCrossChainInstruction} is called by anything other than this
+     * account itself: it is reachable only through {executeUserOp}, so every instruction is
+     * user-signed.
+     */
+    error OnlySelf();
+
+    /**
+     * @notice Reverts on an empty cross-chain payload: a message-only send must carry an
+     * instruction.
+     */
+    error EmptyCrossChainPayload();
+
+    /**
+     * @notice Reverts if the loan bridge settings are not configured yet.
+     */
+    error LoanBridgeNotConfigured();
+
+    /**
+     * @notice Reverts if the OFT's live peer for the loan chain no longer matches the pinned
+     * one; the send fails closed instead of messaging an unknown remote OApp.
+     */
+    error WrongDestinationPeer();
+
+    /**
+     * @notice Reverts if the sent value does not cover the LayerZero messaging fee.
+     * @param required The required fee.
+     */
+    error InsufficientFundsForInstruction(
+        uint256 required
+    );
+
+    /**
+     * @notice Sends a user-signed cross-chain instruction to this account's own address on
+     * the loan chain, as a message-only LayerZero compose over the configured FXRP OFT.
+     * @dev Callable only by this account itself — the method is reached through a
+     * {executeUserOp} multicall, so the XRPL signature covers the payload end-to-end. The
+     * destination is fixed: this same address on the configured loan chain (the loan-chain
+     * Personal Account, which authenticates `composeFrom` back to this address). Validated
+     * like the subaccount's bridge: configured settings, live peer re-checked against the
+     * pinned one, exact quoted fee spent; `msg.value` rides from the account's own balance,
+     * so any excess simply remains on the account. Reverts while the controller is paused
+     * (a forward move). Deliberately not reentrancy-guarded: it runs inside
+     * {executeUserOp}'s guard.
+     * @param _payload The composed payload for the loan-chain Personal Account.
+     * @param _extraOptions Caller-supplied LayerZero execution options (type-3). The message
+     * id is recorded in {CrossChainInstructionSent} (returndata is discarded by the multicall).
+     */
+    function sendCrossChainInstruction(
+        bytes calldata _payload,
+        bytes calldata _extraOptions
+    )
+        external payable;
 
     /**
      * @notice Execute a series of calls (user operation).
