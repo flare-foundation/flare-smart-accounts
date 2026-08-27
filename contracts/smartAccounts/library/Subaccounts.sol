@@ -38,7 +38,7 @@ library Subaccounts {
      * original rationale.
      *
      * For subaccounts the cross-chain commitment is load-bearing for funds in flight, not
-     * just for UX: `sweepToLoan` and `executeLayerZeroCall` bridge FXRP to this account's own
+     * just for UX: `sweepToLoan` and the loan instructions bridge FXRP to this account's own
      * address on the loan chain, so a derivation shift would send assets to an address the
      * user's account no longer controls.
      *

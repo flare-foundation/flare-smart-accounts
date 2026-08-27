@@ -17,6 +17,8 @@ import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOApp
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanBridgeSettingsFacet} from "../../userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
+import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol";
+import {PA_ACTION_EXECUTE} from "../../userInterfaces/ILoanChainPersonalAccount.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {IIVault} from "../interface/IIVault.sol";
@@ -241,60 +243,25 @@ contract PersonalAccount is
     }
 
     /// @inheritdoc IPersonalAccount
-    function sendCrossChainInstruction(
-        bytes calldata _payload,
+    function executeLoanChainUserOp(
+        IPersonalAccount.Call[] calldata _calls,
+        bytes32 _operationId,
+        uint64 _deadline,
         bytes calldata _extraOptions
     )
         external payable
     {
-        // reachable only through executeUserOp (a self-call), so every instruction is
-        // user-signed end-to-end; deliberately not nonReentrant - it runs inside
-        // executeUserOp's transient guard, which a nested guard would trip
+        // reachable only through executeUserOp (a self-call), so the batch is user-signed
+        // end-to-end and is not interpreted here; deliberately not nonReentrant - it runs
+        // inside executeUserOp's transient guard, which a nested guard would trip
         require(msg.sender == address(this), OnlySelf());
-        require(_payload.length > 0, EmptyCrossChainPayload());
-        // a forward move: pausing the controller stops cross-chain instructions immediately
-        require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
-
-        (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
-            ILoanBridgeSettingsFacet(controllerAddress).getLoanBridgeSettings();
         require(
-            fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
-            LoanBridgeNotConfigured()
+            _operationId != bytes32(0) && _deadline >= block.timestamp && _calls.length > 0,
+            InvalidLoanChainInstruction()
         );
-        // a peer mutation on the OFT after configuration must fail closed, not deliver the
-        // instruction to an unknown remote OApp
-        require(
-            IOAppCore(fxrpOft).peers(destinationEid) == destinationPeer,
-            WrongDestinationPeer()
-        );
-
-        // message-only send to this account's own address on the loan chain: the loan-chain
-        // Personal Account authenticates `composeFrom` back to exactly this address
-        SendParam memory sendParam = SendParam({
-            dstEid: destinationEid,
-            to: bytes32(uint256(uint160(address(this)))),
-            amountLD: 0,
-            minAmountLD: 0,
-            extraOptions: _extraOptions,
-            composeMsg: _payload,
-            oftCmd: ""
-        });
-
-        MessagingFee memory fee = IOFT(fxrpOft).quoteSend(sendParam, false);
-        require(msg.value >= fee.nativeFee, InsufficientFundsForInstruction(fee.nativeFee));
-
-        // exactly the quoted fee is spent; msg.value rides from this account's own balance
-        // (a self-call), so the excess simply remains here - no refund transfer needed
-        // slither-disable-start arbitrary-send-eth
-        // solhint-disable-next-line check-send-result
-        (MessagingReceipt memory receipt, ) = IOFT(fxrpOft).send{value: fee.nativeFee}(
-            sendParam,
-            fee,
-            address(this)
-        );
-        // slither-disable-end arbitrary-send-eth
-
-        emit CrossChainInstructionSent(destinationEid, receipt.guid, keccak256(_payload));
+        (uint32 destinationEid, bytes32 guid) =
+            _sendLoanChainUserOp(_calls, _operationId, _deadline, _extraOptions);
+        emit LoanChainUserOpSent(_operationId, _calls.length, destinationEid, guid);
     }
 
     /// @inheritdoc IPersonalAccount
@@ -345,5 +312,70 @@ contract PersonalAccount is
             _interfaceId == type(IERC721Receiver).interfaceId ||
             _interfaceId == type(IERC1363Receiver).interfaceId ||
             super.supportsInterface(_interfaceId); // ERC1155Holder covers IERC1155Receiver and IERC165
+    }
+
+    /// @dev The transport of {executeLoanChainUserOp}: sends the signed batch as a
+    /// message-only compose over the configured FXRP OFT to this account's
+    /// own address on the loan chain, where the mirror authenticates composeFrom back to here
+    /// and executes it. Configured settings required, live peer re-checked against the pinned
+    /// one, exact quoted fee spent, pause-gated (a forward move).
+    function _sendLoanChainUserOp(
+        IPersonalAccount.Call[] memory _calls,
+        bytes32 _operationId,
+        uint64 _deadline,
+        bytes calldata _extraOptions
+    )
+        private
+        returns (uint32 _destinationEid, bytes32 _guid)
+    {
+        // a forward move: pausing the controller stops cross-chain instructions immediately
+        require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
+
+        (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
+            ILoanBridgeSettingsFacet(controllerAddress).getLoanBridgeSettings();
+        require(
+            fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
+            LoanBridgeNotConfigured()
+        );
+        // a peer mutation on the OFT after configuration must fail closed, not deliver the
+        // instruction to an unknown remote OApp
+        require(
+            IOAppCore(fxrpOft).peers(destinationEid) == destinationPeer,
+            WrongDestinationPeer()
+        );
+
+        // the envelope is built here, so what the user signed is structured and a malformed
+        // envelope cannot reach the bridge; the batch encodes as the mirror's Call[]
+        bytes memory payload = abi.encode(
+            PAYLOAD_VERSION_1,
+            PA_ACTION_EXECUTE,
+            abi.encode(_operationId, _deadline, _calls)
+        );
+        SendParam memory sendParam = SendParam({
+            dstEid: destinationEid,
+            to: bytes32(uint256(uint160(address(this)))),
+            amountLD: 0,
+            minAmountLD: 0,
+            extraOptions: _extraOptions,
+            composeMsg: payload,
+            oftCmd: ""
+        });
+
+        MessagingFee memory fee = IOFT(fxrpOft).quoteSend(sendParam, false);
+        require(msg.value >= fee.nativeFee, InsufficientFundsForInstruction(fee.nativeFee));
+
+        // exactly the quoted fee is spent; msg.value rides from this account's own balance
+        // (a self-call), so the excess simply remains here - no refund transfer needed
+        // slither-disable-start arbitrary-send-eth
+        // solhint-disable-next-line check-send-result
+        (MessagingReceipt memory receipt, ) = IOFT(fxrpOft).send{value: fee.nativeFee}(
+            sendParam,
+            fee,
+            address(this)
+        );
+        // slither-disable-end arbitrary-send-eth
+
+        _destinationEid = destinationEid;
+        _guid = receipt.guid;
     }
 }

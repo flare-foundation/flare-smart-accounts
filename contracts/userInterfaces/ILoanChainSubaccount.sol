@@ -25,28 +25,15 @@ uint8 constant ACTION_BORROW = 1;
 /// `depositIdleFxrp`). Position health is enforced by Morpho.
 uint8 constant ACTION_WITHDRAW = 2;
 
-/// @dev Set-recovery action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// uint64 epoch, bytes32 destination)`. Stores the recovery destination for the permissionless
-/// recovery rails; the destination follows the same rules as `DESTINATION_KIND_EVM` (clean
-/// zero-padded, non-zero, neither this account nor the parent Personal Account). The epoch
-/// must be strictly greater than the stored one: LayerZero deliveries are unordered, and an
-/// older authenticated update must not overwrite a newer destination (a stale epoch skips).
-uint8 constant ACTION_SET_RECOVERY = 3;
-
 /// @dev The destination is an EVM address (cleanly zero-padded into the `bytes32`), paid by a
-/// plain ERC-20 transfer — typically an exchange deposit address. It may not be zero, the
-/// subaccount itself, or the parent Personal Account (the two addresses in scope when a
-/// payload is composed, never valid disbursement targets).
+/// plain ERC-20 transfer — typically an exchange deposit address, or the user's own
+/// loan-chain Personal Account (the parent, a functional compose-driven account). It may not
+/// be zero or the subaccount itself (the proceeds could only repay the new debt).
 uint8 constant DESTINATION_KIND_EVM = 1;
 
 /// @dev Reserved: an XRPL address reached over Wormhole. Not implemented yet (Wormhole specs
 /// pending); payloads using it revert.
 uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
-
-/// @dev Skip reason: a set-recovery action carried an epoch not greater than the stored one -
-/// an older update delivered late must not overwrite a newer destination. The id is consumed
-/// (staleness cannot be cured without changing an economic field).
-uint8 constant SKIP_REASON_STALE_EPOCH = 3;
 
 /**
  * @title ILoanChainSubaccount
@@ -58,7 +45,9 @@ uint8 constant SKIP_REASON_STALE_EPOCH = 3;
  * no parent-driven methods — the parent Personal Account has no local key or
  * controller-driven action on this chain; instructions exist only on Flare — so every
  * authorized action arrives as an authenticated LayerZero compose payload sent by this same
- * account on Flare, and everything else is permissionless movement along fixed rails.
+ * account on Flare, and everything else is permissionless movement along fixed rails: into
+ * the account's own position, home over the bridge, or to the parent Personal Account (the
+ * user's own compose-driven account on this chain). It has no native rail.
  */
 interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
 
@@ -111,20 +100,6 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when the recovery destination is set by an authenticated action.
-     * @param parentPersonalAccount The parent Personal Account address.
-     * @param destination The new recovery destination.
-     * @param epoch The new recovery epoch.
-     * @param guid The LayerZero message id the action arrived with.
-     */
-    event RecoveryDestinationSet(
-        address indexed parentPersonalAccount,
-        address destination,
-        uint64 epoch,
-        bytes32 guid
-    );
-
-    /**
      * @notice Emitted when idle loan tokens are repaid into the account's position.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param assets The assets repaid (clamped to the live debt).
@@ -160,29 +135,16 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when a token balance is recovered to the recovery destination.
-     * @param parentPersonalAccount The parent Personal Account address.
+     * @notice Emitted when a token balance is recovered to the parent Personal Account (the
+     * user's own loan-chain account, the fixed recovery destination).
+     * @param parentPersonalAccount The parent Personal Account address paid.
      * @param token The recovered token.
      * @param amount The recovered amount.
-     * @param destination The recovery destination paid.
      */
     event TokenRecovered(
         address indexed parentPersonalAccount,
         address indexed token,
-        uint256 amount,
-        address destination
-    );
-
-    /**
-     * @notice Emitted when the native balance is recovered to the recovery destination.
-     * @param parentPersonalAccount The parent Personal Account address.
-     * @param amount The recovered amount.
-     * @param destination The recovery destination paid.
-     */
-    event NativeRecovered(
-        address indexed parentPersonalAccount,
-        uint256 amount,
-        address destination
+        uint256 amount
     );
 
     /**
@@ -191,8 +153,7 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
      * rails.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The payload's operation id. A duplicate was already consumed; an
-     * expired skip leaves it unconsumed (the intent can retry under it); a stale-epoch skip
-     * consumes it, since staleness cannot be cured without changing an economic field.
+     * expired skip leaves it unconsumed (the intent can retry under it).
      * @param reason The skip reason (see the `SKIP_REASON_*` constants).
      * @param guid The LayerZero message id the action arrived with.
      */
@@ -207,12 +168,6 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
      * @notice Reverts if the parent Personal Account address is invalid.
      */
     error InvalidParentPersonalAccount();
-
-    /**
-     * @notice Reverts on the implementation contract itself, which is never initialized: it
-     * holds no parent and must not accept native (nothing could ever move it out again).
-     */
-    error NotInitialized();
 
     /**
      * @notice Reverts on a debt increase while new borrowing is disabled for this account's
@@ -236,12 +191,6 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
      * @notice Reverts if there is nothing to recover.
      */
     error NothingToRecover();
-
-    /**
-     * @notice Reverts if a recovery rail is used before an authenticated set-recovery action
-     * stored a destination.
-     */
-    error RecoveryDestinationNotSet();
 
     /**
      * @notice Reverts if there is no FXRP to sweep back to the origin chain.
@@ -268,8 +217,8 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
     error RefundFailed();
 
     /**
-     * @notice Reverts if generic recovery is attempted on the market's loan or collateral
-     * token; those move only on their own rails.
+     * @notice Reverts if recovery is attempted on the market's collateral token; it moves only
+     * on its own rails (`depositIdleFxrp`, `sweepToOrigin`).
      * @param token The offending token.
      */
     error ProtectedToken(
@@ -283,11 +232,6 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
     error OutstandingDebt();
 
     /**
-     * @notice Reverts if the native balance could not be sent to the recovery destination.
-     */
-    error NativeRecoveryFailed();
-
-    /**
      * @notice Reverts on a borrow with an unsupported destination kind (the Wormhole-to-XRPL
      * kind is reserved but not implemented).
      * @param destinationKind The unsupported destination kind.
@@ -297,8 +241,8 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts on a borrow disbursement or recovery destination that is not a clean
-     * zero-padded EVM address, or is zero, this account, or the parent Personal Account.
+     * @notice Reverts on a borrow disbursement destination that is not a clean zero-padded
+     * EVM address, or is zero or this account.
      */
     error InvalidDestination();
 
@@ -327,7 +271,7 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
      * Stays available while paused (it moves the position toward safety). Interest accrues
      * first; a balance covering the full debt closes by exact borrow shares (no over-repay
      * revert), a smaller one repays by assets. Surplus stays on the account for
-     * {recoverLoanToken}.
+     * {recoverToken}.
      * @return _assets The assets repaid.
      */
     function repay()
@@ -364,10 +308,13 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
         returns (uint256 _amount);
 
     /**
-     * @notice Recovers a token balance to the stored recovery destination.
-     * @dev Permissionless with a fixed destination (the authenticated recovery destination;
-     * reverts until one is set). The market's loan and collateral tokens are protected and
-     * rejected: they move only on their own rails. Reverts while paused.
+     * @notice Recovers a token balance to the parent Personal Account — the user's own
+     * compose-driven account on this chain, from which a signed user operation moves it anywhere.
+     * @dev Permissionless with a fixed destination. The market's collateral token is rejected
+     * (it moves only on its own rails); the market's loan token is recoverable only while the
+     * position carries no debt (read live from Morpho — until then the balance is repayment
+     * material); any other token moves freely. Not pause-gated: subaccount to its own parent
+     * is inward consolidation, and the parent's signed user operations are what the pause stops.
      * @param _token The token to recover.
      * @return _amount The recovered amount.
      */
@@ -377,49 +324,9 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
         external
         returns (uint256 _amount);
 
-    /**
-     * @notice Recovers the loan-token surplus to the stored recovery destination, once the
-     * position carries no debt.
-     * @dev Permissionless with a fixed destination. While any debt exists the balance is
-     * repayment material and this reverts; the debt is read live from Morpho. Reverts while
-     * paused.
-     * @return _amount The recovered amount.
-     */
-    function recoverLoanToken()
-        external
-        returns (uint256 _amount);
-
-    /**
-     * @notice Recovers the native balance to the stored recovery destination.
-     * @dev Permissionless with a fixed destination (native arrives as bridge refunds).
-     * Reverts while paused.
-     * @return _amount The recovered amount.
-     */
-    function recoverNative()
-        external
-        returns (uint256 _amount);
-
     /// @inheritdoc ISubaccount
     function controllerAddress()
         external view
         override(ILoanChainAccountBase, ISubaccount)
         returns (address);
-
-    /**
-     * @notice Returns the recovery destination set by an authenticated set-recovery action,
-     * or zero when none was ever set.
-     * @return The recovery destination.
-     */
-    function recoveryDestination()
-        external view
-        returns (address);
-
-    /**
-     * @notice Returns the recovery epoch: set-recovery actions must carry a strictly greater
-     * one.
-     * @return The recovery epoch.
-     */
-    function recoveryEpoch()
-        external view
-        returns (uint64);
 }

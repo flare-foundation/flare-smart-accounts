@@ -11,6 +11,7 @@ import {IIMasterAccountController} from "../contracts/smartAccounts/interface/II
 import {MasterAccountControllerInit} from "../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSubaccount.sol";
+import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 import {
     LoanChainSubaccount
 } from "../contracts/smartAccounts/implementation/LoanChainSubaccount.sol";
@@ -26,6 +27,10 @@ import {
 import {TimelockFacet} from "../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {PauseFacet} from "../contracts/smartAccounts/facets/PauseFacet.sol";
 import {ILoanChainSubaccount} from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
+import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
+import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
+import {ILoanChainPersonalAccount} from "../contracts/userInterfaces/ILoanChainPersonalAccount.sol";
+import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {
     ILoanChainSettingsFacet
 } from "../contracts/userInterfaces/facets/ILoanChainSettingsFacet.sol";
@@ -40,7 +45,9 @@ import {
 import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockOft} from "../contracts/mock/MockOft.sol";
+import {MockAssetManager} from "../contracts/mock/MockAssetManager.sol";
 import {MockMorpho} from "../contracts/mock/MockMorpho.sol";
 import {MockLzEndpoint} from "../contracts/mock/MockLzEndpoint.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
@@ -50,9 +57,7 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     DESTINATION_KIND_EVM,
-    DESTINATION_KIND_XRPL_WORMHOLE,
-    ACTION_SET_RECOVERY,
-    SKIP_REASON_STALE_EPOCH
+    DESTINATION_KIND_XRPL_WORMHOLE
 } from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
 import {
     ILoanChainAccountBase,
@@ -72,6 +77,7 @@ import {
 // solhint-disable-next-line max-states-count
 contract LoanChainSubaccountTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+    address private constant FLARE_CONTRACT_REGISTRY = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
 
     IIMasterAccountController private controller;
     LoanChainSubaccount private loanChainImpl;
@@ -236,18 +242,18 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(predictedWithLoanChainImpl, predictedWithFlareImpl);
     }
 
-    function testReceiveGuard() public {
-        // the implementation contract is never initialized and has no parent: it must not
-        // accept native; an initialized proxy accepts it (bridge refunds), and recoverNative
-        // is its exit
+    function testRejectsPlainNative() public {
+        // nothing in the protocol ever pushes native at the account (bridge rails refund
+        // their caller, compose value is rejected), so it has no receive() and no native exit:
+        // a plain send reverts at the sender - implementation and proxy alike
         vm.deal(address(this), 1 ether);
         (bool success, ) = address(loanChainImpl).call{value: 1}("");
         assertFalse(success);
 
         LoanChainSubaccount subaccount = _deploySubaccount();
         (success, ) = address(subaccount).call{value: 1}("");
-        assertTrue(success);
-        assertEq(address(subaccount).balance, 1);
+        assertFalse(success);
+        assertEq(address(subaccount).balance, 0);
     }
 
     //
@@ -847,17 +853,16 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // debt is read live from Morpho on every check - nothing is cached, so an external
         // liquidation is visible to the very next call with no synchronization step
         address subaccount = _borrowedSubaccount(500e18);
-        address destination = _setRecovery(subaccount);
         rlusd.mint(subaccount, 100e18);
 
         vm.expectRevert(ILoanChainSubaccount.OutstandingDebt.selector);
-        ILoanChainSubaccount(subaccount).recoverLoanToken();
+        ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
 
         morpho.simulateLiquidation(_marketId(), subaccount);
 
-        uint256 amount = ILoanChainSubaccount(subaccount).recoverLoanToken();
+        uint256 amount = ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
         assertEq(amount, 100e18);
-        assertEq(rlusd.balanceOf(destination), 100e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
     }
 
     function testPartialLiquidationKeepsCanonicalAccounting() public {
@@ -979,20 +984,10 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
         );
 
-        // the two addresses already in scope when a payload is composed are never valid
-        // targets: disbursing to the account itself only opens debt its own proceeds must
-        // repay, and the parent Personal Account holds no code and no key on this chain
+        // disbursing to the account itself only opens debt its own proceeds must repay (the
+        // parent Personal Account, by contrast, is a valid target - see the dedicated test)
         payload = _borrowPayload(
             bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(subaccount))), 500e18
-        );
-        _deliverExpectRevert(
-            subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
-        );
-        payload = _borrowPayload(
-            bytes32("op-1"),
-            DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(parentPersonalAccount))),
-            500e18
         );
         _deliverExpectRevert(
             subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
@@ -1025,9 +1020,9 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(subaccount), 100e6);
     }
 
-    function testWithdrawAndSetRecoverySkipDuplicateOperation() public {
+    function testWithdrawSkipDuplicateOperation() public {
         // the duplicate terminal gate finalizes every action kind, not just borrows: a
-        // consumed operation id skips a withdraw and a set-recovery without any effect
+        // consumed operation id skips a withdraw without any effect
         address subaccount = _createConfiguredSubaccount();
         bytes32 operationId = bytes32("op-1");
         fxrp.mint(subaccount, 100e6);
@@ -1040,15 +1035,6 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _deliver(subaccount, 2, 0, _withdrawPayload(operationId, 30e6));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
-
-        vm.expectEmit();
-        emit ILoanChainSubaccount.LoanActionSkipped(
-            parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(3)
-        );
-        _deliver(subaccount, 3, 0, _setRecoveryPayload(
-            operationId, 1, bytes32(uint256(uint160(makeAddr("recovery"))))
-        ));
-        assertEq(ILoanChainSubaccount(subaccount).recoveryDestination(), address(0));
     }
 
     function testLzComposeSkipExpiredDeadlineWithoutConsumingTheOperation() public {
@@ -1079,6 +1065,23 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(collateral, 100e6);
         assertEq(fxrp.balanceOf(subaccount), 100e6);
         assertTrue(ILoanChainSubaccount(subaccount).usedOperations(operationId));
+    }
+
+    function testLzComposeExecutesAtDeadlineBoundary() public {
+        // the deadline is inclusive: an instruction delivered in the block whose time equals
+        // its deadline executes, only a later block skips it - and the source-side pre-flight
+        // accepts the same boundary, so a send it lets through is never a guaranteed skip
+        address subaccount = _borrowedSubaccount(0);
+        bytes memory payload = abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_WITHDRAW,
+            abi.encode(bytes32("op-w"), uint64(block.timestamp), uint256(40e6))
+        );
+        _deliver(subaccount, 2, 0, payload);
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 60e6);
+        assertEq(fxrp.balanceOf(subaccount), 40e6);
+        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testLzComposeBorrowRevertBorrowingDisabled() public {
@@ -1143,7 +1146,6 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // the switch stops exactly one thing - new debt; every exit stays open on the sunset
         // pool: composed withdrawal, repayment, and recovery of the surplus
         address subaccount = _borrowedSubaccount(500e18);
-        address destination = _setRecovery(subaccount);
         vm.prank(governance);
         IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
             SUBACCOUNT_TYPE_LOAN
@@ -1156,8 +1158,21 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 600e18);
         assertEq(ILoanChainSubaccount(subaccount).repay(), 500e18);
 
-        assertEq(ILoanChainSubaccount(subaccount).recoverLoanToken(), 100e18);
-        assertEq(rlusd.balanceOf(destination), 100e18);
+        assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(rlusd)), 100e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
+    }
+
+    function testBorrowDisbursesToParent() public {
+        // the parent Personal Account is the user's own compose-driven account on this
+        // chain, so disbursing into it is a legitimate destination - the proceeds then leave
+        // it only by the user's signed transfer
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(parentPersonalAccount))), 500e18
+        ));
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 500e18);
     }
 
     function testBorrowingDisabledIsPerType() public {
@@ -1393,7 +1408,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(assets, 500e18);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(borrowShares, 0);
-        // the over-funded remainder is surplus on the account, recoverLoanToken's material
+        // the over-funded remainder is surplus on the account, recoverToken's material
         assertEq(rlusd.balanceOf(subaccount), 100e18);
     }
 
@@ -1467,11 +1482,10 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(collateral, 110e6);
     }
 
-    function testTransportClearRetainsRecoveryAndBorrowSwitch() public {
-        // the nuclear lever zeroes only the LayerZero surface: the configured recovery
-        // destination and the per-type borrow switch survive the clear
+    function testTransportClearRetainsBorrowSwitchAndRecovery() public {
+        // the nuclear lever zeroes only the LayerZero surface: the per-type borrow switch
+        // survives the clear, and recovery to the parent needs no transport at all
         address subaccount = _createConfiguredSubaccount();
-        address destination = _setRecovery(subaccount);
         vm.startPrank(governance);
         IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
             SUBACCOUNT_TYPE_LOAN
@@ -1484,11 +1498,10 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             ILoanChainSettingsFacet(address(controller))
                 .isLoanChainBorrowingDisabled(SUBACCOUNT_TYPE_LOAN)
         );
-        assertEq(ILoanChainSubaccount(subaccount).recoveryDestination(), destination);
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 1e18);
         assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(stray)), 1e18);
-        assertEq(stray.balanceOf(destination), 1e18);
+        assertEq(stray.balanceOf(parentPersonalAccount), 1e18);
     }
 
     function testDepositIdleFxrp() public {
@@ -1591,23 +1604,16 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
     }
 
-    function testSetRecoveryWorksWhilePaused() public {
-        // rotating a compromised recovery destination is configuration toward safety and must
-        // not wait for (and race) an unpause; outward recovery stays paused meanwhile
+    function testRecoveryWorksWhilePaused() public {
+        // recovery is inward consolidation to the account's own parent, not an exit, so the
+        // pause does not gate it; the parent's signed user operations are what the pause stops
         address subaccount = _createConfiguredSubaccount();
         _pauseController();
 
-        _deliver(subaccount, 1, 0, _setRecoveryPayload(
-            bytes32("op-1"), 1, bytes32(uint256(uint160(makeAddr("safeRecovery"))))
-        ));
-        assertEq(
-            ILoanChainSubaccount(subaccount).recoveryDestination(), makeAddr("safeRecovery")
-        );
-
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 1e18);
-        vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSubaccount(subaccount).recoverToken(address(stray));
+        assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(stray)), 1e18);
+        assertEq(stray.balanceOf(parentPersonalAccount), 1e18);
     }
 
     function testWithdrawWithAttachedCreditLeavesItIdle() public {
@@ -1657,140 +1663,106 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testSetRecoveryDestinationViaCompose() public {
+    function testRecoverTokenToParent() public {
+        // the fixed recovery destination is the parent Personal Account - the user's own
+        // compose-driven account on this chain - with nothing to configure first
         address subaccount = _createConfiguredSubaccount();
-        address destination = makeAddr("recovery");
-
-        vm.expectEmit();
-        emit ILoanChainSubaccount.RecoveryDestinationSet(
-            parentPersonalAccount, destination, 1, _guidFor(1)
-        );
-        _deliver(subaccount, 1, 0, _setRecoveryPayload(
-            bytes32("op-1"), 1, bytes32(uint256(uint160(destination)))
-        ));
-
-        assertEq(ILoanChainSubaccount(subaccount).recoveryDestination(), destination);
-        assertEq(ILoanChainSubaccount(subaccount).recoveryEpoch(), 1);
-    }
-
-    function testSetRecoveryDestinationSkipsStaleEpoch() public {
-        // deliveries are unordered: an older authenticated update must not overwrite a newer
-        // destination
-        address subaccount = _createConfiguredSubaccount();
-        address newer = makeAddr("newer");
-        _deliver(subaccount, 1, 0, _setRecoveryPayload(
-            bytes32("op-2"), 2, bytes32(uint256(uint160(newer)))
-        ));
-
-        vm.expectEmit();
-        emit ILoanChainSubaccount.LoanActionSkipped(
-            parentPersonalAccount, bytes32("op-1"), SKIP_REASON_STALE_EPOCH, _guidFor(2)
-        );
-        _deliver(subaccount, 2, 0, _setRecoveryPayload(
-            bytes32("op-1"), 1, bytes32(uint256(uint160(makeAddr("older"))))
-        ));
-
-        assertEq(ILoanChainSubaccount(subaccount).recoveryDestination(), newer);
-        assertEq(ILoanChainSubaccount(subaccount).recoveryEpoch(), 2);
-        // staleness cannot be cured without changing the epoch itself, so the id is retired
-        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(bytes32("op-1")));
-    }
-
-    function testSetRecoveryDestinationRevertInvalidDestination() public {
-        address subaccount = _createConfiguredSubaccount();
-        _deliverExpectRevert(
-            subaccount, 1, _setRecoveryPayload(bytes32("op-1"), 1, bytes32(0)),
-            ILoanChainSubaccount.InvalidDestination.selector
-        );
-        // same rules as the borrow disbursement: the two addresses in scope when a payload
-        // is composed are never valid recovery destinations
-        _deliverExpectRevert(
-            subaccount, 1,
-            _setRecoveryPayload(bytes32("op-1"), 1, bytes32(uint256(uint160(subaccount)))),
-            ILoanChainSubaccount.InvalidDestination.selector
-        );
-        _deliverExpectRevert(
-            subaccount, 1,
-            _setRecoveryPayload(
-                bytes32("op-1"), 1, bytes32(uint256(uint160(parentPersonalAccount)))
-            ),
-            ILoanChainSubaccount.InvalidDestination.selector
-        );
-    }
-
-    function testRecoverTokenToRecoveryDestination() public {
-        address subaccount = _createConfiguredSubaccount();
-        address destination = _setRecovery(subaccount);
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 42e18);
 
+        vm.expectEmit();
+        emit ILoanChainSubaccount.TokenRecovered(parentPersonalAccount, address(stray), 42e18);
         uint256 amount = ILoanChainSubaccount(subaccount).recoverToken(address(stray));
         assertEq(amount, 42e18);
-        assertEq(stray.balanceOf(destination), 42e18);
+        assertEq(stray.balanceOf(parentPersonalAccount), 42e18);
     }
 
     function testRecoverTokenGuards() public {
         address subaccount = _createConfiguredSubaccount();
-        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(subaccount, 42e18);
 
-        // no destination stored yet
-        vm.expectRevert(ILoanChainSubaccount.RecoveryDestinationNotSet.selector);
-        ILoanChainSubaccount(subaccount).recoverToken(address(stray));
-
-        address destination = _setRecovery(subaccount);
-
-        // the market's tokens never leave through generic recovery
+        // collateral never leaves through recovery: it has its own rails
+        fxrp.mint(subaccount, 1e6);
         vm.expectRevert(
             abi.encodeWithSelector(ILoanChainSubaccount.ProtectedToken.selector, address(fxrp))
         );
         ILoanChainSubaccount(subaccount).recoverToken(address(fxrp));
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ILoanChainSubaccount.ProtectedToken.selector, address(rlusd)
-            )
-        );
-        ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
 
-        // outward recovery is pause-gated
-        _pauseController();
-        vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSubaccount(subaccount).recoverToken(address(stray));
-        _unpauseController();
+        // the loan token is recoverable while the position carries no debt
+        rlusd.mint(subaccount, 5e18);
+        assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(rlusd)), 5e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 5e18);
 
         // nothing to recover
         MintableERC20 empty = new MintableERC20("Empty", "EMP", 18);
         vm.expectRevert(ILoanChainSubaccount.NothingToRecover.selector);
         ILoanChainSubaccount(subaccount).recoverToken(address(empty));
-        assertEq(stray.balanceOf(destination), 0);
     }
 
     function testRecoverLoanTokenSurplusAfterFullRepayment() public {
         address subaccount = _borrowedSubaccount(500e18);
-        address destination = _setRecovery(subaccount);
         rlusd.mint(subaccount, 600e18);
 
         // while debt is outstanding, the balance is repayment material
         vm.expectRevert(ILoanChainSubaccount.OutstandingDebt.selector);
-        ILoanChainSubaccount(subaccount).recoverLoanToken();
+        ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
 
         ILoanChainSubaccount(subaccount).repay();
-        uint256 amount = ILoanChainSubaccount(subaccount).recoverLoanToken();
+        uint256 amount = ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
         assertEq(amount, 100e18);
-        assertEq(rlusd.balanceOf(destination), 100e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
     }
 
-    function testRecoverNative() public {
+    function testFlareSendersProduceThePayloadsTheLoanChainDecodes() public {
+        // sender and receiver in one place: the Flare-side senders (LoanSubaccount,
+        // PersonalAccount) and the loan-chain decoders (LoanChainSubaccount,
+        // LoanChainPersonalAccount) run on this one diamond, so the bytes the Flare side
+        // actually hands to the OFT's send are what the receivers execute - wrapped by the
+        // canonical compose codec exactly as the OFT's lzReceive -> sendCompose wraps them
+        // (composeFrom being the receiver's own address: sender and receiver share it in
+        // production). No hand-built payload in between
         address subaccount = _createConfiguredSubaccount();
-        address destination = _setRecovery(subaccount);
-        vm.deal(address(this), 3 ether);
-        (bool success, ) = subaccount.call{value: 3 ether}("");
-        assertTrue(success);
+        address sender = _flareSenderOnThisDiamond();
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+        vm.deal(parentPersonalAccount, 1 ether);
 
-        uint256 amount = ILoanChainSubaccount(subaccount).recoverNative();
-        assertEq(amount, 3 ether);
-        assertEq(destination.balance, 3 ether);
-        assertEq(subaccount.balance, 0);
+        // borrow: the sender bridges 100e6 with the typed payload; the receiver supplies the
+        // credited amount and disburses the loan to the parent (the mirror's address)
+        fxrp.mint(sender, 100e6);
+        vm.prank(parentPersonalAccount);
+        ILoanSubaccount(sender).borrow{value: 0.01 ether}(
+            100e6, 500e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(parentPersonalAccount))),
+            bytes32("op-b"), deadline, ""
+        );
+        (uint256 amountLD, bytes memory payload) = _lastSentCompose();
+        assertEq(amountLD, 100e6);
+        fxrp.mint(subaccount, amountLD); // the OFT's credit on the receiving side
+        _deliver(subaccount, 1, amountLD, payload);
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 500e18);
+
+        // withdraw: message-only; the receiver returns collateral to the account
+        vm.prank(parentPersonalAccount);
+        ILoanSubaccount(sender).withdraw{value: 0.01 ether}(40e6, bytes32("op-w"), deadline, "");
+        (amountLD, payload) = _lastSentCompose();
+        assertEq(amountLD, 0);
+        _deliver(subaccount, 2, 0, payload);
+        (, , collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 60e6);
+        assertEq(fxrp.balanceOf(subaccount), 40e6);
+
+        // the Personal Account's transfer: sent by a Flare PersonalAccount through
+        // executeUserOp, decoded by a mirror created behind the same beacon
+        address destination = makeAddr("userChosen");
+        _sendTransferFromFlarePersonalAccount(destination, deadline);
+        (amountLD, payload) = _lastSentCompose();
+        assertEq(amountLD, 0);
+        address mirror = _mirrorOnThisDiamond("rMirrorOwner");
+        rlusd.mint(mirror, 500e18);
+        _deliverToMirror(mirror, 3, payload);
+        assertEq(rlusd.balanceOf(destination), 500e18);
+        assertEq(rlusd.balanceOf(mirror), 0);
+        assertTrue(ILoanChainPersonalAccount(mirror).usedOperations(bytes32("op-t")));
     }
 
     function testMinimalLoanChainDiamondTopology() public {
@@ -1848,6 +1820,17 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = minimalController.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
         assertGt(subaccount.code.length, 0);
 
+        // created before its mirror, the subaccount is bound to the computed - still
+        // codeless - mirror address, and a recovery parks the tokens there; creating the
+        // mirror later puts code and the registry entry at that same address, with the
+        // parked balance now under the user's signature
+        address parent = LoanChainSubaccount(payable(subaccount)).parentPersonalAccount();
+        assertEq(parent.code.length, 0);
+        MintableERC20 stray = new MintableERC20("Stray", "STRAY", 18);
+        stray.mint(subaccount, 5e18);
+        ILoanChainSubaccount(subaccount).recoverToken(address(stray));
+        assertEq(stray.balanceOf(parent), 5e18);
+
         // the mirror Personal Account also materializes on the minimal topology, behind the
         // PA beacon, through the explicit loan-chain creation route - but only once the
         // implementation is registered: the frozen BeaconProxy asks the beacon at
@@ -1861,6 +1844,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             .createLoanChainPersonalAccount(xrplOwner);
         assertGt(mirror.code.length, 0);
         assertEq(minimalController.getPersonalAccount(xrplOwner), mirror);
+        assertEq(mirror, parent);
+        assertEq(stray.balanceOf(mirror), 5e18);
 
         // the Flare-only bridge settings are not routable on this diamond
         vm.expectRevert(
@@ -1952,6 +1937,67 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         );
     }
 
+    /// A Flare-side LoanSubaccount sender wired on this diamond as a second type, with the
+    /// Flare bridge settings pointing at this chain and the FAssets registry it reads FXRP from.
+    function _flareSenderOnThisDiamond() private returns (address _sender) {
+        uint256 senderType = 7;
+        vm.prank(governance);
+        controller.setSubaccountImplementation(senderType, address(new LoanSubaccount()));
+        _sender = address(new SubaccountProxy(address(controller), parentPersonalAccount, senderType));
+
+        vm.mockCall(
+            FLARE_CONTRACT_REGISTRY,
+            abi.encodeWithSelector(
+                IFlareContractRegistry.getContractAddressByHash.selector,
+                keccak256(abi.encode("AssetManagerFXRP"))
+            ),
+            abi.encode(address(new MockAssetManager(fxrp)))
+        );
+        bytes32 peer = bytes32(uint256(uint160(address(fxrpOft))));
+        fxrpOft.setPeer(dstEid, peer);
+        vm.prank(governance);
+        controller.setLoanBridgeSettings(address(fxrpOft), dstEid, peer);
+    }
+
+    /// A Flare PersonalAccount behind this diamond's beacon (the Flare implementation is the
+    /// one registered in setUp) sends a one-call transfer batch for the mirror through
+    /// executeUserOp, as in production.
+    function _sendTransferFromFlarePersonalAccount(address _destination, uint64 _deadline) private {
+        address flarePa = address(new PersonalAccountProxy(address(controller), "rSenderOwner"));
+        vm.deal(flarePa, 0.01 ether);
+        IPersonalAccount.Call[] memory batch = new IPersonalAccount.Call[](1);
+        batch[0] = IPersonalAccount.Call({
+            target: address(rlusd),
+            value: 0,
+            data: abi.encodeCall(IERC20.transfer, (_destination, 500e18))
+        });
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: flarePa,
+            value: 0.01 ether,
+            data: abi.encodeCall(
+                IPersonalAccount.executeLoanChainUserOp, (batch, bytes32("op-t"), _deadline, "")
+            )
+        });
+        vm.prank(address(controller));
+        IPersonalAccount(flarePa).executeUserOp(calls);
+    }
+
+    /// The loan-chain mirror for `_xrplOwner`, after switching the PA beacon to the mirror
+    /// implementation (Flare Personal Accounts created earlier on this diamond are not touched
+    /// again).
+    function _mirrorOnThisDiamond(string memory _xrplOwner) private returns (address) {
+        vm.prank(governance);
+        controller.setPersonalAccountImplementation(address(new LoanChainPersonalAccount()));
+        return ILoanChainSettingsFacet(address(controller)).createLoanChainPersonalAccount(_xrplOwner);
+    }
+
+    function _deliverToMirror(address _mirror, uint64 _nonce, bytes memory _payload) private {
+        (bytes memory message, bytes32 guid) = _composeMessage(_mirror, _nonce, 0, _payload);
+        vm.prank(lzEndpoint);
+        ILoanChainPersonalAccount(_mirror).lzCompose(address(fxrpOft), guid, message, executor, "");
+    }
+
     function _createConfiguredSubaccount() private returns (address) {
         _configureSettings();
         return address(_deploySubaccount());
@@ -1966,13 +2012,6 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("exchangeDeposit")))), _borrowAmount
         ));
         return subaccount;
-    }
-
-    function _setRecovery(address _subaccount) private returns (address _destination) {
-        _destination = makeAddr("recovery");
-        _deliver(_subaccount, 99, 0, _setRecoveryPayload(
-            bytes32("op-recovery"), 1, bytes32(uint256(uint160(_destination)))
-        ));
     }
 
     function _deliver(
@@ -2148,23 +2187,6 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         return LoanChainSubaccount(payable(address(proxy)));
     }
 
-    function _setRecoveryPayload(
-        bytes32 _operationId,
-        uint64 _epoch,
-        bytes32 _destination
-    )
-        private view
-        returns (bytes memory)
-    {
-        return abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_SET_RECOVERY,
-            abi.encode(
-                _operationId, uint64(block.timestamp + 1 hours), _epoch, _destination
-            )
-        );
-    }
-
     function _composeMessage(
         address _subaccount,
         uint64 _nonce,
@@ -2192,5 +2214,10 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             dstEid,
             bytes32(uint256(uint160(address(fxrpOft))))
         );
+    }
+
+    /// The amount and compose payload of the last send the Flare side handed to the OFT.
+    function _lastSentCompose() private view returns (uint256 _amountLD, bytes memory _payload) {
+        (, , _amountLD, , , _payload, ) = fxrpOft.lastSendParam();
     }
 }

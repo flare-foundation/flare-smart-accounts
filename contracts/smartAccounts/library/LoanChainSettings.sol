@@ -44,7 +44,7 @@ library LoanChainSettings {
         ) {
             // explicit clear, only for a fully zero struct: disables lzCompose and the
             // bridge-back sweep for all loan types until reconfigured; markets, repayment,
-            // defensive deposits and configured recovery persist. A partially zero struct
+            // defensive deposits and recovery to the parent persist. A partially zero struct
             // falls through to validation and reverts - a malformed clear cannot wipe it
             delete state.transport;
             emit ILoanChainSettingsFacet.LoanChainTransportSet(

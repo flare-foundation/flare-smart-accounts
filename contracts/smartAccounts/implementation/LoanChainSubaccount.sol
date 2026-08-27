@@ -11,9 +11,7 @@ import {
     ILoanChainSubaccount,
     ACTION_BORROW,
     ACTION_WITHDRAW,
-    ACTION_SET_RECOVERY,
-    DESTINATION_KIND_EVM,
-    SKIP_REASON_STALE_EPOCH
+    DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanChainSubaccount.sol";
 import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
 import {
@@ -35,8 +33,12 @@ import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
  * the pool. The parent Personal Account has no local key or controller-driven action on
  * this chain (instructions exist only on Flare), so every authorized action
  * arrives through the authenticated `lzCompose` (see {LoanChainAccountBase}), and everything
- * else is permissionless movement along fixed rails — no caller ever chooses a destination,
- * a market, or an amount source.
+ * else is permissionless movement along fixed rails — into the account's own position, home
+ * over the bridge, or to the parent Personal Account (the user's own compose-driven account
+ * on this chain) — so no caller ever chooses a destination, a market, or an amount source.
+ * It has no native rail: no protocol flow sends native here (a plain send reverts); a
+ * balance landing without a call (pre-deployment funding, an LZ native drop, a force-send)
+ * strands until a beacon upgrade adds a rail - accepted.
  */
 contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
     using SafeERC20 for IERC20;
@@ -50,16 +52,11 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
     address public parentPersonalAccount;
     /// @notice Subaccount type.
     uint256 public subaccountType;
-    /// @inheritdoc ILoanChainSubaccount
-    address public recoveryDestination;
-    /// @inheritdoc ILoanChainSubaccount
-    uint64 public recoveryEpoch;
 
-    /// @dev Native can arrive as a bridge refund; {recoverNative} is its exit. The
-    /// implementation contract itself (never initialized, no parent) rejects it.
-    receive() external payable {
-        require(parentPersonalAccount != address(0), NotInitialized());
-    }
+    // deliberately no receive(): no protocol flow pushes native at this account (the bridge
+    // rails refund their caller, compose value is rejected), so plain native sends revert at
+    // the sender; native landing without a call (pre-deployment funding, an LZ native drop, a
+    // force-send) strands - accepted, the implementation is upgradeable
 
     /// @inheritdoc ISubaccount
     function initialize(
@@ -98,7 +95,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
 
         if (balance >= fullDebt) {
             // the balance covers the whole debt: close by exact borrow shares (no over-repay
-            // revert); the surplus stays on the account for recoverLoanToken
+            // revert); the surplus stays on the account for recoverToken
             loanToken.forceApprove(market.morpho, fullDebt);
             (_assets, ) = IMorpho(market.morpho).repay(
                 market.marketParams, 0, borrowShares, address(this), ""
@@ -204,57 +201,22 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         nonReentrant
         returns (uint256 _amount)
     {
-        address destination = _recoveryDestination();
-        // the market's loan and collateral tokens move only on their own rails
+        // the fixed destination is the parent Personal Account - the user's own compose-driven
+        // account on this chain; not pause-gated, since this is inward consolidation and the
+        // parent's signed user operations are what the pause stops
         ILoanChainSettingsFacet.Market memory market = _myMarket();
-        require(
-            _token != market.marketParams.loanToken &&
-                _token != market.marketParams.collateralToken,
-            ProtectedToken(_token)
-        );
+        // collateral moves only on its own rails
+        require(_token != market.marketParams.collateralToken, ProtectedToken(_token));
+        // while the position has debt, the loan-token balance is repayment material, not
+        // surplus - read live from Morpho, so an external liquidation frees it immediately
+        if (_token == market.marketParams.loanToken) {
+            require(_borrowSharesOf(market) == 0, OutstandingDebt());
+        }
 
         _amount = IERC20(_token).balanceOf(address(this));
         require(_amount > 0, NothingToRecover());
-        IERC20(_token).safeTransfer(destination, _amount);
-        emit TokenRecovered(parentPersonalAccount, _token, _amount, destination);
-    }
-
-    /// @inheritdoc ILoanChainSubaccount
-    function recoverLoanToken()
-        external
-        nonReentrant
-        returns (uint256 _amount)
-    {
-        address destination = _recoveryDestination();
-        // while the position has debt, the balance is repayment material, not surplus;
-        // collateral never leaves through recovery at all
-        ILoanChainSettingsFacet.Market memory market = _myMarket();
-        require(_borrowSharesOf(market) == 0, OutstandingDebt());
-
-        _amount = IERC20(market.marketParams.loanToken).balanceOf(address(this));
-        require(_amount > 0, NothingToRecover());
-        IERC20(market.marketParams.loanToken).safeTransfer(destination, _amount);
-        emit TokenRecovered(parentPersonalAccount, market.marketParams.loanToken, _amount, destination);
-    }
-
-    /// @inheritdoc ILoanChainSubaccount
-    function recoverNative()
-        external
-        nonReentrant
-        returns (uint256 _amount)
-    {
-        address destination = _recoveryDestination();
-        _amount = address(this).balance;
-        require(_amount > 0, NothingToRecover());
-
-        // false positive (arbitrary-send-eth): the recipient is the authenticated recovery
-        // destination stored by a user-signed action - not caller-chosen
-        // slither-disable-start arbitrary-send-eth
-        // solhint-disable-next-line avoid-low-level-calls
-        (bool success, ) = destination.call{value: _amount}("");
-        // slither-disable-end arbitrary-send-eth
-        require(success, NativeRecoveryFailed());
-        emit NativeRecovered(parentPersonalAccount, _amount, destination);
+        IERC20(_token).safeTransfer(parentPersonalAccount, _amount);
+        emit TokenRecovered(parentPersonalAccount, _token, _amount);
     }
 
     /// @inheritdoc ISubaccount
@@ -291,11 +253,6 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
             // unpausing (the borrow action gates itself - its top-up form is pause-exempt)
             _checkNotPaused();
             _executeWithdraw(_actionData, _guid);
-        } else if (_action == ACTION_SET_RECOVERY) {
-            // deliberately allowed while paused: rotating a compromised recovery destination
-            // is configuration toward safety, and outward recovery is paused meanwhile - the
-            // rotation must not have to wait for (and race) an unpause
-            _executeSetRecovery(_actionData, _guid);
         } else {
             revert UnsupportedAction(_action);
         }
@@ -377,15 +334,14 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
                 _destinationKind == DESTINATION_KIND_EVM,
                 UnsupportedDestinationKind(_destinationKind)
             );
-            // a clean zero-padded, non-zero EVM address - and neither address in scope when
-            // composing: not this account (the proceeds could only repay the new debt), not
-            // the parent Personal Account (no local key on this chain - not a payout target)
+            // a clean zero-padded, non-zero EVM address that is not this account (the
+            // proceeds could only repay the new debt); the parent Personal Account - the
+            // user's own compose-driven account on this chain - is a valid target
             address destinationAddress = address(uint160(uint256(_destination)));
             require(
                 uint256(_destination) >> 160 == 0 &&
                     destinationAddress != address(0) &&
-                    destinationAddress != address(this) &&
-                    destinationAddress != parentPersonalAccount,
+                    destinationAddress != address(this),
                 InvalidDestination()
             );
             (uint256 assetsBorrowed, ) = IMorpho(market.morpho).borrow(
@@ -419,45 +375,6 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
             market.marketParams, amount, address(this), address(this)
         );
         emit CollateralWithdrawn(parentPersonalAccount, operationId, amount, _guid);
-    }
-
-    /// @dev Stores the recovery destination for the permissionless recovery rails. The epoch
-    /// must be strictly greater than the stored one: deliveries are unordered, and an older
-    /// authenticated update must not overwrite a newer destination.
-    function _executeSetRecovery(
-        bytes memory _actionData,
-        bytes32 _guid
-    )
-        private
-    {
-        (bytes32 operationId, uint64 deadline, uint64 epoch, bytes32 destination) =
-            abi.decode(_actionData, (bytes32, uint64, uint64, bytes32));
-        require(operationId != bytes32(0), InvalidOperationId());
-        // same destination rules as the borrow disbursement: recovering to this account is
-        // a no-op, and the parent Personal Account has no local key on this chain
-        address destinationAddress = address(uint160(uint256(destination)));
-        require(
-            uint256(destination) >> 160 == 0 &&
-                destinationAddress != address(0) &&
-                destinationAddress != address(this) &&
-                destinationAddress != parentPersonalAccount,
-            InvalidDestination()
-        );
-        if (_skipped(operationId, deadline, _guid)) return;
-        if (epoch <= recoveryEpoch) {
-            // expiry is curable with a fresh deadline; staleness only with a new epoch -
-            // so the id is retired, keeping ids one-intent-one-id
-            usedOperations[operationId] = true;
-            emit LoanActionSkipped(
-                parentPersonalAccount, operationId, SKIP_REASON_STALE_EPOCH, _guid
-            );
-            return;
-        }
-        usedOperations[operationId] = true;
-
-        recoveryDestination = destinationAddress;
-        recoveryEpoch = epoch;
-        emit RecoveryDestinationSet(parentPersonalAccount, recoveryDestination, epoch, _guid);
     }
 
     /// @dev The soft gates shared by all actions (see {LoanChainAccountBase._terminalSkipReason}):
@@ -519,16 +436,6 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
             IMorpho(_market.morpho).market(marketId);
         _fullDebt = _toAssetsUp(_borrowShares, totalBorrowAssets, totalBorrowShares);
-    }
-
-    function _recoveryDestination()
-        private view
-        returns (address _destination)
-    {
-        // outward recovery is a forward move: the pause stops it
-        _checkNotPaused();
-        _destination = recoveryDestination;
-        require(_destination != address(0), RecoveryDestinationNotSet());
     }
 
     function _facet()

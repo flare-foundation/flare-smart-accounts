@@ -94,19 +94,41 @@ interface ILoanSubaccount is ISubaccount {
     );
 
     /**
-     * @notice Emitted when idle FXRP is bridged to the loan chain with a composed call attached.
+     * @notice Emitted when a borrow instruction is sent to this account's loan-chain twin.
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param amount Amount of FXRP bridged.
-     * @param destinationEid The LayerZero endpoint id it was bridged to.
+     * @param operationId The user-chosen operation id.
+     * @param collateralAmount FXRP bridged with the instruction, to become collateral.
+     * @param borrowAmount Loan-token amount to borrow and disburse; zero for a pure top-up.
+     * @param destinationKind The disbursement destination kind.
+     * @param destination The disbursement destination.
+     * @param destinationEid The loan chain's LayerZero endpoint id.
      * @param guid The LayerZero message id.
-     * @param composeMsgHash keccak256 of the composed payload.
      */
-    event LayerZeroCallExecuted(
+    event BorrowInstructionSent(
         address indexed parentPersonalAccount,
+        bytes32 operationId,
+        uint256 collateralAmount,
+        uint256 borrowAmount,
+        uint8 destinationKind,
+        bytes32 destination,
+        uint32 destinationEid,
+        bytes32 guid
+    );
+
+    /**
+     * @notice Emitted when a withdraw instruction is sent to this account's loan-chain twin.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param operationId The user-chosen operation id.
+     * @param amount Collateral to withdraw on the loan chain.
+     * @param destinationEid The loan chain's LayerZero endpoint id.
+     * @param guid The LayerZero message id.
+     */
+    event WithdrawInstructionSent(
+        address indexed parentPersonalAccount,
+        bytes32 operationId,
         uint256 amount,
         uint32 destinationEid,
-        bytes32 guid,
-        bytes32 composeMsgHash
+        bytes32 guid
     );
 
     /**
@@ -204,10 +226,12 @@ interface ILoanSubaccount is ISubaccount {
     );
 
     /**
-     * @notice Reverts if the composed payload passed to {executeLayerZeroCall} is empty. A
-     * plain transfer without a call is {sweepToLoan}'s job.
+     * @notice Reverts on a loan instruction whose arguments cannot execute on the loan chain:
+     * a zero operation id, a deadline already passed, nothing to collateralize or borrow, a
+     * zero withdrawal, or a borrow disbursement that is not a clean non-zero EVM address
+     * other than this account. Checked here, before any bridge fee is paid.
      */
-    error EmptyComposeMessage();
+    error InvalidLoanInstruction();
 
     /**
      * @notice Reverts if the requested bridge amount exceeds the account's FXRP balance.
@@ -251,35 +275,56 @@ interface ILoanSubaccount is ISubaccount {
         returns (uint256 _amount);
 
     /**
-     * @notice Bridges exactly `_amount` FXRP to this account's address on the loan chain with
-     * a composed call attached, which the destination-side account executes on arrival — the
-     * loan action.
-     * @dev Restricted to the parent Personal Account: unlike the parameterless sweeps this is
-     * not cleanup — the payload names a loan action and, for a borrow, a user-chosen destination
-     * for the proceeds — so it must carry the user's XRPL signature. The payload is opaque to
-     * this contract; its schema is defined by the destination-side account's `lzCompose`. The
-     * bridge destination is this account's own cross-chain address, exactly as in {sweepToLoan},
-     * and all of {sweepToLoan}'s guards apply: reverts while the controller is paused, requires
-     * configured bridge settings, and re-checks the OFT's live peer against the pinned one.
-     * The amount is explicit rather than the whole balance: what travels becomes the
-     * authenticated collateral figure on the destination (the OFT's `amountLD`), so the user
-     * signs exactly how much is collateralized, and idle residue on the account stays for the
-     * cleanup rails. A zero amount is a message-only send, used by actions that carry no
-     * tokens (withdraw, configuration).
-     * The FXRP OFT adapter enforces execution options only for plain sends, so `_extraOptions`
-     * must be type-3 options carrying both the destination `lzReceive` gas and the `lzCompose`
-     * gas; enforced options, if the adapter's owner later configures them, are prepended by
-     * LayerZero and raise the quoted fee. `msg.value` must cover the LayerZero messaging fee;
-     * any excess is returned to the caller (the parent).
-     * @param _amount Amount of FXRP to bridge with the message; may be zero, at most the
-     * account's balance.
-     * @param _composeMsg The composed payload, delivered to this account's `lzCompose` on the
-     * destination chain. Must not be empty.
+     * @notice The borrow instruction: bridges exactly `_collateralAmount` FXRP (zero for a
+     * borrow against existing collateral) to this account's own address on the loan chain,
+     * with the typed borrow payload the loan-chain twin executes on arrival — supply the
+     * bridged amount as collateral and, for a non-zero `_borrowAmount`, borrow and disburse.
+     * @dev Restricted to the parent Personal Account: the instruction names a loan action and
+     * a user-chosen disbursement destination, so it must carry the user's XRPL signature. The
+     * payload is built here, not passed in, so what the user signs is structured and
+     * type-checked, and a malformed payload cannot reach the bridge. Arguments are validated
+     * before any fee is paid (`InvalidLoanInstruction`); the loan chain re-validates on
+     * delivery. The bridge destination is this account's own cross-chain address, exactly as
+     * in {sweepToLoan}, with all of its guards: paused reverts, configured settings required,
+     * live peer re-checked. `_extraOptions` must be type-3 options carrying both the
+     * destination `lzReceive` gas and the `lzCompose` gas. `msg.value` must cover the
+     * LayerZero fee; any excess is returned to the caller (the parent).
+     * @param _collateralAmount FXRP to bridge and supply as collateral; may be zero, at most
+     * the account's balance.
+     * @param _borrowAmount Loan-token amount to borrow and disburse; zero for a pure top-up.
+     * @param _destinationKind The disbursement destination kind (`DESTINATION_KIND_*`).
+     * @param _destination The disbursement destination (a clean zero-padded EVM address for
+     * `DESTINATION_KIND_EVM`); ignored for a pure top-up.
+     * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
+     * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
-    function executeLayerZeroCall(
+    function borrow(
+        uint256 _collateralAmount,
+        uint256 _borrowAmount,
+        uint8 _destinationKind,
+        bytes32 _destination,
+        bytes32 _operationId,
+        uint64 _deadline,
+        bytes calldata _extraOptions
+    )
+        external payable;
+
+    /**
+     * @notice The withdraw instruction: a message-only send to this account's own address on
+     * the loan chain, with the typed withdraw payload — withdraw `_amount` of collateral from
+     * the position to the loan-chain account itself, where only its fixed rails can move it.
+     * @dev Restricted to the parent Personal Account; same validation, guards, and fee
+     * handling as {borrow}. No FXRP travels with it.
+     * @param _amount Collateral to withdraw on the loan chain; non-zero.
+     * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
+     * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
+     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
+     */
+    function withdraw(
         uint256 _amount,
-        bytes calldata _composeMsg,
+        bytes32 _operationId,
+        uint64 _deadline,
         bytes calldata _extraOptions
     )
         external payable;

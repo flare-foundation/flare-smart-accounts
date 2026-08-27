@@ -140,16 +140,18 @@ interface IPersonalAccount {
     );
 
     /**
-     * @notice Emitted when a cross-chain instruction is sent to this account's own address
-     * on the loan chain.
+     * @notice Emitted when a signed batch of calls is sent to this account's loan-chain twin
+     * for execution.
+     * @param operationId The user-chosen operation id.
+     * @param callCount The number of calls in the batch.
      * @param destinationEid The loan chain's LayerZero endpoint id.
      * @param guid The LayerZero message id of the send.
-     * @param payloadHash keccak256 of the composed payload.
      */
-    event CrossChainInstructionSent(
+    event LoanChainUserOpSent(
+        bytes32 operationId,
+        uint256 callCount,
         uint32 destinationEid,
-        bytes32 guid,
-        bytes32 payloadHash
+        bytes32 guid
     );
 
     /**
@@ -208,17 +210,18 @@ interface IPersonalAccount {
     error CallFailed(uint256 index, bytes returnData);
 
     /**
-     * @notice Reverts if {sendCrossChainInstruction} is called by anything other than this
+     * @notice Reverts if {executeLoanChainUserOp} is called by anything other than this
      * account itself: it is reachable only through {executeUserOp}, so every instruction is
      * user-signed.
      */
     error OnlySelf();
 
     /**
-     * @notice Reverts on an empty cross-chain payload: a message-only send must carry an
-     * instruction.
+     * @notice Reverts on a loan-chain instruction whose envelope cannot execute on the
+     * mirror: a zero operation id, a deadline already passed, or an empty batch. Checked
+     * here, before any bridge fee is paid; the batch itself is not interpreted.
      */
-    error EmptyCrossChainPayload();
+    error InvalidLoanChainInstruction();
 
     /**
      * @notice Reverts if the loan bridge settings are not configured yet.
@@ -240,23 +243,32 @@ interface IPersonalAccount {
     );
 
     /**
-     * @notice Sends a user-signed cross-chain instruction to this account's own address on
-     * the loan chain, as a message-only LayerZero compose over the configured FXRP OFT.
-     * @dev Callable only by this account itself — the method is reached through a
-     * {executeUserOp} multicall, so the XRPL signature covers the payload end-to-end. The
-     * destination is fixed: this same address on the configured loan chain (the loan-chain
-     * Personal Account, which authenticates `composeFrom` back to this address). Validated
-     * like the subaccount's bridge: configured settings, live peer re-checked against the
-     * pinned one, exact quoted fee spent; `msg.value` rides from the account's own balance,
-     * so any excess simply remains on the account. Reverts while the controller is paused
-     * (a forward move). Deliberately not reentrancy-guarded: it runs inside
-     * {executeUserOp}'s guard.
-     * @param _payload The composed payload for the loan-chain Personal Account.
-     * @param _extraOptions Caller-supplied LayerZero execution options (type-3). The message
-     * id is recorded in {CrossChainInstructionSent} (returndata is discarded by the multicall).
+     * @notice Sends a signed batch of calls to this account's loan-chain twin (the
+     * compose-driven mirror at this same address) for execution there: the loan-chain
+     * `executeUserOp`, carried by the authenticated compose instead of the controller.
+     * @dev Callable only by this account itself — the method is reached through an
+     * {executeUserOp} multicall, so the XRPL signature covers every target, value and
+     * calldata end-to-end. The batch is not interpreted here (the mirror runs it all or
+     * nothing, and a failed call leaves the delivery retriable with the id unconsumed); only
+     * the envelope is validated before any fee is paid (`InvalidLoanChainInstruction`: zero
+     * operation id, passed deadline, empty batch). Sent as a message-only compose over the
+     * configured FXRP OFT to this same address: configured settings required, live peer
+     * re-checked against the pinned one, exact quoted fee spent; `msg.value` rides from the
+     * account's own balance, so any excess simply remains on the account. Reverts while the
+     * controller is paused (a forward move). Deliberately not reentrancy-guarded: it runs
+     * inside {executeUserOp}'s guard. `_extraOptions` must carry the `lzCompose` gas the batch
+     * needs and, when the batch sends more native than the mirror holds, a native drop. The
+     * message id is
+     * recorded in {LoanChainUserOpSent}.
+     * @param _calls The calls to execute from the mirror, in order.
+     * @param _operationId The user-chosen operation id (non-zero, unique per account).
+     * @param _deadline Unix time after which the mirror skips the instruction unexecuted.
+     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
-    function sendCrossChainInstruction(
-        bytes calldata _payload,
+    function executeLoanChainUserOp(
+        Call[] calldata _calls,
+        bytes32 _operationId,
+        uint64 _deadline,
         bytes calldata _extraOptions
     )
         external payable;

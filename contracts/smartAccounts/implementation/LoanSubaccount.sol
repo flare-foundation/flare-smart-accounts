@@ -12,6 +12,12 @@ import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
+import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol";
+import {
+    ACTION_BORROW,
+    ACTION_WITHDRAW,
+    DESTINATION_KIND_EVM
+} from "../../userInterfaces/ILoanChainSubaccount.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {
     ISubaccountsFacet,
@@ -126,24 +132,80 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
     }
 
     /// @inheritdoc ILoanSubaccount
-    function executeLayerZeroCall(
-        uint256 _amount,
-        bytes calldata _composeMsg,
+    function borrow(
+        uint256 _collateralAmount,
+        uint256 _borrowAmount,
+        uint8 _destinationKind,
+        bytes32 _destination,
+        bytes32 _operationId,
+        uint64 _deadline,
         bytes calldata _extraOptions
     )
         external payable
         onlyParent
         nonReentrant
     {
-        // an empty payload would degrade to a plain transfer, which is sweepToLoan's job
-        require(_composeMsg.length > 0, EmptyComposeMessage());
-        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, _extraOptions, _composeMsg);
-        emit LayerZeroCallExecuted(
+        // fail fast on Flare, before any bridge fee is paid; the loan chain re-validates
+        require(
+            _operationId != bytes32(0) &&
+                _deadline >= block.timestamp &&
+                (_collateralAmount > 0 || _borrowAmount > 0),
+            InvalidLoanInstruction()
+        );
+        if (_borrowAmount > 0) {
+            // only the EVM form exists today; a clean non-zero address other than this account
+            // (the parent - the user's own loan-chain account - is a valid target)
+            address destinationAddress = address(uint160(uint256(_destination)));
+            require(
+                _destinationKind == DESTINATION_KIND_EVM &&
+                    uint256(_destination) >> 160 == 0 &&
+                    destinationAddress != address(0) &&
+                    destinationAddress != address(this),
+                InvalidLoanInstruction()
+            );
+        }
+        bytes memory payload = abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_BORROW,
+            abi.encode(_operationId, _deadline, _destinationKind, _destination, _borrowAmount)
+        );
+        (uint32 destinationEid, bytes32 guid) =
+            _bridgeToSelf(_collateralAmount, _extraOptions, payload);
+        emit BorrowInstructionSent(
             parentPersonalAccount,
-            _amount,
+            _operationId,
+            _collateralAmount,
+            _borrowAmount,
+            _destinationKind,
+            _destination,
             destinationEid,
-            guid,
-            keccak256(_composeMsg)
+            guid
+        );
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function withdraw(
+        uint256 _amount,
+        bytes32 _operationId,
+        uint64 _deadline,
+        bytes calldata _extraOptions
+    )
+        external payable
+        onlyParent
+        nonReentrant
+    {
+        require(
+            _operationId != bytes32(0) && _deadline >= block.timestamp && _amount > 0,
+            InvalidLoanInstruction()
+        );
+        bytes memory payload = abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_WITHDRAW,
+            abi.encode(_operationId, _deadline, _amount)
+        );
+        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(0, _extraOptions, payload);
+        emit WithdrawInstructionSent(
+            parentPersonalAccount, _operationId, _amount, destinationEid, guid
         );
     }
 
@@ -236,7 +298,7 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         return ISubaccountsFacet(controllerAddress).implementationForType(subaccountType);
     }
 
-    /// @dev Shared forward-move core of {sweepToLoan} and {executeLayerZeroCall}: bridges
+    /// @dev Shared forward-move core of {sweepToLoan}, {borrow} and {withdraw}: bridges
     /// exactly `_amount` FXRP over LayerZero to this account's own address on the loan chain,
     /// so both entry points share the same guards by construction. A zero amount is a
     /// message-only send (the loan instruction's withdraw and configuration actions carry no
