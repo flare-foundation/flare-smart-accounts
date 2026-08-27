@@ -40,7 +40,7 @@
     "spellcheck": "cspell --config .vscode/cspell.json --no-progress \"contracts/**/*.sol\" \"test/**/*.sol\" \"deployment/**/*.{sol,ts}\" \"docs/**/*.md\" README.md AGENTS.md CHANGELOG.md CONTRIBUTING.md SECURITY.md",
     "test:tooling": "tsx --test deployment/utils/pinned-constants.test.ts",
     "typecheck": "tsc --noEmit",
-    "slither": "pip3 install slither-analyzer && rm -f ./slither.json && rm -f ./slither_badge.json 2> /dev/null; slither . --filter-paths \"dependencies|node_modules|mock\" --json=./slither.json 2> /dev/null || true; node scripts/slither-parse.js ./slither.json",
+    "slither": "pip3 install slither-analyzer 2> /dev/null; rm -f ./slither.json ./slither_badge.json; slither . --filter-paths \"dependencies|node_modules|mock\" --json=./slither.json 2> /dev/null || true; node scripts/slither-parse.js ./slither.json",
     "---------OTHER---SCRIPTS": "",
     "get-error-selectors": "bash scripts/extract-error-selectors.sh",
     "verify_contracts": "tsx deployment/scripts/verify-contracts.ts"
