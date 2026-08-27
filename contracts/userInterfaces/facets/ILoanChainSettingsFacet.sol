@@ -175,7 +175,7 @@ interface ILoanChainSettingsFacet {
 
     /**
      * @notice Returns whether new debt increases are disabled for a subaccount type.
-     * Repayment, collateral top-ups, withdrawals, and recovery are never affected.
+     * Repayment, collateral deposits, withdrawals, and recovery are never affected.
      * @param _subaccountType The subaccount type.
      * @return Whether borrowing is disabled.
      */

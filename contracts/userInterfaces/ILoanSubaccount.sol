@@ -77,7 +77,7 @@ interface ILoanSubaccount is ISubaccount {
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id.
      * @param collateralAmount FXRP bridged with the instruction, to become collateral.
-     * @param borrowAmount Loan-token amount to borrow and disburse; zero for a pure top-up.
+     * @param borrowAmount Loan-token amount to borrow and disburse (non-zero).
      * @param destinationKind The disbursement destination kind.
      * @param destination The disbursement destination.
      * @param destinationEid The loan chain's LayerZero endpoint id.
@@ -90,6 +90,23 @@ interface ILoanSubaccount is ISubaccount {
         uint256 borrowAmount,
         uint8 destinationKind,
         bytes32 destination,
+        uint32 destinationEid,
+        bytes32 guid
+    );
+
+    /**
+     * @notice Emitted when a deposit-collateral instruction is sent to this account's
+     * loan-chain twin.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param operationId The user-chosen operation id.
+     * @param amount FXRP bridged with the instruction, to become collateral.
+     * @param destinationEid The loan chain's LayerZero endpoint id.
+     * @param guid The LayerZero message id.
+     */
+    event CollateralDepositInstructionSent(
+        address indexed parentPersonalAccount,
+        bytes32 operationId,
+        uint256 amount,
         uint32 destinationEid,
         bytes32 guid
     );
@@ -196,9 +213,9 @@ interface ILoanSubaccount is ISubaccount {
 
     /**
      * @notice Reverts on a loan instruction whose arguments cannot execute on the loan chain:
-     * a zero operation id, a deadline already passed, nothing to collateralize or borrow, a
-     * zero withdrawal, or a borrow disbursement that is not a clean non-zero EVM address
-     * other than this account. Checked here, before any bridge fee is paid.
+     * a zero operation id, a deadline already passed, a zero borrow, deposit or withdrawal
+     * amount, or a borrow disbursement that is not a clean non-zero EVM address other than
+     * this account. Checked here, before any bridge fee is paid.
      */
     error InvalidLoanInstruction();
 
@@ -256,7 +273,8 @@ interface ILoanSubaccount is ISubaccount {
      * @notice The borrow instruction: bridges exactly `_collateralAmount` FXRP (zero for a
      * borrow against existing collateral) to this account's own address on the loan chain,
      * with the typed borrow payload the loan-chain twin executes on arrival — supply the
-     * bridged amount as collateral and, for a non-zero `_borrowAmount`, borrow and disburse.
+     * bridged amount as collateral, borrow `_borrowAmount` and disburse it. A pure collateral
+     * deposit is its own instruction, {depositCollateral}.
      * @dev Restricted to the parent Personal Account: the instruction names a loan action and
      * a user-chosen disbursement destination, so it must carry the user's XRPL signature. The
      * payload is built here, not passed in, so what the user signs is structured and
@@ -269,10 +287,10 @@ interface ILoanSubaccount is ISubaccount {
      * LayerZero fee; any excess is returned to the caller (the parent).
      * @param _collateralAmount FXRP to bridge and supply as collateral; may be zero, at most
      * the account's balance.
-     * @param _borrowAmount Loan-token amount to borrow and disburse; zero for a pure top-up.
+     * @param _borrowAmount Loan-token amount to borrow and disburse; non-zero.
      * @param _destinationKind The disbursement destination kind (`DESTINATION_KIND_*`).
      * @param _destination The disbursement destination (a clean zero-padded EVM address for
-     * `DESTINATION_KIND_EVM`); ignored for a pure top-up.
+     * `DESTINATION_KIND_EVM`).
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
@@ -282,6 +300,26 @@ interface ILoanSubaccount is ISubaccount {
         uint256 _borrowAmount,
         uint8 _destinationKind,
         bytes32 _destination,
+        bytes32 _operationId,
+        uint64 _deadline,
+        bytes calldata _extraOptions
+    )
+        external payable;
+
+    /**
+     * @notice The deposit-collateral instruction: bridges exactly `_amount` FXRP to this
+     * account's own address on the loan chain, with the typed deposit payload the loan-chain
+     * twin executes on arrival — supply the bridged amount as collateral, no debt change.
+     * @dev Restricted to the parent Personal Account; same validation, guards, and fee
+     * handling as {borrow}. On the loan chain the deposit is the defensive move: while the
+     * controller is paused it still executes when the position carries live debt.
+     * @param _amount FXRP to bridge and supply as collateral; non-zero, at most the balance.
+     * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
+     * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
+     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
+     */
+    function depositCollateral(
+        uint256 _amount,
         bytes32 _operationId,
         uint64 _deadline,
         bytes calldata _extraOptions

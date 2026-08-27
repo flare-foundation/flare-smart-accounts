@@ -155,27 +155,31 @@ Integration note: the XRP proof's `proofOwner` must be requested as zero or **th
 Personal Account's address** — the asset manager sees the parent as the caller, not the
 subaccount the FXRP came from.
 
-## The loan instructions: `borrow` and `withdraw`
+## The loan instructions: `borrow`, `depositCollateral` and `withdraw`
 
 The forward moves come in two shapes. `sweepToLoan` is cleanup: permissionless, no payload, the
 assets just cross over. The **loan instructions** are `borrow(collateralAmount, borrowAmount,
 destinationKind, destination, operationId, deadline, extraOptions)` and `withdraw(amount,
 operationId, deadline, extraOptions)`: typed methods that build the compose payload
 **on-chain** and bridge it to this account's own address on the loan chain, where the
-loan-chain twin executes it on arrival (supply as collateral, borrow, disburse; withdraw
-collateral). The payload is not passed in: what the user signs is structured and
-type-checked, a malformed payload cannot reach the bridge, and the arguments are validated
-here — before any bridge fee is paid — for everything the loan chain would reject on
-delivery (`InvalidLoanInstruction`: zero operation id, deadline already passed, nothing to
-collateralize or borrow, zero withdrawal, a disbursement destination that is not a clean
-non-zero EVM address other than this account). The loan chain re-validates on delivery.
+loan-chain twin executes it on arrival (supply as collateral, borrow, disburse; deposit
+collateral only; withdraw collateral). The payload is not passed in: what the user signs is
+structured and type-checked, a malformed payload cannot reach the bridge, and the arguments
+are validated here — before any bridge fee is paid — for everything the loan chain would
+reject on delivery (`InvalidLoanInstruction`: zero operation id, deadline already passed, a
+zero borrow, deposit or withdrawal amount, a disbursement destination that is not a clean
+non-zero EVM address other than this account). The loan chain re-validates on delivery. The
+three are separate instructions with separate actions — a borrow always increases debt
+(`borrowAmount` non-zero), `depositCollateral` never does — so each carries exactly the
+fields it needs and its own pause rule (a deposit is the defensive move; see the loan-chain
+section).
 `borrow`'s collateral amount is explicit rather than the whole balance: what travels becomes
 the authenticated collateral figure on the destination (the OFT's `amountLD`), so the user
 signs exactly what is collateralized, and idle residue — donations, strands from skipped
 deliveries — stays behind for the cleanup rails. A **zero collateral amount is a
 message-only send** (verified against the live adapter): a borrow against existing
 collateral, or a withdraw, which never carries tokens. Only the cleanup sweep keeps
-whole-balance semantics, because sweeping everything is what cleanup means. All three share
+whole-balance semantics, because sweeping everything is what cleanup means. All four share
 one bridging core in the contract, so the guards are identical by construction: a paused
 controller blocks it, the governance-pinned settings name the route, and the OFT's live peer
 is re-checked against the pinned one on every call. What differs is authorization and inputs:
@@ -184,7 +188,8 @@ is re-checked against the pinned one on every call. What differs is authorizatio
   action and, for a borrow, a user-chosen destination for the proceeds, so it must carry the
   user's XRPL signature. This is the instruction-destination rule below, in contract form.
 - **The payload schema is shared with the loan-chain account**, not opaque: the constants
-  (`PAYLOAD_VERSION_1`, `ACTION_BORROW`, `ACTION_WITHDRAW`, `DESTINATION_KIND_*`) are imported
+  (`PAYLOAD_VERSION_1`, `ACTION_BORROW`, `ACTION_DEPOSIT_COLLATERAL`, `ACTION_WITHDRAW`,
+  `DESTINATION_KIND_*`) are imported
   from the loan-chain interfaces, so the tags cannot drift apart. The per-action tuple layouts
   are duplicated by construction (the sender encodes, the receiver decodes) and are held equal
   by tests: byte-equality of every sender payload against an independently built one, and a
@@ -229,7 +234,7 @@ side):
 - **A real Endpoint/OFT compose-delivery simulation** belongs to the loan-chain-side test suite
   as a regression test; the live-adapter verification recorded here is evidence, not a test.
   Still open for the wire hop (a real `EndpointV2` and the OFT's `lzReceive → sendCompose`),
-  and it must cover all three actions (borrow, withdraw, mirror execute) — the mirror case with a
+  and it must cover all the actions (borrow, deposit, withdraw, mirror execute) — the mirror case with a
   native drop into the real beacon proxy followed by a value-carrying batch, since unit tests fund
   the mirror with `vm.deal` and never exercise the executor's gas-limited drop. Covered
   locally: a sender→codec→receiver test runs the bytes the Flare senders hand to `send` through
@@ -331,22 +336,26 @@ address itself commits to the pool:
 - **A debt increase respects the per-type borrow switch** and reverts with
   `BorrowingDisabled` while it is set (deliberately not a skip, since the switch is
   temporary-by-policy and a permissionless delivery must not consume the packet; it stays
-  retriable until the deadline expires). Pure collateral top-ups, withdrawals, and repayment
-  are never gated by the switch, so a sunset pool's positions stay defensible and can always exit
-  (while paused, a top-up executes only when the position carries live debt). A message-only
+  retriable until the deadline expires). Collateral deposits, withdrawals, and repayment are
+  never gated by the switch, so a sunset pool's positions stay defensible and can always exit
+  (while paused, a deposit executes only when the position carries live debt). A message-only
   action delivered with tokens attached executes normally; the credit simply stays idle on
   the account for the fixed rails.
 - Skipped deliveries leave their bridged FXRP on the account for the fixed rails.
 
 `ACTION_BORROW` supplies **exactly the authenticated bridged amount** (the codec's `amountLD`,
 never the idle balance, which can commingle donations and unrelated transfers) as collateral,
-and for a non-zero `borrowAmount` borrows against the account's own position and pays the
-destination — EVM kind only, clean zero-padded address, Wormhole kind reserved. If the credited
-tokens were moved before delivery (the accepted race above), the action fails closed with
-`InsufficientComposeBalance` — a cap rather than provenance, since every balance on the account
-is the user's own, but it stops a signed action from absorbing more than its own credit. `ACTION_WITHDRAW` withdraws
-collateral from the account's own position **to the account itself**, where only the fixed
-rails can move it; Morpho enforces position health.
+if any, and borrows `borrowAmount` (non-zero) against the account's own position, paying the
+destination — EVM kind only, clean zero-padded address, Wormhole kind reserved. It is a debt
+increase: pause-gated and subject to the per-type borrow switch. `ACTION_DEPOSIT_COLLATERAL`
+supplies exactly the authenticated bridged amount (non-zero) as collateral and changes no
+debt — the defensive action: while the controller is paused it executes only when the position
+carries live debt. For both, if the credited tokens were moved before delivery (the accepted
+race above), the action fails closed with `InsufficientComposeBalance` — a cap rather than
+provenance, since every balance on the account is the user's own, but it stops a signed action
+from absorbing more than its own credit. `ACTION_WITHDRAW` withdraws collateral from the
+account's own position **to the account itself**, where only the fixed rails can move it;
+Morpho enforces position health.
 
 **Creation route.** The same generic `createSubaccount(xrplOwner, type)` serves this chain —
 there is no separate loan-chain creation function. The parent Personal Account resolves the
@@ -385,15 +394,15 @@ compromised market oracle or interest model.
 debt increases on a type (`enableLoanChainBorrowing` reverses it) — the routine migration
 lever: register the next pool as a new type, disable borrowing on the old one, and the old
 accounts remain fully exit-capable forever
-(repayment, top-ups, withdrawals, and recovery are never gated by the switch). Clearing the
+(repayment, deposits, withdrawals, and recovery are never gated by the switch). Clearing the
 transport zeroes the LayerZero surface for **all** loan types — composed actions and the
 bridge-back sweep wait until governance reconfigures it; with a live timelock that wait is
 real, which is why the clear is the nuclear incident lever. Market bindings, `repay`,
 defensive idle deposits, and recovery to the parent persist through both levers. The global
 pause blocks debt increases, withdrawals, debt-free deposits and the bridge-back (recovery to
 the parent is inward and stays open; the mirror's signed user operations are what the pause
-stops) — while **repayment and defensive collateral top-ups stay available**: a composed
-top-up or an idle-rail deposit executes during a pause exactly when the position carries
+stops) — while **repayment and defensive collateral deposits stay available**: a composed
+deposit or an idle-rail deposit executes during a pause exactly when the position carries
 live debt, so an endangered position can still be defended, while a debt-free deposit is new
 exposure and waits out the pause like everything else. Accepted consequence: the global pause
 is **not a full Morpho quarantine**. While any borrow shares exist — real debt or dust —

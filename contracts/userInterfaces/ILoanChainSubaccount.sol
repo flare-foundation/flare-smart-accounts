@@ -11,11 +11,11 @@ import {ISubaccount} from "./ISubaccount.sol";
 /// The operation id must be non-zero and globally unique per subaccount across all action
 /// types; clients retrying an expired intent must reuse its id only for the same intent
 /// with a fresh deadline (a convention, not contract-enforced). The authenticated bridged
-/// amount (the codec's `amountLD`, never the idle balance) is supplied as collateral; if
-/// `borrowAmount` is non-zero, that amount of the loan token is borrowed and sent to
-/// `destination`. A zero bridged amount borrows against the existing position; a pure
-/// top-up (`borrowAmount == 0`) ignores the destination fields, and while the controller is
-/// paused executes only when the position carries live debt (the defensive case).
+/// amount (the codec's `amountLD`, never the idle balance) is supplied as collateral, and
+/// `borrowAmount` (non-zero) of the loan token is borrowed and sent to `destination`. A zero
+/// bridged amount borrows against the existing position. A debt increase: pause-gated and
+/// subject to the per-type borrow switch. A pure collateral deposit is its own action
+/// (`ACTION_DEPOSIT_COLLATERAL`).
 uint8 constant ACTION_BORROW = 1;
 
 /// @dev Withdraw action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
@@ -24,6 +24,14 @@ uint8 constant ACTION_BORROW = 1;
 /// first is permissionless (redeposit or bridge-back - the accepted ordering race, see
 /// `depositIdleFxrp`). Position health is enforced by Morpho.
 uint8 constant ACTION_WITHDRAW = 2;
+
+/// @dev Deposit-collateral action: `actionData` is `abi.encode(bytes32 operationId,
+/// uint64 deadline)`. Supplies exactly the authenticated bridged amount (the codec's
+/// `amountLD`, which must be non-zero) as collateral on the account's one market; no debt
+/// changes hands. While the controller is paused it executes only when the position carries
+/// live debt (the defensive case - protecting an endangered position); a debt-free deposit is
+/// new exposure and waits out the pause.
+uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
 
 /// @dev The destination is an EVM address (cleanly zero-padded into the `bytes32`), paid by a
 /// plain ERC-20 transfer — typically an exchange deposit address, or the user's own
@@ -68,11 +76,11 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
      * @notice Emitted when a borrow action executes.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
-     * @param collateralSupplied FXRP supplied as collateral (the authenticated bridged amount).
-     * @param borrowAmount Loan-token amount borrowed and disbursed; zero for a pure top-up.
-     * @param destinationKind The destination kind (see the `DESTINATION_KIND_*` constants);
-     * ignored for a pure top-up.
-     * @param destination The disbursement destination; ignored for a pure top-up.
+     * @param collateralSupplied FXRP supplied as collateral (the authenticated bridged amount;
+     * zero for a borrow against the existing position).
+     * @param borrowAmount Loan-token amount borrowed and disbursed (non-zero).
+     * @param destinationKind The destination kind (see the `DESTINATION_KIND_*` constants).
+     * @param destination The disbursement destination.
      * @param guid The LayerZero message id the action arrived with.
      */
     event LoanOpened(
@@ -82,6 +90,20 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
         uint256 borrowAmount,
         uint8 destinationKind,
         bytes32 destination,
+        bytes32 guid
+    );
+
+    /**
+     * @notice Emitted when a deposit-collateral action executes.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param operationId The user-chosen operation id, now consumed.
+     * @param amount FXRP supplied as collateral (the authenticated bridged amount).
+     * @param guid The LayerZero message id the action arrived with.
+     */
+    event CollateralDeposited(
+        address indexed parentPersonalAccount,
+        bytes32 operationId,
+        uint256 amount,
         bytes32 guid
     );
 

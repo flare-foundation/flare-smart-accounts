@@ -14,6 +14,7 @@ import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol"
 import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
+    ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanChainSubaccount.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
@@ -164,25 +165,20 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         onlyParent
         nonReentrant
     {
-        // fail fast on Flare, before any bridge fee is paid; the loan chain re-validates
+        // fail fast on Flare, before any bridge fee is paid; the loan chain re-validates. Only
+        // the EVM destination form exists today: a clean non-zero address other than this
+        // account (the parent - the user's own loan-chain account - is a valid target)
+        address destinationAddress = address(uint160(uint256(_destination)));
         require(
             _operationId != bytes32(0) &&
                 _deadline >= block.timestamp &&
-                (_collateralAmount > 0 || _borrowAmount > 0),
+                _borrowAmount > 0 &&
+                _destinationKind == DESTINATION_KIND_EVM &&
+                uint256(_destination) >> 160 == 0 &&
+                destinationAddress != address(0) &&
+                destinationAddress != address(this),
             InvalidLoanInstruction()
         );
-        if (_borrowAmount > 0) {
-            // only the EVM form exists today; a clean non-zero address other than this account
-            // (the parent - the user's own loan-chain account - is a valid target)
-            address destinationAddress = address(uint160(uint256(_destination)));
-            require(
-                _destinationKind == DESTINATION_KIND_EVM &&
-                    uint256(_destination) >> 160 == 0 &&
-                    destinationAddress != address(0) &&
-                    destinationAddress != address(this),
-                InvalidLoanInstruction()
-            );
-        }
         bytes memory payload = abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_BORROW,
@@ -199,6 +195,32 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
             _destination,
             destinationEid,
             guid
+        );
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function depositCollateral(
+        uint256 _amount,
+        bytes32 _operationId,
+        uint64 _deadline,
+        bytes calldata _extraOptions
+    )
+        external payable
+        onlyParent
+        nonReentrant
+    {
+        require(
+            _operationId != bytes32(0) && _deadline >= block.timestamp && _amount > 0,
+            InvalidLoanInstruction()
+        );
+        bytes memory payload = abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_DEPOSIT_COLLATERAL,
+            abi.encode(_operationId, _deadline)
+        );
+        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, _extraOptions, payload);
+        emit CollateralDepositInstructionSent(
+            parentPersonalAccount, _operationId, _amount, destinationEid, guid
         );
     }
 
@@ -262,11 +284,11 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         return ISubaccountsFacet(controllerAddress).implementationForType(subaccountType);
     }
 
-    /// @dev Shared forward-move core of {sweepToLoan}, {borrow} and {withdraw}: bridges
-    /// exactly `_amount` FXRP over LayerZero to this account's own address on the loan chain,
-    /// so both entry points share the same guards by construction. A zero amount is a
-    /// message-only send (the loan instruction's withdraw and configuration actions carry no
-    /// tokens); the destination is never caller-chosen.
+    /// @dev Shared forward-move core of {sweepToLoan}, {borrow}, {depositCollateral} and
+    /// {withdraw}: bridges exactly `_amount` FXRP over LayerZero to this account's own address
+    /// on the loan chain, so every entry point shares the same guards by construction. A zero
+    /// amount is a message-only send (a withdraw, or a borrow against existing collateral); the
+    /// destination is never caller-chosen.
     function _bridgeToSelf(
         uint256 _amount,
         bytes memory _extraOptions,

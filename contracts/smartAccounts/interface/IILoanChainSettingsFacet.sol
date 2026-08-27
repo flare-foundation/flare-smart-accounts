@@ -41,7 +41,7 @@ interface IILoanChainSettingsFacet is ILoanChainSettingsFacet {
 
     /**
      * @notice Disables new debt increases for a subaccount type — the routine way to sunset
-     * a pool. Repayment, top-ups, withdrawals, and recovery are never affected.
+     * a pool. Repayment, collateral deposits, withdrawals, and recovery are never affected.
      * @param _subaccountType The subaccount type.
      * Can only be called by the owner (timelocked).
      */

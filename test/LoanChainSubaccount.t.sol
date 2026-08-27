@@ -56,6 +56,7 @@ import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
 import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
+    ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM,
     DESTINATION_KIND_XRPL_WORMHOLE
 } from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
@@ -633,22 +634,31 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertTrue(ILoanChainSubaccount(subaccount).usedOperations(operationId));
     }
 
-    function testLzComposeBorrowOnlyTopUp() public {
+    function testLzComposeDepositCollateral() public {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
 
-        // a zero borrow amount is a pure collateral top-up; destination fields are ignored
-        _deliver(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+        // the deposit action supplies exactly the authenticated bridged amount, no debt
+        vm.expectEmit();
+        emit ILoanChainSubaccount.CollateralDeposited(
+            parentPersonalAccount, bytes32("op-1"), 100e6, _guidFor(1)
+        );
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
         assertEq(borrowShares, 0);
+
+        // a deposit that brings nothing is malformed, not a skip
+        _deliverExpectRevertZeroAmount(
+            subaccount, 2, _depositPayload(bytes32("op-2")), ILoanChainSubaccount.ZeroAmount.selector
+        );
     }
 
     function testLzComposeBorrowAgainstExistingCollateral() public {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         // a zero bridged amount with a non-zero borrow draws against the existing position
         address destination = makeAddr("exchangeDeposit");
@@ -664,7 +674,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     function testLzComposeWithdrawReturnsCollateralToTheAccount() public {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         bytes32 operationId = bytes32("op-2");
         vm.expectEmit();
@@ -683,7 +693,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         (bytes memory message, bytes32 guid) =
-            _composeMessage(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
@@ -696,7 +706,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     function testLzComposeRevertOnlyEndpoint() public {
         address subaccount = _createConfiguredSubaccount();
         (bytes memory message, bytes32 guid) =
-            _composeMessage(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         vm.prank(makeAddr("notTheEndpoint"));
         vm.expectRevert(ILoanChainAccountBase.OnlyEndpoint.selector);
@@ -706,7 +716,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     function testLzComposeRevertWrongComposeSender() public {
         address subaccount = _createConfiguredSubaccount();
         (bytes memory message, bytes32 guid) =
-            _composeMessage(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         address notTheOft = makeAddr("notTheOft");
         vm.prank(lzEndpoint);
@@ -724,7 +734,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             100e6,
             abi.encodePacked(
                 bytes32(uint256(uint160(subaccount))),
-                _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0)
+                _depositPayload(bytes32("op-1"))
             )
         );
 
@@ -746,7 +756,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             1,
             originEid,
             100e6,
-            abi.encodePacked(attacker, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0))
+            abi.encodePacked(attacker, _depositPayload(bytes32("op-1")))
         );
 
         vm.prank(lzEndpoint);
@@ -765,7 +775,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         (bytes memory message,) =
-            _composeMessage(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
         bytes32 forgedGuid = GUID.generate(
             1, originEid, makeAddr("maliciousPeer"), dstEid,
             bytes32(uint256(uint160(address(fxrpOft))))
@@ -804,15 +814,15 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(collateral, 100e6);
     }
 
-    function testLzComposeTopUpWorksWhilePaused() public {
-        // a pure collateral top-up into the indebted position moves it toward safety, like
+    function testLzComposeDepositWorksWhilePaused() public {
+        // a collateral deposit into the indebted position moves it toward safety, like
         // repayment: it must stay available during an incident so the position can be
         // defended against liquidation
         address subaccount = _borrowedSubaccount(500e18);
         fxrp.mint(subaccount, 50e6);
         _pauseController();
 
-        _deliver(subaccount, 2, 50e6, _borrowPayload(bytes32("op-2"), 0, bytes32(0), 0));
+        _deliver(subaccount, 2, 50e6, _depositPayload(bytes32("op-2")));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 150e6);
     }
@@ -836,15 +846,15 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         ILoanChainSubaccount(subaccount).depositIdleFxrp();
     }
 
-    function testLzComposeTopUpWhilePausedRequiresLiveDebt() public {
-        // a paused composed top-up is allowed only when the position carries live debt; a
-        // debt-free top-up is new exposure and waits out the pause
+    function testLzComposeDepositWhilePausedRequiresLiveDebt() public {
+        // a paused composed deposit is allowed only when the position carries live debt; a
+        // debt-free deposit is new exposure and waits out the pause
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         _pauseController();
 
         _deliverExpectRevert(
-            subaccount, 1, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0),
+            subaccount, 1, _depositPayload(bytes32("op-1")),
             IPauseFacet.IsPaused.selector
         );
     }
@@ -921,7 +931,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // delete collateral-only positions
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         vm.expectRevert(bytes("no debt to liquidate"));
         morpho.simulateLiquidation(_marketId(), subaccount);
@@ -930,7 +940,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     function testLzComposeRevertTransportNotConfigured() public {
         address subaccount = _createConfiguredSubaccount();
         (bytes memory message, bytes32 guid) =
-            _composeMessage(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         ILoanChainSettingsFacet.Transport memory cleared;
         vm.prank(governance);
@@ -993,18 +1003,17 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
         );
 
-        // a borrow that would neither supply nor borrow
-        payload = _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0);
-        _deliverExpectRevertZeroAmount(
-            subaccount, 1, payload, ILoanChainSubaccount.ZeroAmount.selector
-        );
+        // a borrow with nothing to borrow is malformed even with collateral attached: a pure
+        // deposit is its own action
+        payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(1)), 0);
+        _deliverExpectRevert(subaccount, 1, payload, ILoanChainSubaccount.ZeroAmount.selector);
     }
 
     function testLzComposeSkipDuplicateOperation() public {
         address subaccount = _createConfiguredSubaccount();
         bytes32 operationId = bytes32("op-1");
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayload(operationId, 0, bytes32(0), 0));
+        _deliver(subaccount, 1, 100e6, _depositPayload(operationId));
 
         // a retried instruction delivered twice must not double-execute; the second delivery
         // completes without effect and its bridged FXRP stays on the account
@@ -1013,7 +1022,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         emit ILoanChainSubaccount.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
-        _deliver(subaccount, 2, 100e6, _borrowPayload(operationId, 0, bytes32(0), 0));
+        _deliver(subaccount, 2, 100e6, _depositPayload(operationId));
 
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
@@ -1026,7 +1035,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         bytes32 operationId = bytes32("op-1");
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayload(operationId, 0, bytes32(0), 0));
+        _deliver(subaccount, 1, 100e6, _depositPayload(operationId));
 
         vm.expectEmit();
         emit ILoanChainSubaccount.LoanActionSkipped(
@@ -1044,10 +1053,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         bytes memory stale = abi.encode(
             PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(
-                operationId, uint64(block.timestamp - 1), uint8(0), bytes32(0), uint256(0)
-            )
+            ACTION_DEPOSIT_COLLATERAL,
+            abi.encode(operationId, uint64(block.timestamp - 1))
         );
         vm.expectEmit();
         emit ILoanChainSubaccount.LoanActionSkipped(
@@ -1060,7 +1067,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // retry is a real second packet, crediting its own amount - the first packet's stale
         // credit stays idle on the account for the fixed rails
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 2, 100e6, _borrowPayload(operationId, 0, bytes32(0), 0));
+        _deliver(subaccount, 2, 100e6, _depositPayload(operationId));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
         assertEq(fxrp.balanceOf(subaccount), 100e6);
@@ -1086,7 +1093,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
     function testLzComposeBorrowRevertBorrowingDisabled() public {
         // the borrow switch sunsets a pool: a debt increase reverts (retriable - a reversible
-        // policy must not consume the packet); top-ups, repayment and withdrawals still work
+        // policy must not consume the packet); deposits, repayment and withdrawals still work
         address subaccount = _borrowedSubaccount(500e18);
         vm.prank(governance);
         vm.expectEmit();
@@ -1104,10 +1111,10 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             subaccount, 2, borrowMore, ILoanChainSubaccount.BorrowingDisabled.selector
         );
 
-        // a pure top-up is not a debt increase and still works (a real second packet,
+        // a collateral deposit is not a debt increase and still works (a real second packet,
         // crediting its own amount; packet 2's credit stays idle for its later retry)
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 3, 100e6, _borrowPayload(bytes32("op-3"), 0, bytes32(0), 0));
+        _deliver(subaccount, 3, 100e6, _depositPayload(bytes32("op-3")));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 200e6);
 
@@ -1219,7 +1226,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 100e6);
 
         _deliverExpectRevert(
-            subaccount, 1, _borrowPayload(bytes32(0), 0, bytes32(0), 0),
+            subaccount, 1, _depositPayload(bytes32(0)),
             ILoanChainAccountBase.InvalidOperationId.selector
         );
     }
@@ -1231,7 +1238,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 40e6);
 
         _deliverExpectRevert(
-            subaccount, 1, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0),
+            subaccount, 1, _depositPayload(bytes32("op-1")),
             abi.encodeWithSelector(
                 ILoanChainSubaccount.InsufficientComposeBalance.selector, 100e6, 40e6
             )
@@ -1332,7 +1339,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         fxrp.mint(subaccountB, 100e6);
 
         _deliverExpectRevert(
-            subaccountB, 1, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0),
+            subaccountB, 1, _depositPayload(bytes32("op-1")),
             abi.encodeWithSelector(
                 ILoanChainSettingsFacet.MarketNotRegistered.selector, typeB
             )
@@ -1360,7 +1367,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         ));
         fxrp.mint(subaccountB, 100e6);
 
-        bytes memory payload = _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0);
+        bytes memory payload = _depositPayload(bytes32("op-1"));
         _deliverExpectRevert(
             subaccountB, 1, payload,
             abi.encodeWithSelector(
@@ -1621,7 +1628,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // simply stays idle on the account for the fixed rails
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), 0, bytes32(0), 0));
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         fxrp.mint(subaccount, 5e6);
         _deliver(subaccount, 2, 5e6, _withdrawPayload(bytes32("op-2"), 30e6));
@@ -2007,10 +2014,13 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     function _borrowedSubaccount(uint256 _borrowAmount) private returns (address) {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayload(
-            bytes32("op-borrow"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("exchangeDeposit")))), _borrowAmount
-        ));
+        bytes memory payload = _borrowAmount == 0
+            ? _depositPayload(bytes32("op-borrow"))
+            : _borrowPayload(
+                bytes32("op-borrow"), DESTINATION_KIND_EVM,
+                bytes32(uint256(uint160(makeAddr("exchangeDeposit")))), _borrowAmount
+            );
+        _deliver(subaccount, 1, 100e6, payload);
         return subaccount;
     }
 
@@ -2093,6 +2103,19 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
                 _destination,
                 _borrowAmount
             )
+        );
+    }
+
+    function _depositPayload(
+        bytes32 _operationId
+    )
+        private
+        returns (bytes memory)
+    {
+        return abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_DEPOSIT_COLLATERAL,
+            abi.encode(_operationId, uint64(block.timestamp + 1 hours))
         );
     }
 

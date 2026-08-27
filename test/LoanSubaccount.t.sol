@@ -41,6 +41,7 @@ import {PAYLOAD_VERSION_1} from "../contracts/userInterfaces/ILoanChainAccountBa
 import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
+    ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM
 } from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
 import {PA_ACTION_EXECUTE} from "../contracts/userInterfaces/ILoanChainPersonalAccount.sol";
@@ -1744,6 +1745,33 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(destination, bytes32(uint256(uint160(personalAccount))));
     }
 
+    function testDepositCollateralBridgesExactAmountWithTypedPayload() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 250e6);
+        _configureLoanBridge();
+        uint64 deadline = uint64(block.timestamp + 1 hours);
+
+        // the pure collateral deposit is its own instruction and action: exactly the signed
+        // amount travels, with the deposit schema the loan-chain twin decodes
+        vm.deal(personalAccount, messagingFee);
+        vm.expectEmit();
+        emit ILoanSubaccount.CollateralDepositInstructionSent(
+            personalAccount, bytes32("op-d"), 100e6, destinationEid, fxrpOft.GUID()
+        );
+        vm.prank(personalAccount);
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(100e6, bytes32("op-d"), deadline, "");
+
+        assertEq(fxrp.balanceOf(subaccount), 150e6);
+        assertEq(fxrp.balanceOf(address(fxrpOft)), 100e6);
+        (,, uint256 amountLD,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 100e6);
+        assertEq(
+            composeMsgSent,
+            abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_COLLATERAL, abi.encode(bytes32("op-d"), deadline))
+        );
+    }
+
     function testWithdrawIsMessageOnlyWithTypedPayload() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
@@ -1781,9 +1809,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, 2 * messagingFee);
 
         vm.startPrank(personalAccount);
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32("op-b"), deadline, ""
-        );
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(100e6, bytes32("op-b"), deadline, "");
         ILoanSubaccount(subaccount).withdraw{value: messagingFee}(30e6, bytes32("op-w"), deadline, "");
         vm.stopPrank();
         (,,,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
@@ -1793,7 +1819,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testBorrowRevertAmountExceedsBalance() public {
+    function testForwardMoveRevertAmountExceedsBalance() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 40e6);
@@ -1804,8 +1830,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(ILoanSubaccount.AmountExceedsBalance.selector, 100e6, 40e6)
         );
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
     }
 
@@ -1818,8 +1844,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // user - through the parent Personal Account - may send it
         vm.deal(address(this), 2 * messagingFee);
         vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
         vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
         ILoanSubaccount(subaccount).withdraw{value: messagingFee}(
@@ -1841,18 +1867,25 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // zero operation id
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32(0), deadline, ""
-        );
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(100e6, bytes32(0), deadline, "");
         // deadline already passed
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp - 1), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp - 1), ""
         );
         // nothing to collateralize or borrow
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 0, 0, bytes32(0), bytes32("op-1"), deadline, ""
+            100e6, 0, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, ""
+        );
+        // deposit: zero amount, zero operation id, deadline already passed
+        vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(0, bytes32("op-d"), deadline, "");
+        vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(50e6, bytes32(0), deadline, "");
+        vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            50e6, bytes32("op-d"), uint64(block.timestamp - 1), ""
         );
         // a disbursement needs the EVM kind and a clean, non-zero destination other than
         // the subaccount itself
@@ -1880,7 +1913,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.stopPrank();
     }
 
-    function testBorrowRefundsExcessToParent() public {
+    function testForwardMoveRefundsExcessToParent() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -1889,8 +1922,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         uint256 sent = messagingFee + 1 ether;
         vm.deal(personalAccount, sent);
         vm.prank(personalAccount);
-        ILoanSubaccount(subaccount).borrow{value: sent}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: sent}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
 
         // only the fee was forwarded; the excess came back to the parent, not stranded here
@@ -2001,7 +2034,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(amountLD, loanAmount);
     }
 
-    function testBorrowRevertWhenPaused() public {
+    function testForwardMoveRevertWhenPaused() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -2020,12 +2053,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
     }
 
-    function testBorrowRevertLoanBridgeNotConfigured() public {
+    function testForwardMoveRevertLoanBridgeNotConfigured() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -2033,12 +2066,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
     }
 
-    function testBorrowRevertWhenPeerMutatedAfterConfiguration() public {
+    function testForwardMoveRevertWhenPeerMutatedAfterConfiguration() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -2050,12 +2083,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(ILoanSubaccount.WrongDestinationPeer.selector);
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
     }
 
-    function testBorrowRevertInsufficientFundsForSweep() public {
+    function testForwardMoveRevertInsufficientFundsForSweep() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -2066,12 +2099,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(ILoanSubaccount.InsufficientFundsForSweep.selector, messagingFee)
         );
-        ILoanSubaccount(subaccount).borrow{value: messagingFee - 1}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee - 1}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
     }
 
-    function testBorrowRevertOnEmptyBalance() public {
+    function testForwardMoveRevertOnEmptyBalance() public {
         // an empty account can still send message-only instructions, but any positive
         // collateral amount exceeds the balance
         address subaccount = _createSubaccountFor(xrplOwner);
@@ -2083,8 +2116,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(ILoanSubaccount.AmountExceedsBalance.selector, 100e6, 0)
         );
-        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, 0, bytes32(0), bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
     }
 

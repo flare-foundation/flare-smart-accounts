@@ -11,6 +11,7 @@ import {
     ILoanChainSubaccount,
     ACTION_BORROW,
     ACTION_WITHDRAW,
+    ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanChainSubaccount.sol";
 import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
@@ -250,18 +251,19 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
             _executeBorrow(_actionData, _guid, _amountLD);
         } else if (_action == ACTION_WITHDRAW) {
             // pause-gated; the compose stays queued at the endpoint and re-delivers after
-            // unpausing (the borrow action gates itself - its top-up form is pause-exempt)
+            // unpausing (borrow and deposit gate themselves after their terminal skips)
             _checkNotPaused();
             _executeWithdraw(_actionData, _guid);
+        } else if (_action == ACTION_DEPOSIT_COLLATERAL) {
+            _executeDepositCollateral(_actionData, _guid, _amountLD);
         } else {
             revert UnsupportedAction(_action);
         }
     }
 
-    /// @dev A borrow or pure collateral top-up on the account's one market: exactly the
-    /// authenticated bridged amount becomes collateral; a debt increase disburses to the
-    /// destination. Gating failures revert, not skip - a temporary window must not consume
-    /// the packet.
+    /// @dev A borrow on the account's one market: exactly the authenticated bridged amount (if
+    /// any) becomes collateral, and the debt increase disburses to the destination. Gating
+    /// failures revert, not skip - a temporary window must not consume the packet.
     function _executeBorrow(
         bytes memory _actionData,
         bytes32 _guid,
@@ -276,26 +278,18 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
             bytes32 destination,
             uint256 borrowAmount
         ) = abi.decode(_actionData, (bytes32, uint64, uint8, bytes32, uint256));
-        require(_bridgedAmount > 0 || borrowAmount > 0, ZeroAmount());
+        require(borrowAmount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
         // terminal gates come first, so a duplicate or expired delivery finalizes even when
         // borrowing is disabled or the market is not yet registered, instead of reverting
         // forever
         if (_skipped(operationId, deadline, _guid)) return;
-        // debt increases respect the pause and the per-type borrow switch; paused top-ups
-        // need live debt - defending a position stays available, new exposure waits
-        if (borrowAmount > 0) {
-            _checkNotPaused();
-            require(
-                !_facet().isLoanChainBorrowingDisabled(subaccountType),
-                BorrowingDisabled()
-            );
-        } else if (IPauseFacet(controller).isPaused()) {
-            require(_borrowSharesOf(_myMarket()) > 0, IPauseFacet.IsPaused());
-        }
+        // a debt increase respects the pause and the per-type borrow switch
+        _checkNotPaused();
+        require(!_facet().isLoanChainBorrowingDisabled(subaccountType), BorrowingDisabled());
         usedOperations[operationId] = true;
 
-        _performBorrow(_bridgedAmount, destinationKind, destination, borrowAmount);
+        _supplyAndBorrow(_bridgedAmount, destinationKind, destination, borrowAmount);
         emit LoanOpened(
             parentPersonalAccount,
             operationId,
@@ -307,8 +301,34 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         );
     }
 
-    /// @dev The borrow's asset moves, separated from the decode to keep stack depth flat.
-    function _performBorrow(
+    /// @dev A pure collateral deposit on the account's one market: exactly the authenticated
+    /// bridged amount becomes collateral. While paused it needs live debt - defending a
+    /// position stays available, new exposure waits (a revert, not a skip, so the packet is
+    /// not consumed by a temporary window).
+    function _executeDepositCollateral(
+        bytes memory _actionData,
+        bytes32 _guid,
+        uint256 _bridgedAmount
+    )
+        private
+    {
+        (bytes32 operationId, uint64 deadline) = abi.decode(_actionData, (bytes32, uint64));
+        require(_bridgedAmount > 0, ZeroAmount());
+        require(operationId != bytes32(0), InvalidOperationId());
+        if (_skipped(operationId, deadline, _guid)) return;
+        if (IPauseFacet(controller).isPaused()) {
+            require(_borrowSharesOf(_myMarket()) > 0, IPauseFacet.IsPaused());
+        }
+        usedOperations[operationId] = true;
+
+        _supplyAndBorrow(_bridgedAmount, 0, bytes32(0), 0);
+        emit CollateralDeposited(parentPersonalAccount, operationId, _bridgedAmount, _guid);
+    }
+
+    /// @dev The asset moves of the borrow and deposit actions, separated from the decodes to
+    /// keep stack depth flat: supply the bridged amount (if any), then borrow and disburse
+    /// (if any).
+    function _supplyAndBorrow(
         uint256 _bridgedAmount,
         uint8 _destinationKind,
         bytes32 _destination,
