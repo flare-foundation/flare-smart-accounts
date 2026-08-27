@@ -11,12 +11,19 @@ import {ERC721Holder} from "@openzeppelin/contracts/token/ERC721/utils/ERC721Hol
 import {ERC1155Holder} from "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
 import {IERC1363Receiver} from "@openzeppelin/contracts/interfaces/IERC1363Receiver.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {TransientSlot} from "@openzeppelin/contracts/utils/TransientSlot.sol";
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanBridgeSettingsFacet} from "../../userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
+import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
+import {
+    ISubaccountsFacet,
+    SUBACCOUNT_TYPE_NONE
+} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
+import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol";
 import {PA_ACTION_EXECUTE} from "../../userInterfaces/ILoanChainPersonalAccount.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
@@ -35,8 +42,13 @@ contract PersonalAccount is
     ERC721Holder, ERC1155Holder, IERC1363Receiver
 {
     using SafeERC20 for IERC20;
+    using TransientSlot for *;
 
     address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
+    /// @dev Transient guard slot of {redeemFromSubaccount}, separate from the shared guard. Keep
+    /// the identifier stable across implementations: a proxy's guards must agree across upgrades.
+    bytes32 private constant SUBACCOUNT_REDEMPTION_GUARD_SLOT =
+        keccak256("flare.smartAccounts.PersonalAccount.subaccountRedemptionGuard");
 
     /// @notice MasterAccountController contract address
     address public controllerAddress;
@@ -46,6 +58,32 @@ contract PersonalAccount is
     modifier onlyController() {
         require(msg.sender == controllerAddress, OnlyController());
         _;
+    }
+
+    /// @dev The caller must be one of this account's own subaccounts: the controller's
+    /// prediction for (this account's owner, the caller's type) must be the caller itself. The
+    /// proxy creation code and the derivation are frozen, so no other contract can sit at that
+    /// address; the caller's self-reported type is only the index into that check.
+    modifier onlySubaccount() {
+        require(_isOwnSubaccount(msg.sender), OnlySubaccount());
+        _;
+    }
+
+    /// @dev A guard domain of its own, because the legitimate call path re-enters this account:
+    /// user -> {executeUserOp} (shared guard held) -> subaccount.sweepRedeem ->
+    /// {redeemFromSubaccount}. The nesting this allows is bounded: the method writes no account
+    /// state, creates no allowance of this account's, and pulls before it redeems, so even a
+    /// redemption reached from beneath another guarded method through an external dependency (no
+    /// such trigger exists with canonical FXRP and FAssets) cannot touch this account's
+    /// pre-existing FXRP; a nested redemption is refused by this guard.
+    modifier nonReentrantSubaccountRedemption() {
+        require(
+            !SUBACCOUNT_REDEMPTION_GUARD_SLOT.asBoolean().tload(),
+            ReentrancyGuardReentrantCall()
+        );
+        SUBACCOUNT_REDEMPTION_GUARD_SLOT.asBoolean().tstore(true);
+        _;
+        SUBACCOUNT_REDEMPTION_GUARD_SLOT.asBoolean().tstore(false);
     }
 
     constructor() {
@@ -265,6 +303,41 @@ contract PersonalAccount is
     }
 
     /// @inheritdoc IPersonalAccount
+    function redeemFromSubaccount(
+        uint256 _amount
+    )
+        external payable
+        onlySubaccount
+        nonReentrantSubaccountRedemption
+        returns (uint256 _redeemedAmount)
+    {
+        // the controller's executor is appointed whatever the value: msg.value travels whole
+        // as its fee. The fee policy lives at the entry (the subaccount's permissionless rail
+        // requires the configured fee); an authenticated route may send nothing - the executor
+        // stays appointed, unpaid. Deliberately not enforced here
+        // slither-disable-next-line unused-return
+        (address payable executor, ) = IExecutorsFacet(controllerAddress).getExecutorInfo();
+
+        // pull exactly the amount from the calling subaccount and redeem exactly that: this
+        // account's own balance is never part of a subaccount-initiated redemption. What FAssets
+        // does not fill stays here, under the user's control, like every redemption outcome
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
+        assetManager.fAsset().safeTransferFrom(msg.sender, address(this), _amount);
+        _redeemedAmount = assetManager.redeemAmount{value: msg.value}(
+            _amount,
+            xrplOwner,
+            executor
+        );
+        emit FXrpRedeemedFromSubaccount(
+            msg.sender,
+            _amount,
+            _redeemedAmount,
+            executor,
+            msg.value
+        );
+    }
+
+    /// @inheritdoc IPersonalAccount
     function executeUserOp(
         IPersonalAccount.Call[] calldata _calls
     )
@@ -377,5 +450,27 @@ contract PersonalAccount is
 
         _destinationEid = destinationEid;
         _guid = receipt.guid;
+    }
+
+    /// @dev Whether `_caller` is one of this account's subaccounts (see {onlySubaccount}). A
+    /// caller that is not a contract, or does not answer the type query, is not one.
+    function _isOwnSubaccount(
+        address _caller
+    )
+        private view
+        returns (bool)
+    {
+        if (_caller.code.length == 0) {
+            return false;
+        }
+        try ISubaccount(_caller).subaccountType() returns (uint256 subaccountType) {
+            if (subaccountType == SUBACCOUNT_TYPE_NONE) {
+                return false;
+            }
+            return ISubaccountsFacet(controllerAddress).getSubaccount(xrplOwner, subaccountType)
+                == _caller;
+        } catch {
+            return false;
+        }
     }
 }

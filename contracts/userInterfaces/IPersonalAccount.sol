@@ -155,6 +155,23 @@ interface IPersonalAccount {
     );
 
     /**
+     * @notice Emitted when one of this account's subaccounts pushed FXRP here for redemption
+     * and this account redeemed it to its XRPL owner.
+     * @param subaccount The subaccount that pushed the FXRP.
+     * @param amount Amount pulled from the subaccount and requested for redemption.
+     * @param redeemedAmount Amount actually redeemed, which can be less; the rest stays here.
+     * @param executor Executor used for the redemption.
+     * @param valueForwarded Native value forwarded with the redemption (covers the executor fee).
+     */
+    event FXrpRedeemedFromSubaccount(
+        address indexed subaccount,
+        uint256 amount,
+        uint256 redeemedAmount,
+        address executor,
+        uint256 valueForwarded
+    );
+
+    /**
      * @notice Reverts if the sent value is insufficient for collateral reservation.
      * @param collateralReservationFee The required collateral reservation fee.
      * @param executorFee The required executor fee.
@@ -224,6 +241,12 @@ interface IPersonalAccount {
     error InvalidLoanChainInstruction();
 
     /**
+     * @notice Reverts if {redeemFromSubaccount} is called by anything other than one of this
+     * account's own subaccounts.
+     */
+    error OnlySubaccount();
+
+    /**
      * @notice Reverts if the loan bridge settings are not configured yet.
      */
     error LoanBridgeNotConfigured();
@@ -272,6 +295,32 @@ interface IPersonalAccount {
         bytes calldata _extraOptions
     )
         external payable;
+
+    /**
+     * @notice Redeems FXRP pushed here by one of this account's subaccounts to this account's
+     * XRPL owner: pulls exactly `_amount` from the calling subaccount and redeems exactly that.
+     * @dev Callable only by this account's own subaccounts (the controller's prediction for
+     * this owner and the caller's type must be the caller). This is the backward cleanup rail
+     * of the subaccounts, relocated: the subaccount approves and calls, this account is the
+     * redeemer, so every redemption outcome - a partial fill, a payment-default payout, a
+     * refund - lands here, where {executeUserOp} handles anything (including triggering the
+     * default on the asset manager directly). This account's own balance is never part of it.
+     * The controller's executor is appointed and `msg.value` travels whole as its fee (FAssets
+     * records it in whole gwei). The fee policy lives at the entry, not here: the subaccount's
+     * permissionless rail requires the controller's configured fee, while an authenticated
+     * route may send less or nothing (the executor stays appointed, unpaid). Not pause-gated
+     * (an exit toward the user); guarded in its own reentrancy domain, since the
+     * legitimate path re-enters this account from inside {executeUserOp} - a bounded nesting:
+     * the method writes no account state and pulls before it redeems, so it can never touch
+     * this account's pre-existing FXRP, and a nested redemption is refused.
+     * @param _amount The amount pushed by the subaccount, pulled and redeemed here.
+     * @return _redeemedAmount Amount actually redeemed; the remainder stays on this account.
+     */
+    function redeemFromSubaccount(
+        uint256 _amount
+    )
+        external payable
+        returns (uint256 _redeemedAmount);
 
     /**
      * @notice Execute a series of calls (user operation).

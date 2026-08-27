@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instructions (`borrow`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow and withdraw actions), the per-type market binding and governance configuration (`LoanChainSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves), and the relay grace-period fallback is parked (see open items).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instructions (`borrow`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow and withdraw actions), the per-type market binding and governance configuration (`LoanChainSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
 
 ## Typed subaccounts
 
@@ -45,7 +45,7 @@ with `salt = bytes32(0)`. The subaccount address is therefore a pure function of
 ## Creation and prediction
 
 - `getSubaccount(xrplOwner, type)` — view; returns the registered subaccount, or the computed address if not yet deployed. Works even before the parent PA exists (the PA address itself is deterministic).
-- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; the parent Personal Account resolves to the registered account when one exists, and to its computed address otherwise — the same fallback `getSubaccount` uses, so creation works before the Personal Account exists (and on chains where PAs never exist at all). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them — without waiting for the parent. A subaccount created before its PA is only **partly** inert: `onlyParent` methods have no possible caller and `sweepRedeem` reverts reading the XRPL owner from the codeless parent, while `sweepToLoan` (which never reads the parent) works normally, and `sweepToParent`/`sweepNativeToParent` park assets at the future PA address — the same owner's deterministic address, whose later CREATE2 deployment a pre-existing balance does not block. The PA then deploys at exactly the recorded parent, owning whatever was parked. One qualification: this holds for a valid owner string — the route accepts any string, but a Personal Account cannot be created for an empty one, so an empty-owner subaccount is permanent caller-funded junk with no custody or collision impact. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
+- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; the parent Personal Account resolves to the registered account when one exists, and to its computed address otherwise — the same fallback `getSubaccount` uses, so creation works before the Personal Account exists (and on chains where PAs never exist at all). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them — without waiting for the parent. A subaccount created before its PA is only **partly** inert: `onlyParent` methods have no possible caller and `sweepRedeem` at or above the minimum reverts calling the codeless parent, while `sweepToLoan` (which never reads the parent) works normally, and `sweepToParent`/`sweepNativeToParent` — and `sweepRedeem` below the minimum, which never calls parent code — park assets at the future PA address — the same owner's deterministic address, whose later CREATE2 deployment a pre-existing balance does not block. The PA then deploys at exactly the recorded parent, owning whatever was parked. One qualification: this holds for a valid owner string — the route accepts any string, but a Personal Account cannot be created for an empty one, so an empty-owner subaccount is permanent caller-funded junk with no custody or collision impact. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
 
 Unlike Personal Accounts, which are only ever created as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points), a loan subaccount needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily.
 
@@ -78,9 +78,9 @@ executeUserOp([
 
 Assets can strand at the subaccount whenever a cross-chain flow breaks part-way. Both directions out are permissionless, so an executor — or anyone — can clear them:
 
-- **`sweepRedeem()`** — the backward move. Redeems idle FXRP to the parent Personal Account's XRPL owner through FAssets. It takes **no parameters**: the destination is read on-chain from the parent account, the executor and fee come from the controller, and `msg.value` must cover the fee. Reverts with `NothingToRedeem` rather than no-op, so a caller's value is returned instead of being trapped on the account.
+- **`sweepRedeem()`** — the backward move. Pushes idle FXRP to the parent Personal Account and has the parent redeem it to its XRPL owner in the same call, through `PersonalAccount.redeemFromSubaccount(amount)`: callable only by the account's own subaccounts (the controller's prediction for the owner and the caller's type must be the caller), it **pulls exactly the pushed amount and redeems exactly that**, so the parent's own balance is never part of a subaccount-initiated redemption. It takes **no parameters**: the destination is the parent (fixed at deployment, part of the address), the executor comes from the controller, and `msg.value` travels whole as its fee (FAssets records it in whole gwei). `msg.value` must cover the controller's **configured executor fee** — the fee is the price of the permissionless rail, so forcing the backward direction is never gas-only (see the accepted risk below). The fee policy lives at this entry: `redeemFromSubaccount` itself forwards whatever it receives, so an authenticated route can later send less or nothing (the executor stays appointed, unpaid). Reverts with `NothingToRedeem` rather than no-op, so a caller's value is returned instead of being trapped on the account.
 
-  It calls `redeemAmount` (the UBA-based entry point on `IRedeemExtended`, which the asset manager implements) with the **whole balance**, rather than `redeem`, which only accepts whole lots. A cleanup method that redeemed whole lots would strand the remainder — up to one lot short of a full sweep — with no way out, which defeats the purpose. FAssets may still redeem less than requested when redemption tickets run out; the remainder simply stays on the account and can be swept again.
+  The parent is the **recorded redeemer**. That is the point of the relocation: every redemption outcome — a partial fill, a payment-default payout, a refund — lands on the parent, where `executeUserOp` already handles anything, including triggering the payment default directly on the asset manager. The subaccount keeps no redemption-request or default state and no relay methods; `sweepRedeem` is its one redemption method. The parent calls `redeemAmount` (the UBA-based entry point on `IRedeemExtended`, which the asset manager implements) with the **whole pushed balance**, rather than `redeem`, which only accepts whole lots — a cleanup method that redeemed whole lots would strand the remainder. FAssets may still redeem less than requested when redemption tickets run out; the remainder stays on the parent, under the user's control. A balance below the FAssets minimum redemption amount is pushed to the parent **unredeemed** instead (FAssets would reject it): `redeemedAmount` is zero, the value goes to the parent's float as well (`NativeSweptToParent`), and `TokenSweptToParent` is emitted — the rail never fails on amount, costs the configured fee either way, and "whatever FAssets does not redeem stays on the parent" covers dust and partial fills alike. The parent's redemption runs in its **own reentrancy-guard domain**: the legitimate user-driven path (`executeUserOp` → `sweepRedeem` → `redeemFromSubaccount`) re-enters the parent while its shared guard is held, and the method touches none of the state that guard protects. The nesting is bounded: the method pulls before it redeems and writes no account state, so a redemption reached from beneath any guarded method (no dependency does that today) cannot touch the parent's pre-existing FXRP, and a nested redemption is refused by the guard.
 - **`sweepToLoan()`** — the forward move. Bridges idle FXRP onward to the loan chain over LayerZero. It also takes **no parameters**, for the same reason: the destination is **this account's own address**, which is identical on every chain because it is CREATE2-derived from inputs that do not vary by chain, and the destination chain and OFT come from governance-set controller settings (`setLoanBridgeSettings`, timelocked). So a permissionless caller has nothing to point at. `msg.value` must cover the LayerZero messaging fee; the exact quoted fee is forwarded and any excess is returned to the caller rather than left on an account with no native exit.
 
   The FXRP OFT is a lock/unlock adapter (`approvalRequired() == true`), so the sweep approves it for the exact amount and resets the allowance to zero afterwards. It reverts while the controller is paused: the forward sweep is the incident-containment surface (an OFT or route compromise is stopped by pausers immediately, without waiting out the timelock), while `sweepRedeem` stays available during a pause so assets can always exit toward the user. `setLoanBridgeSettings` validates that the OFT wraps the FXRP token, shares its decimals, and that its live peer for the destination endpoint equals the **pinned expected peer** exactly — existence alone would accept a wrong route — so misconfiguration fails at the timelocked call, not in the field; explicit zeros clear the settings, which disables the forward sweep until reconfigured. Every `sweepToLoan` re-checks the OFT's live peer against the pinned one before locking FXRP, so a peer mutation on the OFT after configuration fails sweeps closed instead of routing to an unknown remote OApp. No compose message is attached: this is cleanup, moving the assets across, and depositing them into the lending protocol is a separate forward move on the destination side. FXRP and the OFT both use 6 decimals, so nothing is lost to shared-decimal dust and `minAmountLD` equals the full amount.
@@ -104,24 +104,26 @@ bridges with the payload — the subaccount balance never exists outside that tr
 there is nothing to front-run on this chain (a test covers the five steps in one transaction; the destination side has its own, separately accepted window — see the loan-chain-side section). Only
 *retry-after-strand* is exposed: FXRP already sitting on the subaccount while the user signs a
 fresh instruction. Second, in that window the funds can only be pushed to the user's own
-addresses. The griefing asymmetry is real, though — the attacker pays a fixed executor or
-messaging fee while `sweepRedeem` imposes a re-mint round trip whose cost is proportional to
-the balance — so this is accepted, not solved; revisit (the direction lifecycle is the known
-remedy) if such griefing is ever observed in practice.
+addresses. The griefing asymmetry is real, though — the attacker pays the configured executor
+fee (backward: to the FAssets executor, or below the minimum to the user's own PA) or the
+messaging fee (forward), while `sweepRedeem` imposes a re-mint round trip whose cost is
+proportional to the balance — so this is accepted, not solved; revisit (the direction lifecycle
+is the known remedy) if such griefing is ever observed in practice. Neither direction is ever
+gas-only: `sweepToParent` rejects FXRP, and `sweepRedeem` requires the fee even when it only
+pushes dust.
 
 ### Recovery to the parent Personal Account
 
-Not everything that can land on a subaccount is FXRP. A FAssets redemption default pays the
-redeemer — this account — in vault collateral (a stablecoin) and/or pool WNat; bridges and
-redemptions can refund native; an instruction can send value to the predicted address before the
-subaccount exists (the account has a `receive()` for native). None of those assets have a bridge
-or redeem exit here, so two permissionless recovery methods push them to the parent Personal
-Account, which accepts any asset and is fully under the user's control:
+Not everything that can land on a subaccount is FXRP: a token sent here by mistake, native
+refunded by an external system or sent with an instruction to the predicted address before the
+subaccount exists (the account has a `receive()` for native). Neither has another exit here, so
+two permissionless thin movers push them to the parent Personal Account, which accepts any
+asset and is fully under the user's control:
 
 - **`sweepToParent(token)`** — recovers a token balance. The caller chooses only *which* asset,
-  never where it goes. FXRP is special-cased: only a residual **below** the FAssets minimum
-  redemption amount can be recovered this way (the complement of `sweepRedeem`, which requires
-  at least the minimum), so recovery cannot become a third direction for the loan asset.
+  never where it goes. FXRP is **rejected** (`ProtectedToken`): the loan asset moves only on
+  its own rails, and executors run `sweepRedeem` — a free push must not front-run it. A residual
+  below the FAssets minimum goes home through `sweepRedeem` itself (pushed unredeemed).
 - **`sweepNativeToParent()`** — recovers the native balance.
 
 Both stay available while the controller is paused: the parent is the safest possible
@@ -129,37 +131,25 @@ destination, and an incident should not trap assets.
 
 When the agent does not pay the underlying XRP for a redemption, someone must trigger the
 **redemption payment default**, which seizes the agent's locked collateral and pays it to the
-redeemer. FAssets permits that only from the recorded redeemer (this account), the appointed
-executor, or the agent owner — so relying on the appointed executor alone would make it a single
-point of failure. The account exposes relays, `redemptionPaymentDefault` and
-`xrpRedemptionPaymentDefault`, **restricted to the parent Personal Account** (`onlyParent`, so
-the user drives them through an XRPL instruction). They are deliberately not permissionless,
-unlike the sweeps: defaulting is not cleanup along fixed rails but a *decision* — after the
-payment window expires, the user may prefer waiting for a late XRP payment over taking the
-collateral payout — and a public relay would let anyone front-run the appointed executor's own
-call, which burns the funded executor fee (FAssets pays it only when the executor is the
-immediate caller). With parent-driven relays, the parties able to default are exactly the three
-FAssets intends: the user (through the parent account), the appointed executor (directly on the
-asset manager), and the agent (directly). The payout always lands on this account, where
-`sweepToParent` recovers it.
+redeemer. FAssets permits that only from the recorded redeemer, the appointed executor, or the
+agent owner. The recorded redeemer is the **parent Personal Account**, so the user triggers the
+default directly on the asset manager through `executeUserOp` — no relay on the subaccount, and
+the payout (vault collateral and/or pool WNat) lands on the parent. The parties able to default
+are exactly the three FAssets intends: the user (through the parent account), the appointed
+executor (directly), and the agent (directly). Two operational notes carry over:
 
-Two costs of the relay to be aware of:
+- **A user-triggered default forfeits the executor fee funded at sweep time**: the asset manager pays it only
+  when the executor is its immediate caller. The executor calling directly is the cheap path;
+  the user's own call is the fallback that removes the executor as a single point of failure.
+- **The user's path is unreachable while the controller is paused**: the parent only acts
+  through the instruction pipeline, which is `notPaused`. The appointed executor's direct path
+  is unaffected by our pause, so defaults keep their normal operational trigger during an
+  incident. Operationally: unpause promptly, and keep executor monitoring alive during
+  incidents.
 
-- **Any relayed default forfeits the funded executor fee** — including a parent-driven one. The
-  asset manager pays the fee only when the executor is its *immediate caller*, and through the
-  relay the caller is always this account, so the fee funded at `sweepRedeem` time is burned.
-  Relaying is the user's fallback, not the cheap path; the executor calling the asset manager
-  directly is.
-- **The relay is unreachable while the controller is paused**: the parent only acts through the
-  instruction pipeline, which is `notPaused`. The appointed executor's direct path is unaffected
-  by our pause, so defaults still have their normal operational trigger during an incident — but
-  a pause held open across FDC's attestation window, combined with an unavailable executor,
-  recreates the executor dependency the relay removes. Operationally: unpause promptly, and keep
-  executor monitoring alive during incidents. A grace-period public fallback on the relay (open
-  to anyone once a request is old enough) is designed but parked — see the open items.
-
-Integration note: the XRP proof's `proofOwner` must be requested as zero or **this account's
-address** — the asset manager sees this account as the caller, not the parent or any relayer.
+Integration note: the XRP proof's `proofOwner` must be requested as zero or **the parent
+Personal Account's address** — the asset manager sees the parent as the caller, not the
+subaccount the FXRP came from.
 
 ## The loan instructions: `borrow` and `withdraw`
 
@@ -256,7 +246,7 @@ The same frozen proxy bytecode and the same derivation give the subaccount one a
 chain, and the per-type implementation registry is what makes that useful: each chain's diamond
 registers its **own** implementation for the loan type. Flare registers
 [`LoanSubaccount`](../../../contracts/smartAccounts/implementation/LoanSubaccount.sol) (FAssets
-redemption, the forward bridge, the parent-driven relays); the loan chain (Ethereum, at
+redemption pushed to the parent, the forward bridge, recovery to the parent); the loan chain (Ethereum, at
 launch) registers
 [`LoanChainSubaccount`](../../../contracts/smartAccounts/implementation/LoanChainSubaccount.sol).
 The implementation never enters the CREATE2 derivation, so the registration choice cannot move
@@ -632,8 +622,7 @@ so no mirror can exist for an impossible owner.
 - **`setLoanBridgeSettings` comes last, and only once the loan-chain side exists.** Its
   validation reads the OFT's live peer for the destination endpoint, so it cannot be configured
   before the destination route is wired; until then the forward moves revert with
-  `LoanBridgeNotConfigured` while creation, the backward sweep, the relays, and recovery
-  already work. The loan-chain-side account (same diamond address, same derivation) must be
+  `LoanBridgeNotConfigured` while creation, the backward sweep and recovery already work. The loan-chain-side account (same diamond address, same derivation) must be
   deployed before the forward moves are enabled, since bridged FXRP lands on the subaccount's
   own address there.
 
@@ -642,5 +631,5 @@ so no mirror can exist for an impossible owner.
 - ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed, the surplus leaves through `recoverToken` to the parent Personal Account (the user's own loan-chain account). Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
 - **TODO, parked: atomic withdraw-and-bridge action.** If guaranteed withdrawal completion is ever required, the clean contract-level fix for the withdraw/redeposit ordering race (see the rails) is a single composed action that withdraws collateral and bridges it back in one execution. It is not free: it needs compose value (rejected today by `NonZeroComposeValue`, which exists to keep mistaken deliveries retriable), fee quoting inside the compose, and refund semantics for a permissionless deliverer. Decide if withdrawal-completion guarantees become a product requirement; until then, executor-side bundling of delivery with `sweepToOrigin` is the operational mitigation.
 - **TODO, in design: the Flare fee.** An interest-spread model (checkpoint accounting over the account's Morpho debt) was accepted by product and is in design review; it is kept out of this spec until the design settles, then documented here.
-- **TODO, parked: grace-period public fallback for the default relays.** `onlyParent` relays are unreachable during a pause (see above), so a pause held across FDC's attestation window combined with an unavailable executor recreates the executor dependency. The designed fix: relays stay parent-only until the request's `lastUnderlyingTimestamp` (read per-request from `redemptionRequestInfo`, no stored clock) is a grace period past, then open to anyone — by then the executor has demonstrably failed and the timing right has lapsed, so a fee-burning public call is acceptable. Implemented and tested, then parked; **must be decided before the first production deployment**, rather than left to incident-time executor availability.
+- ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.
 - ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.

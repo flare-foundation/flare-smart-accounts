@@ -19,6 +19,8 @@
     "*.json"
   ],
   "words": [
+    "tload",
+    "tstore",
     "abicoder",
     "addrs",
     "Addrs",

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
-import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
-import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
-
 import {ISubaccount} from "./ISubaccount.sol";
 
 /**
@@ -25,20 +22,17 @@ interface ILoanSubaccount is ISubaccount {
     );
 
     /**
-     * @notice Emitted when idle FXRP is redeemed to the parent Personal Account's XRPL owner.
-     * @param parentPersonalAccount The parent Personal Account address.
-     * @param amount Amount of FXRP requested for redemption (the whole balance).
-     * @param redeemedAmount Amount of FXRP actually redeemed, which can be less.
-     * @param executor Executor used for the redemption.
-     * @param valueForwarded Native value actually forwarded with the redemption (covers the
-     * executor fee).
+     * @notice Emitted when idle FXRP is pushed to the parent Personal Account and redeemed by
+     * it to its XRPL owner.
+     * @param parentPersonalAccount The parent Personal Account address (the redeemer).
+     * @param amount Amount of FXRP pushed and requested for redemption (the whole balance).
+     * @param redeemedAmount Amount of FXRP actually redeemed, which can be less; the rest
+     * stays on the parent.
      */
     event FXrpRedeemed(
         address indexed parentPersonalAccount,
         uint256 amount,
-        uint256 redeemedAmount,
-        address executor,
-        uint256 valueForwarded
+        uint256 redeemedAmount
     );
 
     /**
@@ -61,22 +55,6 @@ interface ILoanSubaccount is ISubaccount {
     event NativeSweptToParent(
         address indexed parentPersonalAccount,
         uint256 amount
-    );
-
-    /**
-     * @notice Emitted when a redemption payment default is relayed to the asset manager.
-     * @param redemptionRequestId The redemption request that defaulted.
-     */
-    event RedemptionPaymentDefaulted(
-        uint256 redemptionRequestId
-    );
-
-    /**
-     * @notice Emitted when an XRP redemption payment default is relayed to the asset manager.
-     * @param redemptionRequestId The redemption request that defaulted.
-     */
-    event XrpRedemptionPaymentDefaulted(
-        uint256 redemptionRequestId
     );
 
     /**
@@ -186,24 +164,22 @@ interface ILoanSubaccount is ISubaccount {
     error RefundFailed();
 
     /**
-     * @notice Reverts if the FXRP balance is below the FAssets minimum redemption amount.
-     * Such a residual is recovered with {sweepToParent} instead.
-     * @param minimumRedeemAmount The FAssets minimum redemption amount.
+     * @notice Reverts if the value sent with {sweepRedeem} does not cover the controller's
+     * executor fee: the configured fee is the price of the permissionless backward rail.
+     * @param executorFee The required executor fee.
      */
-    error BelowMinimumRedemption(
-        uint256 minimumRedeemAmount
+    error InsufficientFundsForRedeem(
+        uint256 executorFee
     );
 
     /**
-     * @notice Reverts if FXRP at or above the FAssets minimum redemption amount is passed to
-     * {sweepToParent}. Such a balance moves only through {sweepRedeem} or {sweepToLoan}, so
-     * recovery to the parent cannot become a third direction for the loan asset.
-     * @param balance The FXRP balance.
-     * @param minimumRedeemAmount The FAssets minimum redemption amount.
+     * @notice Reverts if FXRP is passed to {sweepToParent}: the loan asset moves only on its
+     * own rails ({sweepRedeem}, which pushes a balance below the FAssets minimum to the parent
+     * unredeemed, and the forward moves).
+     * @param token The rejected token.
      */
-    error FXrpAboveMinimumRedemption(
-        uint256 balance,
-        uint256 minimumRedeemAmount
+    error ProtectedToken(
+        address token
     );
 
     /**
@@ -216,14 +192,6 @@ interface ILoanSubaccount is ISubaccount {
      * not accept native, and its recovery methods have no parent to send to.
      */
     error NotInitialized();
-
-    /**
-     * @notice Reverts if the sent value does not cover the executor fee.
-     * @param executorFee The required executor fee.
-     */
-    error InsufficientFundsForRedeem(
-        uint256 executorFee
-    );
 
     /**
      * @notice Reverts on a loan instruction whose arguments cannot execute on the loan chain:
@@ -244,16 +212,25 @@ interface ILoanSubaccount is ISubaccount {
     );
 
     /**
-     * @notice Redeems all idle FXRP to the parent Personal Account's XRPL owner.
-     * @dev Permissionless: this is the backward cleanup move, so anyone may trigger it. The
-     * destination is read on-chain from the parent Personal Account and cannot be chosen by the
-     * caller, and the executor comes from the controller, so the call takes no parameters at all.
-     * Redeems the whole balance rather than whole lots, so nothing is left stranded; FAssets can
-     * still redeem less than requested, in which case the remainder stays and can be swept again.
-     * Balances below the FAssets minimum redemption amount revert and are recovered with
-     * {sweepToParent} instead.
-     * @return _amount Amount of FXRP requested for redemption (the whole balance).
-     * @return _redeemedAmount Amount of FXRP actually redeemed.
+     * @notice Pushes all idle FXRP to the parent Personal Account and has it redeemed to the
+     * parent's XRPL owner in the same call.
+     * @dev Permissionless: this is the backward cleanup move, so anyone may trigger it. It takes
+     * no parameters: the destination is the parent (fixed at deployment, part of this account's
+     * address), which redeems through {IPersonalAccount-redeemFromSubaccount} - pulling exactly
+     * the pushed amount and redeeming exactly that, with the controller's executor and this
+     * call's whole `msg.value` as the fee (FAssets records it in whole gwei). `msg.value` must
+     * cover the controller's configured executor fee ({InsufficientFundsForRedeem}): the fee is
+     * the price of the permissionless rail, so forcing the backward direction is never
+     * gas-only. The parent is the recorded redeemer, so every redemption outcome (a partial
+     * fill when FAssets tickets run out, a payment-default payout, a refund) lands on the
+     * parent, under the user's control. The whole balance is redeemed rather than whole lots,
+     * so nothing is left stranded here. A balance below the FAssets minimum redemption amount
+     * is pushed to the parent unredeemed instead (FAssets would reject it): `_redeemedAmount`
+     * is zero, the value goes to the parent as well ({NativeSweptToParent}), and
+     * {TokenSweptToParent} is emitted in place of {FXrpRedeemed} - the rail never fails on
+     * amount, and it costs the same either way.
+     * @return _amount Amount of FXRP pushed to the parent (the whole balance).
+     * @return _redeemedAmount Amount of FXRP actually redeemed; zero below the minimum.
      */
     function sweepRedeem()
         external payable
@@ -330,50 +307,13 @@ interface ILoanSubaccount is ISubaccount {
         external payable;
 
     /**
-     * @notice Relays a redemption payment default to the asset manager, when the agent did not
-     * pay the underlying XRP for a redemption this account created.
-     * @dev Restricted to the parent Personal Account: whether and when to default is the user's
-     * decision (after the payment window a late XRP payment may be preferable to the collateral
-     * payout), and a public relay would let anyone front-run the appointed executor's own call,
-     * which burns the funded executor fee. The relay exists so a default does not depend on the
-     * appointed executor: with it, the parties able to default are exactly the three FAssets
-     * intends - the user (through the parent account), the appointed executor and the agent. The
-     * default payout (vault collateral and/or pool WNat) is always paid to this account, where
-     * {sweepToParent} recovers it. Note that any relayed default forfeits the funded executor
-     * fee (the asset manager pays it only to the executor as immediate caller), and that the
-     * relay is unreachable while the controller is paused, since the parent acts through the
-     * paused instruction pipeline; the executor's direct path is unaffected by the pause.
-     * @param _proof Proof that the agent's payment did not happen in the required window.
-     * @param _redemptionRequestId The redemption request id.
-     */
-    function redemptionPaymentDefault(
-        IReferencedPaymentNonexistence.Proof calldata _proof,
-        uint256 _redemptionRequestId
-    )
-        external;
-
-    /**
-     * @notice Same as {redemptionPaymentDefault}, for the XRP payment-nonexistence proof type.
-     * @dev The proof's `proofOwner` must be zero or this account's address: the asset manager
-     * sees this account as the caller, not the parent or any outer relayer.
-     * @param _proof Proof that the agent's payment did not happen in the required window.
-     * @param _redemptionRequestId The redemption request id.
-     */
-    function xrpRedemptionPaymentDefault(
-        IXRPPaymentNonexistence.Proof calldata _proof,
-        uint256 _redemptionRequestId
-    )
-        external;
-
-    /**
      * @notice Recovers a token balance to the parent Personal Account.
      * @dev Permissionless. The destination is fixed to the parent, so the caller chooses only
-     * which asset to recover, never where it goes. This is how assets with no other exit leave
-     * the account — for example vault collateral or WNat paid out here by a FAssets redemption
-     * default, or an FXRP residual below the FAssets minimum redemption amount. FXRP at or above
-     * that minimum is rejected: the loan asset moves only through {sweepRedeem} or {sweepToLoan}.
-     * Stays available while the controller is paused, since the parent is the safest possible
-     * destination.
+     * which asset to recover, never where it goes: a thin mover for anything that lands here
+     * with no other exit (a mistaken token send). FXRP is rejected ({ProtectedToken}) - it
+     * moves only on its own rails, and a below-minimum residual goes home through
+     * {sweepRedeem}. Stays available while the controller is paused, since the parent is the
+     * safest possible destination.
      * @param _token The token to recover.
      * @return _amount The recovered amount.
      */
@@ -385,9 +325,9 @@ interface ILoanSubaccount is ISubaccount {
 
     /**
      * @notice Recovers the native balance to the parent Personal Account.
-     * @dev Permissionless, fixed destination; see {sweepToParent}. Native can arrive here as a
-     * bridge or redemption refund, or by being sent with an instruction before the subaccount
-     * was deployed.
+     * @dev Permissionless, fixed destination; see {sweepToParent}. Native can arrive here as
+     * an external refund, or by being sent with an instruction before the subaccount was
+     * deployed.
      * @return _amount The recovered amount.
      */
     function sweepNativeToParent()

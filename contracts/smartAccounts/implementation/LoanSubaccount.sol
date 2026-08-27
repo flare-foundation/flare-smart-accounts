@@ -3,8 +3,6 @@ pragma solidity ^0.8.27;
 
 import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
-import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
-import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -59,8 +57,9 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         controllerAddress = EMPTY_ADDRESS;
     }
 
-    /// @dev Native can arrive as a bridge or redemption refund; {sweepNativeToParent} is its exit.
-    /// The implementation contract itself (never initialized, no parent) rejects it.
+    /// @dev Native can arrive as an external refund or with an instruction sent before the
+    /// account existed; {sweepNativeToParent} is its exit. The implementation contract itself
+    /// (never initialized, no parent) rejects it.
     receive() external payable {
         require(parentPersonalAccount != address(0), NotInitialized());
     }
@@ -92,28 +91,46 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         returns (uint256 _amount, uint256 _redeemedAmount)
     {
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-        _amount = assetManager.fAsset().balanceOf(address(this));
+        IERC20 fxrp = assetManager.fAsset();
+        _amount = fxrp.balanceOf(address(this));
         require(_amount > 0, NothingToRedeem());
-        // a residual below the FAssets minimum cannot be redeemed; it leaves via sweepToParent
-        uint256 minimumRedeemAmount = assetManager.minimumRedeemAmountUBA();
-        require(_amount >= minimumRedeemAmount, BelowMinimumRedemption(minimumRedeemAmount));
-
-        (address payable executor, uint256 executorFee) =
-            IExecutorsFacet(controllerAddress).getExecutorInfo();
+        // the permissionless rail costs the configured executor fee - paid to the FAssets
+        // executor when a redemption happens, to the parent when it does not - so forcing the
+        // backward direction is never gas-only (the accepted sweep-direction griefing bound)
+        // slither-disable-next-line unused-return
+        (, uint256 executorFee) = IExecutorsFacet(controllerAddress).getExecutorInfo();
         require(msg.value >= executorFee, InsufficientFundsForRedeem(executorFee));
 
-        _redeemedAmount = assetManager.redeemAmount{value: msg.value}(
-            _amount,
-            IPersonalAccount(parentPersonalAccount).xrplOwner(),
-            executor
-        );
+        if (_amount < assetManager.minimumRedeemAmountUBA()) {
+            // FAssets would reject the redemption: the balance still goes home, unredeemed, and
+            // the value joins the user's float on the parent - the rail never fails on amount.
+            // Whatever FAssets does not redeem stays on the parent; here that is all of it
+            fxrp.safeTransfer(parentPersonalAccount, _amount);
+            if (msg.value > 0) {
+                // false positive (arbitrary-send-eth): the recipient is the parent, fixed at
+                // initialization and part of this account's address - not caller-chosen
+                // slither-disable-next-line arbitrary-send-eth
+                // solhint-disable-next-line avoid-low-level-calls
+                (bool success, ) = parentPersonalAccount.call{value: msg.value}("");
+                require(success, NativeSweepFailed());
+                emit NativeSweptToParent(parentPersonalAccount, msg.value);
+            }
+            emit TokenSweptToParent(parentPersonalAccount, address(fxrp), _amount);
+            return (_amount, 0);
+        }
+
+        // the parent redeems: it pulls exactly this amount and redeems exactly that, so it is
+        // the recorded redeemer and every redemption outcome lands on it, under the user's
+        // control; the whole msg.value rides along for the executor fee
+        fxrp.forceApprove(parentPersonalAccount, _amount);
+        _redeemedAmount = IPersonalAccount(parentPersonalAccount).redeemFromSubaccount{
+            value: msg.value
+        }(_amount);
 
         emit FXrpRedeemed(
             parentPersonalAccount,
             _amount,
-            _redeemedAmount,
-            executor,
-            msg.value
+            _redeemedAmount
         );
     }
 
@@ -210,33 +227,6 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
     }
 
     /// @inheritdoc ILoanSubaccount
-    function redemptionPaymentDefault(
-        IReferencedPaymentNonexistence.Proof calldata _proof,
-        uint256 _redemptionRequestId
-    )
-        external
-        onlyParent
-    {
-        // parent-driven relay: whether and when to default is the user's decision, and a public
-        // relay would let anyone front-run the appointed executor's own call, which burns the
-        // funded executor fee; the payout lands here, where sweepToParent recovers it
-        ContractRegistry.getAssetManagerFXRP().redemptionPaymentDefault(_proof, _redemptionRequestId);
-        emit RedemptionPaymentDefaulted(_redemptionRequestId);
-    }
-
-    /// @inheritdoc ILoanSubaccount
-    function xrpRedemptionPaymentDefault(
-        IXRPPaymentNonexistence.Proof calldata _proof,
-        uint256 _redemptionRequestId
-    )
-        external
-        onlyParent
-    {
-        ContractRegistry.getAssetManagerFXRP().xrpRedemptionPaymentDefault(_proof, _redemptionRequestId);
-        emit XrpRedemptionPaymentDefaulted(_redemptionRequestId);
-    }
-
-    /// @inheritdoc ILoanSubaccount
     function sweepToParent(
         address _token
     )
@@ -250,18 +240,13 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         _amount = token.balanceOf(address(this));
         require(_amount > 0, NothingToSweep());
 
-        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-        if (_token == address(assetManager.fAsset())) {
-            // the loan asset has its own two directions (sweepRedeem, sweepToLoan); recovery to
-            // the parent only takes residuals that FAssets cannot redeem, so this method cannot
-            // become a third direction for it
-            uint256 minimumRedeemAmount = assetManager.minimumRedeemAmountUBA();
-            require(
-                _amount < minimumRedeemAmount,
-                FXrpAboveMinimumRedemption(_amount, minimumRedeemAmount)
-            );
-        }
-
+        // FXRP moves only on its own rails - sweepRedeem (which pushes a balance below the
+        // FAssets minimum to the parent unredeemed) and the forward moves - so a permissionless
+        // push cannot front-run the redemption executors run
+        require(
+            _token != address(ContractRegistry.getAssetManagerFXRP().fAsset()),
+            ProtectedToken(_token)
+        );
         token.safeTransfer(parentPersonalAccount, _amount);
         emit TokenSweptToParent(parentPersonalAccount, _token, _amount);
     }
