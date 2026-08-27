@@ -343,28 +343,27 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(address(this), messagingFee);
         assertEq(ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}(), 250e6);
 
-        // token and native recovery park assets at the future PA address - the same
-        // owner's deterministic address
+        // token recovery parks assets at the future PA address - the same owner's
+        // deterministic address; a plain native send reverts (no receive, no native exit)
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 5e18);
         assertEq(ILoanSubaccount(subaccount).sweepToParent(address(stray)), 5e18);
         assertEq(stray.balanceOf(parent), 5e18);
         vm.deal(address(this), 1 ether);
         (bool ok, ) = subaccount.call{value: 1 ether}("");
-        assertTrue(ok);
-        assertEq(ILoanSubaccount(subaccount).sweepNativeToParent(), 1 ether);
-        // plus the fee the dust push parked there earlier
-        assertEq(parent.balance, 1 ether + executorFee);
+        assertFalse(ok);
+        // the fee the dust push parked at the parent earlier
+        assertEq(parent.balance, executorFee);
 
         // parked assets do not block the CREATE2 deployment: the PA still materializes
-        // at exactly the recorded parent, owning everything parked there - the stray, the
-        // native, and the dust push's FXRP and fee
+        // at exactly the recorded parent, owning everything parked there - the stray and the
+        // dust push's FXRP and fee
         vm.deal(address(this), collateralReservationFee + executorFee);
         address personalAccount = _createPersonalAccount(xrplOwner);
         assertEq(personalAccount, parent);
         assertEq(stray.balanceOf(personalAccount), 5e18);
         assertEq(fxrp.balanceOf(personalAccount), 250e6);
-        assertEq(personalAccount.balance, 1 ether + executorFee);
+        assertEq(personalAccount.balance, executorFee);
     }
 
     function testCreateSubaccountEmptyOwnerIsPermanentOrphan() public {
@@ -1062,16 +1061,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testImplementationContractRejectsNativeAndRecovery() public {
         // the implementation contract is never initialized and has no parent: it must not
-        // accept native, and its recovery methods must not burn to the zero address
+        // accept native, and its recovery method must not burn to the zero address
         vm.deal(address(this), 1 ether);
         // solhint-disable-next-line avoid-low-level-calls
         (bool ok, ) = address(loanImpl).call{value: 1 ether}("");
         assertFalse(ok);
-
-        // native can still be force-sent past the guarded receive; recovery must refuse
-        vm.deal(address(loanImpl), 1 ether);
-        vm.expectRevert(ILoanSubaccount.NotInitialized.selector);
-        loanImpl.sweepNativeToParent();
 
         fxrp.mint(address(loanImpl), 1e6);
         vm.expectRevert(ILoanSubaccount.NotInitialized.selector);
@@ -1179,31 +1173,17 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
     }
 
-    function testSweepNativeToParentRecoversNative() public {
+    function testRejectsPlainNativeAndHasNoNativeExit() public {
+        // no receive(): a plain send reverts at the sender - no protocol flow pushes native here
+        // (the bridge refunds its caller, redemption outcomes go to the parent). Native that
+        // lands without a call (funding of the predicted address before deployment, a
+        // force-send) has no exit and strands - accepted; the implementation is upgradeable
         address subaccount = _createSubaccountFor(xrplOwner);
-        address parent = _personalAccountOf(xrplOwner);
-
-        // the subaccount accepts plain native transfers (external refunds, pre-deployment
-        // funding, force-sends; redemption outcomes go to the parent, the redeemer)
         vm.deal(address(this), 1 ether);
         // solhint-disable-next-line avoid-low-level-calls
         (bool ok, ) = subaccount.call{value: 1 ether}("");
-        assertTrue(ok);
-
-        vm.expectEmit();
-        emit ILoanSubaccount.NativeSweptToParent(parent, 1 ether);
-        uint256 amount = ILoanSubaccount(subaccount).sweepNativeToParent();
-
-        assertEq(amount, 1 ether);
+        assertFalse(ok);
         assertEq(subaccount.balance, 0);
-        assertEq(parent.balance, 1 ether);
-    }
-
-    function testSweepNativeToParentRevertNothingToSweep() public {
-        address subaccount = _createSubaccountFor(xrplOwner);
-
-        vm.expectRevert(ILoanSubaccount.NothingToSweep.selector);
-        ILoanSubaccount(subaccount).sweepNativeToParent();
     }
 
     function testSweepToParentWorksWhilePaused() public {
@@ -1211,7 +1191,6 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         address parent = _personalAccountOf(xrplOwner);
         MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
         stableCoin.mint(subaccount, 500e18);
-        vm.deal(subaccount, 1 ether);
 
         address pauser = makeAddr("pauser");
         address[] memory pausers = new address[](1);
@@ -1223,12 +1202,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // recovery to the parent is the safest destination, so it stays available in an incident
         ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
-        ILoanSubaccount(subaccount).sweepNativeToParent();
         assertEq(stableCoin.balanceOf(parent), 500e18);
-        assertEq(parent.balance, 1 ether);
     }
 
-    function testValueSentToUncreatedSubaccountIsRecoverableAfterCreation() public {
+    function testValueSentToUncreatedSubaccountStrands() public {
         address personalAccount = _createPersonalAccount(xrplOwner);
         address subaccount = controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
 
@@ -1244,10 +1221,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(subaccount.code.length, 0);
         assertEq(subaccount.balance, 1 ether);
 
-        // once the subaccount is created, the native recovery path brings it to the parent
+        // creation does not change that: the subaccount has no native exit, so the value strands
+        // - accepted (nobody in the protocol causes it; a beacon upgrade can add an exit).
+        // User operations must create the subaccount first
         controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
-        ILoanSubaccount(subaccount).sweepNativeToParent();
-        assertEq(personalAccount.balance, 1 ether);
+        assertNotEq(subaccount.code.length, 0);
+        assertEq(subaccount.balance, 1 ether);
+        assertEq(personalAccount.balance, 0);
     }
 
     //

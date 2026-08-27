@@ -48,9 +48,10 @@ interface ILoanSubaccount is ISubaccount {
     );
 
     /**
-     * @notice Emitted when the native balance is recovered to the parent Personal Account.
+     * @notice Emitted when native is sent to the parent Personal Account: the value of a
+     * {sweepRedeem} that pushed a below-minimum balance without redeeming.
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param amount The recovered amount.
+     * @param amount The amount sent.
      */
     event NativeSweptToParent(
         address indexed parentPersonalAccount,
@@ -183,13 +184,13 @@ interface ILoanSubaccount is ISubaccount {
     );
 
     /**
-     * @notice Reverts if the native balance could not be sent to the parent Personal Account.
+     * @notice Reverts if native could not be sent to the parent Personal Account.
      */
     error NativeSweepFailed();
 
     /**
-     * @notice Reverts on the implementation contract itself, which is never initialized: it must
-     * not accept native, and its recovery methods have no parent to send to.
+     * @notice Reverts on the implementation contract itself, which is never initialized: its
+     * recovery method has no parent to send to.
      */
     error NotInitialized();
 
@@ -320,17 +321,6 @@ interface ILoanSubaccount is ISubaccount {
     function sweepToParent(
         address _token
     )
-        external
-        returns (uint256 _amount);
-
-    /**
-     * @notice Recovers the native balance to the parent Personal Account.
-     * @dev Permissionless, fixed destination; see {sweepToParent}. Native can arrive here as
-     * an external refund, or by being sent with an instruction before the subaccount was
-     * deployed.
-     * @return _amount The recovered amount.
-     */
-    function sweepNativeToParent()
         external
         returns (uint256 _amount);
 

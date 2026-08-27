@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery methods (`sweepToParent`, `sweepNativeToParent`) are in place. The Flare-side loan instructions (`borrow`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow and withdraw actions), the per-type market binding and governance configuration (`LoanChainSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the the recovery method (`sweepToParent`) are in place. The Flare-side loan instructions (`borrow`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow and withdraw actions), the per-type market binding and governance configuration (`LoanChainSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
 
 ## Typed subaccounts
 
@@ -45,7 +45,7 @@ with `salt = bytes32(0)`. The subaccount address is therefore a pure function of
 ## Creation and prediction
 
 - `getSubaccount(xrplOwner, type)` — view; returns the registered subaccount, or the computed address if not yet deployed. Works even before the parent PA exists (the PA address itself is deterministic).
-- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; the parent Personal Account resolves to the registered account when one exists, and to its computed address otherwise — the same fallback `getSubaccount` uses, so creation works before the Personal Account exists (and on chains where PAs never exist at all). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them — without waiting for the parent. A subaccount created before its PA is only **partly** inert: `onlyParent` methods have no possible caller and `sweepRedeem` at or above the minimum reverts calling the codeless parent, while `sweepToLoan` (which never reads the parent) works normally, and `sweepToParent`/`sweepNativeToParent` — and `sweepRedeem` below the minimum, which never calls parent code — park assets at the future PA address — the same owner's deterministic address, whose later CREATE2 deployment a pre-existing balance does not block. The PA then deploys at exactly the recorded parent, owning whatever was parked. One qualification: this holds for a valid owner string — the route accepts any string, but a Personal Account cannot be created for an empty one, so an empty-owner subaccount is permanent caller-funded junk with no custody or collision impact. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
+- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; the parent Personal Account resolves to the registered account when one exists, and to its computed address otherwise — the same fallback `getSubaccount` uses, so creation works before the Personal Account exists (and on chains where PAs never exist at all). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them — without waiting for the parent. A subaccount created before its PA is only **partly** inert: `onlyParent` methods have no possible caller and `sweepRedeem` at or above the minimum reverts calling the codeless parent, while `sweepToLoan` (which never reads the parent) works normally, and `sweepToParent` — and `sweepRedeem` below the minimum, which never calls parent code — park assets at the future PA address — the same owner's deterministic address, whose later CREATE2 deployment a pre-existing balance does not block. The PA then deploys at exactly the recorded parent, owning whatever was parked. One qualification: this holds for a valid owner string — the route accepts any string, but a Personal Account cannot be created for an empty one, so an empty-owner subaccount is permanent caller-funded junk with no custody or collision impact. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
 
 Unlike Personal Accounts, which are only ever created as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points), a loan subaccount needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily.
 
@@ -65,7 +65,7 @@ XRPL memo → MemoInstructionsFacet.handleMintedFAssets → MemoInstructions.exe
 
 The subaccount type does not need encoding in the instruction: the address already commits to `(parentPersonalAccount, subaccountType)`, so *which* subaccount is called is *which* type is meant. Adding subaccount methods or types therefore needs no controller change, no new memo opcode, and no diamond cut. The controller still enforces pause, nonce, replay protection, executor, and fee on the way in, because that all happens in `handleMintedFAssets` before the user operation runs.
 
-Calling a subaccount that is not deployed yet would **silently succeed** — a call to an address with no code returns success, so `executeUserOp` would not revert. The instruction does nothing, except that any native value it carried is transferred to the codeless address, where it sits until the subaccount is created and `sweepNativeToParent` recovers it. User operations must therefore create the subaccount first. `createSubaccount` is permissionless and idempotent, so it can be the first call of every such operation:
+Calling a subaccount that is not deployed yet would **silently succeed** — a call to an address with no code returns success, so `executeUserOp` would not revert. The instruction does nothing, except that any native value it carried is transferred to the codeless address and strands there — the subaccount has no native exit (accepted; see the open items). User operations must therefore create the subaccount first. `createSubaccount` is permissionless and idempotent, so it can be the first call of every such operation:
 
 ```text
 executeUserOp([
@@ -114,20 +114,24 @@ pushes dust.
 
 ### Recovery to the parent Personal Account
 
-Not everything that can land on a subaccount is FXRP: a token sent here by mistake, native
-refunded by an external system or sent with an instruction to the predicted address before the
-subaccount exists (the account has a `receive()` for native). Neither has another exit here, so
-two permissionless thin movers push them to the parent Personal Account, which accepts any
-asset and is fully under the user's control:
+Not everything that can land on a subaccount is FXRP: a token sent here by mistake has no
+other exit, so one permissionless thin mover pushes it to the parent Personal Account, which
+accepts any asset and is fully under the user's control:
 
 - **`sweepToParent(token)`** — recovers a token balance. The caller chooses only *which* asset,
   never where it goes. FXRP is **rejected** (`ProtectedToken`): the loan asset moves only on
   its own rails, and executors run `sweepRedeem` — a free push must not front-run it. A residual
   below the FAssets minimum goes home through `sweepRedeem` itself (pushed unredeemed).
-- **`sweepNativeToParent()`** — recovers the native balance.
 
-Both stay available while the controller is paused: the parent is the safest possible
+It stays available while the controller is paused: the parent is the safest possible
 destination, and an incident should not trap assets.
+
+**No native rail.** There is no `receive()` — no protocol flow pushes native at the subaccount
+(the bridge refunds its caller, redemption outcomes land on the parent), so a plain send
+reverts at the sender — and no native exit. Native can still land without a call: sent with an
+instruction to the predicted address before the subaccount existed, or force-sent. Such a
+balance strands — accepted, since nobody in the protocol causes it; a beacon upgrade can add an
+exit if it ever matters. The same policy as the loan-chain subaccount.
 
 When the agent does not pay the underlying XRP for a redemption, someone must trigger the
 **redemption payment default**, which seizes the agent's locked collateral and pays it to the
@@ -632,4 +636,4 @@ so no mirror can exist for an impossible owner.
 - **TODO, parked: atomic withdraw-and-bridge action.** If guaranteed withdrawal completion is ever required, the clean contract-level fix for the withdraw/redeposit ordering race (see the rails) is a single composed action that withdraws collateral and bridges it back in one execution. It is not free: it needs compose value (rejected today by `NonZeroComposeValue`, which exists to keep mistaken deliveries retriable), fee quoting inside the compose, and refund semantics for a permissionless deliverer. Decide if withdrawal-completion guarantees become a product requirement; until then, executor-side bundling of delivery with `sweepToOrigin` is the operational mitigation.
 - **TODO, in design: the Flare fee.** An interest-spread model (checkpoint accounting over the account's Morpho debt) was accepted by product and is in design review; it is kept out of this spec until the design settles, then documented here.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.
-- ~~Native payability~~ — resolved: the account has `receive()` and `sweepNativeToParent()`, since external refund behavior (FAssets, LayerZero, bridges) is not under this repo's control.
+- ~~Native payability~~ — resolved the other way: no `receive()` and no native exit on the Flare subaccount (nothing in the protocol pushes native at it — the bridge refunds its caller, redemption outcomes land on the parent); native landing without a call (pre-deployment funding of the predicted address, a force-send) strands — accepted; a beacon upgrade can add an exit if it ever matters.

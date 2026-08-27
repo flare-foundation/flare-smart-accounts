@@ -29,6 +29,13 @@ import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
 /**
  * @title LoanSubaccount contract
  * @notice Deterministic staging account for loan-related assets owned by a Personal Account.
+ * It has no native rail: no `receive()` and no native exit. No protocol flow ever pushes native
+ * at this account - the bridge refunds its caller, redemption outcomes land on the parent - so a
+ * plain send reverts at the sender, and native can land only without a call: value sent with an
+ * instruction to the predicted address before the account existed, or a force-send. Both are
+ * very unlikely, neither is caused by the protocol, and neither is worth a rail: such a balance
+ * strands, deliberately. As a last resort, if it ever actually mattered, the implementation is
+ * beacon-upgradeable and an exit can be added then.
  * @dev The controller (MasterAccountController Diamond) is the beacon: the proxy and this
  * contract resolve the implementation per subaccount type through {implementationForType}.
  */
@@ -57,12 +64,7 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         controllerAddress = EMPTY_ADDRESS;
     }
 
-    /// @dev Native can arrive as an external refund or with an instruction sent before the
-    /// account existed; {sweepNativeToParent} is its exit. The implementation contract itself
-    /// (never initialized, no parent) rejects it.
-    receive() external payable {
-        require(parentPersonalAccount != address(0), NotInitialized());
-    }
+    // deliberately no receive() and no native exit - see the contract notice
 
     /// @inheritdoc ISubaccount
     function initialize(
@@ -249,29 +251,6 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         );
         token.safeTransfer(parentPersonalAccount, _amount);
         emit TokenSweptToParent(parentPersonalAccount, _token, _amount);
-    }
-
-    /// @inheritdoc ILoanSubaccount
-    function sweepNativeToParent()
-        external
-        nonReentrant
-        returns (uint256 _amount)
-    {
-        // never on the implementation contract itself: native can be force-sent even past the
-        // guarded receive, and recovery there would burn it to the zero address
-        require(parentPersonalAccount != address(0), NotInitialized());
-        _amount = address(this).balance;
-        require(_amount > 0, NothingToSweep());
-
-        // false positive (arbitrary-send-eth): the recipient is the parent Personal Account,
-        // fixed at initialization and part of this account's CREATE2 address — not caller-chosen;
-        // the parent accepts native (it has a receive function)
-        // slither-disable-start arbitrary-send-eth
-        // solhint-disable-next-line avoid-low-level-calls
-        (bool success, ) = parentPersonalAccount.call{value: _amount}("");
-        // slither-disable-end arbitrary-send-eth
-        require(success, NativeSweepFailed());
-        emit NativeSweptToParent(parentPersonalAccount, _amount);
     }
 
     /// @inheritdoc ISubaccount
