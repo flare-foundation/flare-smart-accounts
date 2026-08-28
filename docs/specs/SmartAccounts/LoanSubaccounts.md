@@ -165,16 +165,42 @@ The forward moves come in two shapes. `sweepToLoan` is cleanup: permissionless, 
 argument-free deposit compose — the assets cross over and become collateral. The **loan
 instructions** are `borrow(collateralAmount, borrowAmount, destinationKind, destination,
 operationId, deadline, extraOptions)`, `depositCollateral(amount, operationId, deadline,
-extraOptions)` and `withdraw(amount, operationId, deadline, extraOptions)`: typed methods that
+extraOptions)` and `withdraw(amount, operationId, deadline, options)`: typed methods that
 build the compose payload
 **on-chain** and bridge it to this account's own address on the loan chain, where the
 loan-chain twin executes it on arrival (supply as collateral, borrow, disburse; deposit
-collateral only; withdraw collateral). The payload is not passed in: what the user signs is
+collateral only; the atomic withdrawal — withdraw collateral and bridge it back here in the
+same execution, redeemed on arrival). The payload is not passed in: what the user signs is
 structured and type-checked, a malformed payload cannot reach the bridge, and the arguments
 are validated here — before any bridge fee is paid — for everything the loan chain would
 reject on delivery (`InvalidLoanInstruction`: zero operation id, deadline already passed, a
 zero borrow, deposit or withdrawal amount, a disbursement destination that is not a clean
-non-zero EVM address other than this account). The loan chain re-validates on delivery. The
+non-zero EVM address other than this account, a zero withdraw delivery-value floor). The loan chain
+re-validates on delivery.
+
+The withdraw is the one instruction with a second leg, so it takes **two option blobs and a
+delivery floor** in one struct (`WithdrawOptions`): `destinationOptions` for the Flare →
+loan-chain message (the withdraw compose's gas and, as compose value, the native that prepays
+the return leg's LayerZero fee), `returnOptions` for the loan-chain → Flare return send (the
+redeem-home compose's gas and, optionally, the redemption's executor fee as compose value),
+and `minComposeValue`, the **signed delivery-value floor**: compose delivery is permissionless
+and LayerZero does not authenticate the delivered value, so without the floor anyone could
+consume the packet — execute it with less than the prepaid headroom, or terminal-skip an
+expiring one with zero — and the prepaid value would never reach the user; the loan chain
+refuses any delivery below the floor, which stays retriable. The operator quotes the return
+leg first (`quoteSend` on the loan chain is a view), puts that fee plus headroom into
+`destinationOptions` as compose value and the same number into `minComposeValue`, then quotes
+and sends the first message; the excess lands on the mirror — the user's own account — so
+generous headroom is not lost (the LayerZero delivery itself may still cost more). Both blobs
+are signed end-to-end; a bad `returnOptions` blob
+is frozen in the packet and parks that withdrawal until a fresh instruction — issued with the
+**same operation id**, so the parked packet terminal-skips as a duplicate instead of surviving
+as a second live withdrawal. That residual is the accepted cost of not making the return route
+a governance setting (which could not carry the per-transaction redemption fee, and would go
+stale for every in-flight withdrawal at once). The redemption fee optionally bought inside
+`returnOptions` is best-effort on the second leg: the Flare redeem-home accepts zero value by
+design, so a zero-value delivery there redeems with the appointed executor unpaid — never a
+custody change. The
 three are separate instructions with separate actions — a borrow always increases debt
 (`borrowAmount` non-zero), `depositCollateral` never does — so each carries exactly the
 fields it needs and its own pause rule (a deposit is the defensive move; see the loan-chain
@@ -240,7 +266,7 @@ side):
 - **A real Endpoint/OFT compose-delivery simulation** belongs to the loan-chain-side test suite
   as a regression test; the live-adapter verification recorded here is evidence, not a test.
   Still open for the wire hop (a real `EndpointV2` and the OFT's `lzReceive → sendCompose`),
-  and it must cover all the actions (borrow, deposit, sweep deposit, withdraw, mirror execute) — the mirror case with a
+  and it must cover all the actions (borrow, deposit, sweep deposit, the atomic withdraw with its return leg, mirror execute) — the mirror case with a
   native drop into the real beacon proxy followed by a value-carrying batch, since unit tests fund
   the mirror with `vm.deal` and never exercise the executor's gas-limited drop. Covered
   locally: a sender→codec→receiver test runs the bytes the Flare senders hand to `send` through
@@ -336,8 +362,10 @@ must equal the one recomputed from the pinned origin peer
 (`GUID.generate(nonce, srcEid, originPeer, dstEid, fxrpOft)`). The endpoint computes the real
 GUID from the true packet header, so even an OFT whose peer is temporarily swapped to a
 malicious OApp cannot forge a message that passes: this closes the change-send-restore attack
-against accumulated positions. Compose value is rejected (`NonZeroComposeValue`) — the flow
-never sends any, and rejecting keeps a mistaken delivery retriable without value. The executor and extra data are
+against accumulated positions. Compose value is rejected (`NonZeroComposeValue`) for every
+action that does not spend it within the same call — rejecting keeps a mistaken delivery
+retriable without value; the atomic withdraw is the one loan-chain action that opts in (the
+value is its return leg's fee), behind its signed delivery-value floor. The executor and extra data are
 untrusted and ignored. A failing delivery reverts and stays retriable through the endpoint;
 the credited FXRP is already on the account either way.
 
@@ -382,9 +410,19 @@ compose of the permissionless Flare `sweepToLoan`: argument-free, no operation i
 carries its own credit), same pause rule. For all of these, if the credited tokens were moved before delivery (the accepted
 race above), the action fails closed with `InsufficientComposeBalance` — a cap rather than
 provenance, since every balance on the account is the user's own, but it stops a signed action
-from absorbing more than its own credit. `ACTION_WITHDRAW` withdraws collateral from the
-account's own position **to the account itself**, where only the fixed rails can move it;
-Morpho enforces position health.
+from absorbing more than its own credit. `ACTION_WITHDRAW` is the atomic withdrawal: it withdraws collateral from the account's own
+position and bridges exactly that amount back to the account's own Flare address **in the
+same execution**, with the redeem-home compose — no idle window between the two, so the
+redeposit race cannot touch a withdrawal. It is the one action that accepts compose value
+(spent in the same call): the value pays the return send's LayerZero fee, quoted live against
+the signed `returnOptions` from the payload; the excess goes to the parent mirror, and too
+little value for the quote reverts the delivery — retriable, since fee quotes drift both ways.
+Before any consuming branch — execution and terminal skip alike — the delivery must carry at
+least the signed `minComposeValue` (`InsufficientDeliveryValue`, retriable): delivery is
+permissionless and the value unauthenticated, so the floor is what stops a below-value
+front-run from consuming the packet with the prepaid value undelivered. A terminally skipped
+withdraw (delivered at or above the floor) forwards its value to the mirror (nothing may
+strand on an account with no native rail). Morpho enforces position health.
 
 **Creation route.** The same generic `createSubaccount(xrplOwner, type)` serves this chain —
 there is no separate loan-chain creation function. The parent Personal Account resolves the
@@ -468,14 +506,12 @@ Flare-side invariant:
   successful composed action. Defending an indebted position survives a pause, like
   repayment; a debt-free deposit is new exposure and pause-gated. Debt is read live from
   Morpho on every check — nothing is cached, so an external liquidation is visible to the
-  very next call. The direction race versus `sweepToOrigin` is accepted but carries an
-  asymmetry the Flare-side sweeps do not have: redepositing costs the griefer only gas, while
-  completing the withdrawal again costs a new signed operation and a repeat bridge fee. A
-  permissionless caller can even deliver a queued withdrawal compose and redeposit its FXRP in
-  the same transaction; an executor narrows this to a transaction-ordering race by atomically
-  bundling delivery with `sweepToOrigin` (compose delivery is permissionless on the endpoint;
-  private order flow helps), but cannot close it. Funds are never redirected — the impact is
-  delay and the repeat cost.
+  very next call. The direction race versus `sweepToOrigin` still exists for **residue** —
+  credit left by a skipped compose or a direct send can be redeposited or swept by whoever
+  runs first, both owner-safe outcomes — but it can no longer touch a withdrawal: the
+  withdraw action bridges its amount home in the same execution, so there is no idle window
+  to front-run. Funds are never redirected — the impact of the residue race is delay and a
+  repeat cost.
 - **`sweepToOrigin(extraOptions)`** bridges the whole idle FXRP balance back to this account's
   own Flare address (the OFT's own `token()` is the authoritative FXRP identity), with the
   redeem-home compose (a deadline, this block time plus `REDEEM_HOME_TTL`, and nothing else):
@@ -493,9 +529,9 @@ Flare-side invariant:
   Any other stray token strands until a beacon upgrade adds a rail — accepted, exactly as on
   the Flare subaccount: no protocol flow delivers one here, and every token the protocol does
   route here has its own rail.
-  There is no native rail on this account: no `receive()` (no protocol flow sends native
-  here — the bridge rails refund their caller and compose value is rejected — so a plain send
-  reverts at the sender) and no native exit. Native can still land without a call:
+  There is no native rail on this account: no `receive()` (the only protocol-delivered native
+  is a withdraw delivery's compose value, spent or forwarded to the mirror within the same
+  call — a plain send reverts at the sender) and no native exit. Native can still land without a call:
   pre-deployment funding of the predicted address, a caller-requested LayerZero native drop,
   or a force-send; such a balance strands until a beacon upgrade adds a rail — accepted, since
   nobody in the protocol causes it. Containment note: a pause does not contain a compromise of the
@@ -540,7 +576,8 @@ compose delivery), and they live once in
 [`ComposeReceiverAccountBase`](../../../contracts/smartAccounts/implementation/ComposeReceiverAccountBase.sol)
 (public surface: [`IComposeReceiverAccountBase`](../../../contracts/userInterfaces/IComposeReceiverAccountBase.sol)).
 Derived accounts define only their action set, their transport source, whether compose value is
-accepted (only the Flare receiver, which spends it in the same call) and their identity.
+accepted (per action; the Flare redeem-on-arrival and the loan-chain atomic withdraw, each
+spending or forwarding it in the same call) and their identity.
 Deliberately one implementation:
 this block is the security root of every account with no local owner.
 
@@ -654,7 +691,9 @@ Account.
   version 1 relative to the earlier route-registry draft, which is safe **only** while no
   loan-chain settings facet has ever been cut, no old-V1 packet is queued or in flight
   anywhere in LayerZero, and no client or tooling holds prebuilt old-schema payloads — all
-  true today, `deployment/deploys/ethereum.json` holds only the pinned bootstrap contracts. An
+  true today, `deployment/deploys/ethereum.json` holds only the pinned bootstrap contracts. The
+  same condition covers every later in-place V1 change, most recently the withdraw action's
+  `actionData` gaining `minComposeValue` and `returnOptions`. An
   environment that had shipped the old scheme would need a new payload version instead. (The
   settings storage namespaces are fresh - `smartAccounts.ComposeTransport.State` and
   `smartAccounts.LoanMarkets.State`; splitting the earlier single settings namespace is itself a
@@ -705,9 +744,10 @@ Account.
     production configuration;
   - the real Endpoint/OFT compose-delivery integration harness for every action, in both
     directions (also a step-6 release gate; the local sender→codec→receiver tests run each
-    sender's bytes — borrow, deposit, sweep deposit, withdraw, mirror execute, and the
-    loan-chain redeem-home — through the canonical codec into the real receivers, everything but
-    the wire hop; non-zero compose value is covered by the Flare receiver tests, and the
+    sender's bytes — borrow, deposit, sweep deposit, the atomic withdraw with its real return
+    send, mirror execute, and the loan-chain redeem-home — through the canonical codec into the
+    real receivers, everything but the wire hop; non-zero compose value is covered by the
+    receiver tests on both chains (the Flare redeem-home and the loan-chain withdraw), and the
     wire-level `lzReceive → sendCompose → lzCompose` path with delivered compose value, zero and
     non-zero, is exactly what the harness must add).
 - **`setLoanBridgeSettings` comes last, and only once the loan-chain side exists.** Its
@@ -720,7 +760,7 @@ Account.
 ## Open design items (decide with the asset-moving methods)
 
 - ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed — by `repay` itself or by an external liquidation — the same `repay` call pushes the surplus to the parent Personal Account (the user's own loan-chain account), best-effort: a push the token refuses stays on the account for a later `repay` to retry, never rolling back the repayment. No generic `recoverToken`: stray tokens strand, as on the Flare side. Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
-- **TODO, parked: atomic withdraw-and-bridge action.** If guaranteed withdrawal completion is ever required, the clean contract-level fix for the withdraw/redeposit ordering race (see the rails) is a single composed action that withdraws collateral and bridges it back in one execution. It is not free: it needs compose value (rejected today by `NonZeroComposeValue`, which exists to keep mistaken deliveries retriable), fee quoting inside the compose, and refund semantics for a permissionless deliverer. Decide if withdrawal-completion guarantees become a product requirement; until then, executor-side bundling of delivery with `sweepToOrigin` is the operational mitigation.
+- ~~Atomic withdraw-and-bridge action~~ — resolved, built as `ACTION_WITHDRAW` itself: the withdraw compose withdraws the collateral and bridges it home in the same execution (the withdraw/redeposit race is closed for withdrawals; it survives only for residue). Compose value is accepted for this one action and spent in the same call — the return leg's fee, prepaid from Flare as message-1 compose value, quoted against the signed `returnOptions`, excess to the mirror; every delivery must carry the signed `minComposeValue` floor (delivery is permissionless, the value unauthenticated — below the floor nothing consumes the packet), and a short delivery reverts and stays retriable. Two accepted residuals: bad signed `returnOptions` park that withdrawal until a fresh instruction reusing the same operation id (the parked packet then terminal-skips as a duplicate), and the redeem-home packet residual above applies to the return leg as to any bridge-back — including its best-effort redemption fee.
 - **TODO, in design: the Flare fee.** An interest-spread model (checkpoint accounting over the account's Morpho debt) was accepted by product and is in design review; it is kept out of this spec until the design settles, then documented here.
 - ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`. Remaining leftover: `LoanBridgeSettingsFacet` is the Flare end of the same route under a loan name (its validation is FXRP-specific); revisit if a second route ever exists.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.

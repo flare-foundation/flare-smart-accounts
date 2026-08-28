@@ -34,6 +34,27 @@ uint64 constant REDEEM_HOME_TTL = 1 hours;
  */
 interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
+    /// @notice The two LayerZero option blobs a withdraw instruction carries - one per leg of
+    /// the atomic withdrawal. The operator quotes the return leg first, puts that fee (plus
+    /// headroom; the excess lands on the mirror) into `destinationOptions` as compose value,
+    /// then quotes and sends the first message.
+    struct WithdrawOptions {
+        /// @notice Flare -> loan chain: the withdraw compose's gas and, as compose value, the
+        /// native that pays the return leg's LayerZero fee.
+        bytes destinationOptions;
+        /// @notice Loan chain -> Flare: the redeem-home compose's gas and, optionally, the
+        /// redemption's executor fee as compose value. Signed end-to-end and frozen into the
+        /// instruction - a bad value parks the withdrawal until a fresh instruction (reuse the
+        /// same operation id, so the parked packet terminal-skips as a duplicate).
+        bytes returnOptions;
+        /// @notice The delivery-value floor (non-zero): compose delivery is permissionless and
+        /// LayerZero does not authenticate the delivered value, so the loan chain refuses any
+        /// delivery of this withdraw - execution and terminal skip alike - carrying less than
+        /// this. Set it to the compose value bought in `destinationOptions`, so a front-run
+        /// with less cannot consume the packet and burn the prepaid value.
+        uint256 minComposeValue;
+    }
+
     /**
      * @notice Emitted when a loan subaccount is initialized.
      * @param controllerAddress The controller address.
@@ -229,8 +250,9 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
     /**
      * @notice Reverts on a loan instruction whose arguments cannot execute on the loan chain:
      * a zero operation id, a deadline already passed, a zero borrow, deposit or withdrawal
-     * amount, or a borrow disbursement that is not a clean non-zero EVM address other than
-     * this account. Checked here, before any bridge fee is paid.
+     * amount, a borrow disbursement that is not a clean non-zero EVM address other than
+     * this account, or a withdraw with a zero delivery-value floor. Checked here, before any
+     * bridge fee is paid.
      */
     error InvalidLoanInstruction();
 
@@ -353,19 +375,25 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
     /**
      * @notice The withdraw instruction: a message-only send to this account's own address on
      * the loan chain, with the typed withdraw payload — withdraw `_amount` of collateral from
-     * the position to the loan-chain account itself, where only its fixed rails can move it.
+     * the position and bridge it back here in the same execution, to be redeemed on arrival
+     * (the atomic withdrawal: no idle window on the loan chain, so nothing can be redeposited
+     * from under it).
      * @dev Restricted to the parent Personal Account; same validation, guards, and fee
-     * handling as {borrow}. No FXRP travels with it.
-     * @param _amount Collateral to withdraw on the loan chain; non-zero.
+     * handling as {borrow}. No FXRP travels with it, but `_options.destinationOptions` must
+     * carry, as compose value, the native that pays the return leg's LayerZero fee (quoted
+     * against `_options.returnOptions` on the loan chain; the excess lands on the mirror, and
+     * too little parks the delivery as retriable).
+     * @param _amount Collateral to withdraw on the loan chain and bridge home; non-zero.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
-     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
+     * @param _options The two option blobs plus the delivery-value floor ({WithdrawOptions});
+     * `minComposeValue` must be non-zero.
      */
     function withdraw(
         uint256 _amount,
         bytes32 _operationId,
         uint64 _deadline,
-        bytes calldata _extraOptions
+        WithdrawOptions calldata _options
     )
         external payable;
 

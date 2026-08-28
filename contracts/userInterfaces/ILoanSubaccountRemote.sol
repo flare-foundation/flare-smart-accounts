@@ -19,10 +19,23 @@ import {ISubaccount} from "./ISubaccount.sol";
 uint8 constant ACTION_BORROW = 1;
 
 /// @dev Withdraw action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// uint256 withdrawAmount)`. Withdraws collateral from the account's one position to the
-/// account itself; the idle FXRP leaves only along the fixed rails, and which rail runs
-/// first is permissionless (redeposit or bridge-back - the accepted ordering race, see
-/// `depositIdleFxrp`). Position health is enforced by Morpho.
+/// uint256 withdrawAmount, uint256 minComposeValue, bytes returnOptions)`. The atomic withdrawal: withdraws collateral
+/// from the account's one position and bridges exactly that amount back to the account's own
+/// Flare address in the same execution, with the redeem-home compose - no idle window, so the
+/// redeposit ordering race cannot touch a withdrawal. The signed `returnOptions` are the
+/// return send's LayerZero options (Flare-side gas and, optionally, the redemption's executor
+/// fee as compose value); the return leg's fee is paid from the compose value delivered with
+/// this action - the only action that accepts value - and the excess goes to the parent
+/// mirror. Compose delivery is permissionless and LayerZero does not authenticate the
+/// delivered value, so the signed `minComposeValue` is the delivery floor: any delivery
+/// carrying less - execution and terminal skip alike - reverts (`InsufficientDeliveryValue`)
+/// and stays retriable, so a zero-value front-run cannot consume the packet and burn the
+/// prepaid value. Too little value for the live quote also reverts and stays retriable (fee
+/// quotes drift both ways); bad `returnOptions` are frozen in the signed packet - the
+/// accepted residual, fixed by a fresh instruction that reuses the same operation id, so the
+/// parked packet terminal-skips as a duplicate. The redemption fee optionally bought inside
+/// `returnOptions` stays best-effort on the second leg (the Flare redeem-home accepts zero
+/// value by design). Position health is enforced by Morpho.
 uint8 constant ACTION_WITHDRAW = 2;
 
 /// @dev Deposit-collateral action: `actionData` is `abi.encode(bytes32 operationId,
@@ -132,10 +145,11 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when a withdraw action executes.
+     * @notice Emitted when a withdraw action executes; the withdrawn collateral is bridged
+     * home in the same execution ({FXrpSweptToOrigin} follows).
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
-     * @param amount Collateral withdrawn to this account.
+     * @param amount Collateral withdrawn and bridged home.
      * @param guid The LayerZero message id the action arrived with.
      */
     event CollateralWithdrawn(
@@ -166,8 +180,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when idle FXRP is bridged back to this account's address on the origin
-     * chain.
+     * @notice Emitted when FXRP is bridged back to this account's address on the origin
+     * chain, to be redeemed on arrival: the sweep rail, or a withdraw action's return leg.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param amount The amount bridged.
      * @param originEid The origin chain's LayerZero endpoint id.
@@ -178,6 +192,19 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
         uint256 amount,
         uint32 originEid,
         bytes32 guid
+    );
+
+    /**
+     * @notice Emitted when native value is forwarded to the parent Personal Account (the
+     * mirror): the excess of a withdraw action's return-leg fee, or the whole value of a
+     * terminally skipped withdraw delivery - it must not strand on an account with no
+     * native rail.
+     * @param parentPersonalAccount The parent Personal Account address paid.
+     * @param amount The native value forwarded.
+     */
+    event NativeSweptToParent(
+        address indexed parentPersonalAccount,
+        uint256 amount
     );
 
     /**
@@ -264,9 +291,20 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts if the caller's excess native refund could not be returned.
+     * @notice Reverts if excess native could not be pushed to its destination: the sweep
+     * caller's refund, or the parent mirror on the withdraw action.
      */
     error RefundFailed();
+
+    /**
+     * @notice Reverts on a withdraw delivery carrying less compose value than the signed
+     * floor: delivery is permissionless and the value unauthenticated, so anything below the
+     * floor must not consume the packet - not even as a terminal skip. Retriable.
+     * @param required The signed delivery-value floor.
+     */
+    error InsufficientDeliveryValue(
+        uint256 required
+    );
 
 
 

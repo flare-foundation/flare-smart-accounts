@@ -39,8 +39,8 @@ interface IComposeReceiverAccountBase is ILayerZeroComposer {
     /**
      * @notice Reverts if native value is attached to `lzCompose` for an action that does not
      * spend it within the same call. Rejecting it keeps a mistaken delivery retriable without
-     * value; the Flare redeem-on-arrival is the one action that opts in (the value is its
-     * executor fee).
+     * value; an action that spends or forwards the value in the same call opts in (the Flare
+     * redeem-on-arrival, the loan-chain atomic withdraw).
      */
     error NonZeroComposeValue();
 

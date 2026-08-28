@@ -82,6 +82,10 @@ import {
 // solhint-disable-next-line max-states-count
 contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
+    /// The signed return-leg options a withdraw payload carries (the mock OFT ignores them).
+    bytes private constant RETURN_OPTIONS = hex"0003";
+    /// The signed delivery-value floor a withdraw payload carries.
+    uint256 private constant RETURN_MIN_VALUE = 0.01 ether;
     address private constant FLARE_CONTRACT_REGISTRY = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
     MockAssetManager private flareAssetManager;
 
@@ -254,8 +258,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testRejectsPlainNative() public {
-        // nothing in the protocol ever pushes native at the account (bridge rails refund
-        // their caller, compose value is rejected), so it has no receive() and no native exit:
+        // the only protocol-delivered native is a withdraw delivery's compose value, spent or
+        // forwarded within the same call, so the account has no receive() and no native exit:
         // a plain send reverts at the sender - implementation and proxy alike
         vm.deal(address(this), 1 ether);
         (bool success, ) = address(loanChainImpl).call{value: 1}("");
@@ -777,7 +781,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(rlusd.balanceOf(destination), 300e18);
     }
 
-    function testLzComposeWithdrawReturnsCollateralToTheAccount() public {
+    function testLzComposeWithdrawBridgesCollateralHome() public {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
@@ -787,12 +791,124 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         emit ILoanSubaccountRemote.CollateralWithdrawn(
             parentPersonalAccount, operationId, 30e6, _guidFor(2)
         );
-        _deliver(subaccount, 2, 0, _withdrawPayload(operationId, 30e6));
+        _deliverWithValue(subaccount, 2, 0, _withdrawPayload(operationId, 30e6), 0.01 ether);
 
-        // withdrawn to the account itself, where only the fixed rails can move it
+        // withdrawn and bridged home in the same execution: no idle window a redeposit
+        // could touch
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 70e6);
-        assertEq(fxrp.balanceOf(subaccount), 30e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+
+        // the return send: exactly the withdrawn amount, the redeem-home compose, and the
+        // signed return options
+        (, , uint256 amountLD, , bytes memory optionsSent, bytes memory composeMsgSent, ) =
+            fxrpOft.lastSendParam();
+        assertEq(amountLD, 30e6);
+        assertEq(optionsSent, RETURN_OPTIONS);
+        assertEq(
+            composeMsgSent,
+            abi.encode(
+                PAYLOAD_VERSION_1,
+                ACTION_REDEEM_HOME,
+                abi.encode(uint64(block.timestamp) + REDEEM_HOME_TTL)
+            )
+        );
+    }
+
+    function testLzComposeWithdrawRevertInsufficientReturnFee() public {
+        // too little compose value for the return leg reverts the whole action - nothing is
+        // withdrawn, the id stays unconsumed, and the delivery stays retriable (quotes drift)
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+
+        bytes32 operationId = bytes32("op-2");
+        (bytes memory message, bytes32 guid) = _composeMessage(
+            subaccount, 2, 0, _withdrawPayloadWithMin(operationId, 30e6, 0.0005 ether)
+        );
+        vm.deal(lzEndpoint, 0.001 ether);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanSubaccountRemote.InsufficientFundsForSweep.selector, 0.01 ether
+            )
+        );
+        ILoanSubaccountRemote(subaccount).lzCompose{value: 0.001 ether}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
+    }
+
+    function testLzComposeWithdrawForwardsExcessToTheMirror() public {
+        // the operator quotes the return leg generously and signs the whole prepayment as the
+        // floor: a delivery covering only the live quote still reverts on the floor, and the
+        // full delivery's excess lands on the mirror (the user's own account) - never on this
+        // account (no native rail) and never with the executor
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+
+        bytes memory payload = _withdrawPayloadWithMin(bytes32("op-2"), 30e6, 0.05 ether);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
+        vm.deal(lzEndpoint, 0.01 ether);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanSubaccountRemote.InsufficientDeliveryValue.selector, 0.05 ether
+            )
+        );
+        ILoanSubaccountRemote(subaccount).lzCompose{value: 0.01 ether}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.NativeSweptToParent(parentPersonalAccount, 0.04 ether);
+        _deliverWithValue(subaccount, 2, 0, payload, 0.05 ether);
+        assertEq(parentPersonalAccount.balance, 0.04 ether);
+        assertEq(subaccount.balance, 0);
+    }
+
+    function testWithdrawDeliveryBelowSignedFloorReverts() public {
+        // delivery is permissionless and the delivered value unauthenticated: below the
+        // signed floor nothing consumes the packet - not execution, and not a terminal skip
+        // (a zero-value front-run of a doomed packet must not burn the prepaid value)
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+
+        // execution path: a zero-value delivery reverts and stays retriable
+        (bytes memory message, bytes32 guid) =
+            _composeMessage(subaccount, 2, 0, _withdrawPayload(bytes32("op-2"), 30e6));
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanSubaccountRemote.InsufficientDeliveryValue.selector, RETURN_MIN_VALUE
+            )
+        );
+        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+
+        // skip path: a zero-value delivery of a duplicate reverts the same way instead of
+        // consuming the packet with the prepaid value undelivered
+        bytes memory dupPayload = _withdrawPayload(bytes32("op-1"), 30e6);
+        (message, guid) = _composeMessage(subaccount, 3, 0, dupPayload);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanSubaccountRemote.InsufficientDeliveryValue.selector, RETURN_MIN_VALUE
+            )
+        );
+        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+
+        // the same packet delivered at the floor terminal-skips and forwards the value
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanActionSkipped(
+            parentPersonalAccount, bytes32("op-1"), SKIP_REASON_DUPLICATE, _guidFor(3)
+        );
+        _deliverWithValue(subaccount, 3, 0, dupPayload, RETURN_MIN_VALUE);
+        assertEq(parentPersonalAccount.balance, RETURN_MIN_VALUE);
     }
 
     function testLzComposeRevertNonZeroComposeValue() public {
@@ -1144,9 +1260,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         emit ILoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
-        _deliver(subaccount, 2, 0, _withdrawPayload(operationId, 30e6));
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.NativeSweptToParent(parentPersonalAccount, 0.01 ether);
+        _deliverWithValue(subaccount, 2, 0, _withdrawPayload(operationId, 30e6), 0.01 ether);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
+        // the skipped delivery's value went to the mirror, not stranding here
+        assertEq(parentPersonalAccount.balance, 0.01 ether);
+        assertEq(subaccount.balance, 0);
     }
 
     function testLzComposeSkipExpiredDeadlineWithoutConsumingTheOperation() public {
@@ -1185,12 +1306,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         bytes memory payload = abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
-            abi.encode(bytes32("op-w"), uint64(block.timestamp), uint256(40e6))
+            abi.encode(
+                bytes32("op-w"), uint64(block.timestamp), uint256(40e6), RETURN_MIN_VALUE,
+                RETURN_OPTIONS
+            )
         );
-        _deliver(subaccount, 2, 0, payload);
+        _deliverWithValue(subaccount, 2, 0, payload, 0.01 ether);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 60e6);
-        assertEq(fxrp.balanceOf(subaccount), 40e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
@@ -1261,7 +1385,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             SUBACCOUNT_TYPE_LOAN
         );
 
-        _deliver(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 30e6));
+        _deliverWithValue(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 30e6), 0.01 ether);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 70e6);
 
@@ -1773,11 +1897,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         fxrp.mint(subaccount, 5e6);
-        _deliver(subaccount, 2, 5e6, _withdrawPayload(bytes32("op-2"), 30e6));
+        _deliverWithValue(subaccount, 2, 5e6, _withdrawPayload(bytes32("op-2"), 30e6), 0.01 ether);
 
+        // exactly the withdrawn amount bridges home; the attached credit stays for the rails
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 70e6);
-        assertEq(fxrp.balanceOf(subaccount), 35e6);
+        assertEq(fxrp.balanceOf(subaccount), 5e6);
     }
 
     function testRegisterLoanMarketRevertCodelessToken() public {
@@ -1923,15 +2048,36 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 100e6);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 500e18);
 
-        // withdraw: message-only; the receiver returns collateral to the account
+        // withdraw: message-only out, atomic on arrival - the receiver withdraws the
+        // collateral and bridges it home in the same execution, under the signed return
+        // options, paid by the delivered compose value
         vm.prank(parentPersonalAccount);
-        ILoanSubaccount(sender).withdraw{value: 0.01 ether}(40e6, bytes32("op-w"), deadline, "");
+        ILoanSubaccount(sender).withdraw{value: 0.01 ether}(
+            40e6, bytes32("op-w"), deadline,
+            ILoanSubaccount.WithdrawOptions({
+                destinationOptions: "",
+                returnOptions: hex"0003",
+                minComposeValue: 0.01 ether
+            })
+        );
         (amountLD, payload) = _lastSentCompose();
         assertEq(amountLD, 0);
-        _deliver(subaccount, 2, 0, payload);
+        _deliverWithValue(subaccount, 2, 0, payload, 0.01 ether);
         (, , collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 60e6);
-        assertEq(fxrp.balanceOf(subaccount), 40e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+
+        // the withdraw's return leg is a real bridge-back: deliver it to the Flare twin on
+        // this same diamond, which authenticates it against the bridge settings and runs the
+        // sweep-redeem logic on arrival - here its dust branch, since the parent has no code
+        // on this diamond (the redemption itself is covered in the Flare suite)
+        (amountLD, payload) = _lastSentCompose();
+        assertEq(amountLD, 40e6);
+        flareAssetManager.setMinimumRedeemAmountUBA(1_000e6);
+        fxrp.mint(sender, amountLD);
+        _deliverToFlareReceiver(sender, 6, amountLD, payload);
+        assertEq(fxrp.balanceOf(sender), 0);
+        assertEq(fxrp.balanceOf(parentPersonalAccount), 40e6);
 
         // the permissionless forward sweep: whatever idles on the Flare side bridges with the
         // argument-free deposit compose and becomes collateral on arrival
@@ -1956,20 +2102,6 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 130e6);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-d")));
 
-        // the bridge-back: the loan-chain side's idle FXRP (what the withdraw returned) goes
-        // home with the redeem-home compose (a deadline, nothing else); the Flare twin authenticates it against
-        // the bridge settings and runs the sweep-redeem logic on arrival - here its dust branch,
-        // since the parent has no code on this diamond (the redemption itself is covered in the
-        // Flare suite with a real Personal Account)
-        vm.deal(address(this), 0.01 ether);
-        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: 0.01 ether}("");
-        (amountLD, payload) = _lastSentCompose();
-        assertEq(amountLD, 40e6);
-        flareAssetManager.setMinimumRedeemAmountUBA(1_000e6);
-        fxrp.mint(sender, amountLD);
-        _deliverToFlareReceiver(sender, 6, amountLD, payload);
-        assertEq(fxrp.balanceOf(sender), 0);
-        assertEq(fxrp.balanceOf(parentPersonalAccount), 40e6);
 
         // the Personal Account's transfer: sent by a Flare PersonalAccount through
         // executeUserOp, decoded by a mirror created behind the same beacon
@@ -2268,10 +2400,24 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     )
         private
     {
+        _deliverWithValue(_subaccount, _nonce, _amountLD, _payload, 0);
+    }
+
+    /// Delivers with compose value, as the executor does for a withdraw (the return-leg fee).
+    function _deliverWithValue(
+        address _subaccount,
+        uint64 _nonce,
+        uint256 _amountLD,
+        bytes memory _payload,
+        uint256 _value
+    )
+        private
+    {
         (bytes memory message, bytes32 guid) =
             _composeMessage(_subaccount, _nonce, _amountLD, _payload);
+        vm.deal(lzEndpoint, _value);
         vm.prank(lzEndpoint);
-        ILoanSubaccountRemote(_subaccount).lzCompose(
+        ILoanSubaccountRemote(_subaccount).lzCompose{value: _value}(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -2362,10 +2508,24 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         private
         returns (bytes memory)
     {
+        return _withdrawPayloadWithMin(_operationId, _amount, RETURN_MIN_VALUE);
+    }
+
+    function _withdrawPayloadWithMin(
+        bytes32 _operationId,
+        uint256 _amount,
+        uint256 _minComposeValue
+    )
+        private
+        returns (bytes memory)
+    {
         return abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
-            abi.encode(_operationId, uint64(block.timestamp + 1 hours), _amount)
+            abi.encode(
+                _operationId, uint64(block.timestamp + 1 hours), _amount, _minComposeValue,
+                RETURN_OPTIONS
+            )
         );
     }
 

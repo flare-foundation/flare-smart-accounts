@@ -195,22 +195,30 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         uint256 _amount,
         bytes32 _operationId,
         uint64 _deadline,
-        bytes calldata _extraOptions
+        WithdrawOptions calldata _options
     )
         external payable
         onlyParent
         nonReentrant
     {
+        // the delivery-value floor is what makes the prepaid return fee reach the loan chain
+        // (delivery is permissionless and the value unauthenticated), so a zero floor is a
+        // mistake; the option blobs themselves are only checkable on the loan chain (the
+        // accepted frozen-options residual)
         require(
-            _operationId != bytes32(0) && _deadline >= block.timestamp && _amount > 0,
+            _operationId != bytes32(0) && _deadline >= block.timestamp && _amount > 0 &&
+                _options.minComposeValue > 0,
             InvalidLoanInstruction()
         );
         bytes memory payload = abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
-            abi.encode(_operationId, _deadline, _amount)
+            abi.encode(
+                _operationId, _deadline, _amount, _options.minComposeValue,
+                _options.returnOptions
+            )
         );
-        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(0, _extraOptions, payload);
+        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(0, _options.destinationOptions, payload);
         emit WithdrawInstructionSent(
             parentPersonalAccount, _operationId, _amount, destinationEid, guid
         );

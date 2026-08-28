@@ -334,7 +334,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // onlyParent methods have no possible caller: the parent address has no code
         vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
-        ILoanSubaccount(subaccount).withdraw(1, bytes32("op"), uint64(block.timestamp + 1), "");
+        ILoanSubaccount(subaccount).withdraw(
+            1, bytes32("op"), uint64(block.timestamp + 1), _withdrawOptions()
+        );
 
         // at or above the minimum, sweepRedeem reverts calling the codeless parent (no
         // ABI-encoded return from an address without code)
@@ -1153,7 +1155,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testRejectsPlainNativeAndHasNoNativeExit() public {
-        // no receive(): a plain send reverts at the sender - no protocol flow pushes native here
+        // no receive(): a plain send reverts at the sender - the only protocol-delivered
+        // native is the redeem-home compose value, spent or forwarded within the same call
         // (the bridge refunds its caller, redemption outcomes go to the parent). Native that
         // lands without a call (funding of the predicted address before deployment, a
         // force-send) has no exit and strands - accepted; the implementation is upgradeable
@@ -1983,15 +1986,24 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             personalAccount, bytes32("op-w"), 30e6, destinationEid, fxrpOft.GUID()
         );
         vm.prank(personalAccount);
-        ILoanSubaccount(subaccount).withdraw{value: messagingFee}(30e6, bytes32("op-w"), deadline, "");
+        ILoanSubaccount(subaccount).withdraw{value: messagingFee}(
+            30e6, bytes32("op-w"), deadline, _withdrawOptions()
+        );
 
-        // nothing travels but the instruction
+        // nothing travels but the instruction; the signed return options ride in the payload
         assertEq(fxrp.balanceOf(subaccount), 100e6);
         (,, uint256 amountLD,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
         assertEq(amountLD, 0);
         assertEq(
             composeMsgSent,
-            abi.encode(PAYLOAD_VERSION_1, ACTION_WITHDRAW, abi.encode(bytes32("op-w"), deadline, uint256(30e6)))
+            abi.encode(
+                PAYLOAD_VERSION_1,
+                ACTION_WITHDRAW,
+                abi.encode(
+                    bytes32("op-w"), deadline, uint256(30e6),
+                    _withdrawOptions().minComposeValue, _withdrawOptions().returnOptions
+                )
+            )
         );
     }
 
@@ -2008,12 +2020,21 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.startPrank(personalAccount);
         ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(100e6, bytes32("op-b"), deadline, "");
-        ILoanSubaccount(subaccount).withdraw{value: messagingFee}(30e6, bytes32("op-w"), deadline, "");
+        ILoanSubaccount(subaccount).withdraw{value: messagingFee}(
+            30e6, bytes32("op-w"), deadline, _withdrawOptions()
+        );
         vm.stopPrank();
         (,,,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
         assertEq(
             composeMsgSent,
-            abi.encode(PAYLOAD_VERSION_1, ACTION_WITHDRAW, abi.encode(bytes32("op-w"), deadline, uint256(30e6)))
+            abi.encode(
+                PAYLOAD_VERSION_1,
+                ACTION_WITHDRAW,
+                abi.encode(
+                    bytes32("op-w"), deadline, uint256(30e6),
+                    _withdrawOptions().minComposeValue, _withdrawOptions().returnOptions
+                )
+            )
         );
     }
 
@@ -2047,7 +2068,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
         vm.expectRevert(ILoanSubaccount.OnlyParent.selector);
         ILoanSubaccount(subaccount).withdraw{value: messagingFee}(
-            1e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+            1e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), _withdrawOptions()
         );
     }
 
@@ -2107,7 +2128,20 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
         // a zero withdrawal
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
-        ILoanSubaccount(subaccount).withdraw{value: messagingFee}(0, bytes32("op-1"), deadline, "");
+        ILoanSubaccount(subaccount).withdraw{value: messagingFee}(
+            0, bytes32("op-1"), deadline, _withdrawOptions()
+        );
+        // a zero delivery-value floor would let anyone consume the packet with the prepaid
+        // return fee undelivered
+        vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
+        ILoanSubaccount(subaccount).withdraw{value: messagingFee}(
+            30e6, bytes32("op-1"), deadline,
+            ILoanSubaccount.WithdrawOptions({
+                destinationOptions: "",
+                returnOptions: hex"0003",
+                minComposeValue: 0
+            })
+        );
         vm.stopPrank();
     }
 
@@ -2650,5 +2684,16 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function _redeemHomePayloadAt(uint64 _deadline) private pure returns (bytes memory) {
         return abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, abi.encode(_deadline));
+    }
+
+    /// Two-leg options for a withdraw. Both blobs may be empty (enforced options can make an
+    /// empty blob valid, and the mock ignores them); only the delivery-value floor is
+    /// validated, and it is what the sender requires to be non-zero.
+    function _withdrawOptions() private pure returns (ILoanSubaccount.WithdrawOptions memory) {
+        return ILoanSubaccount.WithdrawOptions({
+            destinationOptions: "",
+            returnOptions: "",
+            minComposeValue: 0.01 ether
+        });
     }
 }

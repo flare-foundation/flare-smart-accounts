@@ -41,9 +41,10 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * else is permissionless movement along fixed rails — into the account's own position, home
  * over the bridge, or to the parent Personal Account (the user's own compose-driven account
  * on this chain) — so no caller ever chooses a destination, a market, or an amount source.
- * It has no native rail: no protocol flow sends native here (a plain send reverts); a
- * balance landing without a call (pre-deployment funding, an LZ native drop, a force-send)
- * strands until a beacon upgrade adds a rail - accepted.
+ * It has no native rail: the only protocol-delivered native is a withdraw delivery's compose
+ * value (the return leg's fee), spent or forwarded to the parent mirror within the same call;
+ * a plain send reverts, and a balance landing without a call (pre-deployment funding, an LZ
+ * native drop, a force-send) strands until a beacon upgrade adds a rail - accepted.
  */
 contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
@@ -58,10 +59,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// @notice Subaccount type.
     uint256 public subaccountType;
 
-    // deliberately no receive(): no protocol flow pushes native at this account (the bridge
-    // rails refund their caller, compose value is rejected), so plain native sends revert at
-    // the sender; native landing without a call (pre-deployment funding, an LZ native drop, a
-    // force-send) strands - accepted, the implementation is upgradeable
+    // deliberately no receive(): the only protocol-delivered native is a withdraw delivery's
+    // compose value, spent or forwarded to the parent mirror within the same call, so plain
+    // native sends revert at the sender; native landing without a call (pre-deployment
+    // funding, an LZ native drop, a force-send) strands - accepted, upgradeable
 
     /// @inheritdoc ISubaccount
     function initialize(
@@ -170,58 +171,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         IERC20 fxrp = IERC20(IOFT(transport.oft).token());
         _amount = fxrp.balanceOf(address(this));
         require(_amount > 0, NothingToSweep());
-        // a peer mutation on the OFT after configuration must fail closed
-        require(
-            IOAppCore(transport.oft).peers(transport.originEid) == transport.originPeer,
-            WrongOriginPeer()
-        );
-
-        // the account is its own destination (same address on every chain); decimals match
-        // (validated in the transport), so `minAmountLD` equals `amountLD`. The redeem-home
-        // compose has the Flare twin redeem at most this amount on arrival, until the stamped
-        // deadline; the caller's options carry the Flare-side gas (and, optionally, the
-        // redemption's executor fee as value)
-        SendParam memory sendParam = SendParam({
-            dstEid: transport.originEid,
-            to: bytes32(uint256(uint160(address(this)))),
-            amountLD: _amount,
-            minAmountLD: _amount,
-            extraOptions: _extraOptions,
-            composeMsg: abi.encode(
-                PAYLOAD_VERSION_1,
-                ACTION_REDEEM_HOME,
-                abi.encode(uint64(block.timestamp) + REDEEM_HOME_TTL)
-            ),
-            oftCmd: ""
-        });
 
         // per-call value accounting: exactly the quoted fee is spent, only this call's excess
         // is refunded - pre-existing native on the account never subsidizes a caller
-        MessagingFee memory fee = IOFT(transport.oft).quoteSend(sendParam, false);
-        require(msg.value >= fee.nativeFee, InsufficientFundsForSweep(fee.nativeFee));
-
-        fxrp.forceApprove(transport.oft, _amount);
-        // two false positives on this call: slither arbitrary-send-eth (recipient is the
-        // governance-set OFT, value capped by the msg.value check above) and solhint
-        // check-send-result (this is the OFT's `send`, not address.send; it reverts on failure)
-        // slither-disable-start arbitrary-send-eth
-        // solhint-disable-next-line check-send-result
-        (MessagingReceipt memory receipt, ) = IOFT(transport.oft).send{value: fee.nativeFee}(
-            sendParam,
-            fee,
-            msg.sender
-        );
-        // slither-disable-end arbitrary-send-eth
-        fxrp.forceApprove(transport.oft, 0);
-
-        uint256 excess = msg.value - fee.nativeFee;
-        if (excess > 0) {
-            // solhint-disable-next-line avoid-low-level-calls
-            (bool success, ) = msg.sender.call{value: excess}("");
-            require(success, RefundFailed());
-        }
-
-        emit FXrpSweptToOrigin(parentPersonalAccount, _amount, transport.originEid, receipt.guid);
+        _bridgeHome(transport, _amount, _extraOptions, msg.value, msg.sender);
     }
 
     /// @inheritdoc ISubaccount
@@ -254,8 +207,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         if (_action == ACTION_BORROW) {
             _executeBorrow(_actionData, _guid, _amountLD);
         } else if (_action == ACTION_WITHDRAW) {
-            // pause-gated; the compose stays queued at the endpoint and re-delivers after
-            // unpausing (borrow and deposit gate themselves after their terminal skips)
+            // pause-gated - the atomic withdrawal exits over the OFT, and the compose stays
+            // queued at the endpoint and re-delivers after unpausing (borrow and deposit gate
+            // themselves after their terminal skips)
             _checkNotPaused();
             _executeWithdraw(_actionData, _guid);
         } else if (_action == ACTION_DEPOSIT_COLLATERAL) {
@@ -265,6 +219,18 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         } else {
             revert UnsupportedAction(_action);
         }
+    }
+
+    /// @dev The withdraw action spends compose value in the same call - the return leg's
+    /// LayerZero fee, with the excess pushed to the parent mirror - so it opts in; every
+    /// other action must not carry value (a mistaken delivery stays retriable without it).
+    function _acceptsComposeValue(
+        uint8 _action
+    )
+        internal pure override
+        returns (bool)
+    {
+        return _action == ACTION_WITHDRAW;
     }
 
     /// @dev A borrow on the account's one market: exactly the authenticated bridged amount (if
@@ -395,23 +361,40 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         }
     }
 
-    /// @dev Withdraws collateral to the account itself; the idle FXRP then leaves along
-    /// the fixed rails, whichever runs first (the accepted ordering race - a redeposit can
-    /// undo it at gas cost; see {ILoanSubaccountRemote.depositIdleFxrp}). Morpho enforces
-    /// position health.
+    /// @dev The atomic withdrawal: withdraws collateral from the position and bridges exactly
+    /// that amount home with the redeem-home compose, in the same execution - no idle window
+    /// between the two, so the redeposit race cannot touch a withdrawal. The compose value
+    /// delivered with the action pays the return leg's LayerZero fee (quoted live against the
+    /// signed `returnOptions`); the excess goes to the parent mirror. Too little value
+    /// reverts, and the delivery stays retriable - fee quotes drift both ways. Morpho
+    /// enforces position health.
     function _executeWithdraw(
         bytes memory _actionData,
         bytes32 _guid
     )
         private
     {
-        (bytes32 operationId, uint64 deadline, uint256 amount) =
-            abi.decode(_actionData, (bytes32, uint64, uint256));
+        (
+            bytes32 operationId,
+            uint64 deadline,
+            uint256 amount,
+            uint256 minComposeValue,
+            bytes memory returnOptions
+        ) = abi.decode(_actionData, (bytes32, uint64, uint256, uint256, bytes));
         require(amount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
-        // terminal gates come first, so a duplicate or expired delivery finalizes even when
-        // the market is not yet registered, instead of reverting forever
-        if (_skipped(operationId, deadline, _guid)) return;
+        // the signed delivery floor comes before every consuming branch: delivery is
+        // permissionless and the value unauthenticated, so a below-floor delivery (a
+        // zero-value front-run of an expiring packet, say) must revert and stay retriable
+        // rather than consume the packet with the prepaid value undelivered
+        require(msg.value >= minComposeValue, InsufficientDeliveryValue(minComposeValue));
+        // terminal gates next, so a duplicate or expired delivery finalizes even when
+        // the market is not yet registered, instead of reverting forever; its value must not
+        // strand on an account with no native rail
+        if (_skipped(operationId, deadline, _guid)) {
+            _sweepValueToParent(msg.value);
+            return;
+        }
         ILoanMarketsFacet.Market memory market = _myMarket();
         usedOperations[operationId] = true;
 
@@ -419,6 +402,13 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             market.marketParams, amount, address(this), address(this)
         );
         emit CollateralWithdrawn(parentPersonalAccount, operationId, amount, _guid);
+
+        // the return leg, in the same execution; the fee rode in as compose value
+        uint256 excess =
+            _bridgeHome(_getTransport(), amount, returnOptions, msg.value, parentPersonalAccount);
+        if (excess > 0) {
+            emit NativeSweptToParent(parentPersonalAccount, excess);
+        }
     }
 
     /// @dev The soft gates shared by all actions (see {ComposeReceiverAccountBase._terminalSkipReason}):
@@ -438,6 +428,93 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         }
         emit LoanActionSkipped(parentPersonalAccount, _operationId, reason, _guid);
         return true;
+    }
+
+    /// @dev The shared bridge-home core of {sweepToOrigin} and the withdraw action: sends
+    /// exactly `_amount` FXRP to this account's own Flare address with the redeem-home
+    /// compose (a deadline, this block time plus `REDEEM_HOME_TTL`, and nothing else), so
+    /// the Flare twin redeems at most this amount on arrival. The account is its own
+    /// destination (same address on every chain); decimals match (validated in the
+    /// transport), so `minAmountLD` equals `amountLD`. `_options` carry the Flare-side gas
+    /// and, optionally, the redemption's executor fee as compose value. Exactly the quoted
+    /// fee is spent from `_value`; the excess goes to `_excessTo` (the caller on the sweep
+    /// rail, the parent mirror on the withdraw action).
+    function _bridgeHome(
+        IComposeTransportFacet.Transport memory _transport,
+        uint256 _amount,
+        bytes memory _options,
+        uint256 _value,
+        address _excessTo
+    )
+        private
+        returns (uint256 _excess)
+    {
+        // a peer mutation on the OFT after configuration must fail closed
+        require(
+            IOAppCore(_transport.oft).peers(_transport.originEid) == _transport.originPeer,
+            WrongOriginPeer()
+        );
+        SendParam memory sendParam = SendParam({
+            dstEid: _transport.originEid,
+            to: bytes32(uint256(uint160(address(this)))),
+            amountLD: _amount,
+            minAmountLD: _amount,
+            extraOptions: _options,
+            composeMsg: abi.encode(
+                PAYLOAD_VERSION_1,
+                ACTION_REDEEM_HOME,
+                abi.encode(uint64(block.timestamp) + REDEEM_HOME_TTL)
+            ),
+            oftCmd: ""
+        });
+
+        MessagingFee memory fee = IOFT(_transport.oft).quoteSend(sendParam, false);
+        require(_value >= fee.nativeFee, InsufficientFundsForSweep(fee.nativeFee));
+
+        IERC20 fxrp = IERC20(IOFT(_transport.oft).token());
+        fxrp.forceApprove(_transport.oft, _amount);
+        // two false positives on this call: slither arbitrary-send-eth (recipient is the
+        // governance-set OFT, value capped by the _value check above) and solhint
+        // check-send-result (this is the OFT's `send`, not address.send; it reverts on failure)
+        // slither-disable-start arbitrary-send-eth
+        // solhint-disable-next-line check-send-result
+        (MessagingReceipt memory receipt, ) = IOFT(_transport.oft).send{value: fee.nativeFee}(
+            sendParam,
+            fee,
+            _excessTo
+        );
+        // slither-disable-end arbitrary-send-eth
+        fxrp.forceApprove(_transport.oft, 0);
+
+        _excess = _value - fee.nativeFee;
+        if (_excess > 0) {
+            // the excess never strands here (no native rail): back to the sweep caller, or
+            // forward to the parent mirror for the withdraw action (which emits for it)
+            // slither-disable-start arbitrary-send-eth
+            // solhint-disable-next-line avoid-low-level-calls
+            (bool success, ) = _excessTo.call{value: _excess}("");
+            // slither-disable-end arbitrary-send-eth
+            require(success, RefundFailed());
+        }
+
+        emit FXrpSweptToOrigin(parentPersonalAccount, _amount, _transport.originEid, receipt.guid);
+    }
+
+    /// @dev Forwards a terminally skipped withdraw delivery's compose value to the parent
+    /// mirror: it must not strand on an account with no native rail, and msg.sender on this
+    /// path is the endpoint - never a refund target.
+    function _sweepValueToParent(
+        uint256 _value
+    )
+        private
+    {
+        if (_value == 0) return;
+        // slither-disable-start arbitrary-send-eth
+        // solhint-disable-next-line avoid-low-level-calls
+        (bool success, ) = parentPersonalAccount.call{value: _value}("");
+        // slither-disable-end arbitrary-send-eth
+        require(success, RefundFailed());
+        emit NativeSweptToParent(parentPersonalAccount, _value);
     }
 
     /// @dev The account's one market, bound write-once to its type. If its Morpho stops

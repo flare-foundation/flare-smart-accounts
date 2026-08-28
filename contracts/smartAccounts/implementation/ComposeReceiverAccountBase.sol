@@ -79,9 +79,10 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
             abi.decode(_message.composeMsg(), (uint8, uint8, bytes));
         require(version == PAYLOAD_VERSION_1, UnsupportedPayloadVersion(version));
         // most actions never expect compose value; rejecting it keeps a mistaken delivery
-        // retriable through the endpoint without value. An action that spends the value in the
-        // same call (the Flare redeem-on-arrival) opts in - per action, so no other branch of
-        // the same receiver can silently keep native
+        // retriable through the endpoint without value. An action that spends or forwards the
+        // value in the same call (the Flare redeem-on-arrival, the loan-chain atomic withdraw)
+        // opts in - per action, so no other branch of the same receiver can silently keep
+        // native
         require(msg.value == 0 || _acceptsComposeValue(action), NonZeroComposeValue());
         _dispatch(action, actionData, _guid, _message.amountLD());
     }
