@@ -5,12 +5,12 @@ import {ContractRegistry} from "flare-periphery/src/flare/ContractRegistry.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
-import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
+import {ILoanSubaccount, ACTION_REDEEM_HOME} from "../../userInterfaces/ILoanSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol";
+import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
 import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
@@ -27,27 +27,30 @@ import {ILoanBridgeSettingsFacet} from "../../userInterfaces/facets/ILoanBridgeS
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
+import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
 
 /**
  * @title LoanSubaccount contract
  * @notice Deterministic staging account for loan-related assets owned by a Personal Account.
- * It has no native rail: no `receive()` and no native exit. No protocol flow ever pushes native
- * at this account - the bridge refunds its caller, redemption outcomes land on the parent - so a
- * plain send reverts at the sender, and native can land only without a call: value sent with an
- * instruction to the predicted address before the account existed, or a force-send. Both are
- * very unlikely, neither is caused by the protocol, and neither is worth a rail: such a balance
- * strands, deliberately. As a last resort, if it ever actually mattered, the implementation is
- * beacon-upgradeable and an exit can be added then.
+ * It has no native rail: no `receive()`, no persistent native balance by any protocol flow, and no
+ * native exit. The bridge refunds its caller and redemption outcomes land on the parent, so a
+ * plain send reverts at the sender; the one protocol-delivered native is the compose value of
+ * its own twin's bridge-back, forwarded whole within the same call (a revert unwinds it).
+ * Native can otherwise land only without a call: value sent with an instruction to the predicted
+ * address before the account existed, or a force-send. Both are very unlikely, neither is caused
+ * by the protocol, and neither is worth a rail: such a balance strands, deliberately. As a last
+ * resort, if it ever actually mattered, the implementation is beacon-upgradeable and an exit can
+ * be added then.
+ * It is also the compose receiver of its own loan-chain twin's bridge-back ({LoanChainAccountBase}
+ * with the transport read from the bridge settings): FXRP coming home is redeemed on arrival.
  * @dev The controller (MasterAccountController Diamond) is the beacon: the proxy and this
  * contract resolve the implementation per subaccount type through {implementationForType}.
  */
-contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
+contract LoanSubaccount is ILoanSubaccount, LoanChainAccountBase {
     using SafeERC20 for IERC20;
 
-    address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
-
-    /// @notice MasterAccountController address.
-    address public controllerAddress;
+    // storage: slots 0-1 are the shared base prefix (controller, usedOperations); the same
+    // layout as the loan-chain twin, so the two lineages read alike
     /// @notice Parent Personal Account address.
     address public parentPersonalAccount;
     /// @notice Subaccount type.
@@ -61,11 +64,6 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         _;
     }
 
-    constructor() {
-        // ensure the implementation contract itself cannot be initialized/used
-        controllerAddress = EMPTY_ADDRESS;
-    }
-
     // deliberately no receive() and no native exit - see the contract notice
 
     /// @inheritdoc ISubaccount
@@ -76,12 +74,10 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
     )
         external
     {
-        require(controllerAddress == address(0), AlreadyInitialized());
-        require(_controllerAddress != address(0), InvalidControllerAddress());
+        _setController(_controllerAddress);
         require(_parentPersonalAccount != address(0), InvalidParentPersonalAccount());
         require(_subaccountType != SUBACCOUNT_TYPE_NONE, ISubaccountsFacet.InvalidSubaccountType());
 
-        controllerAddress = _controllerAddress;
         parentPersonalAccount = _parentPersonalAccount;
         subaccountType = _subaccountType;
 
@@ -94,48 +90,13 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         nonReentrant
         returns (uint256 _amount, uint256 _redeemedAmount)
     {
-        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-        IERC20 fxrp = assetManager.fAsset();
-        _amount = fxrp.balanceOf(address(this));
-        require(_amount > 0, NothingToRedeem());
         // the permissionless rail costs the configured executor fee - paid to the FAssets
         // executor when a redemption happens, to the parent when it does not - so forcing the
         // backward direction is never gas-only (the accepted sweep-direction griefing bound)
         // slither-disable-next-line unused-return
-        (, uint256 executorFee) = IExecutorsFacet(controllerAddress).getExecutorInfo();
+        (, uint256 executorFee) = IExecutorsFacet(controller).getExecutorInfo();
         require(msg.value >= executorFee, InsufficientFundsForRedeem(executorFee));
-
-        if (_amount < assetManager.minimumRedeemAmountUBA()) {
-            // FAssets would reject the redemption: the balance still goes home, unredeemed, and
-            // the value joins the user's float on the parent - the rail never fails on amount.
-            // Whatever FAssets does not redeem stays on the parent; here that is all of it
-            fxrp.safeTransfer(parentPersonalAccount, _amount);
-            if (msg.value > 0) {
-                // false positive (arbitrary-send-eth): the recipient is the parent, fixed at
-                // initialization and part of this account's address - not caller-chosen
-                // slither-disable-next-line arbitrary-send-eth
-                // solhint-disable-next-line avoid-low-level-calls
-                (bool success, ) = parentPersonalAccount.call{value: msg.value}("");
-                require(success, NativeSweepFailed());
-                emit NativeSweptToParent(parentPersonalAccount, msg.value);
-            }
-            emit TokenSweptToParent(parentPersonalAccount, address(fxrp), _amount);
-            return (_amount, 0);
-        }
-
-        // the parent redeems: it pulls exactly this amount and redeems exactly that, so it is
-        // the recorded redeemer and every redemption outcome lands on it, under the user's
-        // control; the whole msg.value rides along for the executor fee
-        fxrp.forceApprove(parentPersonalAccount, _amount);
-        _redeemedAmount = IPersonalAccount(parentPersonalAccount).redeemFromSubaccount{
-            value: msg.value
-        }(_amount);
-
-        emit FXrpRedeemed(
-            parentPersonalAccount,
-            _amount,
-            _redeemedAmount
-        );
+        return _sweepRedeem(msg.value, type(uint256).max);
     }
 
     /// @inheritdoc ILoanSubaccount
@@ -286,7 +247,143 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         returns (address)
     {
         // controller is the beacon; it resolves the implementation for this subaccount type
-        return ISubaccountsFacet(controllerAddress).implementationForType(subaccountType);
+        return ISubaccountsFacet(controller).implementationForType(subaccountType);
+    }
+
+    /// @inheritdoc ISubaccount
+    function controllerAddress()
+        external view
+        override(ILoanSubaccount, LoanChainAccountBase)
+        returns (address)
+    {
+        return controller;
+    }
+
+    /// @dev The account's action set as a compose receiver (see {LoanChainAccountBase._dispatch}):
+    /// the redeem-home action of its own twin's bridge-back.
+    function _dispatch(
+        uint8 _action,
+        bytes memory _actionData,
+        bytes32 _guid,
+        uint256 _amountLD
+    )
+        internal override
+    {
+        if (_action == ACTION_REDEEM_HOME) {
+            _executeRedeemHome(_actionData, _guid, _amountLD);
+        } else {
+            revert UnsupportedAction(_action);
+        }
+    }
+
+    /// @dev This receiver's transport is the Flare bridge settings seen from the other side: the
+    /// FXRP OFT adapter and its endpoint, the loan chain as the origin, the pinned peer as the
+    /// sender - the same values the forward moves send with.
+    function _getTransport()
+        internal view override
+        returns (ILoanChainSettingsFacet.Transport memory _transport)
+    {
+        (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
+            ILoanBridgeSettingsFacet(controller).getLoanBridgeSettings();
+        require(
+            fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
+            LoanBridgeNotConfigured()
+        );
+        _transport = ILoanChainSettingsFacet.Transport({
+            lzEndpoint: address(IOAppCore(fxrpOft).endpoint()),
+            fxrpOft: fxrpOft,
+            originEid: destinationEid,
+            originPeer: destinationPeer
+        });
+    }
+
+    /// @dev The redeem-home compose carries the executor fee as compose value and spends it in
+    /// the same call; no other action exists here, and none may carry value.
+    function _acceptsComposeValue(
+        uint8 _action
+    )
+        internal pure override
+        returns (bool)
+    {
+        return _action == ACTION_REDEEM_HOME;
+    }
+
+    /// @dev Redeem at most what this packet brought: the compose value is the executor fee
+    /// (whatever the sender attached, zero included - the packet already cost it the LayerZero
+    /// fee), the cap is the packet's authenticated amount, so no compose moves more than one
+    /// packet's worth (FXRP is fungible; the cap bounds the amount, not the units). Past the
+    /// sender-stamped deadline the packet skips terminally: nothing is redeemed, the balance is
+    /// left for the public rails, the value joins the parent's float - a packet cannot outlive
+    /// its delivery window as a standing instruction over later funds.
+    function _executeRedeemHome(
+        bytes memory _actionData,
+        bytes32 _guid,
+        uint256 _amountLD
+    )
+        private
+    {
+        uint64 deadline = abi.decode(_actionData, (uint64));
+        if (block.timestamp > deadline) {
+            if (msg.value > 0) {
+                // slither-disable-next-line arbitrary-send-eth
+                // solhint-disable-next-line avoid-low-level-calls
+                (bool success, ) = parentPersonalAccount.call{value: msg.value}("");
+                require(success, NativeSweepFailed());
+                emit NativeSweptToParent(parentPersonalAccount, msg.value);
+            }
+            emit RedeemHomeSkipped(parentPersonalAccount, _guid);
+            return;
+        }
+        _sweepRedeem(msg.value, _amountLD);
+    }
+
+    /// @dev The backward move, shared by the public {sweepRedeem} (whole balance) and the
+    /// redeem-home compose (capped at the packet's authenticated amount): the amount goes to the parent,
+    /// which redeems it with `_fee` as the executor fee; below the FAssets minimum it is pushed
+    /// unredeemed and the fee joins the parent's float - the rail never fails on amount, and
+    /// never refunds to `msg.sender` (on the compose path that would be the endpoint).
+    function _sweepRedeem(
+        uint256 _fee,
+        uint256 _cap
+    )
+        private
+        returns (uint256 _amount, uint256 _redeemedAmount)
+    {
+        IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
+        IERC20 fxrp = assetManager.fAsset();
+        _amount = fxrp.balanceOf(address(this));
+        if (_amount > _cap) {
+            _amount = _cap;
+        }
+        require(_amount > 0, NothingToRedeem());
+
+        if (_amount < assetManager.minimumRedeemAmountUBA()) {
+            // FAssets would reject the redemption: the balance still goes home, unredeemed, and
+            // the value joins the user's float on the parent. Whatever FAssets does not redeem
+            // stays on the parent
+            fxrp.safeTransfer(parentPersonalAccount, _amount);
+            if (_fee > 0) {
+                // false positive (arbitrary-send-eth): the recipient is the parent, fixed at
+                // initialization and part of this account's address - not caller-chosen
+                // slither-disable-next-line arbitrary-send-eth
+                // solhint-disable-next-line avoid-low-level-calls
+                (bool success, ) = parentPersonalAccount.call{value: _fee}("");
+                require(success, NativeSweepFailed());
+                emit NativeSweptToParent(parentPersonalAccount, _fee);
+            }
+            emit TokenSweptToParent(parentPersonalAccount, address(fxrp), _amount);
+            return (_amount, 0);
+        }
+
+        // the parent redeems: it pulls exactly this amount and redeems exactly that, so it is
+        // the recorded redeemer and every redemption outcome lands on it, under the user's
+        // control; the whole fee rides along for the executor
+        fxrp.forceApprove(parentPersonalAccount, _amount);
+        _redeemedAmount = IPersonalAccount(parentPersonalAccount).redeemFromSubaccount{
+            value: _fee
+        }(_amount);
+
+        emit FXrpRedeemed(parentPersonalAccount, _amount, _redeemedAmount);
     }
 
     /// @dev Shared forward-move core of {sweepToLoan}, {borrow}, {depositCollateral} and
@@ -309,10 +406,10 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
         // the forward move is the incident-containment surface: pausing the controller stops
         // bridging out immediately, while the backward sweep stays available so assets can
         // always exit toward the user's own XRPL address
-        require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
+        require(!IPauseFacet(controller).isPaused(), IPauseFacet.IsPaused());
 
         (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
-            ILoanBridgeSettingsFacet(controllerAddress).getLoanBridgeSettings();
+            ILoanBridgeSettingsFacet(controller).getLoanBridgeSettings();
         require(
             fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
             LoanBridgeNotConfigured()

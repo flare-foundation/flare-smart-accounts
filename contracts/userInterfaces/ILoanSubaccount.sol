@@ -1,13 +1,38 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
+import {ILoanChainAccountBase} from "./ILoanChainAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
+
+/// @dev Redeem-home action: the compose the loan-chain `sweepToOrigin` attaches to the FXRP it
+/// bridges back. `actionData` is `abi.encode(uint64 deadline)`, stamped by the sender as its
+/// block time plus `REDEEM_HOME_TTL` - a permissionless sweep signed nothing, so it can express
+/// no choice. On arrival, `min(balance, amountLD)` - at most the packet's authenticated
+/// amount - goes through the sweep-redeem logic (to the parent, which redeems it; below the
+/// FAssets minimum pushed unredeemed), with the compose value as the executor fee; the rest of
+/// the balance is left for the public rails. FXRP is fungible: the cap bounds the amount one
+/// compose can move, it does not tie the compose to the units its packet credited. Past its
+/// deadline the packet skips terminally (the balance is left untouched for the public rails,
+/// any compose value goes to the parent), so a packet cannot outlive its delivery window as a
+/// standing instruction over later funds. The public `sweepRedeem` fee requirement does not
+/// apply here: the packet already cost its sender the LayerZero fee.
+uint8 constant ACTION_REDEEM_HOME = 1;
+
+/// @dev Lifetime of a redeem-home packet, from the send on the loan chain to its delivery on
+/// Flare: the intended operational delivery window (verification, executor delivery and
+/// ordinary retries - normally minutes). A packet delivered later skips and its FXRP falls back
+/// to the public rails; an extended LayerZero outage is what that rail is for. Tune from
+/// observed delivery latency once deployment data exists.
+uint64 constant REDEEM_HOME_TTL = 1 hours;
 
 /**
  * @title ILoanSubaccount
- * @notice User interface for deterministic loan subaccounts.
+ * @notice User interface for deterministic loan subaccounts on Flare. Besides its parent-driven
+ * instructions and permissionless rails, the account is the compose receiver of its own
+ * loan-chain twin's bridge-back (see {ILoanChainAccountBase}): FXRP coming home is redeemed on
+ * arrival.
  */
-interface ILoanSubaccount is ISubaccount {
+interface ILoanSubaccount is ILoanChainAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when a loan subaccount is initialized.
@@ -25,7 +50,8 @@ interface ILoanSubaccount is ISubaccount {
      * @notice Emitted when idle FXRP is pushed to the parent Personal Account and redeemed by
      * it to its XRPL owner.
      * @param parentPersonalAccount The parent Personal Account address (the redeemer).
-     * @param amount Amount of FXRP pushed and requested for redemption (the whole balance).
+     * @param amount Amount of FXRP pushed and requested for redemption (the whole balance from
+     * the public rail; at most the packet's authenticated amount from the redeem-home compose).
      * @param redeemedAmount Amount of FXRP actually redeemed, which can be less; the rest
      * stays on the parent.
      */
@@ -33,6 +59,17 @@ interface ILoanSubaccount is ISubaccount {
         address indexed parentPersonalAccount,
         uint256 amount,
         uint256 redeemedAmount
+    );
+
+    /**
+     * @notice Emitted when a redeem-home compose arrives past its deadline and skips: nothing
+     * is redeemed, the packet's credit stays for the public rails, its value went to the parent.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param guid The LayerZero message id of the skipped packet.
+     */
+    event RedeemHomeSkipped(
+        address indexed parentPersonalAccount,
+        bytes32 guid
     );
 
     /**
@@ -49,7 +86,8 @@ interface ILoanSubaccount is ISubaccount {
 
     /**
      * @notice Emitted when native is sent to the parent Personal Account: the value of a
-     * {sweepRedeem} that pushed a below-minimum balance without redeeming.
+     * {sweepRedeem} or redeem-home compose that pushed a below-minimum balance without
+     * redeeming, or of a redeem-home compose that arrived past its deadline.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param amount The amount sent.
      */
@@ -126,16 +164,6 @@ interface ILoanSubaccount is ISubaccount {
         uint32 destinationEid,
         bytes32 guid
     );
-
-    /**
-     * @notice Reverts if the contract is already initialized.
-     */
-    error AlreadyInitialized();
-
-    /**
-     * @notice Reverts if the controller address is invalid.
-     */
-    error InvalidControllerAddress();
 
     /**
      * @notice Reverts if the parent Personal Account address is invalid.
@@ -371,4 +399,9 @@ interface ILoanSubaccount is ISubaccount {
         external
         returns (uint256 _amount);
 
+    /// @inheritdoc ISubaccount
+    function controllerAddress()
+        external view
+        override(ILoanChainAccountBase, ISubaccount)
+        returns (address);
 }

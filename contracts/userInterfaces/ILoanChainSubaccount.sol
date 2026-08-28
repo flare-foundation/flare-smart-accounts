@@ -341,15 +341,23 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
 
     /**
      * @notice Bridges all idle FXRP back to this account's own address on the origin chain
-     * (Flare), where the backward cleanup continues (`sweepRedeem` toward the user's XRPL
-     * address).
-     * @dev Permissionless with a fixed destination. `msg.value` must cover the LayerZero
-     * fee; exactly the quote is spent, only this call's excess is refunded, and the
-     * account's own native never subsidizes a caller. Pause-gated (every exit rides the
-     * OFT); the live peer is re-checked against the pinned one on every call.
+     * (Flare), where it is redeemed on arrival toward the user's XRPL address.
+     * @dev Permissionless with a fixed destination. The attached compose is the Flare twin's
+     * redeem-home action, carrying only a deadline (this block time plus the protocol TTL):
+     * nobody signed it, so it can express no choice; on arrival it redeems at most this amount,
+     * and past the deadline it skips.
+     * `_extraOptions` must carry the Flare-side `lzReceive` and `lzCompose` gas (type-3) and
+     * may carry compose value, which becomes the redemption's executor fee on Flare (zero
+     * allowed). `msg.value` must cover the LayerZero fee; exactly the quote is spent, only this
+     * call's excess is refunded, and the account's own native never subsidizes a caller.
+     * Pause-gated (every exit rides the OFT); the live peer is re-checked against the pinned one
+     * on every call.
+     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      * @return _amount Amount of FXRP bridged.
      */
-    function sweepToOrigin()
+    function sweepToOrigin(
+        bytes calldata _extraOptions
+    )
         external payable
         returns (uint256 _amount);
 

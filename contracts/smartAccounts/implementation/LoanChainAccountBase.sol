@@ -19,21 +19,24 @@ import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 
 /**
  * @title LoanChainAccountBase contract
- * @notice The shared core of compose-driven accounts on the loan chain: the authenticated
- * `lzCompose` entry (endpoint, OFT, origin chain, self-as-sender, GUID recomputed from the
- * pinned origin peer) and operation-id replay protection. Derived accounts define only their
- * action set (in {_dispatch}) and their identity.
- * The authentication is deliberately in one place: it is the security root of every account
- * that has no local owner.
+ * @notice The shared core of the compose-driven accounts - the loan-chain subaccount and
+ * Personal Account, and the Flare loan subaccount as the receiver of its own bridge-back: the
+ * authenticated `lzCompose` entry (endpoint, OFT, origin chain, self-as-sender, GUID recomputed
+ * from the pinned origin peer) and, for the signed id-carrying actions, operation-id replay
+ * protection. Derived accounts define only
+ * their action set (in {_dispatch}), where their transport configuration lives
+ * ({_getTransport}), whether compose value is accepted ({_acceptsComposeValue}), and their
+ * identity. The authentication is deliberately in one place: it is the security root of every
+ * action that arrives without a local signature.
  */
 abstract contract LoanChainAccountBase is ILoanChainAccountBase, ReentrancyGuardTransient {
     using OFTComposeMsgCodec for bytes;
 
     address internal constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
 
-    // STORAGE PREFIX of every derived account's proxy lineage (the loan subaccount and the
-    // loan-chain Personal Account alike): these two fields occupy slots 0 and 1 of every
-    // proxy. Once the first proxy is deployed, never insert, remove, or reorder base fields -
+    // STORAGE PREFIX of every derived account's proxy lineage (the subaccounts on both chains
+    // and the loan-chain Personal Account alike): these two fields occupy slots 0 and 1 of
+    // every proxy. Once the first proxy is deployed, never insert, remove, or reorder base fields -
     // append new base state only after the derived contracts' own fields would be a layout
     // break too, so base state is effectively frozen at these two.
 
@@ -41,8 +44,13 @@ abstract contract LoanChainAccountBase is ILoanChainAccountBase, ReentrancyGuard
     /// storage rather than a public variable so derived contracts can disambiguate the
     /// getter against interface declarations.
     address internal controller;
+    // false positive (uninitialized-state): a mapping has no initializer; derived accounts with
+    // signed, id-carrying actions write it, and a receiver whose actions carry no id (the Flare
+    // redeem-on-arrival) leaves it empty by design
+    // slither-disable-start uninitialized-state
     /// @inheritdoc ILoanChainAccountBase
     mapping(bytes32 operationId => bool used) public usedOperations;
+    // slither-disable-end uninitialized-state
 
     constructor() {
         // ensure the implementation contract itself cannot be initialized/used
@@ -63,16 +71,17 @@ abstract contract LoanChainAccountBase is ILoanChainAccountBase, ReentrancyGuard
         external payable
         nonReentrant
     {
-        // the flow never sends compose value; rejecting it keeps a mistaken delivery
-        // retriable through the endpoint without value
-        require(msg.value == 0, NonZeroComposeValue());
-
         ILoanChainSettingsFacet.Transport memory transport = _getTransport();
         _authenticate(transport, _from, _guid, _message);
 
         (uint8 version, uint8 action, bytes memory actionData) =
             abi.decode(_message.composeMsg(), (uint8, uint8, bytes));
         require(version == PAYLOAD_VERSION_1, UnsupportedPayloadVersion(version));
+        // most actions never expect compose value; rejecting it keeps a mistaken delivery
+        // retriable through the endpoint without value. An action that spends the value in the
+        // same call (the Flare redeem-on-arrival) opts in - per action, so no other branch of
+        // the same receiver can silently keep native
+        require(msg.value == 0 || _acceptsComposeValue(action), NonZeroComposeValue());
         _dispatch(action, actionData, _guid, _message.amountLD());
     }
 
@@ -169,8 +178,12 @@ abstract contract LoanChainAccountBase is ILoanChainAccountBase, ReentrancyGuard
         require(!IPauseFacet(controller).isPaused(), IPauseFacet.IsPaused());
     }
 
+    /// @dev The transport this receiver authenticates against: the endpoint that may call, the
+    /// OFT that must be the sender, the chain the message must come from and the peer it must
+    /// have been sent by. The loan-chain accounts read the governance transport; a receiver on
+    /// another chain derives it from its own settings.
     function _getTransport()
-        internal view
+        internal view virtual
         returns (ILoanChainSettingsFacet.Transport memory _transport)
     {
         _transport = ILoanChainSettingsFacet(controller).getLoanChainTransport();
@@ -178,5 +191,17 @@ abstract contract LoanChainAccountBase is ILoanChainAccountBase, ReentrancyGuard
             _transport.lzEndpoint != address(0),
             ILoanChainSettingsFacet.LoanChainTransportNotConfigured()
         );
+    }
+
+    /// @dev Whether `lzCompose` may carry native value for `_action`. False by default; a
+    /// receiver overrides it for exactly the actions that spend the value within the same
+    /// delivery.
+    function _acceptsComposeValue(
+        uint8 /* _action */
+    )
+        internal pure virtual
+        returns (bool)
+    {
+        return false;
     }
 }

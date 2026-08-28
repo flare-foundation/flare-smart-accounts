@@ -15,10 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Permissionless cleanup rails with fixed destinations: `sweepRedeem()` (pushes FXRP to the parent, which redeems it through the subaccount-only `PersonalAccount.redeemFromSubaccount(amount)`), `sweepToLoan(options)` (deposits on arrival), `sweepToParent(token)`.
     - Timelocked `setLoanBridgeSettings` (FXRP OFT, destination EID, pinned peer), validated against the token, its decimals, the live peer and `oftVersion`.
     - `borrow(...)`, `depositCollateral(...)` and `withdraw(...)` — typed parent-driven loan instructions; the compose payload is built on-chain and validated before any fee is paid.
-    - `LoanChainSubaccount` — the loan-chain-side implementation behind the same proxy and address: authenticated, replay-protected `lzCompose` (borrow, deposit, sweep deposit, withdraw) plus the permissionless rails `repay`, `depositIdleFxrp`, `sweepToOrigin` and `recoverToken` (to the parent). No native.
+    - `LoanChainSubaccount` — the loan-chain-side implementation behind the same proxy and address: authenticated, replay-protected `lzCompose` (borrow, deposit, sweep deposit, withdraw) plus the permissionless rails `repay`, `depositIdleFxrp`, `sweepToOrigin(options)` (redeemed on Flare on arrival) and `recoverToken` (to the parent). No native.
     - `LoanChainSettingsFacet` — loan-chain-only configuration: the global LayerZero transport, one write-once Morpho market per subaccount type with a per-type borrow kill-switch, and `createLoanChainPersonalAccount(xrplOwner)`.
     - `LoanChainPersonalAccount` — the compose-driven mirror of the Flare Personal Account at the same address, behind the same beacon; one action: execute the signed batch of calls (the loan-chain `executeUserOp`); accepts native. The Flare `PersonalAccount` gains the self-called `executeLoanChainUserOp(...)`.
-    - `LoanChainAccountBase` — the shared `lzCompose` authentication and replay-protection core of both loan-chain accounts.
+    - `LoanChainAccountBase` — the shared `lzCompose` authentication core of the compose-driven accounts on both chains (operation-id replay protection for the signed actions); the Flare subaccount redeems its own bridge-back on arrival, capped at the packet's amount and until a stamped deadline.
   - `@layerzerolabs-oapp-evm` dependency (canonical `IOFT` interface).
   - `pnpm spellcheck` (cspell) with an advisory CI job.
 

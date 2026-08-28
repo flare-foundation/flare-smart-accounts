@@ -27,7 +27,11 @@ import {
 import {TimelockFacet} from "../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {PauseFacet} from "../contracts/smartAccounts/facets/PauseFacet.sol";
 import {ILoanChainSubaccount} from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
-import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
+import {
+    ILoanSubaccount,
+    ACTION_REDEEM_HOME,
+    REDEEM_HOME_TTL
+} from "../contracts/userInterfaces/ILoanSubaccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {ILoanChainPersonalAccount} from "../contracts/userInterfaces/ILoanChainPersonalAccount.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
@@ -80,6 +84,7 @@ import {
 contract LoanChainSubaccountTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
     address private constant FLARE_CONTRACT_REGISTRY = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
+    MockAssetManager private flareAssetManager;
 
     IIMasterAccountController private controller;
     LoanChainSubaccount private loanChainImpl;
@@ -1391,7 +1396,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         uint256 messagingFee = 0.01 ether;
         vm.deal(address(this), messagingFee);
         uint256 amount =
-            ILoanChainSubaccount(subaccountB).sweepToOrigin{value: messagingFee}();
+            ILoanChainSubaccount(subaccountB).sweepToOrigin{value: messagingFee}("");
         assertEq(amount, 100e6);
     }
 
@@ -1588,20 +1593,39 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         vm.deal(caller, messagingFee + 1 ether);
         vm.prank(caller);
         uint256 amount =
-            ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee + 1 ether}();
+            ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee + 1 ether}("");
 
         assertEq(amount, 100e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
         assertEq(fxrp.balanceOf(address(fxrpOft)), 100e6);
-        (uint32 sentDstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,,,) =
+        (uint32 sentDstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,, bytes memory composeMsg,) =
             fxrpOft.lastSendParam();
         assertEq(sentDstEid, originEid);
         assertEq(to, bytes32(uint256(uint160(subaccount))));
         assertEq(amountLD, 100e6);
         assertEq(minAmountLD, 100e6);
+        // the redeem-home compose: the Flare twin redeems exactly this credit on arrival, until
+        // the stamped deadline
+        assertEq(
+            composeMsg,
+            abi.encode(
+                PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, abi.encode(uint64(block.timestamp) + REDEEM_HOME_TTL)
+            )
+        );
         // exactly the quoted fee spent, exactly this call's excess refunded
         assertEq(fxrpOft.lastValue(), messagingFee);
         assertEq(caller.balance, 1 ether);
+    }
+
+    function testSweepToOriginPassesTheCallerOptionsThrough() public {
+        // the Flare-side gas (and any redemption fee as compose value) is the caller's to set
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        bytes memory options = hex"0003010011010000000000000000000000000000c350";
+        vm.deal(address(this), 0.01 ether);
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: 0.01 ether}(options);
+        (,,,, bytes memory sentOptions,,) = fxrpOft.lastSendParam();
+        assertEq(sentOptions, options);
     }
 
     function testSweepToOriginNeverSpendsAccountNative() public {
@@ -1614,7 +1638,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address caller = makeAddr("keeper");
         vm.deal(caller, messagingFee);
         vm.prank(caller);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}("");
 
         assertEq(subaccount.balance, 5 ether);
         assertEq(caller.balance, 0);
@@ -1627,7 +1651,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         // nothing to sweep
         vm.expectRevert(ILoanChainSubaccount.NothingToSweep.selector);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}("");
 
         fxrp.mint(subaccount, 100e6);
 
@@ -1637,18 +1661,18 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
                 ILoanChainSubaccount.InsufficientFundsForSweep.selector, messagingFee
             )
         );
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee - 1}();
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee - 1}("");
 
         // a peer mutation fails closed
         fxrpOft.setPeer(originEid, bytes32(uint256(0xbad)));
         vm.expectRevert(ILoanChainSubaccount.WrongOriginPeer.selector);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}("");
         fxrpOft.setPeer(originEid, originPeer);
 
         // every exit from this chain rides the OFT: the pause stops it
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}();
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}("");
     }
 
     function testRecoveryWorksWhilePaused() public {
@@ -1820,6 +1844,21 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         (, , collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 130e6);
         assertTrue(ILoanChainSubaccount(subaccount).usedOperations(bytes32("op-d")));
+
+        // the bridge-back: the loan-chain side's idle FXRP (what the withdraw returned) goes
+        // home with the redeem-home compose (a deadline, nothing else); the Flare twin authenticates it against
+        // the bridge settings and runs the sweep-redeem logic on arrival - here its dust branch,
+        // since the parent has no code on this diamond (the redemption itself is covered in the
+        // Flare suite with a real Personal Account)
+        vm.deal(address(this), 0.01 ether);
+        ILoanChainSubaccount(subaccount).sweepToOrigin{value: 0.01 ether}("");
+        (amountLD, payload) = _lastSentCompose();
+        assertEq(amountLD, 40e6);
+        flareAssetManager.setMinimumRedeemAmountUBA(1_000e6);
+        fxrp.mint(sender, amountLD);
+        _deliverToFlareReceiver(sender, 6, amountLD, payload);
+        assertEq(fxrp.balanceOf(sender), 0);
+        assertEq(fxrp.balanceOf(parentPersonalAccount), 40e6);
 
         // the Personal Account's transfer: sent by a Flare PersonalAccount through
         // executeUserOp, decoded by a mirror created behind the same beacon
@@ -2010,6 +2049,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     /// A Flare-side LoanSubaccount sender wired on this diamond as a second type, with the
     /// Flare bridge settings pointing at this chain and the FAssets registry it reads FXRP from.
     function _flareSenderOnThisDiamond() private returns (address _sender) {
+        flareAssetManager = new MockAssetManager(fxrp);
         uint256 senderType = 7;
         vm.prank(governance);
         controller.setSubaccountImplementation(senderType, address(new LoanSubaccount()));
@@ -2021,7 +2061,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
                 IFlareContractRegistry.getContractAddressByHash.selector,
                 keccak256(abi.encode("AssetManagerFXRP"))
             ),
-            abi.encode(address(new MockAssetManager(fxrp)))
+            abi.encode(address(flareAssetManager))
         );
         bytes32 peer = bytes32(uint256(uint160(address(fxrpOft))));
         fxrpOft.setPeer(dstEid, peer);
@@ -2060,6 +2100,27 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         vm.prank(governance);
         controller.setPersonalAccountImplementation(address(new LoanChainPersonalAccount()));
         return ILoanChainSettingsFacet(address(controller)).createLoanChainPersonalAccount(_xrplOwner);
+    }
+
+    /// Delivers a loan-chain-built compose to a Flare-side receiver on this diamond: srcEid is
+    /// this (loan) chain, the pinned peer is the bridge settings' one (this OFT), the guid the
+    /// endpoint here would compute.
+    function _deliverToFlareReceiver(
+        address _receiver,
+        uint64 _nonce,
+        uint256 _amountLD,
+        bytes memory _payload
+    )
+        private
+    {
+        bytes memory message = OFTComposeMsgCodec.encode(
+            _nonce, dstEid, _amountLD, abi.encodePacked(bytes32(uint256(uint160(_receiver))), _payload)
+        );
+        bytes32 guid = GUID.generate(
+            _nonce, dstEid, address(fxrpOft), dstEid, bytes32(uint256(uint160(address(fxrpOft))))
+        );
+        vm.prank(lzEndpoint);
+        ILoanSubaccount(_receiver).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function _deliverToMirror(address _mirror, uint64 _nonce, bytes memory _payload) private {

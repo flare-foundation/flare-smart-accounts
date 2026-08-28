@@ -3,9 +3,9 @@ pragma solidity >=0.8.4 <0.9;
 
 import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
 
-/// @dev Compose payload schema version 1, shared by every compose-driven account on the
-/// loan chain. The payload is `abi.encode(uint8 version, uint8 action, bytes actionData)`;
-/// the action space is defined per receiving contract.
+/// @dev Compose payload schema version 1, shared by every compose-driven account on either
+/// chain. The payload is `abi.encode(uint8 version, uint8 action, bytes actionData)`; the
+/// action space is defined per receiving contract.
 uint8 constant PAYLOAD_VERSION_1 = 1;
 
 /// @dev Skip reason: the operation id was already consumed (a retried instruction delivered
@@ -18,12 +18,14 @@ uint8 constant SKIP_REASON_EXPIRED = 2;
 
 /**
  * @title ILoanChainAccountBase
- * @notice The shared surface of compose-driven accounts on the loan chain (Ethereum, at
- * launch). Users are XRPL-only and their signatures become on-chain authority only on Flare,
- * so every authorized action on such an account arrives as an authenticated LayerZero
- * compose message sent by this same address on Flare — the account's own twin. The
- * authentication checklist and replay protection are identical for every such account and
- * live in one shared base.
+ * @notice The shared surface of the compose-driven accounts: the loan-chain subaccount and
+ * Personal Account (Ethereum, at launch), and the Flare loan subaccount as the receiver of its
+ * own bridge-back. Users are XRPL-only and their signatures become on-chain authority only on
+ * Flare, so every action that arrives through this entry was sent by this same address on the
+ * other chain — the account's own twin. The authentication checklist is identical for every such
+ * account and lives in one shared base, as does the operation-id replay protection the signed
+ * actions use (an unsigned action, such as the Flare redeem-on-arrival, carries no id and relies
+ * on the endpoint's at-most-once compose delivery).
  */
 interface ILoanChainAccountBase is ILayerZeroComposer {
 
@@ -33,8 +35,10 @@ interface ILoanChainAccountBase is ILayerZeroComposer {
     error OnlyEndpoint();
 
     /**
-     * @notice Reverts if native value is attached to `lzCompose`. The flow never sends
-     * compose value, and rejecting it keeps a mistaken delivery retriable without value.
+     * @notice Reverts if native value is attached to `lzCompose` for an action that does not
+     * spend it within the same call. Rejecting it keeps a mistaken delivery retriable without
+     * value; the Flare redeem-on-arrival is the one action that opts in (the value is its
+     * executor fee).
      */
     error NonZeroComposeValue();
 

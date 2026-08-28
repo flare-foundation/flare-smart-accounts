@@ -21,6 +21,8 @@ import {
     SUBACCOUNT_TYPE_NONE
 } from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
+import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/ILoanSubaccount.sol";
+import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
 import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
@@ -135,7 +137,9 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
     }
 
     /// @inheritdoc ILoanChainSubaccount
-    function sweepToOrigin()
+    function sweepToOrigin(
+        bytes calldata _extraOptions
+    )
         external payable
         nonReentrant
         returns (uint256 _amount)
@@ -155,14 +159,21 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         );
 
         // the account is its own destination (same address on every chain); decimals match
-        // (validated in the transport), so `minAmountLD` equals `amountLD`
+        // (validated in the transport), so `minAmountLD` equals `amountLD`. The redeem-home
+        // compose has the Flare twin redeem at most this amount on arrival, until the stamped
+        // deadline; the caller's options carry the Flare-side gas (and, optionally, the
+        // redemption's executor fee as value)
         SendParam memory sendParam = SendParam({
             dstEid: transport.originEid,
             to: bytes32(uint256(uint160(address(this)))),
             amountLD: _amount,
             minAmountLD: _amount,
-            extraOptions: "",
-            composeMsg: "",
+            extraOptions: _extraOptions,
+            composeMsg: abi.encode(
+                PAYLOAD_VERSION_1,
+                ACTION_REDEEM_HOME,
+                abi.encode(uint64(block.timestamp) + REDEEM_HOME_TTL)
+            ),
             oftCmd: ""
         });
 

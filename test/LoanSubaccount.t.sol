@@ -28,7 +28,11 @@ import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
 import {MockOft} from "../contracts/mock/MockOft.sol";
 import {MockAssetManager} from "../contracts/mock/MockAssetManager.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
-import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
+import {
+    ILoanSubaccount,
+    ACTION_REDEEM_HOME,
+    REDEEM_HOME_TTL
+} from "../contracts/userInterfaces/ILoanSubaccount.sol";
 import {
     ISubaccountsFacet,
     SUBACCOUNT_TYPE_LOAN,
@@ -37,7 +41,13 @@ import {
 import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
-import {PAYLOAD_VERSION_1} from "../contracts/userInterfaces/ILoanChainAccountBase.sol";
+import {
+    ILoanChainAccountBase,
+    PAYLOAD_VERSION_1
+} from "../contracts/userInterfaces/ILoanChainAccountBase.sol";
+import {MockLzEndpoint} from "../contracts/mock/MockLzEndpoint.sol";
+import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
+import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
 import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
@@ -84,6 +94,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     MintableERC20 private fxrp;
     MockAssetManager private mockAssetManager;
     MockOft private fxrpOft;
+    address private lzEndpoint;
+    uint32 private flareEid;
     uint32 private destinationEid;
     uint256 private messagingFee;
     bytes32 private destinationPeer;
@@ -113,6 +125,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         messagingFee = 0.01 ether;
         fxrpOft = new MockOft(fxrp, messagingFee);
         destinationPeer = bytes32(uint256(uint160(address(fxrpOft))));
+        // the adapter's endpoint: what the bridge-back compose must be delivered by
+        flareEid = 30295; // Flare
+        lzEndpoint = address(new MockLzEndpoint(flareEid));
+        fxrpOft.setEndpoint(lzEndpoint);
 
         // deploy the personal account implementation (required by the controller init)
         personalAccountImplementation = address(new PersonalAccount());
@@ -153,7 +169,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     function testInitializeRevertAlreadyInitialized() public {
         LoanSubaccount subaccount = _deploySubaccount();
 
-        vm.expectRevert(ILoanSubaccount.AlreadyInitialized.selector);
+        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
         subaccount.initialize(
             address(controller),
             parentPersonalAccount,
@@ -162,7 +178,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
-        vm.expectRevert(ILoanSubaccount.AlreadyInitialized.selector);
+        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
         loanImpl.initialize(
             address(controller),
             parentPersonalAccount,
@@ -1230,6 +1246,226 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertNotEq(subaccount.code.length, 0);
         assertEq(subaccount.balance, 1 ether);
         assertEq(personalAccount.balance, 0);
+    }
+
+    //
+    // the redeem-home compose: FXRP coming back from the loan chain is redeemed on arrival
+    //
+
+    function testRedeemHomeComposeRedeemsThroughTheParent() public {
+        // the loan-chain twin's sweepToOrigin bridges FXRP here with the redeem-home compose (a
+        // deadline and nothing else); this account authenticates it against the bridge settings
+        // (the adapter, its endpoint,
+        // the loan chain, the pinned peer) and runs the sweep-redeem logic with the compose
+        // value as the executor fee - no public-entry fee check, the packet already cost its
+        // sender the LayerZero fee
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        _configureLoanBridge();
+        fxrp.mint(subaccount, 100e6); // the OFT's credit on arrival
+
+        vm.expectEmit();
+        emit IPersonalAccount.FXrpRedeemedFromSubaccount(subaccount, 100e6, 100e6, executor, executorFee);
+        vm.expectEmit();
+        emit ILoanSubaccount.FXrpRedeemed(personalAccount, 100e6, 100e6);
+        _deliverRedeemHome(subaccount, 1, 100e6, executorFee);
+
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertEq(mockAssetManager.lastRedeemValue(), executorFee);
+        (address redeemer,,) = mockAssetManager.requests(mockAssetManager.lastRequestId());
+        assertEq(redeemer, personalAccount);
+    }
+
+    function testRedeemHomeComposeWithZeroValueAndWhilePaused() public {
+        // zero compose value appoints the executor unpaid; and the backward move is an exit
+        // toward the user, so the pause does not gate it
+        address subaccount = _createSubaccountFor(xrplOwner);
+        _configureLoanBridge();
+        fxrp.mint(subaccount, 100e6);
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+        vm.prank(governance);
+        controller.addPausers(pausers);
+        vm.prank(pauser);
+        controller.pause();
+
+        _deliverRedeemHome(subaccount, 1, 100e6, 0);
+
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertEq(mockAssetManager.lastRedeemValue(), 0);
+    }
+
+    function testRedeemHomeComposeBelowMinimumPushesToParent() public {
+        // dust comes home unredeemed, and the compose value joins the parent's float - never a
+        // refund to msg.sender, which here would be the endpoint
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        _configureLoanBridge();
+        mockAssetManager.setMinimumRedeemAmountUBA(1_000e6);
+        fxrp.mint(subaccount, 100e6);
+
+        _deliverRedeemHome(subaccount, 1, 100e6, executorFee);
+
+        assertEq(fxrp.balanceOf(personalAccount), 100e6);
+        assertEq(personalAccount.balance, executorFee);
+        assertEq(mockAssetManager.lastRequestId(), 0);
+    }
+
+    function testRedeemHomeComposeIsCappedAtItsPacketAmount() public {
+        // two bridge-back packets can credit the account before either compose runs; each
+        // compose redeems at most its own packet's amount (the codec amount), so the first
+        // cannot consume more than one packet's worth, and the rest of the balance stays for
+        // the public rails
+        address subaccount = _createSubaccountFor(xrplOwner);
+        _configureLoanBridge();
+        fxrp.mint(subaccount, 100e6); // 60 + 40 credited, no compose yet
+
+        _deliverRedeemHome(subaccount, 1, 60e6, 0);
+        assertEq(fxrp.balanceOf(subaccount), 40e6);
+        (,, uint256 requested) = mockAssetManager.requests(mockAssetManager.lastRequestId());
+        assertEq(requested, 60e6);
+
+        _deliverRedeemHome(subaccount, 2, 40e6, 0);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+
+        // a packet finding more than its amount leaves the rest alone
+        fxrp.mint(subaccount, 30e6);
+        _deliverRedeemHome(subaccount, 3, 10e6, 0);
+        assertEq(fxrp.balanceOf(subaccount), 20e6);
+    }
+
+    function testRedeemHomeComposeSkipsPastItsDeadline() public {
+        // a packet delivered after the sender-stamped deadline does nothing to the balance:
+        // whatever is on the account stays for the public rails and its value joins the
+        // parent's float - a packet cannot outlive its window as an instruction over later funds
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        _configureLoanBridge();
+        fxrp.mint(subaccount, 100e6);
+        bytes memory stale = _redeemHomePayloadAt(uint64(block.timestamp - 1));
+        (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, stale);
+
+        vm.deal(lzEndpoint, executorFee);
+        vm.expectEmit();
+        emit ILoanSubaccount.NativeSweptToParent(personalAccount, executorFee);
+        vm.expectEmit();
+        emit ILoanSubaccount.RedeemHomeSkipped(personalAccount, guid);
+        vm.prank(lzEndpoint);
+        ILoanSubaccount(subaccount).lzCompose{value: executorFee}(address(fxrpOft), guid, message, executor, "");
+
+        assertEq(fxrp.balanceOf(subaccount), 100e6);
+        assertEq(personalAccount.balance, executorFee);
+        assertEq(mockAssetManager.lastRequestId(), 0);
+    }
+
+    function testStaleRedeemHomeComposeIsBoundedInAmountAndTime() public {
+        // the residual accepted risk, pinned: a packet whose credit a public rail already moved
+        // stays retriable, but can redeem at most its own amount out of later funds, and only
+        // until its deadline - never the whole balance, never forever
+        address subaccount = _createSubaccountFor(xrplOwner);
+        _configureLoanBridge();
+        fxrp.mint(subaccount, 100e6);
+        (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, _redeemHomePayload());
+
+        // an executor's public sweep takes the credit before the compose runs
+        vm.deal(address(this), executorFee);
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        vm.prank(lzEndpoint);
+        vm.expectRevert(ILoanSubaccount.NothingToRedeem.selector);
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+
+        // later funds arrive for a new attempt: within the TTL the old packet redeems at most
+        // its own 100 of them
+        fxrp.mint(subaccount, 500e6);
+        vm.prank(lzEndpoint);
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        assertEq(fxrp.balanceOf(subaccount), 400e6);
+
+        // past the TTL a stale packet skips - the balance is untouched
+        (message, guid) = _composeFromLoanChain(subaccount, 2, 100e6, _redeemHomePayload());
+        vm.warp(block.timestamp + REDEEM_HOME_TTL + 1);
+        vm.prank(lzEndpoint);
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        assertEq(fxrp.balanceOf(subaccount), 400e6);
+    }
+
+    function testRedeemHomeComposeAuthentication() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+
+        // no bridge settings, no transport to authenticate against
+        (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, _redeemHomePayload());
+        vm.prank(lzEndpoint);
+        vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        _configureLoanBridge();
+
+        // only the adapter's endpoint may deliver
+        vm.expectRevert(ILoanChainAccountBase.OnlyEndpoint.selector);
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+
+        // the compose sender must be the configured adapter
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanChainAccountBase.WrongComposeSender.selector, makeAddr("otherOft"))
+        );
+        ILoanSubaccount(subaccount).lzCompose(makeAddr("otherOft"), guid, message, executor, "");
+
+        // the message must come from the loan chain
+        bytes memory wrongChain = OFTComposeMsgCodec.encode(
+            1, 30110, 100e6, abi.encodePacked(bytes32(uint256(uint160(subaccount))), _redeemHomePayload())
+        );
+        vm.prank(lzEndpoint);
+        vm.expectRevert(abi.encodeWithSelector(ILoanChainAccountBase.WrongSourceEid.selector, uint32(30110)));
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, wrongChain, executor, "");
+
+        // the source-chain sender must be this account itself - its own loan-chain twin
+        bytes memory forged = OFTComposeMsgCodec.encode(
+            1, destinationEid, 100e6,
+            abi.encodePacked(bytes32(uint256(uint160(makeAddr("intruder")))), _redeemHomePayload())
+        );
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanChainAccountBase.WrongComposeFrom.selector, bytes32(uint256(uint160(makeAddr("intruder"))))
+            )
+        );
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, forged, executor, "");
+
+        // the GUID must recompute from the pinned peer
+        bytes32 wrongGuid = GUID.generate(
+            1, destinationEid, makeAddr("maliciousPeer"), flareEid, bytes32(uint256(uint160(address(fxrpOft))))
+        );
+        vm.prank(lzEndpoint);
+        vm.expectRevert(abi.encodeWithSelector(ILoanChainAccountBase.WrongGuid.selector, wrongGuid));
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), wrongGuid, message, executor, "");
+
+        // unsupported version and action
+        bytes memory wrongVersion = abi.encode(uint8(2), ACTION_REDEEM_HOME, bytes(""));
+        (message, guid) = _composeFromLoanChain(subaccount, 1, 100e6, wrongVersion);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedPayloadVersion.selector, uint8(2)));
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        bytes memory wrongAction = abi.encode(PAYLOAD_VERSION_1, uint8(9), bytes(""));
+        (message, guid) = _composeFromLoanChain(subaccount, 1, 100e6, wrongAction);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedAction.selector, uint8(9)));
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+
+        // value is admitted for the redeem-home action only: any other action with value fails
+        // the value check (before it would fail as unsupported), so no branch can keep native
+        vm.deal(lzEndpoint, 1);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(ILoanChainAccountBase.NonZeroComposeValue.selector);
+        ILoanSubaccount(subaccount).lzCompose{value: 1}(address(fxrpOft), guid, message, executor, "");
+
+        // nothing idle to redeem: reverts, retriable (the credit always precedes the compose)
+        fxrp.burn(subaccount, 100e6);
+        (message, guid) = _composeFromLoanChain(subaccount, 1, 100e6, _redeemHomePayload());
+        vm.prank(lzEndpoint);
+        vm.expectRevert(ILoanSubaccount.NothingToRedeem.selector);
+        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     //
@@ -2385,8 +2621,50 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
+    function _deliverRedeemHome(
+        address _subaccount,
+        uint64 _nonce,
+        uint256 _amountLD,
+        uint256 _value
+    )
+        private
+    {
+        (bytes memory message, bytes32 guid) =
+            _composeFromLoanChain(_subaccount, _nonce, _amountLD, _redeemHomePayload());
+        vm.deal(lzEndpoint, _value);
+        vm.prank(lzEndpoint);
+        ILoanSubaccount(_subaccount).lzCompose{value: _value}(address(fxrpOft), guid, message, executor, "");
+    }
+
     function _personalAccountOf(string memory _xrplOwner) private view returns (address) {
         return controller.getPersonalAccount(_xrplOwner);
+    }
+
+    /// The redeem-home payload as the loan-chain twin stamps it: its block time plus the TTL.
+    function _redeemHomePayload() private view returns (bytes memory) {
+        return _redeemHomePayloadAt(uint64(block.timestamp) + REDEEM_HOME_TTL);
+    }
+
+    /// The compose the loan-chain twin's bridge-back arrives as: canonical wrapper, source = the
+    /// loan chain, composeFrom = the account itself, guid as Flare's endpoint computes it for a
+    /// packet from the pinned peer.
+    function _composeFromLoanChain(
+        address _subaccount,
+        uint64 _nonce,
+        uint256 _amountLD,
+        bytes memory _payload
+    )
+        private view
+        returns (bytes memory _message, bytes32 _guid)
+    {
+        _message = OFTComposeMsgCodec.encode(
+            _nonce, destinationEid, _amountLD,
+            abi.encodePacked(bytes32(uint256(uint160(_subaccount))), _payload)
+        );
+        _guid = GUID.generate(
+            _nonce, destinationEid, address(uint160(uint256(destinationPeer))), flareEid,
+            bytes32(uint256(uint160(address(fxrpOft))))
+        );
     }
 
     /// Canonically encoded type-3 options: destination lzReceive gas plus index-0 lzCompose
@@ -2424,5 +2702,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             value: 0,
             data: abi.encodeCall(IERC20.transfer, (_destination, _amount))
         });
+    }
+
+    function _redeemHomePayloadAt(uint64 _deadline) private pure returns (bytes memory) {
+        return abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, abi.encode(_deadline));
     }
 }
