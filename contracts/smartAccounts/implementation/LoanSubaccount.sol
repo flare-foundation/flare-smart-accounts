@@ -216,31 +216,6 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         );
     }
 
-    /// @inheritdoc ILoanSubaccount
-    function sweepToParent(
-        address _token
-    )
-        external
-        nonReentrant
-        returns (uint256 _amount)
-    {
-        // never on the implementation contract itself, where the parent is unset
-        require(parentPersonalAccount != address(0), NotInitialized());
-        IERC20 token = IERC20(_token);
-        _amount = token.balanceOf(address(this));
-        require(_amount > 0, NothingToSweep());
-
-        // FXRP moves only on its own rails - sweepRedeem (which pushes a balance below the
-        // FAssets minimum to the parent unredeemed) and the forward moves - so a permissionless
-        // push cannot front-run the redemption executors run
-        require(
-            _token != address(ContractRegistry.getAssetManagerFXRP().fAsset()),
-            ProtectedToken(_token)
-        );
-        token.safeTransfer(parentPersonalAccount, _amount);
-        emit TokenSweptToParent(parentPersonalAccount, _token, _amount);
-    }
-
     /// @inheritdoc ISubaccount
     function implementation()
         external view

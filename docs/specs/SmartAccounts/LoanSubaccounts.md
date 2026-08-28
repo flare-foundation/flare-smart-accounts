@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery method (`sweepToParent`) are in place; the account is also the compose receiver of its own loan-chain twin's bridge-back, redeeming on arrival. The Flare-side loan instructions (`borrow`, `depositCollateral`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow, deposit, sweep-deposit and withdraw actions), the per-type market binding and governance configuration (`ComposeTransportFacet`, `LoanMarketsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`) are in place (there is deliberately no token recovery rail — see Cleanup moves); the account is also the compose receiver of its own loan-chain twin's bridge-back, redeeming on arrival. The Flare-side loan instructions (`borrow`, `depositCollateral`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow, deposit, sweep-deposit and withdraw actions), the per-type market binding and governance configuration (`ComposeTransportFacet`, `LoanMarketsFacet`), the creation route, and the permissionless rails (`repay` — which also returns a closed position's surplus to the parent — `depositIdleFxrp`, `sweepToOrigin`). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
 
 ## Typed subaccounts
 
@@ -45,7 +45,7 @@ with `salt = bytes32(0)`. The subaccount address is therefore a pure function of
 ## Creation and prediction
 
 - `getSubaccount(xrplOwner, type)` — view; returns the registered subaccount, or the computed address if not yet deployed. Works even before the parent PA exists (the PA address itself is deterministic).
-- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; the parent Personal Account resolves to the registered account when one exists, and to its computed address otherwise — the same fallback `getSubaccount` uses, so creation works before the Personal Account exists (and on chains where PAs never exist at all). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them — without waiting for the parent. A subaccount created before its PA is only **partly** inert: `onlyParent` methods have no possible caller and `sweepRedeem` at or above the minimum reverts calling the codeless parent, while `sweepToLoan` (which never reads the parent) works normally, and `sweepToParent` — and `sweepRedeem` below the minimum, which never calls parent code — park assets at the future PA address — the same owner's deterministic address, whose later CREATE2 deployment a pre-existing balance does not block. The PA then deploys at exactly the recorded parent, owning whatever was parked. One qualification: this holds for a valid owner string — the route accepts any string, but a Personal Account cannot be created for an empty one, so an empty-owner subaccount is permanent caller-funded junk with no custody or collision impact. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
+- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; the parent Personal Account resolves to the registered account when one exists, and to its computed address otherwise — the same fallback `getSubaccount` uses, so creation works before the Personal Account exists (and on chains where PAs never exist at all). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them — without waiting for the parent. A subaccount created before its PA is only **partly** inert: `onlyParent` methods have no possible caller and `sweepRedeem` at or above the minimum reverts calling the codeless parent, while `sweepToLoan` (which never reads the parent) works normally, and `sweepRedeem` below the minimum — which never calls parent code — parks assets at the future PA address — the same owner's deterministic address, whose later CREATE2 deployment a pre-existing balance does not block. The PA then deploys at exactly the recorded parent, owning whatever was parked. One qualification: this holds for a valid owner string — the route accepts any string, but a Personal Account cannot be created for an empty one, so an empty-owner subaccount is permanent caller-funded junk with no custody or collision impact. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
 
 Unlike Personal Accounts, which are created lazily as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points) or explicitly through the permissionless `createPersonalAccount`, a loan subaccount always needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily.
 
@@ -109,25 +109,24 @@ fee (backward: to the FAssets executor, or below the minimum to the user's own P
 messaging fee (forward), while `sweepRedeem` imposes a re-mint round trip whose cost is
 proportional to the balance — so this is accepted, not solved; revisit (the direction lifecycle
 is the known remedy) if such griefing is ever observed in practice. Neither direction is ever
-gas-only: `sweepToParent` rejects FXRP, and `sweepRedeem` requires the fee even when it only
-pushes dust. One bounded residual is accepted: a redeem-home packet whose credit a public rail
+gas-only: `sweepRedeem` requires the fee even when it only pushes dust, and no other method
+moves FXRP. One bounded residual is accepted: a redeem-home packet whose credit a public rail
 already moved stays retriable for its TTL and can then redeem at most its own amount out of
 funds that arrive later, for destination gas alone — bounded in amount (its own credit) and
 time (`REDEEM_HOME_TTL`), custody unchanged (the user's own redemption).
 
-### Recovery to the parent Personal Account
+### No token recovery rail
 
-Not everything that can land on a subaccount is FXRP: a token sent here by mistake has no
-other exit, so one permissionless thin mover pushes it to the parent Personal Account, which
-accepts any asset and is fully under the user's control:
-
-- **`sweepToParent(token)`** — recovers a token balance. The caller chooses only *which* asset,
-  never where it goes. FXRP is **rejected** (`ProtectedToken`): the loan asset moves only on
-  its own rails, and executors run `sweepRedeem` — a free push must not front-run it. A residual
-  below the FAssets minimum goes home through `sweepRedeem` itself (pushed unredeemed).
-
-It stays available while the controller is paused: the parent is the safest possible
-destination, and an incident should not trap assets.
+There is deliberately no recovery method for non-FXRP tokens: no protocol flow ever delivers
+one here (RLUSD lives on the loan chain, redemption outcomes land on the parent, the bridge
+refunds its caller), so the only sources are out-of-protocol — a mistaken send, airdrop dust.
+Such a balance strands until a beacon upgrade adds a rail, the same treatment as native and
+for the same reason: nobody in the protocol causes it, and every method the account does have
+exists for an asset the protocol actually routes here. The remote subaccount has no generic
+recovery either; both assets the protocol routes there have their own rails — FXRP through
+`depositIdleFxrp`/`sweepToOrigin`, and the loan-token surplus of a closed position through
+`repay` itself, which pushes it to the parent (best-effort: a push the token refuses is
+retried by any later `repay`).
 
 **No native rail.** There is no `receive()` and no native exit, and no protocol flow leaves
 native on the subaccount: the bridge refunds its caller, redemption outcomes land on the parent,
@@ -252,7 +251,7 @@ side):
 Two different rules apply, and the difference is the signature:
 
 - **Instruction destinations are the user's choice.** A borrow names where the RLUSD goes, and the XRPL signature authorizes it. Version 1 implements only the EVM/ERC-20 form (typically an exchange deposit address), paid by a direct transfer; the XRPL-over-Wormhole form is reserved by the payload's destination-kind tag and added when Wormhole provides specs. The EVM address is checked for shape only — clean zero-padded, non-zero, and not the subaccount itself (the proceeds could only repay the new debt); the parent Personal Account, the user's own compose-driven account on the loan chain, is a valid target — beyond that it is the user's money and the user's choice, the same way the XRPL target is already allowed to be an arbitrary account.
-- **Cleanup destinations are never the caller's choice.** Sweeps and recovery are permissionless and carry no signature, so their destination must be derived on-chain — the account's own position, its own address on the other chain, or `parentPersonalAccount` — never from caller-supplied data. Anyone may move stranded assets; nobody may redirect them.
+- **Cleanup destinations are never the caller's choice.** Sweeps and the surplus push are permissionless and carry no signature, so their destination must be derived on-chain — the account's own position, its own address on the other chain, or `parentPersonalAccount` — never from caller-supplied data. Anyone may move the assets the protocol routes; nobody may redirect them (a stray token has no rail at all and strands).
 
 Caveats specific to the EVM disbursement option, for the front end rather than the contracts: RLUSD is a regulated stablecoin and can freeze or blacklist addresses, so a transfer can revert and turn a borrow into a stuck disbursement; some exchange deposit addresses are not credited when the sender is a contract, or need a tag an ERC-20 transfer cannot carry; and a wrong address is unrecoverable, since nothing is checked.
 
@@ -262,7 +261,7 @@ The same frozen proxy bytecode and the same derivation give the subaccount one a
 chain, and the per-type implementation registry is what makes that useful: each chain's diamond
 registers its **own** implementation for the loan type. Flare registers
 [`LoanSubaccount`](../../../contracts/smartAccounts/implementation/LoanSubaccount.sol) (FAssets
-redemption pushed to the parent, the forward bridge, recovery to the parent); the loan chain (Ethereum, at
+redemption pushed to the parent, the forward bridge); the loan chain (Ethereum, at
 launch) registers
 [`LoanSubaccountRemote`](../../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol).
 The implementation never enters the CREATE2 derivation, so the registration choice cannot move
@@ -292,8 +291,8 @@ never clears (an all-zero struct fails validation). Clearing is its own call,
 `clearComposeTransport()`, **immediate and owner-only**: it is the containment lever for a
 compromised endpoint, OFT or peer, and a lever behind a timelock is not one. It disables the
 transport-dependent surface (composed actions on every receiver and the bridge-back sweep)
-until a new transport is set — repayment, defensive idle deposits, recovery to the parent,
-account creation and the market bindings keep working. Two things the clear does **not** do
+until a new transport is set — repayment (including its best-effort surplus push), defensive
+idle deposits, account creation and the market bindings keep working. Two things the clear does **not** do
 shape the incident runbook: it does not cancel queued `setComposeTransport` calls (the timelock
 keys them by calldata hash and lets anyone execute a matured one, so a set queued before the
 clear would restore the route — cancel them with `cancelTimelockedCall` first, then clear), and
@@ -415,7 +414,7 @@ pre-registration governance trust assumption enforced by review at the timelocke
 contract itself checks only code-presence and market existence. It matters because the
 binding is permanent and the account's debt checks must be able to read its live position: a
 Morpho that could later change behavior or start reverting would block that account's
-debt-gated paths (borrowing, defensive deposits, loan-token recovery) — inherent to where the
+debt-gated paths (borrowing, defensive deposits, repayment and its surplus push) — inherent to where the
 position lives. Immutability reduces that availability risk; it is not containment — it does
 not protect against a vulnerability in the immutable code itself, a malicious clone, or a
 compromised market oracle or interest model.
@@ -424,15 +423,15 @@ compromised market oracle or interest model.
 debt increases on a type (`enableLoanBorrowing` reverses it) — the routine migration
 lever: register the next pool as a new type, disable borrowing on the old one, and the old
 accounts remain fully exit-capable forever
-(repayment, deposits, withdrawals, and recovery are never gated by the switch). Clearing the
+(repayment with its surplus push, deposits, and withdrawals are never gated by the switch). Clearing the
 transport (immediate, owner-only) zeroes the LayerZero surface for **all** compose receivers —
 composed actions and the bridge-back sweep wait until governance sets a new transport through
 the timelock; that wait is real, which is why the clear is the nuclear incident lever and not a
-routine one. Market bindings, `repay`,
-defensive idle deposits, and recovery to the parent persist through both levers. The global
-pause blocks debt increases, withdrawals, debt-free deposits and the bridge-back (recovery to
-the parent is inward and stays open; the mirror's signed user operations are what the pause
-stops) — while **repayment and defensive collateral deposits stay available**: a composed
+routine one. Market bindings, `repay`
+(with its surplus push), and defensive idle deposits persist through both levers. The global
+pause blocks debt increases, withdrawals, debt-free deposits and the bridge-back (the surplus
+push to the parent is inward and stays open; the mirror's signed user operations are what the
+pause stops) — while **repayment and defensive collateral deposits stay available**: a composed
 deposit or an idle-rail deposit executes during a pause exactly when the position carries
 live debt, so an endangered position can still be defended, while a debt-free deposit is new
 exposure and waits out the pause like everything else. Accepted consequence: the global pause
@@ -450,12 +449,20 @@ improvement and remain future work.
 Flare-side invariant:
 
 - **`repay()`** pushes the whole idle loan-token balance into the account's one position,
-  clamped to the live debt: interest is accrued first, a balance below the debt repays by
-  assets, a balance covering it repays by **exact borrow shares** (Morpho's canonical
-  rounded-up conversion with virtual offsets), closing the position without the over-repay
-  revert. The documented user flow overfunds repayments to cover in-flight interest, so the
-  clamp is what makes that flow work; the surplus stays for `recoverToken`. Available
-  while paused — repaying moves the position toward safety.
+  clamped to the live debt: with live debt, interest is accrued first, a balance below the
+  debt repays by assets, a balance covering it repays by **exact borrow shares** (Morpho's
+  canonical rounded-up conversion with virtual offsets), closing the position without the
+  over-repay revert. The documented user flow overfunds repayments to cover in-flight
+  interest, so the clamp is what makes that flow work. Once the debt is zero — closed by this
+  call, or already zero (an external liquidation, tokens arriving after the close; accrual is
+  skipped then, so a reverting IRM cannot trap the balance) — the remaining balance is the
+  user's surplus and is pushed to the parent Personal Account in the same call.
+  **Best-effort**: a push the token refuses (RLUSD can freeze addresses) never rolls back the
+  repayment that just succeeded — the surplus stays on the now debt-free account
+  (`LoanSurplusRetained`) and any later `repay` retries it, so loan tokens rest on a
+  debt-free account only until a push succeeds. Available while paused — repaying moves the
+  position toward safety, and the surplus push is inward consolidation to the user's own
+  account.
 - **`depositIdleFxrp()`** supplies the whole idle FXRP balance as collateral into the
   account's one position — the executor's retry rail for FXRP that arrived without a
   successful composed action. Defending an indebted position survives a pause, like
@@ -477,14 +484,15 @@ Flare-side invariant:
   becomes the redemption's executor fee. Exactly the quoted fee is spent and only the call's own
   excess refunded — pre-existing native never subsidizes a caller. Pause-gated: every exit from
   this chain rides the OFT itself. Live peer re-checked against the pinned one.
-- **Recovery** goes to the **parent Personal Account** — the user's own compose-driven account
-  on this chain (see below) — a fixed destination baked in at creation, nothing to configure
-  and nothing to rotate. `recoverToken(token)` is the one rail: the market's collateral token
-  is rejected (it moves only on its own rails); the market's loan token is recoverable only
-  while **the position carries no debt** — read live from Morpho, so an external liquidation
-  (which zeroes debt without the account observing it) frees the surplus immediately; any
-  other token moves freely. It is **not pause-gated**: subaccount to its own parent is inward
-  consolidation, not an exit — the parent's signed user operation outward is what the pause stops.
+- **There is no generic recovery rail.** Loan-token surplus is the one thing that needs an
+  exit, and it is folded into `repay` (above): debt is read live from Morpho, so an external
+  liquidation — which zeroes debt without the account observing it — frees the balance for
+  the very next `repay` call, which pushes it whole to the parent Personal Account (the
+  user's own compose-driven account on this chain, a fixed destination baked in at creation;
+  best-effort — a refused push stays here for the next `repay` to retry).
+  Any other stray token strands until a beacon upgrade adds a rail — accepted, exactly as on
+  the Flare subaccount: no protocol flow delivers one here, and every token the protocol does
+  route here has its own rail.
   There is no native rail on this account: no `receive()` (no protocol flow sends native
   here — the bridge rails refund their caller and compose value is rejected — so a plain send
   reverts at the sender) and no native exit. Native can still land without a call:
@@ -563,9 +571,9 @@ reentrancy guard; `receive()` and the views stay callable and are benign.
   authority, as on Flare); the wallet owns the batch's correctness.
 - **No permissionless rail at all.** No protocol flow ever routes FXRP to the mirror: Flare's
   instructions are message-only, bridged collateral lands on the loan subaccount, and
-  subaccount recovery brings only non-collateral tokens (the subaccount rejects FXRP in
-  `recoverToken`). What lands here is borrow proceeds the user directed here, recovered
-  loan-token surplus, and external strays — and the user's next batch moves or uses them.
+  the subaccount's only outward push is its closed-position loan-token surplus (folded into
+  `repay`). What lands here is borrow proceeds the user directed here, that surplus, and
+  external strays — and the user's next batch moves or uses them.
 - **Native is accepted** (`receive()`) and leaves the same way, as a value-carrying call. The
   purpose is funding: a bridge call (proceeds to XRPL through Wormhole, say) wants a native
   fee, and the LayerZero executor **native-drop option** in `extraOptions` delivers native to
@@ -705,13 +713,13 @@ Account.
 - **`setLoanBridgeSettings` comes last, and only once the loan-chain side exists.** Its
   validation reads the OFT's live peer for the destination endpoint, so it cannot be configured
   before the destination route is wired; until then the forward moves revert with
-  `LoanBridgeNotConfigured` while creation, the backward sweep and recovery already work. The loan-chain-side account (same diamond address, same derivation) must be
+  `LoanBridgeNotConfigured` while creation and the backward sweep already work. The loan-chain-side account (same diamond address, same derivation) must be
   deployed before the forward moves are enabled, since bridged FXRP lands on the subaccount's
   own address there.
 
 ## Open design items (decide with the asset-moving methods)
 
-- ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed, the surplus leaves through `recoverToken` to the parent Personal Account (the user's own loan-chain account). Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
+- ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed — by `repay` itself or by an external liquidation — the same `repay` call pushes the surplus to the parent Personal Account (the user's own loan-chain account), best-effort: a push the token refuses stays on the account for a later `repay` to retry, never rolling back the repayment. No generic `recoverToken`: stray tokens strand, as on the Flare side. Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
 - **TODO, parked: atomic withdraw-and-bridge action.** If guaranteed withdrawal completion is ever required, the clean contract-level fix for the withdraw/redeposit ordering race (see the rails) is a single composed action that withdraws collateral and bridges it back in one execution. It is not free: it needs compose value (rejected today by `NonZeroComposeValue`, which exists to keep mistaken deliveries retriable), fee quoting inside the compose, and refund semantics for a permissionless deliverer. Decide if withdrawal-completion guarantees become a product requirement; until then, executor-side bundling of delivery with `sweepToOrigin` is the operational mitigation.
 - **TODO, in design: the Flare fee.** An interest-spread model (checkpoint accounting over the account's Morpho debt) was accepted by product and is in design review; it is kept out of this spec until the design settles, then documented here.
 - ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`. Remaining leftover: `LoanBridgeSettingsFacet` is the Flare end of the same route under a loan name (its validation is FXRP-specific); revisit if a second route ever exists.

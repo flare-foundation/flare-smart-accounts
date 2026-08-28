@@ -181,15 +181,25 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when a token balance is recovered to the parent Personal Account (the
-     * user's own loan-chain account, the fixed recovery destination).
+     * @notice Emitted when a closed position's loan-token surplus is sent to the parent
+     * Personal Account (the user's own account on this chain) at the end of {repay}.
      * @param parentPersonalAccount The parent Personal Account address paid.
-     * @param token The recovered token.
-     * @param amount The recovered amount.
+     * @param amount The surplus amount.
      */
-    event TokenRecovered(
+    event LoanSurplusRecovered(
         address indexed parentPersonalAccount,
-        address indexed token,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when a closed position's loan-token surplus could not be sent to the
+     * parent Personal Account (the token refused the transfer - RLUSD can freeze addresses)
+     * and stays on the account. The repayment itself stands; a later {repay} retries the push.
+     * @param parentPersonalAccount The parent Personal Account address that refused.
+     * @param amount The surplus amount retained.
+     */
+    event LoanSurplusRetained(
+        address indexed parentPersonalAccount,
         uint256 amount
     );
 
@@ -224,7 +234,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     error BorrowingDisabled();
 
     /**
-     * @notice Reverts if there are no idle loan tokens to repay, or the position has no debt.
+     * @notice Reverts if there are no idle loan tokens.
      */
     error NothingToRepay();
 
@@ -233,10 +243,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      */
     error NothingToDeposit();
 
-    /**
-     * @notice Reverts if there is nothing to recover.
-     */
-    error NothingToRecover();
 
     /**
      * @notice Reverts if there is no FXRP to sweep back to the origin chain.
@@ -262,20 +268,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      */
     error RefundFailed();
 
-    /**
-     * @notice Reverts if recovery is attempted on the market's collateral token; it moves only
-     * on its own rails (`depositIdleFxrp`, `sweepToOrigin`).
-     * @param token The offending token.
-     */
-    error ProtectedToken(
-        address token
-    );
 
-    /**
-     * @notice Reverts if a loan-token recovery is attempted while the position carries debt:
-     * the balance is repayment material, not surplus.
-     */
-    error OutstandingDebt();
 
     /**
      * @notice Reverts on a borrow with an unsupported destination kind (the Wormhole-to-XRPL
@@ -314,10 +307,17 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * @notice Repays the account's debt with its idle loan-token balance, clamped to the
      * live debt.
      * @dev Permissionless - repayment only reduces debt on the account's own position.
-     * Stays available while paused (it moves the position toward safety). Interest accrues
-     * first; a balance covering the full debt closes by exact borrow shares (no over-repay
-     * revert), a smaller one repays by assets. Surplus stays on the account for
-     * {recoverToken}.
+     * Stays available while paused (it moves the position toward safety). With live debt,
+     * interest accrues first; a balance covering the full debt closes by exact borrow shares
+     * (no over-repay revert), a smaller one repays by assets and keeps the balance as
+     * repayment material. Once the position carries no debt - closed by this call, or already
+     * zero (an external liquidation, tokens arriving after the close; accrual is skipped
+     * then, so a reverting IRM cannot trap the balance) - the whole remaining loan-token
+     * balance is the user's surplus and is pushed to the parent Personal Account in the same
+     * call ({LoanSurplusRecovered}). The push is best-effort: if the token refuses the parent
+     * (RLUSD can freeze addresses), the repayment stands, the surplus stays here
+     * ({LoanSurplusRetained}), and any later call retries - so loan tokens rest on a
+     * debt-free account only until a repay's push succeeds.
      * @return _assets The assets repaid.
      */
     function repay()
@@ -359,23 +359,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
         bytes calldata _extraOptions
     )
         external payable
-        returns (uint256 _amount);
-
-    /**
-     * @notice Recovers a token balance to the parent Personal Account — the user's own
-     * compose-driven account on this chain, from which a signed user operation moves it anywhere.
-     * @dev Permissionless with a fixed destination. The market's collateral token is rejected
-     * (it moves only on its own rails); the market's loan token is recoverable only while the
-     * position carries no debt (read live from Morpho — until then the balance is repayment
-     * material); any other token moves freely. Not pause-gated: subaccount to its own parent
-     * is inward consolidation, and the parent's signed user operations are what the pause stops.
-     * @param _token The token to recover.
-     * @return _amount The recovered amount.
-     */
-    function recoverToken(
-        address _token
-    )
-        external
         returns (uint256 _amount);
 
     /// @inheritdoc ISubaccount

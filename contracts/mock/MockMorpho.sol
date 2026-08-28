@@ -37,6 +37,7 @@ contract MockMorpho is IMorpho {
     /// @notice Interest waiting to be applied on the next `accrueInterest` call, per market.
     mapping(bytes32 marketId => uint256 assets) public pendingInterest;
 
+    bool public accrueInterestReverts;
     mapping(bytes32 marketId => MarketState) private _markets;
     mapping(bytes32 marketId => mapping(address account => PositionState)) private _positions;
 
@@ -49,6 +50,11 @@ contract MockMorpho is IMorpho {
     /// @notice Queues interest on a market's debt, applied on the next `accrueInterest`.
     function addPendingInterest(bytes32 marketId, uint256 assets) external {
         pendingInterest[marketId] += assets;
+    }
+
+    /// @notice Makes `accrueInterest` revert, standing in for a broken or hostile IRM.
+    function setAccrueInterestReverts(bool _reverts) external {
+        accrueInterestReverts = _reverts;
     }
 
     /// @notice Simulates a full external liquidation: a third party repays the account's
@@ -66,6 +72,7 @@ contract MockMorpho is IMorpho {
 
     /// @inheritdoc IMorpho
     function accrueInterest(MarketParams calldata marketParams) external {
+        require(!accrueInterestReverts, "IRM reverted");
         bytes32 id = _id(marketParams);
         MarketState storage m = _markets[id];
         require(m.lastUpdate != 0, "market not created");

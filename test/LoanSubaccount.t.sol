@@ -361,12 +361,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(address(this), messagingFee);
         assertEq(ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}(""), 250e6);
 
-        // token recovery parks assets at the future PA address - the same owner's
-        // deterministic address; a plain native send reverts (no receive, no native exit)
-        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(subaccount, 5e18);
-        assertEq(ILoanSubaccount(subaccount).sweepToParent(address(stray)), 5e18);
-        assertEq(stray.balanceOf(parent), 5e18);
+        // a plain native send reverts (no receive, no native exit)
         vm.deal(address(this), 1 ether);
         (bool ok, ) = subaccount.call{value: 1 ether}("");
         assertFalse(ok);
@@ -374,12 +369,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(parent.balance, executorFee);
 
         // parked assets do not block the CREATE2 deployment: the PA still materializes
-        // at exactly the recorded parent, owning everything parked there - the stray and the
-        // dust push's FXRP and fee
+        // at exactly the recorded parent, owning everything parked there - the dust push's
+        // FXRP and fee
         vm.deal(address(this), collateralReservationFee + executorFee);
         address personalAccount = _createPersonalAccount(xrplOwner);
         assertEq(personalAccount, parent);
-        assertEq(stray.balanceOf(personalAccount), 5e18);
         assertEq(fxrp.balanceOf(personalAccount), 250e6);
         assertEq(personalAccount.balance, executorFee);
     }
@@ -1077,17 +1071,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testImplementationContractRejectsNativeAndRecovery() public {
-        // the implementation contract is never initialized and has no parent: it must not
-        // accept native, and its recovery method must not burn to the zero address
+    function testImplementationContractRejectsNative() public {
+        // the implementation contract is never initialized: it must not accept native
         vm.deal(address(this), 1 ether);
         // solhint-disable-next-line avoid-low-level-calls
         (bool ok, ) = address(loanImpl).call{value: 1 ether}("");
         assertFalse(ok);
-
-        fxrp.mint(address(loanImpl), 1e6);
-        vm.expectRevert(ILoanSubaccount.NotInitialized.selector);
-        loanImpl.sweepToParent(address(fxrp));
     }
 
     function testPublicAggregateExposesLoanFacet() public {
@@ -1151,44 +1140,16 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     //
-    // step 4: recovery to the parent Personal Account
+    // step 4: no recovery rail - strays strand
     //
 
-    function testSweepToParentRecoversStrayTokens() public {
+    function testStrayTokenHasNoExit() public {
+        // no recovery method: a token sent here by mistake strands until a beacon upgrade
+        // adds a rail - accepted, since no protocol flow delivers non-FXRP tokens here
         address subaccount = _createSubaccountFor(xrplOwner);
-        address parent = _personalAccountOf(xrplOwner);
-        // a token sent here by mistake (redemption-default payouts go to the parent, which is
-        // the redeemer, so they never land here)
         MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
         stableCoin.mint(subaccount, 500e18);
-
-        vm.expectEmit();
-        emit ILoanSubaccount.TokenSweptToParent(parent, address(stableCoin), 500e18);
-        uint256 amount = ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
-
-        assertEq(amount, 500e18);
-        assertEq(stableCoin.balanceOf(subaccount), 0);
-        assertEq(stableCoin.balanceOf(parent), 500e18);
-    }
-
-    function testSweepToParentRejectsFxrp() public {
-        address subaccount = _createSubaccountFor(xrplOwner);
-        fxrp.mint(subaccount, 250e6);
-
-        // the loan asset moves only on its own rails, so a free push cannot front-run the
-        // redemption executors run; a below-minimum residual goes home through sweepRedeem
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccount.ProtectedToken.selector, address(fxrp))
-        );
-        ILoanSubaccount(subaccount).sweepToParent(address(fxrp));
-    }
-
-    function testSweepToParentRevertNothingToSweep() public {
-        address subaccount = _createSubaccountFor(xrplOwner);
-        MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
-
-        vm.expectRevert(ILoanSubaccount.NothingToSweep.selector);
-        ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
+        assertEq(stableCoin.balanceOf(subaccount), 500e18);
     }
 
     function testRejectsPlainNativeAndHasNoNativeExit() public {
@@ -1202,25 +1163,6 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         (bool ok, ) = subaccount.call{value: 1 ether}("");
         assertFalse(ok);
         assertEq(subaccount.balance, 0);
-    }
-
-    function testSweepToParentWorksWhilePaused() public {
-        address subaccount = _createSubaccountFor(xrplOwner);
-        address parent = _personalAccountOf(xrplOwner);
-        MintableERC20 stableCoin = new MintableERC20("Stable", "STB", 18);
-        stableCoin.mint(subaccount, 500e18);
-
-        address pauser = makeAddr("pauser");
-        address[] memory pausers = new address[](1);
-        pausers[0] = pauser;
-        vm.prank(governance);
-        controller.addPausers(pausers);
-        vm.prank(pauser);
-        controller.pause();
-
-        // recovery to the parent is the safest destination, so it stays available in an incident
-        ILoanSubaccount(subaccount).sweepToParent(address(stableCoin));
-        assertEq(stableCoin.balanceOf(parent), 500e18);
     }
 
     function testValueSentToUncreatedSubaccountStrands() public {

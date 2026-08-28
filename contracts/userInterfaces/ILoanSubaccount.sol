@@ -73,10 +73,11 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when a token balance is recovered to the parent Personal Account.
+     * @notice Emitted when a {sweepRedeem} or redeem-home compose pushes a below-minimum FXRP
+     * balance to the parent Personal Account unredeemed (in place of {FXrpRedeemed}).
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param token The recovered token.
-     * @param amount The recovered amount.
+     * @param token The FXRP token.
+     * @param amount The pushed amount.
      */
     event TokenSweptToParent(
         address indexed parentPersonalAccount,
@@ -218,26 +219,12 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         uint256 executorFee
     );
 
-    /**
-     * @notice Reverts if FXRP is passed to {sweepToParent}: the loan asset moves only on its
-     * own rails ({sweepRedeem}, which pushes a balance below the FAssets minimum to the parent
-     * unredeemed, and the forward moves).
-     * @param token The rejected token.
-     */
-    error ProtectedToken(
-        address token
-    );
 
     /**
      * @notice Reverts if native could not be sent to the parent Personal Account.
      */
     error NativeSweepFailed();
 
-    /**
-     * @notice Reverts on the implementation contract itself, which is never initialized: its
-     * recovery method has no parent to send to.
-     */
-    error NotInitialized();
 
     /**
      * @notice Reverts on a loan instruction whose arguments cannot execute on the loan chain:
@@ -382,22 +369,6 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
     )
         external payable;
 
-    /**
-     * @notice Recovers a token balance to the parent Personal Account.
-     * @dev Permissionless. The destination is fixed to the parent, so the caller chooses only
-     * which asset to recover, never where it goes: a thin mover for anything that lands here
-     * with no other exit (a mistaken token send). FXRP is rejected ({ProtectedToken}) - it
-     * moves only on its own rails, and a below-minimum residual goes home through
-     * {sweepRedeem}. Stays available while the controller is paused, since the parent is the
-     * safest possible destination.
-     * @param _token The token to recover.
-     * @return _amount The recovered amount.
-     */
-    function sweepToParent(
-        address _token
-    )
-        external
-        returns (uint256 _amount);
 
     /// @inheritdoc ISubaccount
     function controllerAddress()

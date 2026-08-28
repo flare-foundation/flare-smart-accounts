@@ -50,6 +50,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockOft} from "../contracts/mock/MockOft.sol";
 import {MockAssetManager} from "../contracts/mock/MockAssetManager.sol";
 import {MockMorpho} from "../contracts/mock/MockMorpho.sol";
+import {MockFreezableToken} from "../contracts/mock/MockFreezableToken.sol";
 import {MockLzEndpoint} from "../contracts/mock/MockLzEndpoint.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
@@ -964,20 +965,19 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
     }
 
-    function testExternalLiquidationImmediatelyUnblocksRecovery() public {
+    function testExternalLiquidationTurnsBalanceIntoSurplus() public {
         // debt is read live from Morpho on every check - nothing is cached, so an external
-        // liquidation is visible to the very next call with no synchronization step
+        // liquidation is visible to the very next call: the position is closed, repay has
+        // nothing to repay, and the whole balance leaves as surplus
         address subaccount = _borrowedSubaccount(500e18);
+        morpho.simulateLiquidation(_marketId(), subaccount);
         rlusd.mint(subaccount, 100e18);
 
-        vm.expectRevert(ILoanSubaccountRemote.OutstandingDebt.selector);
-        ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd));
-
-        morpho.simulateLiquidation(_marketId(), subaccount);
-
-        uint256 amount = ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd));
-        assertEq(amount, 100e18);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 100e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
+        assertEq(rlusd.balanceOf(subaccount), 0);
     }
 
     function testPartialLiquidationKeepsCanonicalAccounting() public {
@@ -1267,8 +1267,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         rlusd.mint(subaccount, 600e18);
         assertEq(ILoanSubaccountRemote(subaccount).repay(), 500e18);
-
-        assertEq(ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd)), 100e18);
+        // the surplus left with the same call
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
     }
 
@@ -1508,18 +1507,23 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(borrowShares, 300e18 * 1e6);
     }
 
-    function testRepayFullClosesByShares() public {
-        // the balance covers the debt: repaid by exact borrow shares, the surplus stays
+    function testRepayFullClosesBySharesAndRecoversSurplus() public {
+        // the balance covers the debt: repaid by exact borrow shares, and the over-funded
+        // remainder leaves to the parent in the same call
         address subaccount = _borrowedSubaccount(500e18);
         rlusd.mint(subaccount, 600e18);
 
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 500e18);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 100e18);
         uint256 assets = ILoanSubaccountRemote(subaccount).repay();
 
         assertEq(assets, 500e18);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(borrowShares, 0);
-        // the over-funded remainder is surplus on the account, recoverToken's material
-        assertEq(rlusd.balanceOf(subaccount), 100e18);
+        assertEq(rlusd.balanceOf(subaccount), 0);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
     }
 
     function testRepayClampsToAccruedDebt() public {
@@ -1536,19 +1540,36 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertLe(assets, 525e18 + 1);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(borrowShares, 0);
+        // the rest left as surplus in the same call
+        assertEq(rlusd.balanceOf(subaccount), 0);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 600e18 - assets);
     }
 
     function testRepayRevertNothingToRepay() public {
+        // no idle balance at all
         address subaccount = _createConfiguredSubaccount();
-
-        // no idle balance
         vm.expectRevert(ILoanSubaccountRemote.NothingToRepay.selector);
         ILoanSubaccountRemote(subaccount).repay();
+    }
 
-        // balance but no debt
+    function testRepayWithoutDebtRecoversWholeBalance() public {
+        // loan tokens on a debt-free account (sent by mistake, or arriving after the close)
+        // are surplus: repay is their exit, with nothing repaid
+        address subaccount = _createConfiguredSubaccount();
         rlusd.mint(subaccount, 100e18);
-        vm.expectRevert(ILoanSubaccountRemote.NothingToRepay.selector);
-        ILoanSubaccountRemote(subaccount).repay();
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
+        assertEq(rlusd.balanceOf(subaccount), 0);
+    }
+
+    function testRepayKeepsBalanceWhileDebtRemains() public {
+        // while the position has debt, the loan-token balance is repayment material: a
+        // partial repay consumes it and nothing leaves to the parent
+        address subaccount = _borrowedSubaccount(500e18);
+        rlusd.mint(subaccount, 100e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 0);
+        assertEq(rlusd.balanceOf(subaccount), 0);
     }
 
     function testRepayRevertMarketNotRegistered() public {
@@ -1583,6 +1604,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 600e18);
         uint256 assets = ILoanSubaccountRemote(subaccount).repay();
         assertEq(assets, 500e18);
+        // nor does the surplus push
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
 
         // the defensive idle deposit needs no transport either
         fxrp.mint(subaccount, 10e6);
@@ -1606,10 +1629,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             ILoanMarketsFacet(address(controller))
                 .isLoanBorrowingDisabled(SUBACCOUNT_TYPE_LOAN)
         );
-        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(subaccount, 1e18);
-        assertEq(ILoanSubaccountRemote(subaccount).recoverToken(address(stray)), 1e18);
-        assertEq(stray.balanceOf(parentPersonalAccount), 1e18);
+        rlusd.mint(subaccount, 1e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 1e18);
     }
 
     function testDepositIdleFxrp() public {
@@ -1731,16 +1753,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
     }
 
-    function testRecoveryWorksWhilePaused() public {
-        // recovery is inward consolidation to the account's own parent, not an exit, so the
-        // pause does not gate it; the parent's signed user operations are what the pause stops
+    function testSurplusRecoveryWorksWhilePaused() public {
+        // the surplus push is inward consolidation to the account's own parent, not an exit,
+        // so the pause does not gate it; the parent's signed user operations are what the
+        // pause stops
         address subaccount = _createConfiguredSubaccount();
         _pauseController();
 
-        MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(subaccount, 1e18);
-        assertEq(ILoanSubaccountRemote(subaccount).recoverToken(address(stray)), 1e18);
-        assertEq(stray.balanceOf(parentPersonalAccount), 1e18);
+        rlusd.mint(subaccount, 1e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 1e18);
     }
 
     function testWithdrawWithAttachedCreditLeavesItIdle() public {
@@ -1790,53 +1812,86 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
     }
 
-    function testRecoverTokenToParent() public {
-        // the fixed recovery destination is the parent Personal Account - the user's own
-        // compose-driven account on this chain - with nothing to configure first
+    function testRepaySurplusPushFailureDoesNotRevertRepayment() public {
+        // an RLUSD-like freeze on the parent: the surplus push fails, but the repayment that
+        // just closed the debt stands - the surplus stays here and any later repay retries it
+        _configureSettings();
+        uint256 typeB = 2;
+        MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.loanToken = address(frozenRlusd);
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        vm.stopPrank();
+
+        address subaccount = controller.createSubaccount("rFrozenParentOwner", typeB);
+        address parent = LoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-frz"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("destFrz")))), 300e18
+        ));
+
+        frozenRlusd.mint(subaccount, 400e18);
+        frozenRlusd.setFrozen(parent, true);
+
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanRepaid(parent, 300e18);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanSurplusRetained(parent, 100e18);
+        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
+
+        // the debt is closed and the repayment stood; only the push was deferred
+        assertEq(assets, 300e18);
+        bytes32 marketIdB = keccak256(abi.encode(marketB.marketParams));
+        (, uint128 shares, ) = morpho.position(marketIdB, subaccount);
+        assertEq(shares, 0);
+        assertEq(frozenRlusd.balanceOf(subaccount), 100e18);
+        assertEq(frozenRlusd.balanceOf(parent), 0);
+
+        // unfrozen, the next permissionless repay retries the push
+        frozenRlusd.setFrozen(parent, false);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanSurplusRecovered(parent, 100e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(frozenRlusd.balanceOf(parent), 100e18);
+        assertEq(frozenRlusd.balanceOf(subaccount), 0);
+    }
+
+    function testDebtFreeSurplusRecoveryNeedsNoAccrual() public {
+        // the debt-free path reads only the position: a reverting IRM (broken or hostile)
+        // cannot trap recoverable loan tokens
+        address subaccount = _createConfiguredSubaccount();
+        rlusd.mint(subaccount, 100e18);
+        morpho.setAccrueInterestReverts(true);
+
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
+
+        // with live debt, repayment still needs accrual - the guard is scoped to debt-free
+        morpho.setAccrueInterestReverts(false);
+        address indebted = controller.createSubaccount("rIndebtedAccrualOwner", SUBACCOUNT_TYPE_LOAN);
+        fxrp.mint(indebted, 100e6);
+        _deliver(indebted, 1, 100e6, _borrowPayload(
+            bytes32("op-acc"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("destAcc")))), 300e18
+        ));
+        morpho.setAccrueInterestReverts(true);
+        rlusd.mint(indebted, 100e18);
+        vm.expectRevert(bytes("IRM reverted"));
+        ILoanSubaccountRemote(indebted).repay();
+    }
+
+    function testStrayTokenHasNoExit() public {
+        // no generic recovery rail: a stray token strands until a beacon upgrade adds one -
+        // accepted on both subaccounts. Every token the protocol routes here has its own rail
+        // (FXRP: depositIdleFxrp / sweepToOrigin; the loan token: repay)
         address subaccount = _createConfiguredSubaccount();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 42e18);
-
-        vm.expectEmit();
-        emit ILoanSubaccountRemote.TokenRecovered(parentPersonalAccount, address(stray), 42e18);
-        uint256 amount = ILoanSubaccountRemote(subaccount).recoverToken(address(stray));
-        assertEq(amount, 42e18);
-        assertEq(stray.balanceOf(parentPersonalAccount), 42e18);
-    }
-
-    function testRecoverTokenGuards() public {
-        address subaccount = _createConfiguredSubaccount();
-
-        // collateral never leaves through recovery: it has its own rails
-        fxrp.mint(subaccount, 1e6);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.ProtectedToken.selector, address(fxrp))
-        );
-        ILoanSubaccountRemote(subaccount).recoverToken(address(fxrp));
-
-        // the loan token is recoverable while the position carries no debt
-        rlusd.mint(subaccount, 5e18);
-        assertEq(ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd)), 5e18);
-        assertEq(rlusd.balanceOf(parentPersonalAccount), 5e18);
-
-        // nothing to recover
-        MintableERC20 empty = new MintableERC20("Empty", "EMP", 18);
-        vm.expectRevert(ILoanSubaccountRemote.NothingToRecover.selector);
-        ILoanSubaccountRemote(subaccount).recoverToken(address(empty));
-    }
-
-    function testRecoverLoanTokenSurplusAfterFullRepayment() public {
-        address subaccount = _borrowedSubaccount(500e18);
-        rlusd.mint(subaccount, 600e18);
-
-        // while debt is outstanding, the balance is repayment material
-        vm.expectRevert(ILoanSubaccountRemote.OutstandingDebt.selector);
-        ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd));
-
-        ILoanSubaccountRemote(subaccount).repay();
-        uint256 amount = ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd));
-        assertEq(amount, 100e18);
-        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
+        assertEq(stray.balanceOf(subaccount), 42e18);
     }
 
     function testFlareSendersProduceThePayloadsTheLoanChainDecodes() public {
@@ -1987,15 +2042,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertGt(subaccount.code.length, 0);
 
         // created before its mirror, the subaccount is bound to the computed - still
-        // codeless - mirror address, and a recovery parks the tokens there; creating the
-        // mirror later puts code and the registry entry at that same address, with the
+        // codeless - mirror address, and the surplus push parks the tokens there; creating
+        // the mirror later puts code and the registry entry at that same address, with the
         // parked balance now under the user's signature
         address parent = LoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
         assertEq(parent.code.length, 0);
-        MintableERC20 stray = new MintableERC20("Stray", "STRAY", 18);
-        stray.mint(subaccount, 5e18);
-        ILoanSubaccountRemote(subaccount).recoverToken(address(stray));
-        assertEq(stray.balanceOf(parent), 5e18);
+        rlusd.mint(subaccount, 5e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(rlusd.balanceOf(parent), 5e18);
 
         // the mirror Personal Account also materializes on the minimal topology, behind the
         // PA beacon, through the generic creation route on the PersonalAccountsFacet - but
@@ -2010,7 +2064,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertGt(mirror.code.length, 0);
         assertEq(minimalController.getPersonalAccount(xrplOwner), mirror);
         assertEq(mirror, parent);
-        assertEq(stray.balanceOf(mirror), 5e18);
+        assertEq(rlusd.balanceOf(mirror), 5e18);
 
         // the Flare-only bridge settings are not routable on this diamond
         vm.expectRevert(

@@ -93,26 +93,43 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         uint256 balance = loanToken.balanceOf(address(this));
         require(balance > 0, NothingToRepay());
 
-        // accrue first, so the clamp compares against the live debt
-        IMorpho(market.morpho).accrueInterest(market.marketParams);
-        (uint128 borrowShares, uint256 fullDebt) = _debtOf(market);
-        require(borrowShares > 0, NothingToRepay());
-
-        if (balance >= fullDebt) {
-            // the balance covers the whole debt: close by exact borrow shares (no over-repay
-            // revert); the surplus stays on the account for recoverToken
-            loanToken.forceApprove(market.morpho, fullDebt);
-            (_assets, ) = IMorpho(market.morpho).repay(
-                market.marketParams, 0, borrowShares, address(this), ""
-            );
-        } else {
-            loanToken.forceApprove(market.morpho, balance);
-            (_assets, ) = IMorpho(market.morpho).repay(
-                market.marketParams, balance, 0, address(this), ""
-            );
+        // shares first: the debt-free surplus path must not depend on interest accrual (a
+        // reverting IRM must not trap recoverable tokens)
+        if (_borrowSharesOf(market) > 0) {
+            // accrue first, so the clamp compares against the live debt
+            IMorpho(market.morpho).accrueInterest(market.marketParams);
+            (uint128 borrowShares, uint256 fullDebt) = _debtOf(market);
+            if (balance >= fullDebt) {
+                // the balance covers the whole debt: close by exact borrow shares (no
+                // over-repay revert)
+                loanToken.forceApprove(market.morpho, fullDebt);
+                (_assets, ) = IMorpho(market.morpho).repay(
+                    market.marketParams, 0, borrowShares, address(this), ""
+                );
+            } else {
+                loanToken.forceApprove(market.morpho, balance);
+                (_assets, ) = IMorpho(market.morpho).repay(
+                    market.marketParams, balance, 0, address(this), ""
+                );
+            }
+            loanToken.forceApprove(market.morpho, 0);
+            emit LoanRepaid(parentPersonalAccount, _assets);
         }
-        loanToken.forceApprove(market.morpho, 0);
-        emit LoanRepaid(parentPersonalAccount, _assets);
+
+        // once the debt is gone - closed by this call, or already zero (an external
+        // liquidation, tokens arriving after the close) - the remaining balance is the
+        // user's surplus and leaves to the parent; while debt remains it stays repayment
+        // material. Best-effort by design: a parent the token refuses (RLUSD can freeze
+        // addresses) must never roll back the repayment that just succeeded, so a failed
+        // push leaves the surplus here for a later repay to retry
+        uint256 surplus = loanToken.balanceOf(address(this));
+        if (surplus > 0 && _borrowSharesOf(market) == 0) {
+            if (loanToken.trySafeTransfer(parentPersonalAccount, surplus)) {
+                emit LoanSurplusRecovered(parentPersonalAccount, surplus);
+            } else {
+                emit LoanSurplusRetained(parentPersonalAccount, surplus);
+            }
+        }
     }
 
     /// @inheritdoc ILoanSubaccountRemote
@@ -205,32 +222,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         }
 
         emit FXrpSweptToOrigin(parentPersonalAccount, _amount, transport.originEid, receipt.guid);
-    }
-
-    /// @inheritdoc ILoanSubaccountRemote
-    function recoverToken(
-        address _token
-    )
-        external
-        nonReentrant
-        returns (uint256 _amount)
-    {
-        // the fixed destination is the parent Personal Account - the user's own compose-driven
-        // account on this chain; not pause-gated, since this is inward consolidation and the
-        // parent's signed user operations are what the pause stops
-        ILoanMarketsFacet.Market memory market = _myMarket();
-        // collateral moves only on its own rails
-        require(_token != market.marketParams.collateralToken, ProtectedToken(_token));
-        // while the position has debt, the loan-token balance is repayment material, not
-        // surplus - read live from Morpho, so an external liquidation frees it immediately
-        if (_token == market.marketParams.loanToken) {
-            require(_borrowSharesOf(market) == 0, OutstandingDebt());
-        }
-
-        _amount = IERC20(_token).balanceOf(address(this));
-        require(_amount > 0, NothingToRecover());
-        IERC20(_token).safeTransfer(parentPersonalAccount, _amount);
-        emit TokenRecovered(parentPersonalAccount, _token, _amount);
     }
 
     /// @inheritdoc ISubaccount
