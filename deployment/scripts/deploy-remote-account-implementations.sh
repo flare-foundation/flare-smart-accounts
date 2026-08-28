@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: deployment/scripts/deploy-loan-chain-subaccount-implementation.sh <network>
-# Example: deployment/scripts/deploy-loan-chain-subaccount-implementation.sh coston2
-# Example: deployment/scripts/deploy-loan-chain-subaccount-implementation.sh coston2-staging
+# Usage: deployment/scripts/deploy-remote-account-implementations.sh <network>
+# Example: deployment/scripts/deploy-remote-account-implementations.sh coston2
+# Example: deployment/scripts/deploy-remote-account-implementations.sh coston2-staging
 
 if [[ $# -ne 1 ]]; then
   echo "Usage: $0 <network>" >&2
@@ -59,7 +59,7 @@ fi
 OUTPUT_DIR="deployment/output-internal/$NETWORK"
 mkdir -p "$OUTPUT_DIR"
 
-forge script deployment/scripts/DeployLoanChainSubaccountImplementation.s.sol:DeployLoanChainSubaccountImplementation \
+forge script deployment/scripts/DeployRemoteAccountImplementations.s.sol:DeployRemoteAccountImplementations \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
   --offline \

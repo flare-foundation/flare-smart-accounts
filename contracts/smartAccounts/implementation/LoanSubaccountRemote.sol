@@ -8,13 +8,13 @@ import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {
-    ILoanChainSubaccount,
+    ILoanSubaccountRemote,
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
-} from "../../userInterfaces/ILoanChainSubaccount.sol";
+} from "../../userInterfaces/ILoanSubaccountRemote.sol";
 import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
 import {
     ISubaccountsFacet,
@@ -22,13 +22,13 @@ import {
 } from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/ILoanSubaccount.sol";
-import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol";
+import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
-import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
+import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
- * @title LoanChainSubaccount contract
+ * @title LoanSubaccountRemote contract
  * @notice The loan-chain-side subaccount implementation (Ethereum, at launch): same frozen
  * proxy and CREATE2 address as the Flare-side account, resolved per type through the
  * controller-as-beacon.
@@ -36,7 +36,7 @@ import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
  * subaccount type is bound to (write-once in the settings), so the address itself commits to
  * the pool. The parent Personal Account has no local key or controller-driven action on
  * this chain (instructions exist only on Flare), so every authorized action
- * arrives through the authenticated `lzCompose` (see {LoanChainAccountBase}), and everything
+ * arrives through the authenticated `lzCompose` (see {ComposeReceiverAccountBase}), and everything
  * else is permissionless movement along fixed rails — into the account's own position, home
  * over the bridge, or to the parent Personal Account (the user's own compose-driven account
  * on this chain) — so no caller ever chooses a destination, a market, or an amount source.
@@ -44,7 +44,7 @@ import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
  * balance landing without a call (pre-deployment funding, an LZ native drop, a force-send)
  * strands until a beacon upgrade adds a rail - accepted.
  */
-contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
+contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
 
     /// @dev Morpho's virtual-share offsets for share/asset conversion.
@@ -80,7 +80,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         emit LoanSubaccountInitialized(_controllerAddress, _parentPersonalAccount, _subaccountType);
     }
 
-    /// @inheritdoc ILoanChainSubaccount
+    /// @inheritdoc ILoanSubaccountRemote
     function repay()
         external
         nonReentrant
@@ -114,7 +114,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         emit LoanRepaid(parentPersonalAccount, _assets);
     }
 
-    /// @inheritdoc ILoanChainSubaccount
+    /// @inheritdoc ILoanSubaccountRemote
     function depositIdleFxrp()
         external
         nonReentrant
@@ -136,7 +136,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         emit IdleFxrpDeposited(parentPersonalAccount, _amount);
     }
 
-    /// @inheritdoc ILoanChainSubaccount
+    /// @inheritdoc ILoanSubaccountRemote
     function sweepToOrigin(
         bytes calldata _extraOptions
     )
@@ -206,7 +206,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         emit FXrpSweptToOrigin(parentPersonalAccount, _amount, transport.originEid, receipt.guid);
     }
 
-    /// @inheritdoc ILoanChainSubaccount
+    /// @inheritdoc ILoanSubaccountRemote
     function recoverToken(
         address _token
     )
@@ -235,7 +235,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
     /// @inheritdoc ISubaccount
     function controllerAddress()
         external view
-        override(ILoanChainSubaccount, LoanChainAccountBase)
+        override(ILoanSubaccountRemote, ComposeReceiverAccountBase)
         returns (address)
     {
         return controller;
@@ -250,7 +250,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         return ISubaccountsFacet(controller).implementationForType(subaccountType);
     }
 
-    /// @dev The subaccount's action set (see {LoanChainAccountBase._dispatch}).
+    /// @dev The subaccount's action set (see {ComposeReceiverAccountBase._dispatch}).
     function _dispatch(
         uint8 _action,
         bytes memory _actionData,
@@ -405,7 +405,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
 
     /// @dev Withdraws collateral to the account itself; the idle FXRP then leaves along
     /// the fixed rails, whichever runs first (the accepted ordering race - a redeposit can
-    /// undo it at gas cost; see {ILoanChainSubaccount.depositIdleFxrp}). Morpho enforces
+    /// undo it at gas cost; see {ILoanSubaccountRemote.depositIdleFxrp}). Morpho enforces
     /// position health.
     function _executeWithdraw(
         bytes memory _actionData,
@@ -429,7 +429,7 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
         emit CollateralWithdrawn(parentPersonalAccount, operationId, amount, _guid);
     }
 
-    /// @dev The soft gates shared by all actions (see {LoanChainAccountBase._terminalSkipReason}):
+    /// @dev The soft gates shared by all actions (see {ComposeReceiverAccountBase._terminalSkipReason}):
     /// a duplicate id or a stale deadline completes the delivery without executing; the
     /// bridged FXRP stays for the fixed rails.
     function _skipped(

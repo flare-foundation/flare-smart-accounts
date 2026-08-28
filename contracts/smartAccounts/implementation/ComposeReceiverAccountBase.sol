@@ -9,18 +9,19 @@ import {IMessagingChannel} from "@layerzerolabs/lz-evm-protocol-v2/contracts/int
 // solhint-disable-next-line no-unused-import
 import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
 import {
-    ILoanChainAccountBase,
+    IComposeReceiverAccountBase,
     PAYLOAD_VERSION_1,
     SKIP_REASON_DUPLICATE,
     SKIP_REASON_EXPIRED
-} from "../../userInterfaces/ILoanChainAccountBase.sol";
+} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 
 /**
- * @title LoanChainAccountBase contract
- * @notice The shared core of the compose-driven accounts - the loan-chain subaccount and
- * Personal Account, and the Flare loan subaccount as the receiver of its own bridge-back: the
+ * @title ComposeReceiverAccountBase contract
+ * @notice The compose-receiver surface shared by the accounts that receive authenticated compose
+ * messages - the loan-chain subaccount and Personal Account, and the Flare loan subaccount as the
+ * receiver of its own bridge-back (their parent-driven and public rails live outside it): the
  * authenticated `lzCompose` entry (endpoint, OFT, origin chain, self-as-sender, GUID recomputed
  * from the pinned origin peer) and, for the signed id-carrying actions, operation-id replay
  * protection. Derived accounts define only
@@ -29,13 +30,13 @@ import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
  * identity. The authentication is deliberately in one place: it is the security root of every
  * action that arrives without a local signature.
  */
-abstract contract LoanChainAccountBase is ILoanChainAccountBase, ReentrancyGuardTransient {
+abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, ReentrancyGuardTransient {
     using OFTComposeMsgCodec for bytes;
 
     address internal constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
 
     // STORAGE PREFIX of every derived account's proxy lineage (the subaccounts on both chains
-    // and the loan-chain Personal Account alike): these two fields occupy slots 0 and 1 of
+    // and the remote Personal Account alike): these two fields occupy slots 0 and 1 of
     // every proxy. Once the first proxy is deployed, never insert, remove, or reorder base fields -
     // append new base state only after the derived contracts' own fields would be a layout
     // break too, so base state is effectively frozen at these two.
@@ -48,7 +49,7 @@ abstract contract LoanChainAccountBase is ILoanChainAccountBase, ReentrancyGuard
     // signed, id-carrying actions write it, and a receiver whose actions carry no id (the Flare
     // redeem-on-arrival) leaves it empty by design
     // slither-disable-start uninitialized-state
-    /// @inheritdoc ILoanChainAccountBase
+    /// @inheritdoc IComposeReceiverAccountBase
     mapping(bytes32 operationId => bool used) public usedOperations;
     // slither-disable-end uninitialized-state
 
@@ -85,7 +86,7 @@ abstract contract LoanChainAccountBase is ILoanChainAccountBase, ReentrancyGuard
         _dispatch(action, actionData, _guid, _message.amountLD());
     }
 
-    /// @inheritdoc ILoanChainAccountBase
+    /// @inheritdoc IComposeReceiverAccountBase
     function controllerAddress()
         external view virtual
         returns (address)

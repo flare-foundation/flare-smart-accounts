@@ -42,9 +42,9 @@ import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoan
 import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {
-    ILoanChainAccountBase,
+    IComposeReceiverAccountBase,
     PAYLOAD_VERSION_1
-} from "../contracts/userInterfaces/ILoanChainAccountBase.sol";
+} from "../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 import {MockLzEndpoint} from "../contracts/mock/MockLzEndpoint.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
@@ -54,8 +54,8 @@ import {
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
-} from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
-import {PA_ACTION_EXECUTE} from "../contracts/userInterfaces/ILoanChainPersonalAccount.sol";
+} from "../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {PA_ACTION_EXECUTE} from "../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IMemoInstructionsFacet} from "../contracts/userInterfaces/facets/IMemoInstructionsFacet.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
@@ -169,7 +169,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     function testInitializeRevertAlreadyInitialized() public {
         LoanSubaccount subaccount = _deploySubaccount();
 
-        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
         subaccount.initialize(
             address(controller),
             parentPersonalAccount,
@@ -178,7 +178,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
-        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
         loanImpl.initialize(
             address(controller),
             parentPersonalAccount,
@@ -1402,13 +1402,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         _configureLoanBridge();
 
         // only the adapter's endpoint may deliver
-        vm.expectRevert(ILoanChainAccountBase.OnlyEndpoint.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.OnlyEndpoint.selector);
         ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
 
         // the compose sender must be the configured adapter
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainAccountBase.WrongComposeSender.selector, makeAddr("otherOft"))
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongComposeSender.selector, makeAddr("otherOft"))
         );
         ILoanSubaccount(subaccount).lzCompose(makeAddr("otherOft"), guid, message, executor, "");
 
@@ -1417,7 +1417,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             1, 30110, 100e6, abi.encodePacked(bytes32(uint256(uint160(subaccount))), _redeemHomePayload())
         );
         vm.prank(lzEndpoint);
-        vm.expectRevert(abi.encodeWithSelector(ILoanChainAccountBase.WrongSourceEid.selector, uint32(30110)));
+        vm.expectRevert(abi.encodeWithSelector(IComposeReceiverAccountBase.WrongSourceEid.selector, uint32(30110)));
         ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, wrongChain, executor, "");
 
         // the source-chain sender must be this account itself - its own loan-chain twin
@@ -1428,7 +1428,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(lzEndpoint);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanChainAccountBase.WrongComposeFrom.selector, bytes32(uint256(uint160(makeAddr("intruder"))))
+                IComposeReceiverAccountBase.WrongComposeFrom.selector, bytes32(uint256(uint160(makeAddr("intruder"))))
             )
         );
         ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, forged, executor, "");
@@ -1438,26 +1438,28 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             1, destinationEid, makeAddr("maliciousPeer"), flareEid, bytes32(uint256(uint160(address(fxrpOft))))
         );
         vm.prank(lzEndpoint);
-        vm.expectRevert(abi.encodeWithSelector(ILoanChainAccountBase.WrongGuid.selector, wrongGuid));
+        vm.expectRevert(abi.encodeWithSelector(IComposeReceiverAccountBase.WrongGuid.selector, wrongGuid));
         ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), wrongGuid, message, executor, "");
 
         // unsupported version and action
         bytes memory wrongVersion = abi.encode(uint8(2), ACTION_REDEEM_HOME, bytes(""));
         (message, guid) = _composeFromLoanChain(subaccount, 1, 100e6, wrongVersion);
         vm.prank(lzEndpoint);
-        vm.expectRevert(abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedPayloadVersion.selector, uint8(2)));
+        vm.expectRevert(
+            abi.encodeWithSelector(IComposeReceiverAccountBase.UnsupportedPayloadVersion.selector, uint8(2))
+        );
         ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
         bytes memory wrongAction = abi.encode(PAYLOAD_VERSION_1, uint8(9), bytes(""));
         (message, guid) = _composeFromLoanChain(subaccount, 1, 100e6, wrongAction);
         vm.prank(lzEndpoint);
-        vm.expectRevert(abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedAction.selector, uint8(9)));
+        vm.expectRevert(abi.encodeWithSelector(IComposeReceiverAccountBase.UnsupportedAction.selector, uint8(9)));
         ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
 
         // value is admitted for the redeem-home action only: any other action with value fails
         // the value check (before it would fail as unsupported), so no branch can keep native
         vm.deal(lzEndpoint, 1);
         vm.prank(lzEndpoint);
-        vm.expectRevert(ILoanChainAccountBase.NonZeroComposeValue.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
         ILoanSubaccount(subaccount).lzCompose{value: 1}(address(fxrpOft), guid, message, executor, "");
 
         // nothing idle to redeem: reverts, retriable (the credit always precedes the compose)
@@ -1571,7 +1573,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee - 1}("");
     }
 
-    function testExecuteLoanChainUserOp() public {
+    function testSendCrossChainUserOp() public {
         // the user-signed instruction to the loan-chain twin: reached only through an
         // executeUserOp multicall (a self-call), the envelope is built here and sent as a
         // message-only compose to this same address, where the mirror authenticates it and
@@ -1594,11 +1596,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             target: personalAccount,
             value: messagingFee,
             data: abi.encodeCall(
-                IPersonalAccount.executeLoanChainUserOp, (batch, bytes32("op-x"), deadline, "")
+                IPersonalAccount.sendCrossChainUserOp, (batch, bytes32("op-x"), deadline, "")
             )
         });
         vm.expectEmit();
-        emit IPersonalAccount.LoanChainUserOpSent(bytes32("op-x"), 2, destinationEid, fxrpOft.GUID());
+        emit IPersonalAccount.CrossChainUserOpSent(bytes32("op-x"), 2, destinationEid, fxrpOft.GUID());
         vm.prank(address(controller));
         IPersonalAccount(personalAccount).executeUserOp(calls);
 
@@ -1614,7 +1616,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(fxrpOft.lastValue(), messagingFee);
     }
 
-    function testExecuteLoanChainUserOpReverts() public {
+    function testSendCrossChainUserOpReverts() public {
         address personalAccount = _createPersonalAccount(xrplOwner);
         vm.deal(personalAccount, 1 ether);
         uint64 deadline = uint64(block.timestamp + 1 hours);
@@ -1622,24 +1624,24 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // self-call only
         vm.expectRevert(IPersonalAccount.OnlySelf.selector);
-        IPersonalAccount(personalAccount).executeLoanChainUserOp(batch, bytes32("op-x"), deadline, "");
+        IPersonalAccount(personalAccount).sendCrossChainUserOp(batch, bytes32("op-x"), deadline, "");
 
         // envelope checks, before any fee is paid: zero id, passed deadline, empty batch
         vm.startPrank(personalAccount);
-        vm.expectRevert(IPersonalAccount.InvalidLoanChainInstruction.selector);
-        IPersonalAccount(personalAccount).executeLoanChainUserOp(batch, bytes32(0), deadline, "");
-        vm.expectRevert(IPersonalAccount.InvalidLoanChainInstruction.selector);
-        IPersonalAccount(personalAccount).executeLoanChainUserOp(
+        vm.expectRevert(IPersonalAccount.InvalidCrossChainUserOp.selector);
+        IPersonalAccount(personalAccount).sendCrossChainUserOp(batch, bytes32(0), deadline, "");
+        vm.expectRevert(IPersonalAccount.InvalidCrossChainUserOp.selector);
+        IPersonalAccount(personalAccount).sendCrossChainUserOp(
             batch, bytes32("op-x"), uint64(block.timestamp - 1), ""
         );
-        vm.expectRevert(IPersonalAccount.InvalidLoanChainInstruction.selector);
-        IPersonalAccount(personalAccount).executeLoanChainUserOp(
+        vm.expectRevert(IPersonalAccount.InvalidCrossChainUserOp.selector);
+        IPersonalAccount(personalAccount).sendCrossChainUserOp(
             new IPersonalAccount.Call[](0), bytes32("op-x"), deadline, ""
         );
 
         // bridge not configured yet
         vm.expectRevert(IPersonalAccount.LoanBridgeNotConfigured.selector);
-        IPersonalAccount(personalAccount).executeLoanChainUserOp(batch, bytes32("op-x"), deadline, "");
+        IPersonalAccount(personalAccount).sendCrossChainUserOp(batch, bytes32("op-x"), deadline, "");
         vm.stopPrank();
 
         _configureLoanBridge();
@@ -1651,7 +1653,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 IPersonalAccount.InsufficientFundsForInstruction.selector, messagingFee
             )
         );
-        IPersonalAccount(personalAccount).executeLoanChainUserOp{value: messagingFee - 1}(
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee - 1}(
             batch, bytes32("op-x"), deadline, ""
         );
 
@@ -1659,7 +1661,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         fxrpOft.setPeer(destinationEid, bytes32(uint256(0xbad)));
         vm.prank(personalAccount);
         vm.expectRevert(IPersonalAccount.WrongDestinationPeer.selector);
-        IPersonalAccount(personalAccount).executeLoanChainUserOp{value: messagingFee}(
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
             batch, bytes32("op-x"), deadline, ""
         );
         fxrpOft.setPeer(destinationEid, destinationPeer);
@@ -1674,12 +1676,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         controller.pause();
         vm.prank(personalAccount);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        IPersonalAccount(personalAccount).executeLoanChainUserOp{value: messagingFee}(
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
             batch, bytes32("op-x"), deadline, ""
         );
     }
 
-    function testExecuteLoanChainUserOpExcessStaysAndOptionsPassThrough() public {
+    function testSendCrossChainUserOpExcessStaysAndOptionsPassThrough() public {
         // the fee value rides from the account's own balance, so the excess never leaves it;
         // the caller-supplied type-3 options reach the OFT verbatim
         address personalAccount = _createPersonalAccount(xrplOwner);
@@ -1692,7 +1694,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             target: personalAccount,
             value: messagingFee + 0.5 ether,
             data: abi.encodeCall(
-                IPersonalAccount.executeLoanChainUserOp,
+                IPersonalAccount.sendCrossChainUserOp,
                 (
                     _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18), bytes32("op-x"),
                     uint64(block.timestamp + 1 hours), options
@@ -1708,9 +1710,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(sentOptions, options);
     }
 
-    function testExecuteLoanChainUserOpViaMemo() public {
+    function testSendCrossChainUserOpViaMemo() public {
         // end to end through the production path: XRPL memo -> handleMintedFAssets ->
-        // executeUserOp -> the account's own executeLoanChainUserOp
+        // executeUserOp -> the account's own sendCrossChainUserOp
         address personalAccount = _createPersonalAccount(xrplOwner);
         _configureLoanBridge();
 
@@ -1719,7 +1721,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             target: personalAccount,
             value: messagingFee,
             data: abi.encodeCall(
-                IPersonalAccount.executeLoanChainUserOp,
+                IPersonalAccount.sendCrossChainUserOp,
                 (
                     _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18), bytes32("op-x"),
                     uint64(block.timestamp + 1 hours), ""
@@ -1735,7 +1737,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(amountLD, 0);
     }
 
-    function testExecuteLoanChainUserOpAcceptsDeadlineEqualToNow() public {
+    function testSendCrossChainUserOpAcceptsDeadlineEqualToNow() public {
         // inclusive boundary, matching the mirror's skip rule (past the deadline, not at it)
         address personalAccount = _createPersonalAccount(xrplOwner);
         _configureLoanBridge();
@@ -1744,7 +1746,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         IPersonalAccount.Call[] memory batch = _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18);
 
         vm.prank(personalAccount);
-        IPersonalAccount(personalAccount).executeLoanChainUserOp{value: messagingFee}(
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
             batch, bytes32("op-x"), deadline, ""
         );
         (,,,,, bytes memory composeMsg,) = fxrpOft.lastSendParam();

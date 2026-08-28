@@ -9,7 +9,7 @@ import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanSubaccount, ACTION_REDEEM_HOME} from "../../userInterfaces/ILoanSubaccount.sol";
-import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol";
+import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
 import {
     ACTION_BORROW,
@@ -17,7 +17,7 @@ import {
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
-} from "../../userInterfaces/ILoanChainSubaccount.sol";
+} from "../../userInterfaces/ILoanSubaccountRemote.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {
     ISubaccountsFacet,
@@ -27,7 +27,7 @@ import {ILoanBridgeSettingsFacet} from "../../userInterfaces/facets/ILoanBridgeS
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
-import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
+import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
  * @title LoanSubaccount contract
@@ -41,12 +41,12 @@ import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
  * by the protocol, and neither is worth a rail: such a balance strands, deliberately. As a last
  * resort, if it ever actually mattered, the implementation is beacon-upgradeable and an exit can
  * be added then.
- * It is also the compose receiver of its own loan-chain twin's bridge-back ({LoanChainAccountBase}
+ * It is also the compose receiver of its own loan-chain twin's bridge-back ({ComposeReceiverAccountBase}
  * with the transport read from the bridge settings): FXRP coming home is redeemed on arrival.
  * @dev The controller (MasterAccountController Diamond) is the beacon: the proxy and this
  * contract resolve the implementation per subaccount type through {implementationForType}.
  */
-contract LoanSubaccount is ILoanSubaccount, LoanChainAccountBase {
+contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
 
     // storage: slots 0-1 are the shared base prefix (controller, usedOperations); the same
@@ -253,13 +253,13 @@ contract LoanSubaccount is ILoanSubaccount, LoanChainAccountBase {
     /// @inheritdoc ISubaccount
     function controllerAddress()
         external view
-        override(ILoanSubaccount, LoanChainAccountBase)
+        override(ILoanSubaccount, ComposeReceiverAccountBase)
         returns (address)
     {
         return controller;
     }
 
-    /// @dev The account's action set as a compose receiver (see {LoanChainAccountBase._dispatch}):
+    /// @dev The account's action set as a compose receiver (see {ComposeReceiverAccountBase._dispatch}):
     /// the redeem-home action of its own twin's bridge-back.
     function _dispatch(
         uint8 _action,

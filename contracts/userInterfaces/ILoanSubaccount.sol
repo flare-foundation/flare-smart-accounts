@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
-import {ILoanChainAccountBase} from "./ILoanChainAccountBase.sol";
+import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
 
 /// @dev Redeem-home action: the compose the loan-chain `sweepToOrigin` attaches to the FXRP it
@@ -29,10 +29,10 @@ uint64 constant REDEEM_HOME_TTL = 1 hours;
  * @title ILoanSubaccount
  * @notice User interface for deterministic loan subaccounts on Flare. Besides its parent-driven
  * instructions and permissionless rails, the account is the compose receiver of its own
- * loan-chain twin's bridge-back (see {ILoanChainAccountBase}): FXRP coming home is redeemed on
+ * loan-chain twin's bridge-back (see {IComposeReceiverAccountBase}): FXRP coming home is redeemed on
  * arrival.
  */
-interface ILoanSubaccount is ILoanChainAccountBase, ISubaccount {
+interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when a loan subaccount is initialized.
@@ -402,6 +402,6 @@ interface ILoanSubaccount is ILoanChainAccountBase, ISubaccount {
     /// @inheritdoc ISubaccount
     function controllerAddress()
         external view
-        override(ILoanChainAccountBase, ISubaccount)
+        override(IComposeReceiverAccountBase, ISubaccount)
         returns (address);
 }

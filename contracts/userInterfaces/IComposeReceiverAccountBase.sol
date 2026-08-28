@@ -3,7 +3,7 @@ pragma solidity >=0.8.4 <0.9;
 
 import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
 
-/// @dev Compose payload schema version 1, shared by every compose-driven account on either
+/// @dev Compose payload schema version 1, shared by every compose receiver on either
 /// chain. The payload is `abi.encode(uint8 version, uint8 action, bytes actionData)`; the
 /// action space is defined per receiving contract.
 uint8 constant PAYLOAD_VERSION_1 = 1;
@@ -17,17 +17,19 @@ uint8 constant SKIP_REASON_DUPLICATE = 1;
 uint8 constant SKIP_REASON_EXPIRED = 2;
 
 /**
- * @title ILoanChainAccountBase
- * @notice The shared surface of the compose-driven accounts: the loan-chain subaccount and
- * Personal Account (Ethereum, at launch), and the Flare loan subaccount as the receiver of its
- * own bridge-back. Users are XRPL-only and their signatures become on-chain authority only on
- * Flare, so every action that arrives through this entry was sent by this same address on the
- * other chain — the account's own twin. The authentication checklist is identical for every such
- * account and lives in one shared base, as does the operation-id replay protection the signed
- * actions use (an unsigned action, such as the Flare redeem-on-arrival, carries no id and relies
- * on the endpoint's at-most-once compose delivery).
+ * @title IComposeReceiverAccountBase
+ * @notice The compose-receiver surface shared by every account that receives authenticated
+ * compose messages: the loan-chain subaccount and Personal Account (Ethereum, at launch), and the
+ * Flare loan subaccount as the receiver of its own bridge-back. It is that ingress only — the
+ * subaccounts also have parent-driven and public rails outside it. Users are XRPL-only and their
+ * signatures become on-chain authority only on Flare, so every action that arrives through this
+ * entry was sent by this same address on the other chain — the account's own twin. The
+ * authentication checklist is identical for every such account and lives in one shared base, as
+ * does the operation-id replay protection the signed actions use (an unsigned action, such as the
+ * Flare redeem-on-arrival, carries no id and relies on the endpoint's at-most-once compose
+ * delivery).
  */
-interface ILoanChainAccountBase is ILayerZeroComposer {
+interface IComposeReceiverAccountBase is ILayerZeroComposer {
 
     /**
      * @notice Reverts if `lzCompose` is called by anything other than the LayerZero endpoint.

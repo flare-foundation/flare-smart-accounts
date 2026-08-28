@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
-import {ILoanChainAccountBase} from "./ILoanChainAccountBase.sol";
+import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 
 /// @dev Execute action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
 /// Call[] calls)`. Runs the signed batch of calls from this account, in order, all or nothing
-/// for calls that revert: the loan-chain form of the Flare `executeUserOp`, carried by the
+/// for calls that revert: the remote form of the Flare `executeUserOp`, carried by the
 /// authenticated compose instead of the controller. The user's XRPL signature covers every
 /// target, value and calldata, exactly as it does on Flare - and, as there, return data is
 /// not interpreted: a callee that reports failure by returning `false` (some ERC-20s) or a
@@ -14,13 +14,14 @@ import {ILoanChainAccountBase} from "./ILoanChainAccountBase.sol";
 uint8 constant PA_ACTION_EXECUTE = 1;
 
 /**
- * @title ILoanChainPersonalAccount
- * @notice User interface for the loan-chain-side Personal Account: the implementation
- * registered behind the frozen PA proxy on the loan-chain diamond (Ethereum, at launch),
+ * @title IPersonalAccountRemote
+ * @notice User interface for the remote Personal Account: the implementation
+ * registered behind the frozen PA proxy on a diamond other than Flare's (the loan chain,
+ * Ethereum, at launch),
  * living at the same CREATE2 address as the user's Flare Personal Account. It has no local
  * owner and no controller-driven methods — instructions exist only on Flare — so every
  * authorized action arrives as an authenticated LayerZero compose message sent by this same
- * account on Flare (`executeLoanChainUserOp`). The action set is exactly one action: execute
+ * account on Flare (`sendCrossChainUserOp`). The action set is exactly one action: execute
  * a signed batch of calls, the way the Flare account executes `executeUserOp`. The blast
  * radius is therefore the same as a controller compromise on Flare: a compromised compose
  * root has the full on-chain authority of this address - balances, approvals, external
@@ -31,7 +32,7 @@ uint8 constant PA_ACTION_EXECUTE = 1;
  * recovered loan-token surplus, strays, native delivered with a message to fund
  * value-carrying calls) moves only by the user's signature.
  */
-interface ILoanChainPersonalAccount is ILoanChainAccountBase {
+interface IPersonalAccountRemote is IComposeReceiverAccountBase {
     /// @notice One call of a signed batch. Field-identical to the Flare `IPersonalAccount.Call`
     /// (the sender encodes that struct, this account decodes this one - the same ABI layout).
     struct Call {
@@ -44,11 +45,11 @@ interface ILoanChainPersonalAccount is ILoanChainAccountBase {
     }
 
     /**
-     * @notice Emitted when a loan-chain Personal Account is initialized.
+     * @notice Emitted when a remote Personal Account is initialized.
      * @param controllerAddress The controller address.
      * @param xrplOwner The XRPL owner.
      */
-    event LoanChainPersonalAccountInitialized(
+    event PersonalAccountRemoteInitialized(
         address indexed controllerAddress,
         string xrplOwner
     );

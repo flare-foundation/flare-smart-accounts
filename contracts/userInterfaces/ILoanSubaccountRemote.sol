@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
-import {ILoanChainAccountBase} from "./ILoanChainAccountBase.sol";
+import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
 
 /// @dev Borrow action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
@@ -55,7 +55,7 @@ uint8 constant DESTINATION_KIND_EVM = 1;
 uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
 
 /**
- * @title ILoanChainSubaccount
+ * @title ILoanSubaccountRemote
  * @notice User interface for the loan-chain-side subaccount: the implementation registered
  * for a loan subaccount type on the loan-chain diamond (Ethereum, at launch), living at the
  * same CREATE2 address
@@ -68,7 +68,7 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  * the account's own position, home over the bridge, or to the parent Personal Account (the
  * user's own compose-driven account on this chain). It has no native rail.
  */
-interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
+interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when a loan subaccount is initialized.
@@ -381,6 +381,6 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
     /// @inheritdoc ISubaccount
     function controllerAddress()
         external view
-        override(ILoanChainAccountBase, ISubaccount)
+        override(IComposeReceiverAccountBase, ISubaccount)
         returns (address);
 }

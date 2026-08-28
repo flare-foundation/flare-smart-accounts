@@ -140,14 +140,14 @@ interface IPersonalAccount {
     );
 
     /**
-     * @notice Emitted when a signed batch of calls is sent to this account's loan-chain twin
-     * for execution.
+     * @notice Emitted when a signed batch of calls is sent to this account's remote twin on
+     * the destination chain (the loan chain today) for execution.
      * @param operationId The user-chosen operation id.
      * @param callCount The number of calls in the batch.
-     * @param destinationEid The loan chain's LayerZero endpoint id.
+     * @param destinationEid The destination chain's LayerZero endpoint id.
      * @param guid The LayerZero message id of the send.
      */
-    event LoanChainUserOpSent(
+    event CrossChainUserOpSent(
         bytes32 operationId,
         uint256 callCount,
         uint32 destinationEid,
@@ -227,18 +227,18 @@ interface IPersonalAccount {
     error CallFailed(uint256 index, bytes returnData);
 
     /**
-     * @notice Reverts if {executeLoanChainUserOp} is called by anything other than this
+     * @notice Reverts if {sendCrossChainUserOp} is called by anything other than this
      * account itself: it is reachable only through {executeUserOp}, so every instruction is
      * user-signed.
      */
     error OnlySelf();
 
     /**
-     * @notice Reverts on a loan-chain instruction whose envelope cannot execute on the
+     * @notice Reverts on a cross-chain user operation whose envelope cannot execute on the
      * mirror: a zero operation id, a deadline already passed, or an empty batch. Checked
      * here, before any bridge fee is paid; the batch itself is not interpreted.
      */
-    error InvalidLoanChainInstruction();
+    error InvalidCrossChainUserOp();
 
     /**
      * @notice Reverts if {redeemFromSubaccount} is called by anything other than one of this
@@ -266,14 +266,14 @@ interface IPersonalAccount {
     );
 
     /**
-     * @notice Sends a signed batch of calls to this account's loan-chain twin (the
-     * compose-driven mirror at this same address) for execution there: the loan-chain
-     * `executeUserOp`, carried by the authenticated compose instead of the controller.
+     * @notice Sends a signed batch of calls to this account's remote twin (the mirror at this
+     * same address on the other chain; the loan chain today) for execution there:
+     * the remote `executeUserOp`, carried by the authenticated compose instead of the controller.
      * @dev Callable only by this account itself — the method is reached through an
      * {executeUserOp} multicall, so the XRPL signature covers every target, value and
      * calldata end-to-end. The batch is not interpreted here (the mirror runs it all or
      * nothing, and a failed call leaves the delivery retriable with the id unconsumed); only
-     * the envelope is validated before any fee is paid (`InvalidLoanChainInstruction`: zero
+     * the envelope is validated before any fee is paid (`InvalidCrossChainUserOp`: zero
      * operation id, passed deadline, empty batch). Sent as a message-only compose over the
      * configured FXRP OFT to this same address: configured settings required, live peer
      * re-checked against the pinned one, exact quoted fee spent; `msg.value` rides from the
@@ -282,13 +282,13 @@ interface IPersonalAccount {
      * inside {executeUserOp}'s guard. `_extraOptions` must carry the `lzCompose` gas the batch
      * needs and, when the batch sends more native than the mirror holds, a native drop. The
      * message id is
-     * recorded in {LoanChainUserOpSent}.
+     * recorded in {CrossChainUserOpSent}.
      * @param _calls The calls to execute from the mirror, in order.
      * @param _operationId The user-chosen operation id (non-zero, unique per account).
      * @param _deadline Unix time after which the mirror skips the instruction unexecuted.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
-    function executeLoanChainUserOp(
+    function sendCrossChainUserOp(
         Call[] calldata _calls,
         bytes32 _operationId,
         uint64 _deadline,

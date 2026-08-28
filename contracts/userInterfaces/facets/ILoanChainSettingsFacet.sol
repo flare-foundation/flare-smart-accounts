@@ -136,19 +136,18 @@ interface ILoanChainSettingsFacet {
     error LoanChainTransportNotConfigured();
 
     /**
-     * @notice Creates the loan-chain Personal Account for an XRPL owner on this chain: the
-     * compose-driven mirror of the user's Flare Personal Account, at the same CREATE2
-     * address.
+     * @notice Creates the remote Personal Account for an XRPL owner on this chain: the
+     * mirror of the user's Flare Personal Account, at the same CREATE2 address.
      * @dev Permissionless and idempotent. Exists only on this facet because the instruction
      * machinery that creates Personal Accounts lazily on Flare does not exist on the loan
      * chain; the frozen PA proxy derivation is chain-independent, so the created account is
-     * exactly the address the Flare side predicts. Requires a registered loan-chain Personal
-     * Account implementation (the proxy resolves it through the controller-as-beacon at
+     * exactly the address the Flare side predicts. Requires a registered remote Personal Account
+     * implementation (the proxy resolves it through the controller-as-beacon at
      * construction).
      * @param _xrplOwner The XRPL owner.
-     * @return The loan-chain Personal Account address.
+     * @return The remote Personal Account address.
      */
-    function createLoanChainPersonalAccount(
+    function createPersonalAccountRemote(
         string calldata _xrplOwner
     )
         external

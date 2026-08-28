@@ -13,8 +13,8 @@ import {PersonalAccount} from "../contracts/smartAccounts/implementation/Persona
 import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSubaccount.sol";
 import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 import {
-    LoanChainSubaccount
-} from "../contracts/smartAccounts/implementation/LoanChainSubaccount.sol";
+    LoanSubaccountRemote
+} from "../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
 import {SubaccountProxy} from "../contracts/smartAccounts/proxy/SubaccountProxy.sol";
 import {
     LoanChainSettingsFacet
@@ -22,18 +22,18 @@ import {
 import {SubaccountsFacet} from "../contracts/smartAccounts/facets/SubaccountsFacet.sol";
 import {PersonalAccountsFacet} from "../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {
-    LoanChainPersonalAccount
-} from "../contracts/smartAccounts/implementation/LoanChainPersonalAccount.sol";
+    PersonalAccountRemote
+} from "../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
 import {TimelockFacet} from "../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {PauseFacet} from "../contracts/smartAccounts/facets/PauseFacet.sol";
-import {ILoanChainSubaccount} from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
+import {ILoanSubaccountRemote} from "../contracts/userInterfaces/ILoanSubaccountRemote.sol";
 import {
     ILoanSubaccount,
     ACTION_REDEEM_HOME,
     REDEEM_HOME_TTL
 } from "../contracts/userInterfaces/ILoanSubaccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
-import {ILoanChainPersonalAccount} from "../contracts/userInterfaces/ILoanChainPersonalAccount.sol";
+import {IPersonalAccountRemote} from "../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {
     ILoanChainSettingsFacet
@@ -64,16 +64,16 @@ import {
     ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM,
     DESTINATION_KIND_XRPL_WORMHOLE
-} from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
+} from "../contracts/userInterfaces/ILoanSubaccountRemote.sol";
 import {
-    ILoanChainAccountBase,
+    IComposeReceiverAccountBase,
     PAYLOAD_VERSION_1,
     SKIP_REASON_DUPLICATE,
     SKIP_REASON_EXPIRED
-} from "../contracts/userInterfaces/ILoanChainAccountBase.sol";
+} from "../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 
 /**
- * @title LoanChainSubaccountTest
+ * @title LoanSubaccountRemoteTest
  * @notice The loan-chain-side subaccount (Ethereum, at launch), step 1: the same frozen
  * proxy resolves a per-chain implementation through the controller-as-beacon, so the
  * account keeps its cross-chain CREATE2 address while behaving differently per chain. Covers initialization,
@@ -81,13 +81,13 @@ import {
  * across implementations.
  */
 // solhint-disable-next-line max-states-count
-contract LoanChainSubaccountTest is Test, FacetsDeploy {
+contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
     address private constant FLARE_CONTRACT_REGISTRY = 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019;
     MockAssetManager private flareAssetManager;
 
     IIMasterAccountController private controller;
-    LoanChainSubaccount private loanChainImpl;
+    LoanSubaccountRemote private loanChainImpl;
 
     address private initialOwner;
     address private governance;
@@ -148,7 +148,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         controller.diamondCut(settingsCut, address(0), "");
 
         // register the loan-chain implementation for the loan type (timelock is 0 in tests)
-        loanChainImpl = new LoanChainSubaccount();
+        loanChainImpl = new LoanSubaccountRemote();
         vm.prank(governance);
         controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
@@ -157,7 +157,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     }
 
     function testDeployAndInitialize() public {
-        LoanChainSubaccount subaccount = _deploySubaccount();
+        LoanSubaccountRemote subaccount = _deploySubaccount();
 
         assertEq(subaccount.controllerAddress(), address(controller));
         assertEq(subaccount.parentPersonalAccount(), parentPersonalAccount);
@@ -166,9 +166,9 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     }
 
     function testInitializeRevertAlreadyInitialized() public {
-        LoanChainSubaccount subaccount = _deploySubaccount();
+        LoanSubaccountRemote subaccount = _deploySubaccount();
 
-        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
         subaccount.initialize(
             address(controller),
             parentPersonalAccount,
@@ -178,7 +178,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
         // the implementation contract locks itself in its own constructor
-        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
         loanChainImpl.initialize(
             address(controller),
             parentPersonalAccount,
@@ -187,10 +187,10 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     }
 
     function testUpgradeRoutesToNewImplementation() public {
-        LoanChainSubaccount subaccount = _deploySubaccount();
+        LoanSubaccountRemote subaccount = _deploySubaccount();
         assertEq(subaccount.implementation(), address(loanChainImpl));
 
-        LoanChainSubaccount newImpl = new LoanChainSubaccount();
+        LoanSubaccountRemote newImpl = new LoanSubaccountRemote();
         vm.prank(governance);
         controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
@@ -207,7 +207,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // chain, and each chain's diamond registers its own implementation for the type -
         // Flare the FAssets one, the loan chain this one. Switching the registration stands in
         // for looking at the other chain.
-        LoanChainSubaccount subaccount = _deploySubaccount();
+        LoanSubaccountRemote subaccount = _deploySubaccount();
         assertEq(subaccount.implementation(), address(loanChainImpl));
         assertEq(subaccount.parentPersonalAccount(), parentPersonalAccount);
 
@@ -257,7 +257,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         (bool success, ) = address(loanChainImpl).call{value: 1}("");
         assertFalse(success);
 
-        LoanChainSubaccount subaccount = _deploySubaccount();
+        LoanSubaccountRemote subaccount = _deploySubaccount();
         (success, ) = address(subaccount).call{value: 1}("");
         assertFalse(success);
         assertEq(address(subaccount).balance, 0);
@@ -617,7 +617,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         bytes32 operationId = bytes32("op-1");
         vm.expectEmit();
-        emit ILoanChainSubaccount.LoanOpened(
+        emit ILoanSubaccountRemote.LoanOpened(
             parentPersonalAccount,
             operationId,
             100e6,
@@ -637,7 +637,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(borrowShares, 500e18 * 1e6);
         assertEq(fxrp.balanceOf(subaccount), 5e6);
         assertEq(rlusd.balanceOf(destination), 500e18);
-        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(operationId));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
     }
 
     function testLzComposeDepositCollateral() public {
@@ -646,7 +646,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         // the deposit action supplies exactly the authenticated bridged amount, no debt
         vm.expectEmit();
-        emit ILoanChainSubaccount.CollateralDeposited(
+        emit ILoanSubaccountRemote.CollateralDeposited(
             parentPersonalAccount, bytes32("op-1"), 100e6, _guidFor(1)
         );
         _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
@@ -657,7 +657,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         // a deposit that brings nothing is malformed, not a skip
         _deliverExpectRevertZeroAmount(
-            subaccount, 2, _depositPayload(bytes32("op-2")), ILoanChainSubaccount.ZeroAmount.selector
+            subaccount, 2, _depositPayload(bytes32("op-2")), ILoanSubaccountRemote.ZeroAmount.selector
         );
     }
 
@@ -667,7 +667,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         vm.expectEmit();
-        emit ILoanChainSubaccount.SweptFxrpDeposited(parentPersonalAccount, 100e6, _guidFor(1));
+        emit ILoanSubaccountRemote.SweptFxrpDeposited(parentPersonalAccount, 100e6, _guidFor(1));
         _deliver(subaccount, 1, 100e6, _sweepDepositPayload());
 
         (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
@@ -681,7 +681,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         // a sweep that brings nothing is malformed
         _deliverExpectRevertZeroAmount(
-            subaccount, 3, _sweepDepositPayload(), ILoanChainSubaccount.ZeroAmount.selector
+            subaccount, 3, _sweepDepositPayload(), ILoanSubaccountRemote.ZeroAmount.selector
         );
     }
 
@@ -723,7 +723,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         bytes32 operationId = bytes32("op-2");
         vm.expectEmit();
-        emit ILoanChainSubaccount.CollateralWithdrawn(
+        emit ILoanSubaccountRemote.CollateralWithdrawn(
             parentPersonalAccount, operationId, 30e6, _guidFor(2)
         );
         _deliver(subaccount, 2, 0, _withdrawPayload(operationId, 30e6));
@@ -742,8 +742,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
-        vm.expectRevert(ILoanChainAccountBase.NonZeroComposeValue.selector);
-        ILoanChainSubaccount(subaccount).lzCompose{value: 1}(
+        vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
+        ILoanSubaccountRemote(subaccount).lzCompose{value: 1}(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -754,8 +754,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         vm.prank(makeAddr("notTheEndpoint"));
-        vm.expectRevert(ILoanChainAccountBase.OnlyEndpoint.selector);
-        ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        vm.expectRevert(IComposeReceiverAccountBase.OnlyEndpoint.selector);
+        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function testLzComposeRevertWrongComposeSender() public {
@@ -766,9 +766,9 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address notTheOft = makeAddr("notTheOft");
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainAccountBase.WrongComposeSender.selector, notTheOft)
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongComposeSender.selector, notTheOft)
         );
-        ILoanChainSubaccount(subaccount).lzCompose(notTheOft, guid, message, executor, "");
+        ILoanSubaccountRemote(subaccount).lzCompose(notTheOft, guid, message, executor, "");
     }
 
     function testLzComposeRevertWrongSourceEid() public {
@@ -785,9 +785,9 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainAccountBase.WrongSourceEid.selector, originEid + 1)
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongSourceEid.selector, originEid + 1)
         );
-        ILoanChainSubaccount(subaccount).lzCompose(
+        ILoanSubaccountRemote(subaccount).lzCompose(
             address(fxrpOft), _guidFor(1), message, executor, ""
         );
     }
@@ -806,9 +806,9 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainAccountBase.WrongComposeFrom.selector, attacker)
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongComposeFrom.selector, attacker)
         );
-        ILoanChainSubaccount(subaccount).lzCompose(
+        ILoanSubaccountRemote(subaccount).lzCompose(
             address(fxrpOft), _guidFor(1), message, executor, ""
         );
     }
@@ -828,9 +828,9 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainAccountBase.WrongGuid.selector, forgedGuid)
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongGuid.selector, forgedGuid)
         );
-        ILoanChainSubaccount(subaccount).lzCompose(
+        ILoanSubaccountRemote(subaccount).lzCompose(
             address(fxrpOft), forgedGuid, message, executor, ""
         );
     }
@@ -849,12 +849,12 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _pauseController();
         vm.prank(lzEndpoint);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
 
         // the compose stays queued at the endpoint; the same delivery succeeds after unpausing
         _unpauseController();
         vm.prank(lzEndpoint);
-        ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
     }
@@ -879,16 +879,16 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 30e6);
         _pauseController();
 
-        ILoanChainSubaccount(subaccount).depositIdleFxrp();
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 130e6);
 
         // once the debt is gone, a paused deposit is new exposure and reverts
         rlusd.mint(subaccount, 600e18);
-        ILoanChainSubaccount(subaccount).repay();
+        ILoanSubaccountRemote(subaccount).repay();
         fxrp.mint(subaccount, 10e6);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSubaccount(subaccount).depositIdleFxrp();
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
     }
 
     function testLzComposeDepositWhilePausedRequiresLiveDebt() public {
@@ -910,12 +910,12 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = _borrowedSubaccount(500e18);
         rlusd.mint(subaccount, 100e18);
 
-        vm.expectRevert(ILoanChainSubaccount.OutstandingDebt.selector);
-        ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
+        vm.expectRevert(ILoanSubaccountRemote.OutstandingDebt.selector);
+        ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd));
 
         morpho.simulateLiquidation(_marketId(), subaccount);
 
-        uint256 amount = ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
+        uint256 amount = ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd));
         assertEq(amount, 100e18);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
     }
@@ -943,7 +943,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         // the remaining debt stays repayable with canonical share conversion afterwards
         rlusd.mint(subaccount, 500e18);
-        ILoanChainSubaccount(subaccount).repay();
+        ILoanSubaccountRemote(subaccount).repay();
         (, uint128 finalShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(finalShares, 0);
     }
@@ -995,7 +995,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         vm.expectRevert(
             ILoanChainSettingsFacet.LoanChainTransportNotConfigured.selector
         );
-        ILoanChainSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function testLzComposeRevertUnsupportedPayloadShapes() public {
@@ -1006,14 +1006,14 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         bytes memory payload = abi.encode(uint8(2), ACTION_BORROW, bytes(""));
         _deliverExpectRevert(
             subaccount, 1, payload,
-            abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedPayloadVersion.selector, 2)
+            abi.encodeWithSelector(IComposeReceiverAccountBase.UnsupportedPayloadVersion.selector, 2)
         );
 
         // unsupported action
         payload = abi.encode(PAYLOAD_VERSION_1, uint8(9), bytes(""));
         _deliverExpectRevert(
             subaccount, 1, payload,
-            abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedAction.selector, 9)
+            abi.encodeWithSelector(IComposeReceiverAccountBase.UnsupportedAction.selector, 9)
         );
 
         // the reserved Wormhole destination kind
@@ -1023,7 +1023,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             subaccount, 1, payload,
             abi.encodeWithSelector(
-                ILoanChainSubaccount.UnsupportedDestinationKind.selector,
+                ILoanSubaccountRemote.UnsupportedDestinationKind.selector,
                 DESTINATION_KIND_XRPL_WORMHOLE
             )
         );
@@ -1031,12 +1031,12 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // a zero destination, and a destination with dirty upper bits
         payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(0), 500e18);
         _deliverExpectRevert(
-            subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
+            subaccount, 1, payload, ILoanSubaccountRemote.InvalidDestination.selector
         );
         bytes32 dirty = bytes32(uint256(uint160(makeAddr("dest"))) | (uint256(1) << 200));
         payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dirty, 500e18);
         _deliverExpectRevert(
-            subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
+            subaccount, 1, payload, ILoanSubaccountRemote.InvalidDestination.selector
         );
 
         // disbursing to the account itself only opens debt its own proceeds must repay (the
@@ -1045,13 +1045,13 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(subaccount))), 500e18
         );
         _deliverExpectRevert(
-            subaccount, 1, payload, ILoanChainSubaccount.InvalidDestination.selector
+            subaccount, 1, payload, ILoanSubaccountRemote.InvalidDestination.selector
         );
 
         // a borrow with nothing to borrow is malformed even with collateral attached: a pure
         // deposit is its own action
         payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(1)), 0);
-        _deliverExpectRevert(subaccount, 1, payload, ILoanChainSubaccount.ZeroAmount.selector);
+        _deliverExpectRevert(subaccount, 1, payload, ILoanSubaccountRemote.ZeroAmount.selector);
     }
 
     function testLzComposeSkipDuplicateOperation() public {
@@ -1064,7 +1064,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // completes without effect and its bridged FXRP stays on the account
         fxrp.mint(subaccount, 100e6);
         vm.expectEmit();
-        emit ILoanChainSubaccount.LoanActionSkipped(
+        emit ILoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
         _deliver(subaccount, 2, 100e6, _depositPayload(operationId));
@@ -1083,7 +1083,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _deliver(subaccount, 1, 100e6, _depositPayload(operationId));
 
         vm.expectEmit();
-        emit ILoanChainSubaccount.LoanActionSkipped(
+        emit ILoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
         _deliver(subaccount, 2, 0, _withdrawPayload(operationId, 30e6));
@@ -1102,11 +1102,11 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             abi.encode(operationId, uint64(block.timestamp - 1))
         );
         vm.expectEmit();
-        emit ILoanChainSubaccount.LoanActionSkipped(
+        emit ILoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_EXPIRED, _guidFor(1)
         );
         _deliver(subaccount, 1, 100e6, stale);
-        assertFalse(ILoanChainSubaccount(subaccount).usedOperations(operationId));
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
 
         // the same intent retries under the same operation id with a fresh deadline; the
         // retry is a real second packet, crediting its own amount - the first packet's stale
@@ -1116,7 +1116,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
         assertEq(fxrp.balanceOf(subaccount), 100e6);
-        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(operationId));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
     }
 
     function testLzComposeExecutesAtDeadlineBoundary() public {
@@ -1133,7 +1133,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 60e6);
         assertEq(fxrp.balanceOf(subaccount), 40e6);
-        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testLzComposeBorrowRevertBorrowingDisabled() public {
@@ -1153,7 +1153,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         );
         _deliverExpectRevert(
-            subaccount, 2, borrowMore, ILoanChainSubaccount.BorrowingDisabled.selector
+            subaccount, 2, borrowMore, ILoanSubaccountRemote.BorrowingDisabled.selector
         );
 
         // a collateral deposit is not a debt increase and still works (a real second packet,
@@ -1185,7 +1185,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         fxrp.mint(subaccount, 100e6);
         vm.expectEmit();
-        emit ILoanChainSubaccount.LoanActionSkipped(
+        emit ILoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, bytes32("op-borrow"), SKIP_REASON_DUPLICATE, _guidFor(9)
         );
         _deliver(subaccount, 9, 100e6, _borrowPayload(
@@ -1208,9 +1208,9 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(collateral, 70e6);
 
         rlusd.mint(subaccount, 600e18);
-        assertEq(ILoanChainSubaccount(subaccount).repay(), 500e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 500e18);
 
-        assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(rlusd)), 100e18);
+        assertEq(ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd)), 100e18);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
     }
 
@@ -1252,7 +1252,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
                 bytes32("op-a"), DESTINATION_KIND_EVM,
                 bytes32(uint256(uint160(makeAddr("destA")))), 100e18
             ),
-            ILoanChainSubaccount.BorrowingDisabled.selector
+            ILoanSubaccountRemote.BorrowingDisabled.selector
         );
 
         address subaccountB = address(new SubaccountProxy(
@@ -1272,7 +1272,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         _deliverExpectRevert(
             subaccount, 1, _depositPayload(bytes32(0)),
-            ILoanChainAccountBase.InvalidOperationId.selector
+            IComposeReceiverAccountBase.InvalidOperationId.selector
         );
     }
 
@@ -1285,7 +1285,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             subaccount, 1, _depositPayload(bytes32("op-1")),
             abi.encodeWithSelector(
-                ILoanChainSubaccount.InsufficientComposeBalance.selector, 100e6, 40e6
+                ILoanSubaccountRemote.InsufficientComposeBalance.selector, 100e6, 40e6
             )
         );
     }
@@ -1390,13 +1390,13 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             )
         );
         // the revert rolled the whole delivery back: the id stays unconsumed for a retry
-        assertFalse(ILoanChainSubaccount(subaccountB).usedOperations(bytes32("op-1")));
+        assertFalse(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-1")));
 
         // the stranded credit exits over the transport without needing a market
         uint256 messagingFee = 0.01 ether;
         vm.deal(address(this), messagingFee);
         uint256 amount =
-            ILoanChainSubaccount(subaccountB).sweepToOrigin{value: messagingFee}("");
+            ILoanSubaccountRemote(subaccountB).sweepToOrigin{value: messagingFee}("");
         assertEq(amount, 100e6);
     }
 
@@ -1419,7 +1419,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
                 ILoanChainSettingsFacet.MarketNotRegistered.selector, typeB
             )
         );
-        assertFalse(ILoanChainSubaccount(subaccountB).usedOperations(bytes32("op-1")));
+        assertFalse(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-1")));
 
         ILoanChainSettingsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
@@ -1433,7 +1433,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         (, , uint128 collateral) =
             morpho.position(keccak256(abi.encode(marketB.marketParams)), subaccountB);
         assertEq(collateral, 100e6);
-        assertTrue(ILoanChainSubaccount(subaccountB).usedOperations(bytes32("op-1")));
+        assertTrue(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-1")));
     }
 
     function testRepayPartialByAssets() public {
@@ -1441,8 +1441,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 200e18);
 
         vm.expectEmit();
-        emit ILoanChainSubaccount.LoanRepaid(parentPersonalAccount, 200e18);
-        uint256 assets = ILoanChainSubaccount(subaccount).repay();
+        emit ILoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 200e18);
+        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
 
         assertEq(assets, 200e18);
         assertEq(rlusd.balanceOf(subaccount), 0);
@@ -1455,7 +1455,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = _borrowedSubaccount(500e18);
         rlusd.mint(subaccount, 600e18);
 
-        uint256 assets = ILoanChainSubaccount(subaccount).repay();
+        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
 
         assertEq(assets, 500e18);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
@@ -1471,7 +1471,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         morpho.addPendingInterest(_marketId(), 25e18);
         rlusd.mint(subaccount, 600e18);
 
-        uint256 assets = ILoanChainSubaccount(subaccount).repay();
+        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
 
         // full debt incl. accrued interest, repaid via exact shares (rounding up by at most 1)
         assertGe(assets, 525e18);
@@ -1484,13 +1484,13 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
 
         // no idle balance
-        vm.expectRevert(ILoanChainSubaccount.NothingToRepay.selector);
-        ILoanChainSubaccount(subaccount).repay();
+        vm.expectRevert(ILoanSubaccountRemote.NothingToRepay.selector);
+        ILoanSubaccountRemote(subaccount).repay();
 
         // balance but no debt
         rlusd.mint(subaccount, 100e18);
-        vm.expectRevert(ILoanChainSubaccount.NothingToRepay.selector);
-        ILoanChainSubaccount(subaccount).repay();
+        vm.expectRevert(ILoanSubaccountRemote.NothingToRepay.selector);
+        ILoanSubaccountRemote(subaccount).repay();
     }
 
     function testRepayRevertMarketNotRegistered() public {
@@ -1503,7 +1503,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
                 ILoanChainSettingsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
             )
         );
-        ILoanChainSubaccount(subaccount).repay();
+        ILoanSubaccountRemote(subaccount).repay();
     }
 
     function testRepayWorksWhilePaused() public {
@@ -1512,7 +1512,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 200e18);
         _pauseController();
 
-        uint256 assets = ILoanChainSubaccount(subaccount).repay();
+        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
         assertEq(assets, 200e18);
     }
 
@@ -1524,12 +1524,12 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
 
         rlusd.mint(subaccount, 600e18);
-        uint256 assets = ILoanChainSubaccount(subaccount).repay();
+        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
         assertEq(assets, 500e18);
 
         // the defensive idle deposit needs no transport either
         fxrp.mint(subaccount, 10e6);
-        ILoanChainSubaccount(subaccount).depositIdleFxrp();
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 110e6);
     }
@@ -1552,7 +1552,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         );
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 1e18);
-        assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(stray)), 1e18);
+        assertEq(ILoanSubaccountRemote(subaccount).recoverToken(address(stray)), 1e18);
         assertEq(stray.balanceOf(parentPersonalAccount), 1e18);
     }
 
@@ -1561,8 +1561,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 70e6);
 
         vm.expectEmit();
-        emit ILoanChainSubaccount.IdleFxrpDeposited(parentPersonalAccount, 70e6);
-        uint256 amount = ILoanChainSubaccount(subaccount).depositIdleFxrp();
+        emit ILoanSubaccountRemote.IdleFxrpDeposited(parentPersonalAccount, 70e6);
+        uint256 amount = ILoanSubaccountRemote(subaccount).depositIdleFxrp();
 
         assertEq(amount, 70e6);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
@@ -1574,14 +1574,14 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
 
         // nothing idle
-        vm.expectRevert(ILoanChainSubaccount.NothingToDeposit.selector);
-        ILoanChainSubaccount(subaccount).depositIdleFxrp();
+        vm.expectRevert(ILoanSubaccountRemote.NothingToDeposit.selector);
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
 
         // new exposure is pause-gated
         fxrp.mint(subaccount, 70e6);
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSubaccount(subaccount).depositIdleFxrp();
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
     }
 
     function testSweepToOriginBridgesBackToOwnFlareAddress() public {
@@ -1593,7 +1593,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         vm.deal(caller, messagingFee + 1 ether);
         vm.prank(caller);
         uint256 amount =
-            ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee + 1 ether}("");
+            ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee + 1 ether}("");
 
         assertEq(amount, 100e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
@@ -1623,7 +1623,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 100e6);
         bytes memory options = hex"0003010011010000000000000000000000000000c350";
         vm.deal(address(this), 0.01 ether);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: 0.01 ether}(options);
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: 0.01 ether}(options);
         (,,,, bytes memory sentOptions,,) = fxrpOft.lastSendParam();
         assertEq(sentOptions, options);
     }
@@ -1638,7 +1638,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         address caller = makeAddr("keeper");
         vm.deal(caller, messagingFee);
         vm.prank(caller);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}("");
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
 
         assertEq(subaccount.balance, 5 ether);
         assertEq(caller.balance, 0);
@@ -1650,29 +1650,29 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         vm.deal(address(this), 1 ether);
 
         // nothing to sweep
-        vm.expectRevert(ILoanChainSubaccount.NothingToSweep.selector);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}("");
+        vm.expectRevert(ILoanSubaccountRemote.NothingToSweep.selector);
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
 
         fxrp.mint(subaccount, 100e6);
 
         // insufficient fee
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanChainSubaccount.InsufficientFundsForSweep.selector, messagingFee
+                ILoanSubaccountRemote.InsufficientFundsForSweep.selector, messagingFee
             )
         );
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee - 1}("");
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee - 1}("");
 
         // a peer mutation fails closed
         fxrpOft.setPeer(originEid, bytes32(uint256(0xbad)));
-        vm.expectRevert(ILoanChainSubaccount.WrongOriginPeer.selector);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}("");
+        vm.expectRevert(ILoanSubaccountRemote.WrongOriginPeer.selector);
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
         fxrpOft.setPeer(originEid, originPeer);
 
         // every exit from this chain rides the OFT: the pause stops it
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: messagingFee}("");
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
     }
 
     function testRecoveryWorksWhilePaused() public {
@@ -1683,7 +1683,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
 
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 1e18);
-        assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(stray)), 1e18);
+        assertEq(ILoanSubaccountRemote(subaccount).recoverToken(address(stray)), 1e18);
         assertEq(stray.balanceOf(parentPersonalAccount), 1e18);
     }
 
@@ -1742,8 +1742,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         stray.mint(subaccount, 42e18);
 
         vm.expectEmit();
-        emit ILoanChainSubaccount.TokenRecovered(parentPersonalAccount, address(stray), 42e18);
-        uint256 amount = ILoanChainSubaccount(subaccount).recoverToken(address(stray));
+        emit ILoanSubaccountRemote.TokenRecovered(parentPersonalAccount, address(stray), 42e18);
+        uint256 amount = ILoanSubaccountRemote(subaccount).recoverToken(address(stray));
         assertEq(amount, 42e18);
         assertEq(stray.balanceOf(parentPersonalAccount), 42e18);
     }
@@ -1754,19 +1754,19 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // collateral never leaves through recovery: it has its own rails
         fxrp.mint(subaccount, 1e6);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainSubaccount.ProtectedToken.selector, address(fxrp))
+            abi.encodeWithSelector(ILoanSubaccountRemote.ProtectedToken.selector, address(fxrp))
         );
-        ILoanChainSubaccount(subaccount).recoverToken(address(fxrp));
+        ILoanSubaccountRemote(subaccount).recoverToken(address(fxrp));
 
         // the loan token is recoverable while the position carries no debt
         rlusd.mint(subaccount, 5e18);
-        assertEq(ILoanChainSubaccount(subaccount).recoverToken(address(rlusd)), 5e18);
+        assertEq(ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd)), 5e18);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 5e18);
 
         // nothing to recover
         MintableERC20 empty = new MintableERC20("Empty", "EMP", 18);
-        vm.expectRevert(ILoanChainSubaccount.NothingToRecover.selector);
-        ILoanChainSubaccount(subaccount).recoverToken(address(empty));
+        vm.expectRevert(ILoanSubaccountRemote.NothingToRecover.selector);
+        ILoanSubaccountRemote(subaccount).recoverToken(address(empty));
     }
 
     function testRecoverLoanTokenSurplusAfterFullRepayment() public {
@@ -1774,19 +1774,19 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 600e18);
 
         // while debt is outstanding, the balance is repayment material
-        vm.expectRevert(ILoanChainSubaccount.OutstandingDebt.selector);
-        ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
+        vm.expectRevert(ILoanSubaccountRemote.OutstandingDebt.selector);
+        ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd));
 
-        ILoanChainSubaccount(subaccount).repay();
-        uint256 amount = ILoanChainSubaccount(subaccount).recoverToken(address(rlusd));
+        ILoanSubaccountRemote(subaccount).repay();
+        uint256 amount = ILoanSubaccountRemote(subaccount).recoverToken(address(rlusd));
         assertEq(amount, 100e18);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
     }
 
     function testFlareSendersProduceThePayloadsTheLoanChainDecodes() public {
         // sender and receiver in one place: the Flare-side senders (LoanSubaccount,
-        // PersonalAccount) and the loan-chain decoders (LoanChainSubaccount,
-        // LoanChainPersonalAccount) run on this one diamond, so the bytes the Flare side
+        // PersonalAccount) and the loan-chain decoders (LoanSubaccountRemote,
+        // PersonalAccountRemote) run on this one diamond, so the bytes the Flare side
         // actually hands to the OFT's send are what the receivers execute - wrapped by the
         // canonical compose codec exactly as the OFT's lzReceive -> sendCompose wraps them
         // (composeFrom being the receiver's own address: sender and receiver share it in
@@ -1843,7 +1843,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _deliver(subaccount, 4, amountLD, payload);
         (, , collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 130e6);
-        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(bytes32("op-d")));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-d")));
 
         // the bridge-back: the loan-chain side's idle FXRP (what the withdraw returned) goes
         // home with the redeem-home compose (a deadline, nothing else); the Flare twin authenticates it against
@@ -1851,7 +1851,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // since the parent has no code on this diamond (the redemption itself is covered in the
         // Flare suite with a real Personal Account)
         vm.deal(address(this), 0.01 ether);
-        ILoanChainSubaccount(subaccount).sweepToOrigin{value: 0.01 ether}("");
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: 0.01 ether}("");
         (amountLD, payload) = _lastSentCompose();
         assertEq(amountLD, 40e6);
         flareAssetManager.setMinimumRedeemAmountUBA(1_000e6);
@@ -1871,7 +1871,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _deliverToMirror(mirror, 5, payload);
         assertEq(rlusd.balanceOf(destination), 500e18);
         assertEq(rlusd.balanceOf(mirror), 0);
-        assertTrue(ILoanChainPersonalAccount(mirror).usedOperations(bytes32("op-t")));
+        assertTrue(IPersonalAccountRemote(mirror).usedOperations(bytes32("op-t")));
     }
 
     function testMinimalLoanChainDiamondTopology() public {
@@ -1933,11 +1933,11 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // codeless - mirror address, and a recovery parks the tokens there; creating the
         // mirror later puts code and the registry entry at that same address, with the
         // parked balance now under the user's signature
-        address parent = LoanChainSubaccount(payable(subaccount)).parentPersonalAccount();
+        address parent = LoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
         assertEq(parent.code.length, 0);
         MintableERC20 stray = new MintableERC20("Stray", "STRAY", 18);
         stray.mint(subaccount, 5e18);
-        ILoanChainSubaccount(subaccount).recoverToken(address(stray));
+        ILoanSubaccountRemote(subaccount).recoverToken(address(stray));
         assertEq(stray.balanceOf(parent), 5e18);
 
         // the mirror Personal Account also materializes on the minimal topology, behind the
@@ -1945,12 +1945,12 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         // implementation is registered: the frozen BeaconProxy asks the beacon at
         // construction, and an unset beacon fails the creation closed
         vm.expectRevert();
-        ILoanChainSettingsFacet(address(minimal)).createLoanChainPersonalAccount(xrplOwner);
-        LoanChainPersonalAccount mirrorImpl = new LoanChainPersonalAccount();
+        ILoanChainSettingsFacet(address(minimal)).createPersonalAccountRemote(xrplOwner);
+        PersonalAccountRemote mirrorImpl = new PersonalAccountRemote();
         vm.prank(initialOwner);
         minimalController.setPersonalAccountImplementation(address(mirrorImpl));
         address mirror = ILoanChainSettingsFacet(address(minimal))
-            .createLoanChainPersonalAccount(xrplOwner);
+            .createPersonalAccountRemote(xrplOwner);
         assertGt(mirror.code.length, 0);
         assertEq(minimalController.getPersonalAccount(xrplOwner), mirror);
         assertEq(mirror, parent);
@@ -2086,7 +2086,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             target: flarePa,
             value: 0.01 ether,
             data: abi.encodeCall(
-                IPersonalAccount.executeLoanChainUserOp, (batch, bytes32("op-t"), _deadline, "")
+                IPersonalAccount.sendCrossChainUserOp, (batch, bytes32("op-t"), _deadline, "")
             )
         });
         vm.prank(address(controller));
@@ -2098,8 +2098,8 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     /// again).
     function _mirrorOnThisDiamond(string memory _xrplOwner) private returns (address) {
         vm.prank(governance);
-        controller.setPersonalAccountImplementation(address(new LoanChainPersonalAccount()));
-        return ILoanChainSettingsFacet(address(controller)).createLoanChainPersonalAccount(_xrplOwner);
+        controller.setPersonalAccountImplementation(address(new PersonalAccountRemote()));
+        return ILoanChainSettingsFacet(address(controller)).createPersonalAccountRemote(_xrplOwner);
     }
 
     /// Delivers a loan-chain-built compose to a Flare-side receiver on this diamond: srcEid is
@@ -2126,7 +2126,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     function _deliverToMirror(address _mirror, uint64 _nonce, bytes memory _payload) private {
         (bytes memory message, bytes32 guid) = _composeMessage(_mirror, _nonce, 0, _payload);
         vm.prank(lzEndpoint);
-        ILoanChainPersonalAccount(_mirror).lzCompose(address(fxrpOft), guid, message, executor, "");
+        IPersonalAccountRemote(_mirror).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function _createConfiguredSubaccount() private returns (address) {
@@ -2159,7 +2159,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) =
             _composeMessage(_subaccount, _nonce, _amountLD, _payload);
         vm.prank(lzEndpoint);
-        ILoanChainSubaccount(_subaccount).lzCompose(
+        ILoanSubaccountRemote(_subaccount).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -2176,7 +2176,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
             _composeMessage(_subaccount, _nonce, 100e6, _payload);
         vm.prank(lzEndpoint);
         vm.expectRevert(_expectedRevert);
-        ILoanChainSubaccount(_subaccount).lzCompose(
+        ILoanSubaccountRemote(_subaccount).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -2203,7 +2203,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) = _composeMessage(_subaccount, _nonce, 0, _payload);
         vm.prank(lzEndpoint);
         vm.expectRevert(_selector);
-        ILoanChainSubaccount(_subaccount).lzCompose(
+        ILoanSubaccountRemote(_subaccount).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -2325,13 +2325,13 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _controller.transferOwnership(governance);
     }
 
-    function _deploySubaccount() private returns (LoanChainSubaccount) {
+    function _deploySubaccount() private returns (LoanSubaccountRemote) {
         SubaccountProxy proxy = new SubaccountProxy(
             address(controller),
             parentPersonalAccount,
             SUBACCOUNT_TYPE_LOAN
         );
-        return LoanChainSubaccount(payable(address(proxy)));
+        return LoanSubaccountRemote(payable(address(proxy)));
     }
 
     function _composeMessage(

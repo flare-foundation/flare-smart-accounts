@@ -11,21 +11,21 @@ import {IIMasterAccountController} from "../contracts/smartAccounts/interface/II
 import {MasterAccountControllerInit} from "../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {
-    LoanChainPersonalAccount
-} from "../contracts/smartAccounts/implementation/LoanChainPersonalAccount.sol";
+    PersonalAccountRemote
+} from "../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
 import {
     LoanChainSettingsFacet
 } from "../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol";
 import {
-    ILoanChainPersonalAccount,
+    IPersonalAccountRemote,
     PA_ACTION_EXECUTE
-} from "../contracts/userInterfaces/ILoanChainPersonalAccount.sol";
+} from "../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {
-    ILoanChainAccountBase,
+    IComposeReceiverAccountBase,
     PAYLOAD_VERSION_1,
     SKIP_REASON_DUPLICATE,
     SKIP_REASON_EXPIRED
-} from "../contracts/userInterfaces/ILoanChainAccountBase.sol";
+} from "../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 import {
     ILoanChainSettingsFacet
 } from "../contracts/userInterfaces/facets/ILoanChainSettingsFacet.sol";
@@ -46,17 +46,17 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
 
 /**
- * @title LoanChainPersonalAccountTest
- * @notice The loan-chain-side Personal Account: the compose-driven mirror of the user's
- * Flare Personal Account, at the same frozen CREATE2 address. Covers the explicit creation
+ * @title PersonalAccountRemoteTest
+ * @notice The remote Personal Account: the mirror of the user's Flare Personal
+ * Account on the loan chain, at the same frozen CREATE2 address. Covers the explicit creation
  * route, beacon resolution, and the authenticated compose entry with the signed execute
  * action (the loan-chain `executeUserOp`).
  */
-contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
+contract PersonalAccountRemoteTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
 
     IIMasterAccountController private controller;
-    LoanChainPersonalAccount private mirrorImpl;
+    PersonalAccountRemote private mirrorImpl;
 
     address private initialOwner;
     address private governance;
@@ -111,16 +111,16 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         vm.prank(governance);
         controller.diamondCut(settingsCut, address(0), "");
 
-        // register the loan-chain Personal Account implementation behind the PA beacon
+        // register the remote Personal Account implementation behind the PA beacon
         // (timelock is 0 in tests)
-        mirrorImpl = new LoanChainPersonalAccount();
+        mirrorImpl = new PersonalAccountRemote();
         vm.prank(governance);
         controller.setPersonalAccountImplementation(address(mirrorImpl));
 
         _configureTransport();
     }
 
-    function testCreateLoanChainPersonalAccount() public {
+    function testCreatePersonalAccountRemote() public {
         // the explicit creation route: PAs are created lazily by instructions on Flare, but
         // no instruction machinery exists here - creation is permissionless and idempotent
         address predicted = controller.getPersonalAccount(xrplOwner);
@@ -129,53 +129,53 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         address caller = makeAddr("anyone");
         vm.prank(caller);
         address created = ILoanChainSettingsFacet(address(controller))
-            .createLoanChainPersonalAccount(xrplOwner);
+            .createPersonalAccountRemote(xrplOwner);
         assertEq(created, predicted);
         assertNotEq(created.code.length, 0);
 
         // idempotent, and now registered
         address again = ILoanChainSettingsFacet(address(controller))
-            .createLoanChainPersonalAccount(xrplOwner);
+            .createPersonalAccountRemote(xrplOwner);
         assertEq(again, created);
         assertEq(controller.getPersonalAccount(xrplOwner), created);
     }
 
-    function testCreateLoanChainPersonalAccountRevertWhenPaused() public {
+    function testCreatePersonalAccountRemoteRevertWhenPaused() public {
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSettingsFacet(address(controller)).createLoanChainPersonalAccount(xrplOwner);
+        ILoanChainSettingsFacet(address(controller)).createPersonalAccountRemote(xrplOwner);
     }
 
-    function testCreateLoanChainPersonalAccountRevertEmptyOwner() public {
+    function testCreatePersonalAccountRemoteRevertEmptyOwner() public {
         // the mirror implementation rejects an empty owner in initialize, so the whole
         // CREATE2 deployment reverts - no orphan mirror can exist for an impossible owner
         vm.expectRevert();
-        ILoanChainSettingsFacet(address(controller)).createLoanChainPersonalAccount("");
+        ILoanChainSettingsFacet(address(controller)).createPersonalAccountRemote("");
     }
 
     function testMirrorResolvesViaBeacon() public {
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         assertEq(mirror.implementation(), address(mirrorImpl));
         assertEq(mirror.xrplOwner(), xrplOwner);
         assertEq(mirror.controllerAddress(), address(controller));
 
         // the controller-as-beacon upgrades every mirror in one registration, exactly like
         // the Flare Personal Accounts
-        LoanChainPersonalAccount newImpl = new LoanChainPersonalAccount();
+        PersonalAccountRemote newImpl = new PersonalAccountRemote();
         vm.prank(governance);
         controller.setPersonalAccountImplementation(address(newImpl));
         assertEq(mirror.implementation(), address(newImpl));
     }
 
     function testInitializeRevertAlreadyInitialized() public {
-        LoanChainPersonalAccount mirror = _createMirror();
-        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
+        PersonalAccountRemote mirror = _createMirror();
+        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
         mirror.initialize(address(controller), xrplOwner);
     }
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
         // the implementation locks itself in its constructor
-        vm.expectRevert(ILoanChainAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
         mirrorImpl.initialize(address(controller), xrplOwner);
     }
 
@@ -183,7 +183,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         // native funds value-carrying calls (a LayerZero native drop lands this way) and
         // leaves as one; the implementation contract, never initialized, rejects it since
         // nothing could ever move it out of there
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         vm.deal(address(this), 2);
 
         (bool success, ) = address(mirror).call{value: 1}("");
@@ -200,14 +200,14 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
 
     function testTransferTokenViaCompose() public {
         // the common instruction, as a wallet builds it: a one-call transfer batch
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
         address destination = makeAddr("userChosenDestination");
 
         bytes32 operationId = bytes32("op-1");
         vm.expectEmit();
-        emit ILoanChainPersonalAccount.UserOpExecuted(operationId, 1, _guidFor(1));
+        emit IPersonalAccountRemote.UserOpExecuted(operationId, 1, _guidFor(1));
         _deliver(address(mirror), 1, _transferTokenPayload(
             operationId, address(stray), destination, 10e18
         ));
@@ -221,7 +221,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         // the general case: several calls in one signed batch - a token transfer, a plain
         // native send (target = recipient, empty data) funded by native that landed with a
         // message, and an arbitrary contract call (an approval) - in order, one operation id
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
         vm.deal(address(mirror), 1 ether);
@@ -229,16 +229,16 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         address nativeDest = makeAddr("nativeDest");
         address spender = makeAddr("spender");
 
-        ILoanChainPersonalAccount.Call[] memory calls = new ILoanChainPersonalAccount.Call[](3);
-        calls[0] = ILoanChainPersonalAccount.Call({
+        IPersonalAccountRemote.Call[] memory calls = new IPersonalAccountRemote.Call[](3);
+        calls[0] = IPersonalAccountRemote.Call({
             target: address(stray), value: 0, data: abi.encodeCall(IERC20.transfer, (tokenDest, 10e18))
         });
-        calls[1] = ILoanChainPersonalAccount.Call({target: nativeDest, value: 0.4 ether, data: ""});
-        calls[2] = ILoanChainPersonalAccount.Call({
+        calls[1] = IPersonalAccountRemote.Call({target: nativeDest, value: 0.4 ether, data: ""});
+        calls[2] = IPersonalAccountRemote.Call({
             target: address(stray), value: 0, data: abi.encodeCall(IERC20.approve, (spender, 5e18))
         });
         vm.expectEmit();
-        emit ILoanChainPersonalAccount.UserOpExecuted(bytes32("op-1"), 3, _guidFor(1));
+        emit IPersonalAccountRemote.UserOpExecuted(bytes32("op-1"), 3, _guidFor(1));
         _deliver(address(mirror), 1, _executePayload(bytes32("op-1"), calls));
 
         assertEq(stray.balanceOf(tokenDest), 10e18);
@@ -252,22 +252,22 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         // a failing call anywhere in the batch reverts the whole delivery with its index and
         // the callee's revert data; nothing before it sticks, the id stays unconsumed, and the
         // exact same packet succeeds once the cause is fixed (here: the native to send)
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
         address tokenDest = makeAddr("tokenDest");
         address nativeDest = makeAddr("nativeDest");
 
-        ILoanChainPersonalAccount.Call[] memory calls = new ILoanChainPersonalAccount.Call[](2);
-        calls[0] = ILoanChainPersonalAccount.Call({
+        IPersonalAccountRemote.Call[] memory calls = new IPersonalAccountRemote.Call[](2);
+        calls[0] = IPersonalAccountRemote.Call({
             target: address(stray), value: 0, data: abi.encodeCall(IERC20.transfer, (tokenDest, 10e18))
         });
-        calls[1] = ILoanChainPersonalAccount.Call({target: nativeDest, value: 1 ether, data: ""});
+        calls[1] = IPersonalAccountRemote.Call({target: nativeDest, value: 1 ether, data: ""});
         bytes memory payload = _executePayload(bytes32("op-1"), calls);
 
         _deliverExpectRevert(
             address(mirror), 1, payload,
-            abi.encodeWithSelector(ILoanChainPersonalAccount.CallFailed.selector, 1, bytes(""))
+            abi.encodeWithSelector(IPersonalAccountRemote.CallFailed.selector, 1, bytes(""))
         );
         assertEq(stray.balanceOf(tokenDest), 0);
         assertFalse(mirror.usedOperations(bytes32("op-1")));
@@ -283,20 +283,20 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         // returning false (no revert) and a call to a codeless target both count as successful
         // calls - the batch completes, the id is consumed, and no token moved. The wallet must
         // know the callee's success convention; nothing here can tell for it
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MockFalseReturningToken sneaky = new MockFalseReturningToken();
         sneaky.mint(address(mirror), 10e18);
         address destination = makeAddr("dest");
 
-        ILoanChainPersonalAccount.Call[] memory calls = new ILoanChainPersonalAccount.Call[](2);
-        calls[0] = ILoanChainPersonalAccount.Call({
+        IPersonalAccountRemote.Call[] memory calls = new IPersonalAccountRemote.Call[](2);
+        calls[0] = IPersonalAccountRemote.Call({
             target: address(sneaky), value: 0, data: abi.encodeCall(IERC20.transfer, (destination, 10e18))
         });
-        calls[1] = ILoanChainPersonalAccount.Call({
+        calls[1] = IPersonalAccountRemote.Call({
             target: makeAddr("codeless"), value: 0, data: abi.encodeCall(IERC20.transfer, (destination, 1))
         });
         vm.expectEmit();
-        emit ILoanChainPersonalAccount.UserOpExecuted(bytes32("op-1"), 2, _guidFor(1));
+        emit IPersonalAccountRemote.UserOpExecuted(bytes32("op-1"), 2, _guidFor(1));
         _deliver(address(mirror), 1, _executePayload(bytes32("op-1"), calls));
 
         assertTrue(mirror.usedOperations(bytes32("op-1")));
@@ -305,7 +305,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     }
 
     function testExecuteGuards() public {
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
 
@@ -313,20 +313,20 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             address(mirror), 1,
             _transferTokenPayload(bytes32(0), address(stray), makeAddr("dest"), 1e18),
-            ILoanChainAccountBase.InvalidOperationId.selector
+            IComposeReceiverAccountBase.InvalidOperationId.selector
         );
         // an empty batch would only consume the id
         _deliverExpectRevert(
             address(mirror), 1,
-            _executePayload(bytes32("op-1"), new ILoanChainPersonalAccount.Call[](0)),
-            ILoanChainPersonalAccount.EmptyUserOp.selector
+            _executePayload(bytes32("op-1"), new IPersonalAccountRemote.Call[](0)),
+            IPersonalAccountRemote.EmptyUserOp.selector
         );
     }
 
     function testTransferRevertWhenPausedThenRetriable() public {
         // outward moves stop while paused - even signed-looking traffic, since a transport
         // compromise is exactly what an incident looks like; the packet stays retriable
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
         bytes memory payload =
@@ -344,7 +344,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     function testTerminalSkipsRunBeforeThePauseGate() public {
         // a duplicate or expired delivery finalizes even while paused, instead of reverting
         // forever on an incident: terminal gates come before the pause check
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
         address destination = makeAddr("dest");
@@ -354,7 +354,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
 
         _pauseController();
         vm.expectEmit();
-        emit ILoanChainPersonalAccount.ActionSkipped(
+        emit IPersonalAccountRemote.ActionSkipped(
             bytes32("op-1"), SKIP_REASON_DUPLICATE, _guidFor(2)
         );
         _deliver(address(mirror), 2, _transferTokenPayload(
@@ -367,7 +367,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
             _transferCall(address(stray), destination, 1e18)
         );
         vm.expectEmit();
-        emit ILoanChainPersonalAccount.ActionSkipped(
+        emit IPersonalAccountRemote.ActionSkipped(
             bytes32("op-2"), SKIP_REASON_EXPIRED, _guidFor(3)
         );
         _deliver(address(mirror), 3, expired);
@@ -379,7 +379,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         // a transfer that fails (here: balance too low) reverts the whole delivery with the
         // callee's own revert data wrapped in CallFailed, so the id is not consumed and the
         // exact same packet succeeds once the balance is there
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 1e18);
         address destination = makeAddr("dest");
@@ -389,7 +389,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             address(mirror), 1, payload,
             abi.encodeWithSelector(
-                ILoanChainPersonalAccount.CallFailed.selector,
+                IPersonalAccountRemote.CallFailed.selector,
                 0,
                 abi.encodeWithSelector(
                     IERC20Errors.ERC20InsufficientBalance.selector, address(mirror), 1e18, 5e18
@@ -409,7 +409,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         // asserted by the guard's own error, so the test fails if the guard is ever removed
         // (the callback would then fail later, on OnlyEndpoint, for another reason);
         // the whole action reverts and stays retriable - nothing executes twice or is consumed
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MockReentrantToken evil = new MockReentrantToken();
         evil.mint(address(mirror), 10e18);
         bytes memory payload =
@@ -427,7 +427,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             address(mirror), 1, payload,
             abi.encodeWithSelector(
-                ILoanChainPersonalAccount.CallFailed.selector,
+                IPersonalAccountRemote.CallFailed.selector,
                 0,
                 abi.encodePacked(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector)
             )
@@ -437,7 +437,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     }
 
     function testComposeSkipDuplicateOperation() public {
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
         address destination = makeAddr("dest");
@@ -448,7 +448,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
 
         // the same id delivered again finalizes without a second transfer
         vm.expectEmit();
-        emit ILoanChainPersonalAccount.ActionSkipped(
+        emit IPersonalAccountRemote.ActionSkipped(
             bytes32("op-1"), SKIP_REASON_DUPLICATE, _guidFor(2)
         );
         _deliver(address(mirror), 2, _transferTokenPayload(
@@ -458,7 +458,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     }
 
     function testComposeSkipExpiredWithoutConsumingTheOperation() public {
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
 
@@ -468,7 +468,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
             _transferCall(address(stray), makeAddr("dest"), 1e18)
         );
         vm.expectEmit();
-        emit ILoanChainPersonalAccount.ActionSkipped(
+        emit IPersonalAccountRemote.ActionSkipped(
             bytes32("op-1"), SKIP_REASON_EXPIRED, _guidFor(1)
         );
         _deliver(address(mirror), 1, expired);
@@ -476,7 +476,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     }
 
     function testComposeAuthentication() public {
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(address(mirror), 42e18);
         bytes memory payload =
@@ -485,20 +485,20 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
 
         // only the endpoint may deliver
         vm.prank(makeAddr("notTheEndpoint"));
-        vm.expectRevert(ILoanChainAccountBase.OnlyEndpoint.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.OnlyEndpoint.selector);
         mirror.lzCompose(address(fxrpOft), guid, message, executor, "");
 
         // compose value is rejected, keeping a mistaken delivery retriable
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
-        vm.expectRevert(ILoanChainAccountBase.NonZeroComposeValue.selector);
+        vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
         mirror.lzCompose{value: 1}(address(fxrpOft), guid, message, executor, "");
 
         // the compose sender must be the configured OFT
         vm.prank(lzEndpoint);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanChainAccountBase.WrongComposeSender.selector, makeAddr("otherOft")
+                IComposeReceiverAccountBase.WrongComposeSender.selector, makeAddr("otherOft")
             )
         );
         mirror.lzCompose(makeAddr("otherOft"), guid, message, executor, "");
@@ -511,7 +511,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         vm.prank(lzEndpoint);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanChainAccountBase.WrongComposeFrom.selector,
+                IComposeReceiverAccountBase.WrongComposeFrom.selector,
                 bytes32(uint256(uint160(makeAddr("intruder"))))
             )
         );
@@ -524,31 +524,31 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         );
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanChainAccountBase.WrongGuid.selector, wrongGuid)
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongGuid.selector, wrongGuid)
         );
         mirror.lzCompose(address(fxrpOft), wrongGuid, message, executor, "");
     }
 
     function testComposeRevertUnsupportedPayloads() public {
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
 
         bytes memory wrongVersion = abi.encode(uint8(2), PA_ACTION_EXECUTE, bytes(""));
         _deliverExpectRevert(
             address(mirror), 1, wrongVersion,
             abi.encodeWithSelector(
-                ILoanChainAccountBase.UnsupportedPayloadVersion.selector, uint8(2)
+                IComposeReceiverAccountBase.UnsupportedPayloadVersion.selector, uint8(2)
             )
         );
 
         bytes memory wrongAction = abi.encode(PAYLOAD_VERSION_1, uint8(77), bytes(""));
         _deliverExpectRevert(
             address(mirror), 1, wrongAction,
-            abi.encodeWithSelector(ILoanChainAccountBase.UnsupportedAction.selector, uint8(77))
+            abi.encodeWithSelector(IComposeReceiverAccountBase.UnsupportedAction.selector, uint8(77))
         );
     }
 
     function testComposeRevertTransportNotConfigured() public {
-        LoanChainPersonalAccount mirror = _createMirror();
+        PersonalAccountRemote mirror = _createMirror();
         ILoanChainSettingsFacet.Transport memory cleared;
         vm.prank(governance);
         IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
@@ -564,9 +564,9 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     // helpers
     //
 
-    function _createMirror() private returns (LoanChainPersonalAccount) {
-        return LoanChainPersonalAccount(payable(
-            ILoanChainSettingsFacet(address(controller)).createLoanChainPersonalAccount(xrplOwner)
+    function _createMirror() private returns (PersonalAccountRemote) {
+        return PersonalAccountRemote(payable(
+            ILoanChainSettingsFacet(address(controller)).createPersonalAccountRemote(xrplOwner)
         ));
     }
 
@@ -592,7 +592,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     {
         (bytes memory message, bytes32 guid) = _composeMessage(_mirror, _nonce, _payload);
         vm.prank(lzEndpoint);
-        ILoanChainPersonalAccount(_mirror).lzCompose(
+        IPersonalAccountRemote(_mirror).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -608,7 +608,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) = _composeMessage(_mirror, _nonce, _payload);
         vm.prank(lzEndpoint);
         vm.expectRevert(_expectedRevert);
-        ILoanChainPersonalAccount(_mirror).lzCompose(
+        IPersonalAccountRemote(_mirror).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -639,7 +639,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
 
     function _executePayload(
         bytes32 _operationId,
-        ILoanChainPersonalAccount.Call[] memory _calls
+        IPersonalAccountRemote.Call[] memory _calls
     )
         private
         returns (bytes memory)
@@ -746,10 +746,10 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     )
         private
         pure
-        returns (ILoanChainPersonalAccount.Call[] memory _calls)
+        returns (IPersonalAccountRemote.Call[] memory _calls)
     {
-        _calls = new ILoanChainPersonalAccount.Call[](1);
-        _calls[0] = ILoanChainPersonalAccount.Call({
+        _calls = new IPersonalAccountRemote.Call[](1);
+        _calls[0] = IPersonalAccountRemote.Call({
             target: _token,
             value: 0,
             data: abi.encodeCall(IERC20.transfer, (_destination, _amount))
@@ -759,7 +759,7 @@ contract LoanChainPersonalAccountTest is Test, FacetsDeploy {
     function _executePayloadAt(
         bytes32 _operationId,
         uint64 _deadline,
-        ILoanChainPersonalAccount.Call[] memory _calls
+        IPersonalAccountRemote.Call[] memory _calls
     )
         private
         pure

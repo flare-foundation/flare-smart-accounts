@@ -2,13 +2,13 @@
 pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {LoanChainSubaccount} from "../../contracts/smartAccounts/implementation/LoanChainSubaccount.sol";
+import {LoanSubaccountRemote} from "../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
 import {
-    LoanChainPersonalAccount
-} from "../../contracts/smartAccounts/implementation/LoanChainPersonalAccount.sol";
+    PersonalAccountRemote
+} from "../../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
 
 // solhint-disable no-console
-contract DeployLoanChainSubaccountImplementation is Script {
+contract DeployRemoteAccountImplementations is Script {
     function run(bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
@@ -18,23 +18,23 @@ contract DeployLoanChainSubaccountImplementation is Script {
         }
 
         vm.startBroadcast(deployerPrivateKey);
-        LoanChainSubaccount loanChainSubaccountImpl = new LoanChainSubaccount();
-        LoanChainPersonalAccount loanChainPersonalAccountImpl = new LoanChainPersonalAccount();
+        LoanSubaccountRemote loanSubaccountRemoteImpl = new LoanSubaccountRemote();
+        PersonalAccountRemote personalAccountRemoteImpl = new PersonalAccountRemote();
         vm.stopBroadcast();
 
         console2.log(string.concat("NETWORK: ", network));
         console2.log(
             string.concat(
-                "DEPLOYED: LoanChainSubaccountImplementation, ",
-                "LoanChainSubaccount.sol: ",
-                vm.toString(address(loanChainSubaccountImpl))
+                "DEPLOYED: LoanSubaccountRemoteImplementation, ",
+                "LoanSubaccountRemote.sol: ",
+                vm.toString(address(loanSubaccountRemoteImpl))
             )
         );
         console2.log(
             string.concat(
-                "DEPLOYED: LoanChainPersonalAccountImplementation, ",
-                "LoanChainPersonalAccount.sol: ",
-                vm.toString(address(loanChainPersonalAccountImpl))
+                "DEPLOYED: PersonalAccountRemoteImplementation, ",
+                "PersonalAccountRemote.sol: ",
+                vm.toString(address(personalAccountRemoteImpl))
             )
         );
     }

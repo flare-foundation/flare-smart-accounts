@@ -24,8 +24,8 @@ import {
     SUBACCOUNT_TYPE_NONE
 } from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
-import {PAYLOAD_VERSION_1} from "../../userInterfaces/ILoanChainAccountBase.sol";
-import {PA_ACTION_EXECUTE} from "../../userInterfaces/ILoanChainPersonalAccount.sol";
+import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
+import {PA_ACTION_EXECUTE} from "../../userInterfaces/IPersonalAccountRemote.sol";
 import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {IIVault} from "../interface/IIVault.sol";
@@ -281,7 +281,7 @@ contract PersonalAccount is
     }
 
     /// @inheritdoc IPersonalAccount
-    function executeLoanChainUserOp(
+    function sendCrossChainUserOp(
         IPersonalAccount.Call[] calldata _calls,
         bytes32 _operationId,
         uint64 _deadline,
@@ -295,11 +295,11 @@ contract PersonalAccount is
         require(msg.sender == address(this), OnlySelf());
         require(
             _operationId != bytes32(0) && _deadline >= block.timestamp && _calls.length > 0,
-            InvalidLoanChainInstruction()
+            InvalidCrossChainUserOp()
         );
         (uint32 destinationEid, bytes32 guid) =
-            _sendLoanChainUserOp(_calls, _operationId, _deadline, _extraOptions);
-        emit LoanChainUserOpSent(_operationId, _calls.length, destinationEid, guid);
+            _sendCrossChainUserOp(_calls, _operationId, _deadline, _extraOptions);
+        emit CrossChainUserOpSent(_operationId, _calls.length, destinationEid, guid);
     }
 
     /// @inheritdoc IPersonalAccount
@@ -387,12 +387,12 @@ contract PersonalAccount is
             super.supportsInterface(_interfaceId); // ERC1155Holder covers IERC1155Receiver and IERC165
     }
 
-    /// @dev The transport of {executeLoanChainUserOp}: sends the signed batch as a
+    /// @dev The transport of {sendCrossChainUserOp}: sends the signed batch as a
     /// message-only compose over the configured FXRP OFT to this account's
     /// own address on the loan chain, where the mirror authenticates composeFrom back to here
     /// and executes it. Configured settings required, live peer re-checked against the pinned
     /// one, exact quoted fee spent, pause-gated (a forward move).
-    function _sendLoanChainUserOp(
+    function _sendCrossChainUserOp(
         IPersonalAccount.Call[] memory _calls,
         bytes32 _operationId,
         uint64 _deadline,

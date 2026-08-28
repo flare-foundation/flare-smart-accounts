@@ -3,18 +3,18 @@ pragma solidity ^0.8.27;
 
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {
-    ILoanChainPersonalAccount,
+    IPersonalAccountRemote,
     PA_ACTION_EXECUTE
-} from "../../userInterfaces/ILoanChainPersonalAccount.sol";
-import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
+} from "../../userInterfaces/IPersonalAccountRemote.sol";
+import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
- * @title LoanChainPersonalAccount contract
- * @notice The loan-chain-side Personal Account implementation: the same frozen PA proxy and
- * CREATE2 address as the user's Flare Personal Account, resolved per chain through the
- * controller-as-beacon. Instructions exist only on Flare, so this account has no
+ * @title PersonalAccountRemote contract
+ * @notice The remote Personal Account implementation (the loan chain, at launch): the
+ * same frozen PA proxy and CREATE2 address as the user's Flare Personal Account, resolved per
+ * chain through the controller-as-beacon. Instructions exist only on Flare, so this account has no
  * controller-driven methods at all; every authorized action arrives through the authenticated
- * `lzCompose` (see {LoanChainAccountBase}) sent by this same account on Flare. It does what
+ * `lzCompose` (see {ComposeReceiverAccountBase}) sent by this same account on Flare. It does what
  * the Flare account does: execute the batch of calls the user signed — here carried by the
  * compose instead of the controller — and nothing permissionless. Borrow proceeds the user
  * directed here, recovered loan-token surplus from the loan subaccount, mistaken sends and
@@ -22,7 +22,7 @@ import {LoanChainAccountBase} from "./LoanChainAccountBase.sol";
  * accepted (a LayerZero native drop delivered with a message funds value-carrying calls) and
  * leaves the same way, as a value-carrying call.
  */
-contract LoanChainPersonalAccount is ILoanChainPersonalAccount, LoanChainAccountBase {
+contract PersonalAccountRemote is IPersonalAccountRemote, ComposeReceiverAccountBase {
 
     /// @notice XRPL owner (the same string the Flare Personal Account is derived from).
     string public xrplOwner;
@@ -49,10 +49,10 @@ contract LoanChainPersonalAccount is ILoanChainPersonalAccount, LoanChainAccount
         _setController(_controllerAddress);
         require(bytes(_xrplOwner).length > 0, InvalidXrplOwner());
         xrplOwner = _xrplOwner;
-        emit LoanChainPersonalAccountInitialized(_controllerAddress, _xrplOwner);
+        emit PersonalAccountRemoteInitialized(_controllerAddress, _xrplOwner);
     }
 
-    /// @inheritdoc ILoanChainPersonalAccount
+    /// @inheritdoc IPersonalAccountRemote
     function implementation()
         external view
         returns (address)
@@ -61,7 +61,7 @@ contract LoanChainPersonalAccount is ILoanChainPersonalAccount, LoanChainAccount
         return IBeacon(controller).implementation();
     }
 
-    /// @dev The account's action set (see {LoanChainAccountBase._dispatch}): one action, the
+    /// @dev The account's action set (see {ComposeReceiverAccountBase._dispatch}): one action, the
     /// signed batch. Pause-gated - during an incident the pause must stop even signed-looking
     /// traffic, since a transport compromise is exactly what an incident looks like.
     function _dispatch(

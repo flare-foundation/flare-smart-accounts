@@ -11,7 +11,7 @@ import {FacetBase} from "./FacetBase.sol";
 /**
  * @title LoanChainSettingsFacet
  * @notice Facet holding the loan-chain configuration (global transport, per-type write-once
- * markets, the per-type borrow switch) and the loan-chain Personal Account creation route.
+ * markets, the per-type borrow switch) and the remote Personal Account creation route.
  * Cut only on the loan-chain diamond (Ethereum, at launch), never on the Flare side.
  * Subaccount creation goes through the generic {SubaccountsFacet}, whose parent resolution
  * works without a deployed Personal Account; Personal Account creation needs this explicit
@@ -26,7 +26,7 @@ contract LoanChainSettingsFacet is IILoanChainSettingsFacet, FacetBase {
     }
 
     /// @inheritdoc ILoanChainSettingsFacet
-    function createLoanChainPersonalAccount(
+    function createPersonalAccountRemote(
         string calldata _xrplOwner
     )
         external
