@@ -42,6 +42,7 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
+    ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
 } from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
 import {PA_ACTION_EXECUTE} from "../contracts/userInterfaces/ILoanChainPersonalAccount.sol";
@@ -342,7 +343,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // sweepToLoan never reads the parent: the forward bridge works pre-PA
         _configureLoanBridge();
         vm.deal(address(this), messagingFee);
-        assertEq(ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}(), 250e6);
+        assertEq(ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}(""), 250e6);
 
         // token recovery parks assets at the future PA address - the same owner's
         // deterministic address; a plain native send reverts (no receive, no native exit)
@@ -1242,20 +1243,37 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         _configureLoanBridge();
 
         vm.deal(address(this), messagingFee);
-        uint256 amount = ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        uint256 amount = ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}("");
 
         assertEq(amount, balance);
         // the FXRP left the subaccount and the adapter locked it
         assertEq(fxrp.balanceOf(subaccount), 0);
         assertEq(fxrp.balanceOf(address(fxrpOft)), balance);
 
-        // destination is this account's own address on the configured chain, full amount, no compose
-        (uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,,,) = fxrpOft.lastSendParam();
+        // destination is this account's own address on the configured chain, full amount, and
+        // the argument-free deposit compose the loan-chain twin executes on arrival
+        (uint32 dstEid, bytes32 to, uint256 amountLD, uint256 minAmountLD,, bytes memory composeMsg,) =
+            fxrpOft.lastSendParam();
         assertEq(dstEid, destinationEid);
         assertEq(to, bytes32(uint256(uint160(subaccount))));
         assertEq(amountLD, balance);
         assertEq(minAmountLD, balance);
+        assertEq(composeMsg, abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_SWEEP, bytes("")));
         assertEq(fxrpOft.lastValue(), messagingFee);
+    }
+
+    function testSweepToLoanPassesTheCallerOptionsThrough() public {
+        // the compose needs destination gas the caller supplies; the options reach the OFT verbatim
+        address subaccount = _createSubaccountFor(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+        bytes memory options = _canonicalLoanOptions();
+
+        vm.deal(address(this), messagingFee);
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}(options);
+
+        (,,,, bytes memory sentOptions,,) = fxrpOft.lastSendParam();
+        assertEq(sentOptions, options);
     }
 
     function testSweepToLoanCanBeCalledByAnyoneAndRefundsExcess() public {
@@ -1267,7 +1285,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         uint256 sent = messagingFee + 1 ether;
         vm.deal(caller, sent);
         vm.prank(caller);
-        ILoanSubaccount(subaccount).sweepToLoan{value: sent}();
+        ILoanSubaccount(subaccount).sweepToLoan{value: sent}("");
 
         // only the fee was forwarded; the excess came back to the caller, not stranded here
         assertEq(fxrpOft.lastValue(), messagingFee);
@@ -1282,7 +1300,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         _configureLoanBridge();
 
         vm.deal(address(this), messagingFee);
-        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}("");
 
         assertEq(fxrp.allowance(subaccount, address(fxrpOft)), 0);
     }
@@ -1293,7 +1311,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.deal(address(this), messagingFee);
         vm.expectRevert(ILoanSubaccount.NothingToSweep.selector);
-        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}("");
     }
 
     function testSweepToLoanRevertLoanBridgeNotConfigured() public {
@@ -1302,7 +1320,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.deal(address(this), messagingFee);
         vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
-        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}("");
     }
 
     function testSweepToLoanRevertInsufficientFundsForSweep() public {
@@ -1314,7 +1332,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(ILoanSubaccount.InsufficientFundsForSweep.selector, messagingFee)
         );
-        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee - 1}();
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee - 1}("");
     }
 
     function testExecuteLoanChainUserOp() public {
@@ -1604,11 +1622,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.deal(address(this), messagingFee);
         vm.expectRevert(ILoanSubaccount.WrongDestinationPeer.selector);
-        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}("");
 
         // restoring the pinned peer restores the sweep
         fxrpOft.setPeer(destinationEid, destinationPeer);
-        uint256 amount = ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        uint256 amount = ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}("");
         assertEq(amount, 100e6);
     }
 
@@ -1628,7 +1646,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.deal(address(this), messagingFee);
         vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
-        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}("");
     }
 
     function testSweepToLoanRevertWhenPausedButSweepRedeemStillWorks() public {
@@ -1647,7 +1665,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // the forward sweep is blocked while paused: it is the incident-containment surface
         vm.deal(address(this), messagingFee + executorFee);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}();
+        ILoanSubaccount(subaccount).sweepToLoan{value: messagingFee}("");
 
         // the backward sweep stays available, so assets can always exit toward the user
         (uint256 amount,) = ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();

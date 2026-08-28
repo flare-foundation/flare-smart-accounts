@@ -12,6 +12,7 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
+    ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanChainSubaccount.sol";
 import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
@@ -256,6 +257,8 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
             _executeWithdraw(_actionData, _guid);
         } else if (_action == ACTION_DEPOSIT_COLLATERAL) {
             _executeDepositCollateral(_actionData, _guid, _amountLD);
+        } else if (_action == ACTION_DEPOSIT_SWEEP) {
+            _executeSweepDeposit(_guid, _amountLD);
         } else {
             revert UnsupportedAction(_action);
         }
@@ -323,6 +326,23 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
 
         _supplyAndBorrow(_bridgedAmount, 0, bytes32(0), 0);
         emit CollateralDeposited(parentPersonalAccount, operationId, _bridgedAmount, _guid);
+    }
+
+    /// @dev The permissionless forward sweep's compose: deposit exactly the authenticated bridged
+    /// amount, nothing to decode and no id to consume (nobody signed it - it can express no
+    /// choice). Same pause rule as the signed deposit.
+    function _executeSweepDeposit(
+        bytes32 _guid,
+        uint256 _bridgedAmount
+    )
+        private
+    {
+        require(_bridgedAmount > 0, ZeroAmount());
+        if (IPauseFacet(controller).isPaused()) {
+            require(_borrowSharesOf(_myMarket()) > 0, IPauseFacet.IsPaused());
+        }
+        _supplyAndBorrow(_bridgedAmount, 0, bytes32(0), 0);
+        emit SweptFxrpDeposited(parentPersonalAccount, _bridgedAmount, _guid);
     }
 
     /// @dev The asset moves of the borrow and deposit actions, separated from the decodes to

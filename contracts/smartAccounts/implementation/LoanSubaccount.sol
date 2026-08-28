@@ -15,6 +15,7 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
+    ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanChainSubaccount.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
@@ -138,16 +139,20 @@ contract LoanSubaccount is ILoanSubaccount, ReentrancyGuardTransient {
     }
 
     /// @inheritdoc ILoanSubaccount
-    function sweepToLoan()
+    function sweepToLoan(
+        bytes calldata _extraOptions
+    )
         external payable
         nonReentrant
         returns (uint256 _amount)
     {
-        // cleanup sweeps the whole balance; no compose message and no options - acting on the
-        // assets on the destination side is the loan instruction's job
+        // cleanup sweeps the whole balance, with the argument-free deposit compose: on arrival
+        // the loan-chain twin supplies exactly what arrived as collateral - no choice for the
+        // permissionless caller to make, no id to consume
         _amount = ContractRegistry.getAssetManagerFXRP().fAsset().balanceOf(address(this));
         require(_amount > 0, NothingToSweep());
-        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, "", "");
+        bytes memory payload = abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_SWEEP, bytes(""));
+        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, _extraOptions, payload);
         emit FXrpSweptToLoan(parentPersonalAccount, _amount, destinationEid, guid);
     }
 

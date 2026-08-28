@@ -33,6 +33,15 @@ uint8 constant ACTION_WITHDRAW = 2;
 /// new exposure and waits out the pause.
 uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
 
+/// @dev Sweep-deposit action: the compose the permissionless Flare `sweepToLoan` attaches.
+/// `actionData` is empty - nobody signed this, so it can express no choice: exactly the
+/// authenticated bridged amount (the codec's `amountLD`, non-zero) is supplied as collateral
+/// on the account's one market, no debt changes hands, and there is no operation id to
+/// consume (each packet carries its own credit, so it is idempotent by construction). Same
+/// pause rule as the signed deposit: while paused only when the position carries live debt.
+/// If it fails, the credit sits idle for `depositIdleFxrp`, the fallback rail.
+uint8 constant ACTION_DEPOSIT_SWEEP = 4;
+
 /// @dev The destination is an EVM address (cleanly zero-padded into the `bytes32`), paid by a
 /// plain ERC-20 transfer — typically an exchange deposit address, or the user's own
 /// loan-chain Personal Account (the parent, a functional compose-driven account). It may not
@@ -103,6 +112,19 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
     event CollateralDeposited(
         address indexed parentPersonalAccount,
         bytes32 operationId,
+        uint256 amount,
+        bytes32 guid
+    );
+
+    /**
+     * @notice Emitted when a sweep-deposit action executes: FXRP swept forward from Flare was
+     * supplied as collateral on arrival.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param amount FXRP supplied as collateral (the authenticated bridged amount).
+     * @param guid The LayerZero message id the action arrived with.
+     */
+    event SweptFxrpDeposited(
+        address indexed parentPersonalAccount,
         uint256 amount,
         bytes32 guid
     );

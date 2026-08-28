@@ -57,6 +57,7 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
+    ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM,
     DESTINATION_KIND_XRPL_WORMHOLE
 } from "../contracts/userInterfaces/ILoanChainSubaccount.sol";
@@ -653,6 +654,45 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         _deliverExpectRevertZeroAmount(
             subaccount, 2, _depositPayload(bytes32("op-2")), ILoanChainSubaccount.ZeroAmount.selector
         );
+    }
+
+    function testLzComposeSweepDepositSuppliesBridgedAmount() public {
+        // the permissionless forward sweep's compose: argument-free, deposits exactly what
+        // arrived, no debt, no id - a second packet simply deposits again
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        vm.expectEmit();
+        emit ILoanChainSubaccount.SweptFxrpDeposited(parentPersonalAccount, 100e6, _guidFor(1));
+        _deliver(subaccount, 1, 100e6, _sweepDepositPayload());
+
+        (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+        assertEq(borrowShares, 0);
+
+        fxrp.mint(subaccount, 25e6);
+        _deliver(subaccount, 2, 25e6, _sweepDepositPayload());
+        (, , collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 125e6);
+
+        // a sweep that brings nothing is malformed
+        _deliverExpectRevertZeroAmount(
+            subaccount, 3, _sweepDepositPayload(), ILoanChainSubaccount.ZeroAmount.selector
+        );
+    }
+
+    function testLzComposeSweepDepositWhilePausedRequiresLiveDebt() public {
+        // the deposit rule: defending an indebted position survives a pause, a debt-free
+        // deposit is new exposure and waits (a revert, retriable, not a skip)
+        address indebted = _borrowedSubaccount(500e18);
+        address debtFree = controller.createSubaccount("rDebtFreeOwner", SUBACCOUNT_TYPE_LOAN);
+        fxrp.mint(indebted, 50e6);
+        fxrp.mint(debtFree, 100e6);
+        _pauseController();
+
+        _deliverExpectRevert(debtFree, 1, _sweepDepositPayload(), IPauseFacet.IsPaused.selector);
+        _deliver(indebted, 2, 50e6, _sweepDepositPayload());
+        (, , uint128 collateral) = morpho.position(_marketId(), indebted);
+        assertEq(collateral, 150e6);
     }
 
     function testLzComposeBorrowAgainstExistingCollateral() public {
@@ -1758,6 +1798,17 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(collateral, 60e6);
         assertEq(fxrp.balanceOf(subaccount), 40e6);
 
+        // the permissionless forward sweep: whatever idles on the Flare side bridges with the
+        // argument-free deposit compose and becomes collateral on arrival
+        fxrp.mint(sender, 40e6);
+        ILoanSubaccount(sender).sweepToLoan{value: 0.01 ether}("");
+        (amountLD, payload) = _lastSentCompose();
+        assertEq(amountLD, 40e6);
+        fxrp.mint(subaccount, amountLD);
+        _deliver(subaccount, 3, amountLD, payload);
+        (, , collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+
         // the Personal Account's transfer: sent by a Flare PersonalAccount through
         // executeUserOp, decoded by a mirror created behind the same beacon
         address destination = makeAddr("userChosen");
@@ -1766,7 +1817,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(amountLD, 0);
         address mirror = _mirrorOnThisDiamond("rMirrorOwner");
         rlusd.mint(mirror, 500e18);
-        _deliverToMirror(mirror, 3, payload);
+        _deliverToMirror(mirror, 4, payload);
         assertEq(rlusd.balanceOf(destination), 500e18);
         assertEq(rlusd.balanceOf(mirror), 0);
         assertTrue(ILoanChainPersonalAccount(mirror).usedOperations(bytes32("op-t")));
@@ -2242,5 +2293,9 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
     /// The amount and compose payload of the last send the Flare side handed to the OFT.
     function _lastSentCompose() private view returns (uint256 _amountLD, bytes memory _payload) {
         (, , _amountLD, , , _payload, ) = fxrpOft.lastSendParam();
+    }
+
+    function _sweepDepositPayload() private pure returns (bytes memory) {
+        return abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_SWEEP, bytes(""));
     }
 }

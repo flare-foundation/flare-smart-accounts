@@ -255,17 +255,26 @@ interface ILoanSubaccount is ISubaccount {
         returns (uint256 _amount, uint256 _redeemedAmount);
 
     /**
-     * @notice Bridges all idle FXRP onward to this account's address on the loan chain.
-     * @dev Permissionless: this is the forward cleanup move, so anyone may trigger it. Like
-     * {sweepRedeem} it takes no parameters. The destination address is this account's own address,
-     * which is identical on every chain because it is CREATE2-derived from inputs that do not vary
-     * by chain, and the destination chain and OFT come from the controller, so the caller cannot
-     * choose where the assets go. `msg.value` must cover the LayerZero messaging fee; any excess
-     * is returned to the caller. Reverts while the controller is paused: the forward sweep is the
-     * incident-containment surface, while {sweepRedeem} stays available during a pause.
+     * @notice Bridges all idle FXRP onward to this account's address on the loan chain, where
+     * it is deposited as collateral on arrival.
+     * @dev Permissionless: this is the forward cleanup move, so anyone may trigger it. The
+     * destination address is this account's own address, which is identical on every chain
+     * because it is CREATE2-derived from inputs that do not vary by chain, and the destination
+     * chain and OFT come from the controller, so the caller cannot choose where the assets go.
+     * The attached compose is argument-free (`ACTION_DEPOSIT_SWEEP`): the loan-chain twin
+     * supplies exactly the bridged amount as collateral, no debt, no operation id - nobody
+     * signed it, so it can express no choice. If that compose fails, the credit sits idle on
+     * the loan-chain account for its permissionless deposit rail. `_extraOptions` must carry
+     * the destination `lzReceive` and `lzCompose` gas (type-3). `msg.value` must cover the
+     * LayerZero messaging fee; any excess is returned to the caller. Reverts while the
+     * controller is paused: the forward sweep is the incident-containment surface, while
+     * {sweepRedeem} stays available during a pause.
+     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      * @return _amount Amount of FXRP bridged.
      */
-    function sweepToLoan()
+    function sweepToLoan(
+        bytes calldata _extraOptions
+    )
         external payable
         returns (uint256 _amount);
 
