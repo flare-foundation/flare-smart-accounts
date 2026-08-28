@@ -330,7 +330,8 @@ contract LoanChainSubaccount is ILoanChainSubaccount, LoanChainAccountBase {
 
     /// @dev The permissionless forward sweep's compose: deposit exactly the authenticated bridged
     /// amount, nothing to decode and no id to consume (nobody signed it - it can express no
-    /// choice). Same pause rule as the signed deposit.
+    /// choice; replay safety is the endpoint's at-most-once compose delivery per packet, and each
+    /// packet supplies only its own credit). Same pause rule as the signed deposit.
     function _executeSweepDeposit(
         bytes32 _guid,
         uint256 _bridgedAmount

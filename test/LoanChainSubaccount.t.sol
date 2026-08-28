@@ -1809,6 +1809,18 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         (, , collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
 
+        // the signed deposit: exactly the signed amount travels and is supplied, no debt
+        fxrp.mint(sender, 30e6);
+        vm.prank(parentPersonalAccount);
+        ILoanSubaccount(sender).depositCollateral{value: 0.01 ether}(30e6, bytes32("op-d"), deadline, "");
+        (amountLD, payload) = _lastSentCompose();
+        assertEq(amountLD, 30e6);
+        fxrp.mint(subaccount, amountLD);
+        _deliver(subaccount, 4, amountLD, payload);
+        (, , collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 130e6);
+        assertTrue(ILoanChainSubaccount(subaccount).usedOperations(bytes32("op-d")));
+
         // the Personal Account's transfer: sent by a Flare PersonalAccount through
         // executeUserOp, decoded by a mirror created behind the same beacon
         address destination = makeAddr("userChosen");
@@ -1817,7 +1829,7 @@ contract LoanChainSubaccountTest is Test, FacetsDeploy {
         assertEq(amountLD, 0);
         address mirror = _mirrorOnThisDiamond("rMirrorOwner");
         rlusd.mint(mirror, 500e18);
-        _deliverToMirror(mirror, 4, payload);
+        _deliverToMirror(mirror, 5, payload);
         assertEq(rlusd.balanceOf(destination), 500e18);
         assertEq(rlusd.balanceOf(mirror), 0);
         assertTrue(ILoanChainPersonalAccount(mirror).usedOperations(bytes32("op-t")));

@@ -37,8 +37,10 @@ uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
 /// `actionData` is empty - nobody signed this, so it can express no choice: exactly the
 /// authenticated bridged amount (the codec's `amountLD`, non-zero) is supplied as collateral
 /// on the account's one market, no debt changes hands, and there is no operation id to
-/// consume (each packet carries its own credit, so it is idempotent by construction). Same
-/// pause rule as the signed deposit: while paused only when the position carries live debt.
+/// consume: replay safety is the endpoint's - EndpointV2 executes a compose at most once per
+/// `(from, to, guid, index)` and a failed one stays retriable - and the action is additive,
+/// each packet supplying only its own credited amount. Same pause rule as the signed deposit:
+/// while paused only when the position carries live debt.
 /// If it fails, the credit sits idle for `depositIdleFxrp`, the fallback rail.
 uint8 constant ACTION_DEPOSIT_SWEEP = 4;
 
@@ -291,8 +293,8 @@ interface ILoanChainSubaccount is ILoanChainAccountBase, ISubaccount {
     error InvalidDestination();
 
     /**
-     * @notice Reverts on an action carrying no amount: a borrow that would neither supply
-     * collateral nor borrow, or a withdraw of zero.
+     * @notice Reverts on an action carrying no amount: a borrow with a zero borrow amount, a
+     * deposit (signed or swept) with no bridged amount, or a withdraw of zero.
      */
     error ZeroAmount();
 

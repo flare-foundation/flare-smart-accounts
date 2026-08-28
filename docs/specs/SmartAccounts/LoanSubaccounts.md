@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the the recovery method (`sweepToParent`) are in place. The Flare-side loan instructions (`borrow`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow and withdraw actions), the per-type market binding and governance configuration (`LoanChainSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery method (`sweepToParent`) are in place. The Flare-side loan instructions (`borrow`, `depositCollateral`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow, deposit, sweep-deposit and withdraw actions), the per-type market binding and governance configuration (`LoanChainSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
 
 ## Typed subaccounts
 
@@ -81,9 +81,9 @@ Assets can strand at the subaccount whenever a cross-chain flow breaks part-way.
 - **`sweepRedeem()`** — the backward move. Pushes idle FXRP to the parent Personal Account and has the parent redeem it to its XRPL owner in the same call, through `PersonalAccount.redeemFromSubaccount(amount)`: callable only by the account's own subaccounts (the controller's prediction for the owner and the caller's type must be the caller), it **pulls exactly the pushed amount and redeems exactly that**, so the parent's own balance is never part of a subaccount-initiated redemption. It takes **no parameters**: the destination is the parent (fixed at deployment, part of the address), the executor comes from the controller, and `msg.value` travels whole as its fee (FAssets records it in whole gwei). `msg.value` must cover the controller's **configured executor fee** — the fee is the price of the permissionless rail, so forcing the backward direction is never gas-only (see the accepted risk below). The fee policy lives at this entry: `redeemFromSubaccount` itself forwards whatever it receives, so an authenticated route can later send less or nothing (the executor stays appointed, unpaid). Reverts with `NothingToRedeem` rather than no-op, so a caller's value is returned instead of being trapped on the account.
 
   The parent is the **recorded redeemer**. That is the point of the relocation: every redemption outcome — a partial fill, a payment-default payout, a refund — lands on the parent, where `executeUserOp` already handles anything, including triggering the payment default directly on the asset manager. The subaccount keeps no redemption-request or default state and no relay methods; `sweepRedeem` is its one redemption method. The parent calls `redeemAmount` (the UBA-based entry point on `IRedeemExtended`, which the asset manager implements) with the **whole pushed balance**, rather than `redeem`, which only accepts whole lots — a cleanup method that redeemed whole lots would strand the remainder. FAssets may still redeem less than requested when redemption tickets run out; the remainder stays on the parent, under the user's control. A balance below the FAssets minimum redemption amount is pushed to the parent **unredeemed** instead (FAssets would reject it): `redeemedAmount` is zero, the value goes to the parent's float as well (`NativeSweptToParent`), and `TokenSweptToParent` is emitted — the rail never fails on amount, costs the configured fee either way, and "whatever FAssets does not redeem stays on the parent" covers dust and partial fills alike. The parent's redemption runs in its **own reentrancy-guard domain**: the legitimate user-driven path (`executeUserOp` → `sweepRedeem` → `redeemFromSubaccount`) re-enters the parent while its shared guard is held, and the method touches none of the state that guard protects. The nesting is bounded: the method pulls before it redeems and writes no account state, so a redemption reached from beneath any guarded method (no dependency does that today) cannot touch the parent's pre-existing FXRP, and a nested redemption is refused by the guard.
-- **`sweepToLoan()`** — the forward move. Bridges idle FXRP onward to the loan chain over LayerZero. It also takes **no parameters**, for the same reason: the destination is **this account's own address**, which is identical on every chain because it is CREATE2-derived from inputs that do not vary by chain, and the destination chain and OFT come from governance-set controller settings (`setLoanBridgeSettings`, timelocked). So a permissionless caller has nothing to point at. `msg.value` must cover the LayerZero messaging fee; the exact quoted fee is forwarded and any excess is returned to the caller rather than left on an account with no native exit.
+- **`sweepToLoan(extraOptions)`** — the forward move. Bridges idle FXRP onward to the loan chain over LayerZero, to be deposited as collateral on arrival. Its only parameter is the LayerZero execution options (the destination gas); the caller chooses nothing else, for the same reason: the destination is **this account's own address**, which is identical on every chain because it is CREATE2-derived from inputs that do not vary by chain, and the destination chain and OFT come from governance-set controller settings (`setLoanBridgeSettings`, timelocked). So a permissionless caller has nothing to point at. `msg.value` must cover the LayerZero messaging fee; the exact quoted fee is forwarded and any excess is returned to the caller rather than left on an account with no native exit.
 
-  The FXRP OFT is a lock/unlock adapter (`approvalRequired() == true`), so the sweep approves it for the exact amount and resets the allowance to zero afterwards. It reverts while the controller is paused: the forward sweep is the incident-containment surface (an OFT or route compromise is stopped by pausers immediately, without waiting out the timelock), while `sweepRedeem` stays available during a pause so assets can always exit toward the user. `setLoanBridgeSettings` validates that the OFT wraps the FXRP token, shares its decimals, and that its live peer for the destination endpoint equals the **pinned expected peer** exactly — existence alone would accept a wrong route — so misconfiguration fails at the timelocked call, not in the field; explicit zeros clear the settings, which disables the forward sweep until reconfigured. Every `sweepToLoan` re-checks the OFT's live peer against the pinned one before locking FXRP, so a peer mutation on the OFT after configuration fails sweeps closed instead of routing to an unknown remote OApp. It carries the **deposit compose** (`ACTION_DEPOSIT_SWEEP`): on arrival the loan-chain twin supplies exactly the bridged amount as collateral — no debt, no destination, no operation id, because nobody signed it and it must express no choice; each packet carries its own credit, so it is idempotent by construction. The caller supplies the destination `lzReceive` and `lzCompose` gas in `extraOptions`. If the compose fails, the credit sits idle on the loan-chain account for `depositIdleFxrp`, the fallback rail. FXRP and the OFT both use 6 decimals, so nothing is lost to shared-decimal dust and `minAmountLD` equals the full amount.
+  The FXRP OFT is a lock/unlock adapter (`approvalRequired() == true`), so the sweep approves it for the exact amount and resets the allowance to zero afterwards. It reverts while the controller is paused: the forward sweep is the incident-containment surface (an OFT or route compromise is stopped by pausers immediately, without waiting out the timelock), while `sweepRedeem` stays available during a pause so assets can always exit toward the user. `setLoanBridgeSettings` validates that the OFT wraps the FXRP token, shares its decimals, and that its live peer for the destination endpoint equals the **pinned expected peer** exactly — existence alone would accept a wrong route — so misconfiguration fails at the timelocked call, not in the field; explicit zeros clear the settings, which disables the forward sweep until reconfigured. Every `sweepToLoan` re-checks the OFT's live peer against the pinned one before locking FXRP, so a peer mutation on the OFT after configuration fails sweeps closed instead of routing to an unknown remote OApp. It carries the **deposit compose** (`ACTION_DEPOSIT_SWEEP`): on arrival the loan-chain twin supplies exactly the bridged amount as collateral — no debt, no destination, no operation id, because nobody signed it and it must express no choice. Replay safety is the endpoint's: EndpointV2 executes a compose at most once per packet and a failed one stays retriable; the action itself is additive — each packet supplies only its own credited amount. The caller supplies the destination `lzReceive` and `lzCompose` gas in `extraOptions`. If the compose fails, the credit sits idle on the loan-chain account for `depositIdleFxrp`, the fallback rail. FXRP and the OFT both use 6 decimals, so nothing is lost to shared-decimal dust and `minAmountLD` equals the full amount.
 
 Which direction to sweep is the **executor's operational decision**, deliberately not enforced
 on-chain. A parent-stamped direction lifecycle — so a third party could not front-run the
@@ -157,10 +157,12 @@ subaccount the FXRP came from.
 
 ## The loan instructions: `borrow`, `depositCollateral` and `withdraw`
 
-The forward moves come in two shapes. `sweepToLoan` is cleanup: permissionless, no payload, the
-assets just cross over. The **loan instructions** are `borrow(collateralAmount, borrowAmount,
-destinationKind, destination, operationId, deadline, extraOptions)` and `withdraw(amount,
-operationId, deadline, extraOptions)`: typed methods that build the compose payload
+The forward moves come in two shapes. `sweepToLoan` is cleanup: permissionless, with a fixed
+argument-free deposit compose — the assets cross over and become collateral. The **loan
+instructions** are `borrow(collateralAmount, borrowAmount, destinationKind, destination,
+operationId, deadline, extraOptions)`, `depositCollateral(amount, operationId, deadline,
+extraOptions)` and `withdraw(amount, operationId, deadline, extraOptions)`: typed methods that
+build the compose payload
 **on-chain** and bridge it to this account's own address on the loan chain, where the
 loan-chain twin executes it on arrival (supply as collateral, borrow, disburse; deposit
 collateral only; withdraw collateral). The payload is not passed in: what the user signs is
@@ -266,7 +268,8 @@ Personal Account has no local key on the loan chain — instructions exist only 
 its loan-chain presence is the compose-driven mirror described below — so
 `onlyParent` methods could
 never be called. Every authorized action instead arrives as an authenticated LayerZero compose
-payload sent by this same account on Flare (`borrow`, `withdraw`), and everything else is
+payload sent by this same account on Flare (`borrow`, `depositCollateral`, `withdraw`, and the
+forward sweep's fixed deposit compose), and everything else is
 permissionless movement along fixed rails, the same invariant as everywhere: anyone may move
 the assets, nobody may redirect them.
 
@@ -317,7 +320,9 @@ untrusted and ignored. A failing delivery reverts and stays retriable through th
 the credited FXRP is already on the account either way.
 
 **The payload, version 1** — `abi.encode(uint8 version, uint8 action, bytes actionData)`. Every
-action carries `(bytes32 operationId, uint64 deadline, …)`. The market is not a payload field:
+signed action carries `(bytes32 operationId, uint64 deadline, …)`; the unsigned sweep deposit
+carries nothing, its replay safety being the endpoint's at-most-once compose delivery. The
+market is not a payload field:
 the account operates on exactly one market — the one its type is bound to — so the subaccount
 address itself commits to the pool:
 
@@ -631,9 +636,10 @@ so no mirror can exist for an impossible owner.
   - per-action `lzCompose` gas profiling against the real Morpho, oracle and token contracts
     — the test fixture's option values are illustrative headroom for the mock path, not
     production configuration;
-  - the real Endpoint/OFT compose-delivery integration harness for all three typed actions
-    (also a step-6 release gate; the local sender→codec→receiver test covers everything but
-    the wire hop).
+  - the real Endpoint/OFT compose-delivery integration harness for every action (also a
+    step-6 release gate; the local sender→codec→receiver test runs each Flare sender's bytes —
+    borrow, deposit, sweep deposit, withdraw, mirror execute — through the canonical codec into
+    the real receivers, everything but the wire hop).
 - **`setLoanBridgeSettings` comes last, and only once the loan-chain side exists.** Its
   validation reads the OFT's live peer for the destination endpoint, so it cannot be configured
   before the destination route is wired; until then the forward moves revert with

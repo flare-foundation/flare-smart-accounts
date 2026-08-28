@@ -1673,7 +1673,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     //
-    // the loan instructions: borrow and withdraw (forward moves with typed payloads)
+    // the loan instructions: borrow, depositCollateral and withdraw (forward moves with typed payloads)
     //
 
     function testBorrowBridgesExactAmountWithTypedPayload() public {
