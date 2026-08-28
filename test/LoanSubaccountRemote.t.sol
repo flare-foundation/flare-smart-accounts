@@ -16,9 +16,8 @@ import {
     LoanSubaccountRemote
 } from "../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
 import {SubaccountProxy} from "../contracts/smartAccounts/proxy/SubaccountProxy.sol";
-import {
-    LoanChainSettingsFacet
-} from "../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol";
+import {ComposeTransportFacet} from "../contracts/smartAccounts/facets/ComposeTransportFacet.sol";
+import {LoanMarketsFacet} from "../contracts/smartAccounts/facets/LoanMarketsFacet.sol";
 import {SubaccountsFacet} from "../contracts/smartAccounts/facets/SubaccountsFacet.sol";
 import {PersonalAccountsFacet} from "../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {
@@ -35,12 +34,10 @@ import {
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {IPersonalAccountRemote} from "../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
-import {
-    ILoanChainSettingsFacet
-} from "../contracts/userInterfaces/facets/ILoanChainSettingsFacet.sol";
-import {
-    IILoanChainSettingsFacet
-} from "../contracts/smartAccounts/interface/IILoanChainSettingsFacet.sol";
+import {IComposeTransportFacet} from "../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
+import {ILoanMarketsFacet} from "../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
+import {IIComposeTransportFacet} from "../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
+import {IILoanMarketsFacet} from "../contracts/smartAccounts/interface/IILoanMarketsFacet.sol";
 import {IMorpho} from "../contracts/smartAccounts/interface/IMorpho.sol";
 import {
     ISubaccountsFacet,
@@ -57,6 +54,7 @@ import {MockLzEndpoint} from "../contracts/mock/MockLzEndpoint.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
+import {ITimelockFacet} from "../contracts/userInterfaces/facets/ITimelockFacet.sol";
 import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
@@ -137,11 +135,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         personalAccountImplementation = address(new PersonalAccount());
         controller = _deployDiamond();
 
-        // the loan-chain diamond additionally carries the loan settings facet
-        IDiamond.FacetCut[] memory settingsCut = new IDiamond.FacetCut[](1);
+        // the remote diamond additionally carries the compose transport and the loan markets
+        IDiamond.FacetCut[] memory settingsCut = new IDiamond.FacetCut[](2);
         settingsCut[0] = _buildFacetCut(
-            address(new LoanChainSettingsFacet()),
-            "LoanChainSettingsFacet",
+            address(new ComposeTransportFacet()),
+            "ComposeTransportFacet",
+            IDiamond.FacetCutAction.Add
+        );
+        settingsCut[1] = _buildFacetCut(
+            address(new LoanMarketsFacet()),
+            "LoanMarketsFacet",
             IDiamond.FacetCutAction.Add
         );
         vm.prank(governance);
@@ -267,18 +270,18 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     // step 2: the loan-chain settings
     //
 
-    function testSetLoanChainTransportAndRegisterMarket() public {
+    function testSetComposeTransportAndRegisterMarket() public {
         _configureSettings();
 
-        ILoanChainSettingsFacet.Transport memory transport =
-            ILoanChainSettingsFacet(address(controller)).getLoanChainTransport();
+        IComposeTransportFacet.Transport memory transport =
+            IComposeTransportFacet(address(controller)).getComposeTransport();
         assertEq(transport.lzEndpoint, lzEndpoint);
-        assertEq(transport.fxrpOft, address(fxrpOft));
+        assertEq(transport.oft, address(fxrpOft));
         assertEq(transport.originEid, originEid);
         assertEq(transport.originPeer, originPeer);
 
-        ILoanChainSettingsFacet.Market memory market =
-            ILoanChainSettingsFacet(address(controller)).getLoanChainMarket(
+        ILoanMarketsFacet.Market memory market =
+            ILoanMarketsFacet(address(controller)).getLoanMarket(
                 SUBACCOUNT_TYPE_LOAN
             );
         assertEq(market.morpho, address(morpho));
@@ -286,240 +289,301 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(market.marketParams.collateralToken, address(fxrp));
         assertEq(market.marketParams.lltv, 0.77e18);
         assertFalse(
-            ILoanChainSettingsFacet(address(controller)).isLoanChainBorrowingDisabled(
+            ILoanMarketsFacet(address(controller)).isLoanBorrowingDisabled(
                 SUBACCOUNT_TYPE_LOAN
             )
         );
     }
 
-    function testLoanChainSettingsRevertNotOwner() public {
+    function testSettingsRevertNotOwner() public {
         address notOwner = makeAddr("notOwner");
         vm.startPrank(notOwner);
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
-            _defaultTransport()
-        );
+        IIComposeTransportFacet(address(controller)).setComposeTransport(_defaultTransport());
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IILoanChainSettingsFacet(address(controller)).enableLoanChainBorrowing(
+        IILoanMarketsFacet(address(controller)).enableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
+        );
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
         vm.stopPrank();
     }
 
-    function testSetLoanChainTransportRevertInvalidValues() public {
+    function testSetComposeTransportRevertInvalidValues() public {
         fxrpOft.setPeer(originEid, originPeer);
-        ILoanChainSettingsFacet.Transport memory transport;
+        IComposeTransportFacet.Transport memory transport;
 
         // the endpoint and the OFT must be contracts
         transport = _defaultTransport();
         transport.lzEndpoint = makeAddr("noCode");
-        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidLzEndpoint.selector);
+        _setTransportExpectRevert(transport, IComposeTransportFacet.InvalidLzEndpoint.selector);
 
         transport = _defaultTransport();
-        transport.fxrpOft = makeAddr("noCode");
-        _setTransportExpectRevert(transport, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+        transport.oft = makeAddr("noCode");
+        _setTransportExpectRevert(transport, IComposeTransportFacet.InvalidOft.selector);
 
         transport = _defaultTransport();
         transport.originEid = 0;
-        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidOriginEid.selector);
+        _setTransportExpectRevert(transport, IComposeTransportFacet.InvalidOriginEid.selector);
 
         transport = _defaultTransport();
         transport.originPeer = bytes32(0);
-        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidOriginPeer.selector);
+        _setTransportExpectRevert(transport, IComposeTransportFacet.InvalidOriginPeer.selector);
     }
 
-    function testRegisterLoanChainMarketRevertInvalidValues() public {
+    function testRegisterLoanMarketRevertInvalidValues() public {
         _configureTransport();
-        ILoanChainSettingsFacet.Market memory market;
+        ILoanMarketsFacet.Market memory market;
 
         // Morpho must be a contract
         market = _defaultMarket();
         market.morpho = makeAddr("noCode");
-        _registerMarketExpectRevert(market, ILoanChainSettingsFacet.InvalidMorpho.selector);
+        _registerMarketExpectRevert(market, ILoanMarketsFacet.InvalidMorpho.selector);
 
         // the market must name both tokens and a non-zero LLTV
         market = _defaultMarket();
         market.marketParams.loanToken = address(0);
         _registerMarketExpectRevert(
-            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+            market, ILoanMarketsFacet.InvalidMarketParams.selector
         );
 
         market = _defaultMarket();
         market.marketParams.collateralToken = address(0);
         _registerMarketExpectRevert(
-            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+            market, ILoanMarketsFacet.InvalidMarketParams.selector
         );
 
         market = _defaultMarket();
         market.marketParams.lltv = 0;
         _registerMarketExpectRevert(
-            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+            market, ILoanMarketsFacet.InvalidMarketParams.selector
         );
 
         // the reserved type 0 can never be bound
         vm.prank(governance);
         vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
             0, _defaultMarket()
         );
     }
 
-    function testRegisterLoanChainMarketRevertWithoutTransport() public {
+    function testRegisterLoanMarketRevertWithoutTransport() public {
         // the transport pins FXRP's identity, which the market's collateral must match:
         // markets cannot be registered before the transport is configured
         morpho.createMarket(_defaultMarket().marketParams);
         _registerMarketExpectRevert(
             _defaultMarket(),
-            ILoanChainSettingsFacet.LoanChainTransportNotConfigured.selector
+            IComposeTransportFacet.ComposeTransportNotConfigured.selector
         );
     }
 
-    function testRegisterLoanChainMarketRevertWrongCollateral() public {
+    function testRegisterLoanMarketRevertWrongCollateral() public {
         // the market's collateral token must be exactly the OFT's own token
         _configureTransport();
         MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
-        ILoanChainSettingsFacet.Market memory market = _defaultMarket();
+        ILoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.collateralToken = address(otherToken);
         morpho.createMarket(market.marketParams);
-        _registerMarketExpectRevert(market, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+        _registerMarketExpectRevert(market, ILoanMarketsFacet.InvalidMarketParams.selector);
     }
 
-    function testSetLoanChainTransportRevertWrongSharedDecimals() public {
+    function testSetComposeTransportRevertWrongSharedDecimals() public {
         // the bridge-back sweep sends with minAmountLD == amountLD, so shared-decimal dust
         // would make it revert; such an OFT must be rejected up front
         fxrpOft.setPeer(originEid, originPeer);
         fxrpOft.setSharedDecimals(4);
         _setTransportExpectRevert(
-            _defaultTransport(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
+            _defaultTransport(), IComposeTransportFacet.InvalidOft.selector
         );
     }
 
-    function testSetLoanChainTransportRevertWrongOftVersion() public {
+    function testSetComposeTransportRevertWrongOftVersion() public {
         // the compose authentication depends on the canonical composeFrom encoding, so only
         // the canonical interface id and message-codec version 1 are accepted
         fxrpOft.setPeer(originEid, originPeer);
 
         fxrpOft.setOftVersion(0x02e49c2c, 2);
         _setTransportExpectRevert(
-            _defaultTransport(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
+            _defaultTransport(), IComposeTransportFacet.InvalidOft.selector
         );
 
         fxrpOft.setOftVersion(0xdeadbeef, 1);
         _setTransportExpectRevert(
-            _defaultTransport(), ILoanBridgeSettingsFacet.InvalidFxrpOft.selector
+            _defaultTransport(), IComposeTransportFacet.InvalidOft.selector
         );
 
         fxrpOft.setOftVersion(0x02e49c2c, 1);
-        vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
-            _defaultTransport()
-        );
+        _setTransport(_defaultTransport());
     }
 
-    function testSetLoanChainTransportRevertPeerMismatch() public {
+    function testSetComposeTransportRevertPeerMismatch() public {
         // the live peer for the origin endpoint must be exactly the pinned remote OApp
         fxrpOft.setPeer(originEid, bytes32(uint256(0xbad)));
         _setTransportExpectRevert(
-            _defaultTransport(), ILoanChainSettingsFacet.InvalidOriginPeer.selector
+            _defaultTransport(), IComposeTransportFacet.InvalidOriginPeer.selector
         );
     }
 
-    function testSetLoanChainTransportRevertWrongEndpointAssociation() public {
+    function testSetComposeTransportRevertWrongEndpointAssociation() public {
         // the OFT must be wired to the same endpoint that delivers lzCompose calls; a wrong
         // (or malicious) endpoint could fabricate every callback parameter
         fxrpOft.setPeer(originEid, originPeer);
         address otherEndpoint = makeAddr("otherEndpoint");
         vm.etch(otherEndpoint, hex"00");
 
-        ILoanChainSettingsFacet.Transport memory transport = _defaultTransport();
+        IComposeTransportFacet.Transport memory transport = _defaultTransport();
         transport.lzEndpoint = otherEndpoint;
-        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidLzEndpoint.selector);
+        _setTransportExpectRevert(transport, IComposeTransportFacet.InvalidLzEndpoint.selector);
     }
 
-    function testSetLoanChainTransportRevertDirtyOriginPeer() public {
+    function testSetComposeTransportRevertDirtyOriginPeer() public {
         // the origin peer is an EVM address and must be cleanly zero-padded
         bytes32 dirtyPeer = bytes32(uint256(originPeer) | (uint256(1) << 200));
         fxrpOft.setPeer(originEid, dirtyPeer);
 
-        ILoanChainSettingsFacet.Transport memory transport = _defaultTransport();
+        IComposeTransportFacet.Transport memory transport = _defaultTransport();
         transport.originPeer = dirtyPeer;
-        _setTransportExpectRevert(transport, ILoanChainSettingsFacet.InvalidOriginPeer.selector);
+        _setTransportExpectRevert(transport, IComposeTransportFacet.InvalidOriginPeer.selector);
     }
 
-    function testClearLoanChainTransportRevertPartialZero() public {
+    function testSetComposeTransportRevertZeroFields() public {
         _configureSettings();
 
-        // a struct with only some fields zeroed is not a clear: it falls through to
-        // validation and reverts, so a malformed clear cannot silently wipe the transport
-        ILoanChainSettingsFacet.Transport memory partialZero;
+        // the setter never clears: an all-zero struct and a partially zero struct both fall
+        // through to validation and revert, so a malformed set cannot silently wipe the
+        // transport - clearing is its own immediate call
+        IComposeTransportFacet.Transport memory zero;
+        _setTransportExpectRevert(zero, IComposeTransportFacet.InvalidLzEndpoint.selector);
+        IComposeTransportFacet.Transport memory partialZero;
         partialZero.originEid = 5;
-        vm.prank(governance);
-        vm.expectRevert(ILoanChainSettingsFacet.InvalidLzEndpoint.selector);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(partialZero);
+        _setTransportExpectRevert(partialZero, IComposeTransportFacet.InvalidLzEndpoint.selector);
 
         // the configured transport is untouched
         assertEq(
-            ILoanChainSettingsFacet(address(controller))
-                .getLoanChainTransport().lzEndpoint,
+            IComposeTransportFacet(address(controller))
+                .getComposeTransport().lzEndpoint,
             lzEndpoint
         );
     }
 
-    function testClearLoanChainTransport() public {
+    function testClearComposeTransport() public {
         _configureSettings();
 
-        // clearing with an all-zero transport disables the transport-dependent surface until
-        // reconfigured; the registered market and repayment persist
-        ILoanChainSettingsFacet.Transport memory cleared;
+        // the clear is immediate and disables the transport-dependent surface until a new
+        // transport is set; the registered market and repayment persist
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+        vm.expectEmit();
+        emit IComposeTransportFacet.ComposeTransportCleared();
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
 
-        ILoanChainSettingsFacet.Transport memory stored =
-            ILoanChainSettingsFacet(address(controller)).getLoanChainTransport();
+        IComposeTransportFacet.Transport memory stored =
+            IComposeTransportFacet(address(controller)).getComposeTransport();
         assertEq(stored.lzEndpoint, address(0));
-        assertEq(stored.fxrpOft, address(0));
+        assertEq(stored.oft, address(0));
         assertEq(stored.originEid, 0);
         assertEq(stored.originPeer, bytes32(0));
 
         // the write-once market binding is not part of the transport and survives
         assertEq(
-            ILoanChainSettingsFacet(address(controller))
-                .getLoanChainMarket(SUBACCOUNT_TYPE_LOAN).morpho,
+            ILoanMarketsFacet(address(controller))
+                .getLoanMarket(SUBACCOUNT_TYPE_LOAN).morpho,
             address(morpho)
         );
     }
 
-    function testRegisterLoanChainMarketIsWriteOnce() public {
+    function testSetComposeTransportEmits() public {
+        fxrpOft.setPeer(originEid, originPeer);
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IComposeTransportFacet.ComposeTransportSet(
+            lzEndpoint, address(fxrpOft), originEid, originPeer
+        );
+        IIComposeTransportFacet(address(controller)).setComposeTransport(_defaultTransport());
+    }
+
+    function testIncidentRunbookCancelsQueuedTransportSetBeforeClear() public {
+        // the runbook under a live timelock: cancel every queued transport set, then clear
+        // immediately. A cancelled set can never execute, so the cleared state holds
+        _configureTransport();
+        vm.prank(governance);
+        controller.setTimelockDuration(1 days);
+
+        IComposeTransportFacet.Transport memory transport = _defaultTransport();
+        bytes memory queuedSet =
+            abi.encodeCall(IIComposeTransportFacet.setComposeTransport, (transport));
+        // with a live timelock the owner call records instead of executing
+        vm.prank(governance);
+        IIComposeTransportFacet(address(controller)).setComposeTransport(transport);
+        assertEq(controller.getExecuteTimelockedCallTimestamp(queuedSet), vm.getBlockTimestamp() + 1 days);
+
+        vm.startPrank(governance);
+        controller.cancelTimelockedCall(queuedSet);
+        // the clear needs no timelock and takes effect in the same call
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
+        vm.stopPrank();
+        assertEq(IComposeTransportFacet(address(controller)).getComposeTransport().lzEndpoint, address(0));
+
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        vm.expectRevert(ITimelockFacet.TimelockInvalidSelector.selector);
+        controller.executeTimelockedCall(queuedSet);
+        assertEq(IComposeTransportFacet(address(controller)).getComposeTransport().lzEndpoint, address(0));
+    }
+
+    function testClearDoesNotRetireQueuedTransportSet() public {
+        // why the runbook cancels first: the clear does not touch the timelock, so a set queued
+        // before it matures on schedule and anyone can execute it, restoring the route
+        _configureTransport();
+        vm.prank(governance);
+        controller.setTimelockDuration(1 days);
+
+        IComposeTransportFacet.Transport memory transport = _defaultTransport();
+        bytes memory queuedSet =
+            abi.encodeCall(IIComposeTransportFacet.setComposeTransport, (transport));
+        vm.startPrank(governance);
+        IIComposeTransportFacet(address(controller)).setComposeTransport(transport);
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
+        vm.stopPrank();
+        assertEq(IComposeTransportFacet(address(controller)).getComposeTransport().lzEndpoint, address(0));
+
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+        vm.prank(makeAddr("anyone"));
+        controller.executeTimelockedCall(queuedSet);
+        assertEq(IComposeTransportFacet(address(controller)).getComposeTransport().lzEndpoint, lzEndpoint);
+    }
+
+    function testRegisterLoanMarketIsWriteOnce() public {
         _configureSettings();
 
         // the binding is permanent: a different market means a new subaccount type
-        ILoanChainSettingsFacet.Market memory other = _defaultMarket();
+        ILoanMarketsFacet.Market memory other = _defaultMarket();
         other.marketParams.lltv = 0.5e18;
         morpho.createMarket(other.marketParams);
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanChainSettingsFacet.MarketAlreadyRegistered.selector,
+                ILoanMarketsFacet.MarketAlreadyRegistered.selector,
                 SUBACCOUNT_TYPE_LOAN
             )
         );
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, other
         );
     }
@@ -528,65 +592,61 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.startPrank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanChainSettingsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
+                ILoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
             )
         );
-        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanChainSettingsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
+                ILoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
             )
         );
-        IILoanChainSettingsFacet(address(controller)).enableLoanChainBorrowing(
+        IILoanMarketsFacet(address(controller)).enableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.stopPrank();
     }
 
-    function testSetLoanChainTransportRevertDifferentTokenAfterMarket() public {
+    function testSetComposeTransportRevertDifferentTokenAfterMarket() public {
         // once a market is bound, the collateral token is pinned: a replacement transport
         // wrapping a different token would strand the permanent binding and is rejected
         _configureSettings();
         MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
-        ILoanChainSettingsFacet.Transport memory transport = _defaultTransport();
-        transport.fxrpOft = address(_wiredOft(otherToken));
-        _setTransportExpectRevert(transport, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+        IComposeTransportFacet.Transport memory transport = _defaultTransport();
+        transport.oft = address(_wiredOft(otherToken));
+        _setTransportExpectRevert(transport, IComposeTransportFacet.InvalidOft.selector);
     }
 
-    function testSetLoanChainTransportAllowsAdapterRotation() public {
+    function testSetComposeTransportAllowsAdapterRotation() public {
         // the pin freezes the token, not the adapter: a new OFT wrapping the same token passes
         _configureSettings();
-        ILoanChainSettingsFacet.Transport memory transport = _defaultTransport();
-        transport.fxrpOft = address(_wiredOft(fxrp));
-        vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(transport);
+        IComposeTransportFacet.Transport memory transport = _defaultTransport();
+        transport.oft = address(_wiredOft(fxrp));
+        _setTransport(transport);
         assertEq(
-            ILoanChainSettingsFacet(address(controller)).getLoanChainTransport().fxrpOft,
-            transport.fxrpOft
+            IComposeTransportFacet(address(controller)).getComposeTransport().oft,
+            transport.oft
         );
     }
 
     function testTransportClearAndRestoreKeepsCollateralPin() public {
         // the pin is not transport state: it survives a clear, still rejects a wrong-token
-        // transport, and the original same-token transport restores cleanly
+        // transport, and the original same-token transport restores cleanly (a benign clear;
+        // after an authentication-root compromise the tuple is rotated, never restored)
         _configureSettings();
-        ILoanChainSettingsFacet.Transport memory cleared;
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
 
         MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
-        ILoanChainSettingsFacet.Transport memory wrongToken = _defaultTransport();
-        wrongToken.fxrpOft = address(_wiredOft(otherToken));
-        _setTransportExpectRevert(wrongToken, ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
+        IComposeTransportFacet.Transport memory wrongToken = _defaultTransport();
+        wrongToken.oft = address(_wiredOft(otherToken));
+        _setTransportExpectRevert(wrongToken, IComposeTransportFacet.InvalidOft.selector);
 
-        vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
-            _defaultTransport()
-        );
+        _setTransport(_defaultTransport());
         assertEq(
-            ILoanChainSettingsFacet(address(controller)).getLoanChainTransport().fxrpOft,
+            IComposeTransportFacet(address(controller)).getComposeTransport().oft,
             address(fxrpOft)
         );
     }
@@ -596,12 +656,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // a different collateral token (rejected against the pinned transport's OFT)
         _configureSettings();
         MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
-        ILoanChainSettingsFacet.Market memory market = _defaultMarket();
+        ILoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.collateralToken = address(otherToken);
         morpho.createMarket(market.marketParams);
         vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(2, market);
+        vm.expectRevert(ILoanMarketsFacet.InvalidMarketParams.selector);
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(2, market);
     }
 
     //
@@ -986,14 +1046,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         (bytes memory message, bytes32 guid) =
             _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
-
-        ILoanChainSettingsFacet.Transport memory cleared;
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
 
         vm.prank(lzEndpoint);
         vm.expectRevert(
-            ILoanChainSettingsFacet.LoanChainTransportNotConfigured.selector
+            IComposeTransportFacet.ComposeTransportNotConfigured.selector
         );
         ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
@@ -1142,8 +1200,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _borrowedSubaccount(500e18);
         vm.prank(governance);
         vm.expectEmit();
-        emit ILoanChainSettingsFacet.LoanChainBorrowingDisabled(SUBACCOUNT_TYPE_LOAN);
-        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+        emit ILoanMarketsFacet.LoanBorrowingDisabled(SUBACCOUNT_TYPE_LOAN);
+        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
 
@@ -1166,8 +1224,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // re-enabling makes the exact same packet deliverable again
         vm.prank(governance);
         vm.expectEmit();
-        emit ILoanChainSettingsFacet.LoanChainBorrowingEnabled(SUBACCOUNT_TYPE_LOAN);
-        IILoanChainSettingsFacet(address(controller)).enableLoanChainBorrowing(
+        emit ILoanMarketsFacet.LoanBorrowingEnabled(SUBACCOUNT_TYPE_LOAN);
+        IILoanMarketsFacet(address(controller)).enableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         _deliver(subaccount, 2, 100e6, borrowMore);
@@ -1179,7 +1237,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // without effect instead of reverting forever on a sunset pool
         address subaccount = _borrowedSubaccount(500e18);
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
 
@@ -1199,7 +1257,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // pool: composed withdrawal, repayment, and recovery of the surplus
         address subaccount = _borrowedSubaccount(500e18);
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
 
@@ -1231,15 +1289,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the switch isolates per type: sunsetting one pool leaves another borrowing
         _configureSettings();
         uint256 typeB = 2;
-        ILoanChainSettingsFacet.Market memory marketB = _defaultMarket();
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
-        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.stopPrank();
@@ -1322,12 +1380,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // pools never share an account
         _configureSettings();
         uint256 typeB = 2;
-        ILoanChainSettingsFacet.Market memory marketB = _defaultMarket();
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
         vm.stopPrank();
@@ -1386,7 +1444,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             subaccountB, 1, _depositPayload(bytes32("op-1")),
             abi.encodeWithSelector(
-                ILoanChainSettingsFacet.MarketNotRegistered.selector, typeB
+                ILoanMarketsFacet.MarketNotRegistered.selector, typeB
             )
         );
         // the revert rolled the whole delivery back: the id stays unconsumed for a retry
@@ -1416,16 +1474,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             subaccountB, 1, payload,
             abi.encodeWithSelector(
-                ILoanChainSettingsFacet.MarketNotRegistered.selector, typeB
+                ILoanMarketsFacet.MarketNotRegistered.selector, typeB
             )
         );
         assertFalse(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-1")));
 
-        ILoanChainSettingsFacet.Market memory marketB = _defaultMarket();
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
 
@@ -1500,7 +1558,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanChainSettingsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
+                ILoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
             )
         );
         ILoanSubaccountRemote(subaccount).repay();
@@ -1519,9 +1577,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testRepayWorksWithClearedTransport() public {
         // clearing the transport kills composed actions and the sweep, never repayment
         address subaccount = _borrowedSubaccount(500e18);
-        ILoanChainSettingsFacet.Transport memory cleared;
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
 
         rlusd.mint(subaccount, 600e18);
         uint256 assets = ILoanSubaccountRemote(subaccount).repay();
@@ -1539,16 +1596,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // survives the clear, and recovery to the parent needs no transport at all
         address subaccount = _createConfiguredSubaccount();
         vm.startPrank(governance);
-        IILoanChainSettingsFacet(address(controller)).disableLoanChainBorrowing(
+        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
-        ILoanChainSettingsFacet.Transport memory cleared;
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
         vm.stopPrank();
 
         assertTrue(
-            ILoanChainSettingsFacet(address(controller))
-                .isLoanChainBorrowingDisabled(SUBACCOUNT_TYPE_LOAN)
+            ILoanMarketsFacet(address(controller))
+                .isLoanBorrowingDisabled(SUBACCOUNT_TYPE_LOAN)
         );
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
         stray.mint(subaccount, 1e18);
@@ -1702,35 +1758,35 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(subaccount), 35e6);
     }
 
-    function testRegisterLoanChainMarketRevertCodelessToken() public {
+    function testRegisterLoanMarketRevertCodelessToken() public {
         // the binding is permanent, and a Morpho market can exist for an address with no
         // code - so both tokens must be contracts
         _configureTransport();
-        ILoanChainSettingsFacet.Market memory market = _defaultMarket();
+        ILoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.loanToken = makeAddr("codelessToken");
         morpho.createMarket(market.marketParams);
         _registerMarketExpectRevert(
-            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+            market, ILoanMarketsFacet.InvalidMarketParams.selector
         );
     }
 
-    function testRegisterLoanChainMarketRevertCodelessCollateralToken() public {
+    function testRegisterLoanMarketRevertCodelessCollateralToken() public {
         // the symmetric case: a codeless collateral token must be rejected too
         _configureTransport();
-        ILoanChainSettingsFacet.Market memory market = _defaultMarket();
+        ILoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.collateralToken = makeAddr("codelessCollateral");
         morpho.createMarket(market.marketParams);
         _registerMarketExpectRevert(
-            market, ILoanChainSettingsFacet.InvalidMarketParams.selector
+            market, ILoanMarketsFacet.InvalidMarketParams.selector
         );
     }
 
-    function testRegisterLoanChainMarketRevertNonexistentMarket() public {
+    function testRegisterLoanMarketRevertNonexistentMarket() public {
         // the market must actually exist on the Morpho contract, or every credited compose
         // action against it would revert
         _configureTransport();
         _registerMarketExpectRevert(
-            _defaultMarket(), ILoanChainSettingsFacet.InvalidMarketParams.selector
+            _defaultMarket(), ILoanMarketsFacet.InvalidMarketParams.selector
         );
     }
 
@@ -1876,7 +1932,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function testMinimalLoanChainDiamondTopology() public {
         // the intended loan-chain cut: the generic subaccount surface, the PA beacon
-        // surface, and the loan-chain settings facet - never the Flare-only
+        // surface, the compose transport and the loan markets - never the Flare-only
         // LoanBridgeSettingsFacet. The full-suite diamond could hide an accidental
         // dependency; this minimal one proves there is none (base facets reused from
         // setUp - their fixed CREATE2 salts would collide again)
@@ -1887,7 +1943,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         });
         MasterAccountController minimal = new MasterAccountController(baseCuts, args);
 
-        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](5);
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](6);
         cuts[0] = _buildFacetCut(
             address(new SubaccountsFacet()), "SubaccountsFacet", IDiamond.FacetCutAction.Add
         );
@@ -1898,11 +1954,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add
         );
         cuts[3] = _buildFacetCut(
-            address(new LoanChainSettingsFacet()),
-            "LoanChainSettingsFacet",
+            address(new ComposeTransportFacet()),
+            "ComposeTransportFacet",
             IDiamond.FacetCutAction.Add
         );
         cuts[4] = _buildFacetCut(
+            address(new LoanMarketsFacet()), "LoanMarketsFacet", IDiamond.FacetCutAction.Add
+        );
+        cuts[5] = _buildFacetCut(
             address(new PersonalAccountsFacet()),
             "PersonalAccountsFacet",
             IDiamond.FacetCutAction.Add
@@ -1918,10 +1977,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrpOft.setPeer(originEid, originPeer);
         vm.startPrank(initialOwner);
         minimalController.setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, address(loanChainImpl));
-        IILoanChainSettingsFacet(address(minimal)).setLoanChainTransport(
-            _defaultTransport()
-        );
-        IILoanChainSettingsFacet(address(minimal)).registerLoanChainMarket(
+        IIComposeTransportFacet(address(minimal)).setComposeTransport(_defaultTransport());
+        IILoanMarketsFacet(address(minimal)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
         vm.stopPrank();
@@ -1941,16 +1998,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(stray.balanceOf(parent), 5e18);
 
         // the mirror Personal Account also materializes on the minimal topology, behind the
-        // PA beacon, through the explicit loan-chain creation route - but only once the
-        // implementation is registered: the frozen BeaconProxy asks the beacon at
-        // construction, and an unset beacon fails the creation closed
+        // PA beacon, through the generic creation route on the PersonalAccountsFacet - but
+        // only once the implementation is registered: the frozen BeaconProxy asks the beacon
+        // at construction, and an unset beacon fails the creation closed
         vm.expectRevert();
-        ILoanChainSettingsFacet(address(minimal)).createPersonalAccountRemote(xrplOwner);
+        minimalController.createPersonalAccount(xrplOwner);
         PersonalAccountRemote mirrorImpl = new PersonalAccountRemote();
         vm.prank(initialOwner);
         minimalController.setPersonalAccountImplementation(address(mirrorImpl));
-        address mirror = ILoanChainSettingsFacet(address(minimal))
-            .createPersonalAccountRemote(xrplOwner);
+        address mirror = minimalController.createPersonalAccount(xrplOwner);
         assertGt(mirror.code.length, 0);
         assertEq(minimalController.getPersonalAccount(xrplOwner), mirror);
         assertEq(mirror, parent);
@@ -1972,11 +2028,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function _defaultTransport()
         private
-        returns (ILoanChainSettingsFacet.Transport memory)
+        returns (IComposeTransportFacet.Transport memory)
     {
-        return ILoanChainSettingsFacet.Transport({
+        return IComposeTransportFacet.Transport({
             lzEndpoint: lzEndpoint,
-            fxrpOft: address(fxrpOft),
+            oft: address(fxrpOft),
             originEid: originEid,
             originPeer: originPeer
         });
@@ -1984,9 +2040,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function _defaultMarket()
         private
-        returns (ILoanChainSettingsFacet.Market memory)
+        returns (ILoanMarketsFacet.Market memory)
     {
-        return ILoanChainSettingsFacet.Market({
+        return ILoanMarketsFacet.Market({
             morpho: address(morpho),
             marketParams: IMorpho.MarketParams({
                 loanToken: address(rlusd),
@@ -2007,41 +2063,43 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function _configureTransport() private {
         fxrpOft.setPeer(originEid, originPeer);
+        _setTransport(_defaultTransport());
+    }
+
+    function _setTransport(IComposeTransportFacet.Transport memory _transport) private {
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
-            _defaultTransport()
-        );
+        IIComposeTransportFacet(address(controller)).setComposeTransport(_transport);
     }
 
     function _configureSettings() private {
         _configureTransport();
         morpho.createMarket(_defaultMarket().marketParams);
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
     }
 
     function _setTransportExpectRevert(
-        ILoanChainSettingsFacet.Transport memory _transport,
+        IComposeTransportFacet.Transport memory _transport,
         bytes4 _selector
     )
         private
     {
         vm.prank(governance);
         vm.expectRevert(_selector);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(_transport);
+        IIComposeTransportFacet(address(controller)).setComposeTransport(_transport);
     }
 
     function _registerMarketExpectRevert(
-        ILoanChainSettingsFacet.Market memory _market,
+        ILoanMarketsFacet.Market memory _market,
         bytes4 _selector
     )
         private
     {
         vm.prank(governance);
         vm.expectRevert(_selector);
-        IILoanChainSettingsFacet(address(controller)).registerLoanChainMarket(
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _market
         );
     }
@@ -2099,7 +2157,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function _mirrorOnThisDiamond(string memory _xrplOwner) private returns (address) {
         vm.prank(governance);
         controller.setPersonalAccountImplementation(address(new PersonalAccountRemote()));
-        return ILoanChainSettingsFacet(address(controller)).createPersonalAccountRemote(_xrplOwner);
+        return controller.createPersonalAccount(_xrplOwner);
     }
 
     /// Delivers a loan-chain-built compose to a Flare-side receiver on this diamond: srcEid is

@@ -71,7 +71,8 @@ contract ExecuteDiamondCutGuardsTest is Test {
 
     function testAcceptsOrdinaryFacetNames() public view {
         harness.validateFacetName("SubaccountsFacet");
-        harness.validateFacetName("LoanChainSettingsFacet");
+        harness.validateFacetName("ComposeTransportFacet");
+        harness.validateFacetName("LoanMarketsFacet");
         harness.validateFacetName("_Facet123");
         // the canonical spellings are valid facet names: they take the pinned branch
         harness.validateFacetName("DiamondCutFacet");

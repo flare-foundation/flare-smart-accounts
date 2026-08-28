@@ -15,7 +15,8 @@ import {
     ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanSubaccountRemote.sol";
-import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
+import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
+import {ILoanMarketsFacet} from "../../userInterfaces/facets/ILoanMarketsFacet.sol";
 import {
     ISubaccountsFacet,
     SUBACCOUNT_TYPE_NONE
@@ -87,7 +88,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         returns (uint256 _assets)
     {
         // no pause gate: repaying moves the position toward safety, and must stay available
-        ILoanChainSettingsFacet.Market memory market = _myMarket();
+        ILoanMarketsFacet.Market memory market = _myMarket();
         IERC20 loanToken = IERC20(market.marketParams.loanToken);
         uint256 balance = loanToken.balanceOf(address(this));
         require(balance > 0, NothingToRepay());
@@ -120,7 +121,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         nonReentrant
         returns (uint256 _amount)
     {
-        ILoanChainSettingsFacet.Market memory market = _myMarket();
+        ILoanMarketsFacet.Market memory market = _myMarket();
         // defending an indebted position survives a pause, like repayment; a debt-free
         // deposit is new exposure and waits out the pause
         if (_borrowSharesOf(market) == 0) {
@@ -144,17 +145,17 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         nonReentrant
         returns (uint256 _amount)
     {
-        ILoanChainSettingsFacet.Transport memory transport = _getTransport();
+        IComposeTransportFacet.Transport memory transport = _getTransport();
         // every exit from this chain rides the OFT itself, so an OFT incident must stop it
         _checkNotPaused();
 
         // the OFT's own underlying is the authoritative FXRP identity on this chain
-        IERC20 fxrp = IERC20(IOFT(transport.fxrpOft).token());
+        IERC20 fxrp = IERC20(IOFT(transport.oft).token());
         _amount = fxrp.balanceOf(address(this));
         require(_amount > 0, NothingToSweep());
         // a peer mutation on the OFT after configuration must fail closed
         require(
-            IOAppCore(transport.fxrpOft).peers(transport.originEid) == transport.originPeer,
+            IOAppCore(transport.oft).peers(transport.originEid) == transport.originPeer,
             WrongOriginPeer()
         );
 
@@ -179,22 +180,22 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
 
         // per-call value accounting: exactly the quoted fee is spent, only this call's excess
         // is refunded - pre-existing native on the account never subsidizes a caller
-        MessagingFee memory fee = IOFT(transport.fxrpOft).quoteSend(sendParam, false);
+        MessagingFee memory fee = IOFT(transport.oft).quoteSend(sendParam, false);
         require(msg.value >= fee.nativeFee, InsufficientFundsForSweep(fee.nativeFee));
 
-        fxrp.forceApprove(transport.fxrpOft, _amount);
+        fxrp.forceApprove(transport.oft, _amount);
         // two false positives on this call: slither arbitrary-send-eth (recipient is the
         // governance-set OFT, value capped by the msg.value check above) and solhint
         // check-send-result (this is the OFT's `send`, not address.send; it reverts on failure)
         // slither-disable-start arbitrary-send-eth
         // solhint-disable-next-line check-send-result
-        (MessagingReceipt memory receipt, ) = IOFT(transport.fxrpOft).send{value: fee.nativeFee}(
+        (MessagingReceipt memory receipt, ) = IOFT(transport.oft).send{value: fee.nativeFee}(
             sendParam,
             fee,
             msg.sender
         );
         // slither-disable-end arbitrary-send-eth
-        fxrp.forceApprove(transport.fxrpOft, 0);
+        fxrp.forceApprove(transport.oft, 0);
 
         uint256 excess = msg.value - fee.nativeFee;
         if (excess > 0) {
@@ -217,7 +218,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // the fixed destination is the parent Personal Account - the user's own compose-driven
         // account on this chain; not pause-gated, since this is inward consolidation and the
         // parent's signed user operations are what the pause stops
-        ILoanChainSettingsFacet.Market memory market = _myMarket();
+        ILoanMarketsFacet.Market memory market = _myMarket();
         // collateral moves only on its own rails
         require(_token != market.marketParams.collateralToken, ProtectedToken(_token));
         // while the position has debt, the loan-token balance is repayment material, not
@@ -300,7 +301,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         if (_skipped(operationId, deadline, _guid)) return;
         // a debt increase respects the pause and the per-type borrow switch
         _checkNotPaused();
-        require(!_facet().isLoanChainBorrowingDisabled(subaccountType), BorrowingDisabled());
+        require(!ILoanMarketsFacet(controller).isLoanBorrowingDisabled(subaccountType), BorrowingDisabled());
         usedOperations[operationId] = true;
 
         _supplyAndBorrow(_bridgedAmount, destinationKind, destination, borrowAmount);
@@ -368,7 +369,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     )
         private
     {
-        ILoanChainSettingsFacet.Market memory market = _myMarket();
+        ILoanMarketsFacet.Market memory market = _myMarket();
         if (_bridgedAmount > 0) {
             IERC20 fxrp = IERC20(market.marketParams.collateralToken);
             uint256 balance = fxrp.balanceOf(address(this));
@@ -420,7 +421,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // terminal gates come first, so a duplicate or expired delivery finalizes even when
         // the market is not yet registered, instead of reverting forever
         if (_skipped(operationId, deadline, _guid)) return;
-        ILoanChainSettingsFacet.Market memory market = _myMarket();
+        ILoanMarketsFacet.Market memory market = _myMarket();
         usedOperations[operationId] = true;
 
         IMorpho(market.morpho).withdrawCollateral(
@@ -453,19 +454,19 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// lives; hence the operational policy of only canonical immutable Morpho Blue deployments.
     function _myMarket()
         private view
-        returns (ILoanChainSettingsFacet.Market memory _market)
+        returns (ILoanMarketsFacet.Market memory _market)
     {
-        _market = _facet().getLoanChainMarket(subaccountType);
+        _market = ILoanMarketsFacet(controller).getLoanMarket(subaccountType);
         require(
             _market.morpho != address(0),
-            ILoanChainSettingsFacet.MarketNotRegistered(subaccountType)
+            ILoanMarketsFacet.MarketNotRegistered(subaccountType)
         );
     }
 
     /// @dev The account's live borrow shares on its market - the exact test for "is there
     /// any debt", read live from Morpho every time (nothing is cached).
     function _borrowSharesOf(
-        ILoanChainSettingsFacet.Market memory _market
+        ILoanMarketsFacet.Market memory _market
     )
         private view
         returns (uint128 _borrowShares)
@@ -478,7 +479,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// @dev The account's live borrow shares and the assets needed to close them, using
     /// Morpho's canonical rounded-up share conversion with virtual offsets.
     function _debtOf(
-        ILoanChainSettingsFacet.Market memory _market
+        ILoanMarketsFacet.Market memory _market
     )
         private view
         returns (uint128 _borrowShares, uint256 _fullDebt)
@@ -488,13 +489,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
             IMorpho(_market.morpho).market(marketId);
         _fullDebt = _toAssetsUp(_borrowShares, totalBorrowAssets, totalBorrowShares);
-    }
-
-    function _facet()
-        private view
-        returns (ILoanChainSettingsFacet)
-    {
-        return ILoanChainSettingsFacet(controller);
     }
 
     function _toAssetsUp(

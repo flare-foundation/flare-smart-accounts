@@ -54,7 +54,8 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         // check transaction id
         require(_transactionId != bytes32(0), InvalidTransactionId());
         // create or get existing Personal Account for the XRPL address
-        IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
+        IIPersonalAccount personalAccount =
+            IIPersonalAccount(payable(PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress)));
         // reserve collateral
         address agentVault = AgentVaults.getAgentVaultAddress(_paymentReference);
         uint256 lots = PaymentReferenceParser.getValue(_paymentReference);
@@ -110,7 +111,8 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         // verify payment proof
         PaymentProofs.verifyPayment(_proof, _xrplAddress);
         // check that minter and amount match
-        IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
+        IIPersonalAccount personalAccount =
+            IIPersonalAccount(payable(PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress)));
         require(address(personalAccount) == reservationInfo.minter, InvalidMinter());
         uint256 amount = FXrp.lotsToAmount(PaymentReferenceParser.getValue(paymentReference)); // value = lots
         // could revert if lot size changes between minting and deposit, but very unlikely
@@ -164,7 +166,8 @@ contract InstructionsFacet is IIInstructionsFacet, FacetBase {
         state.usedTransactionIds[transactionId] = true;
 
         // create or get existing Personal Account for the XRPL address
-        IIPersonalAccount personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress);
+        IIPersonalAccount personalAccount =
+            IIPersonalAccount(payable(PersonalAccounts.getOrCreatePersonalAccount(_xrplAddress)));
 
         // execute instruction
         Instructions.executeInstruction(

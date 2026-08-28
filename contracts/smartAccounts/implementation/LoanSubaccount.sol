@@ -10,7 +10,7 @@ import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOApp
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {ILoanSubaccount, ACTION_REDEEM_HOME} from "../../userInterfaces/ILoanSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
-import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
+import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
@@ -281,7 +281,7 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
     /// sender - the same values the forward moves send with.
     function _getTransport()
         internal view override
-        returns (ILoanChainSettingsFacet.Transport memory _transport)
+        returns (IComposeTransportFacet.Transport memory _transport)
     {
         (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
             ILoanBridgeSettingsFacet(controller).getLoanBridgeSettings();
@@ -289,9 +289,9 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
             fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
             LoanBridgeNotConfigured()
         );
-        _transport = ILoanChainSettingsFacet.Transport({
+        _transport = IComposeTransportFacet.Transport({
             lzEndpoint: address(IOAppCore(fxrpOft).endpoint()),
-            fxrpOft: fxrpOft,
+            oft: fxrpOft,
             originEid: destinationEid,
             originPeer: destinationPeer
         });

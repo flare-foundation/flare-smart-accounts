@@ -16,7 +16,8 @@ import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
  *
  * This script only reproduces the diamond with its three base facets. The follow-up cut that
  * installs the Ethereum facet set (SubaccountsFacet, TimelockFacet, PauseFacet,
- * PersonalAccountsFacet, LoanChainSettingsFacet) is owner-gated: the fresh diamond is owned by the historical
+ * PersonalAccountsFacet, ComposeTransportFacet, LoanMarketsFacet) is owner-gated: the fresh
+ * diamond is owned by the historical
  * `DiamondArgs.owner` EOA. Confirm that key is still controlled before deploying here.
  */
 // solhint-disable no-console

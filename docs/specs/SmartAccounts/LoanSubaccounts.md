@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery method (`sweepToParent`) are in place; the account is also the compose receiver of its own loan-chain twin's bridge-back, redeeming on arrival. The Flare-side loan instructions (`borrow`, `depositCollateral`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow, deposit, sweep-deposit and withdraw actions), the per-type market binding and governance configuration (`LoanChainSettingsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
+Status: in progress. The account, its proxy, the per-type implementation registry, controller-side creation/prediction, the account abstraction dispatch, both cleanup moves (`sweepRedeem`, `sweepToLoan`), and the recovery method (`sweepToParent`) are in place; the account is also the compose receiver of its own loan-chain twin's bridge-back, redeeming on arrival. The Flare-side loan instructions (`borrow`, `depositCollateral`, `withdraw`) are in place. The loan-chain-side account (Ethereum, at launch) is functionally complete: the authenticated compose entry point (`lzCompose` with the borrow, deposit, sweep-deposit and withdraw actions), the per-type market binding and governance configuration (`ComposeTransportFacet`, `LoanMarketsFacet`), the creation route, and the permissionless rails (`repay`, `depositIdleFxrp`, `sweepToOrigin`, recovery). Redemption is the parent Personal Account's (`redeemFromSubaccount`; the subaccount pushes), so the subaccount carries no redemption-default relays. A sweep-direction lifecycle was evaluated and rejected (see Cleanup moves).
 
 ## Typed subaccounts
 
@@ -47,7 +47,7 @@ with `salt = bytes32(0)`. The subaccount address is therefore a pure function of
 - `getSubaccount(xrplOwner, type)` — view; returns the registered subaccount, or the computed address if not yet deployed. Works even before the parent PA exists (the PA address itself is deterministic).
 - `createSubaccount(xrplOwner, type)` — permissionless, `notPaused`; the parent Personal Account resolves to the registered account when one exists, and to its computed address otherwise — the same fallback `getSubaccount` uses, so creation works before the Personal Account exists (and on chains where PAs never exist at all). Permissionless creation supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount to sweep them — without waiting for the parent. A subaccount created before its PA is only **partly** inert: `onlyParent` methods have no possible caller and `sweepRedeem` at or above the minimum reverts calling the codeless parent, while `sweepToLoan` (which never reads the parent) works normally, and `sweepToParent` — and `sweepRedeem` below the minimum, which never calls parent code — park assets at the future PA address — the same owner's deterministic address, whose later CREATE2 deployment a pre-existing balance does not block. The PA then deploys at exactly the recorded parent, owning whatever was parked. One qualification: this holds for a valid owner string — the route accepts any string, but a Personal Account cannot be created for an empty one, so an empty-owner subaccount is permanent caller-funded junk with no custody or collision impact. It is also what a user operation calls before invoking a method on the subaccount. Idempotent — repeated calls return the same address.
 
-Unlike Personal Accounts, which are only ever created as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points), a loan subaccount needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily.
+Unlike Personal Accounts, which are created lazily as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points) or explicitly through the permissionless `createPersonalAccount`, a loan subaccount always needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily.
 
 Created subaccounts are recorded in `Subaccounts.State.subaccounts[parentPersonalAccount][subaccountType]` and announced with `SubaccountCreated`.
 
@@ -278,26 +278,44 @@ forward sweep's fixed deposit compose), and everything else is
 permissionless movement along fixed rails, the same invariant as everywhere: anyone may move
 the assets, nobody may redirect them.
 
-The account's configuration lives in
-[`LoanChainSettingsFacet`](../../../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol),
-cut **only on the loan-chain diamond** (Ethereum, at launch), in two parts. The **global transport**, shared by
-every loan type: the LayerZero endpoint (the only allowed `lzCompose` caller), the FXRP OFT on
-this chain (the only allowed compose sender, the authoritative FXRP identity, and the vehicle
-for the bridge-back sweep), and the pinned origin route back to Flare (`originEid`/`originPeer`).
-The timelocked `setLoanChainTransport` validates the OFT exactly as the Flare-side
-`setLoanBridgeSettings` does — canonical `oftVersion`, decimals shared with its own token,
-wired to the same endpoint, live peer equal to the pinned one — and an all-zero transport
-clears it, disabling the transport-dependent surface (composed actions and the bridge-back
-sweep) for all loan types until reconfigured — repayment, defensive idle deposits, and
-recovery to the parent keep working. And the **per-type market binding**: the timelocked
-`registerLoanChainMarket(type, market)` binds a subaccount type to one Morpho contract and
-market (`collateralToken` must be the OFT's token — enforced; the loan token is RLUSD by
+The account's configuration lives in two facets, both cut **only on the remote diamond**
+(Ethereum, at launch). The **compose transport**
+([`ComposeTransportFacet`](../../../contracts/smartAccounts/facets/ComposeTransportFacet.sol)),
+one per diamond and shared by every compose receiver on it — the remote Personal Account as
+much as every loan type: the LayerZero endpoint (the only allowed `lzCompose` caller), the OFT
+on this chain (the only allowed compose sender, the authoritative identity of the bridged
+token, and the vehicle for the bridge-back sweep), and the pinned origin route back to Flare
+(`originEid`/`originPeer`). The timelocked `setComposeTransport(transport)` validates the OFT
+exactly as the Flare-side `setLoanBridgeSettings` does — canonical `oftVersion`, decimals
+shared with its own token, wired to the same endpoint, live peer equal to the pinned one — and
+never clears (an all-zero struct fails validation). Clearing is its own call,
+`clearComposeTransport()`, **immediate and owner-only**: it is the containment lever for a
+compromised endpoint, OFT or peer, and a lever behind a timelock is not one. It disables the
+transport-dependent surface (composed actions on every receiver and the bridge-back sweep)
+until a new transport is set — repayment, defensive idle deposits, recovery to the parent,
+account creation and the market bindings keep working. Two things the clear does **not** do
+shape the incident runbook: it does not cancel queued `setComposeTransport` calls (the timelock
+keys them by calldata hash and lets anyone execute a matured one, so a set queued before the
+clear would restore the route — cancel them with `cancelTimelockedCall` first, then clear), and
+it does not retire compose packets already queued at the endpoint (a delivery that reverts
+against a cleared transport stays retriable). The runbook is therefore: pause, cancel queued
+transport sets, clear, and later queue a replacement transport that **rotates the compromised
+identity** — the exact compromised endpoint/OFT/peer tuple is never restored, because packets
+forged under it would pass authentication again the moment it is. The accepted cost is an
+owner-held availability lever stronger than the pause — the clear also stops `sweepToOrigin` —
+documented as the nuclear action, with the owner trusted for liveness. And the **loan
+markets** ([`LoanMarketsFacet`](../../../contracts/smartAccounts/facets/LoanMarketsFacet.sol)),
+the per-type market binding: the timelocked `registerLoanMarket(type, market)` binds a
+subaccount type to one Morpho contract and market (`collateralToken` must be the transport
+OFT's token — enforced, so the transport is configured first; the loan token is RLUSD by
 governance policy per registration, not an on-chain check), **write-once** — see below. The
-first registration permanently pins the collateral token: every later non-zero transport must
-wrap it (rotating to a different OFT adapter for the same token stays possible), so a
-transport replacement can never strand the write-once bindings; the pin survives a transport
-clear. One selected loan chain at a time: the Flare side stores a single global destination
-route and this side one global transport, so the deployment serves exactly one loan chain.
+first registration permanently pins the collateral token on the transport: every later
+transport must wrap it (rotating to a different OFT adapter for the same token stays
+possible), so a transport replacement can never strand the write-once bindings; the pin
+survives a clear. One selected loan chain at a time: the Flare side stores a single global
+destination route and this side one global transport, so the deployment serves exactly one
+loan chain.
+
 Serving several loan chains simultaneously would need the transport bound per subaccount type
 (the type would then identify both the chain and the pool) and a per-type destination on the
 Flare side — a design change, not a configuration.
@@ -380,7 +398,7 @@ predicts, whether or not the mirror exists yet.
 
 **One market per account, bound by the type.** Positions must outlive every configuration
 decision, so the market an account operates on is not mutable state at all: the timelocked
-`registerLoanChainMarket(type, market)` binds a subaccount type to one Morpho contract and
+`registerLoanMarket(type, market)` binds a subaccount type to one Morpho contract and
 market, **write-once** — registering a different market for the same type reverts, and a new
 pool is a new subaccount type (same implementation, one registry call per chain, its own
 deterministic addresses). Since the account's address commits to its type and the type
@@ -402,14 +420,15 @@ position lives. Immutability reduces that availability risk; it is not containme
 not protect against a vulnerability in the immutable code itself, a malicious clone, or a
 compromised market oracle or interest model.
 
-**Sunsetting a pool.** The timelocked per-type `disableLoanChainBorrowing` stops new
-debt increases on a type (`enableLoanChainBorrowing` reverses it) — the routine migration
+**Sunsetting a pool.** The timelocked per-type `disableLoanBorrowing` stops new
+debt increases on a type (`enableLoanBorrowing` reverses it) — the routine migration
 lever: register the next pool as a new type, disable borrowing on the old one, and the old
 accounts remain fully exit-capable forever
 (repayment, deposits, withdrawals, and recovery are never gated by the switch). Clearing the
-transport zeroes the LayerZero surface for **all** loan types — composed actions and the
-bridge-back sweep wait until governance reconfigures it; with a live timelock that wait is
-real, which is why the clear is the nuclear incident lever. Market bindings, `repay`,
+transport (immediate, owner-only) zeroes the LayerZero surface for **all** compose receivers —
+composed actions and the bridge-back sweep wait until governance sets a new transport through
+the timelock; that wait is real, which is why the clear is the nuclear incident lever and not a
+routine one. Market bindings, `repay`,
 defensive idle deposits, and recovery to the parent persist through both levers. The global
 pause blocks debt increases, withdrawals, debt-free deposits and the bridge-back (recovery to
 the parent is inward and stays open; the mirror's signed user operations are what the pause
@@ -473,7 +492,10 @@ Flare-side invariant:
   or a force-send; such a balance strands until a beacon upgrade adds a rail — accepted, since
   nobody in the protocol causes it. Containment note: a pause does not contain a compromise of the
   compose-authentication root itself (endpoint, OFT, pinned peer) — for that incident,
-  clearing the transport is the containment, since it disables `lzCompose` entirely.
+  clearing the transport (immediate, owner-only; queued transport sets cancelled first) is the
+  containment, since it disables `lzCompose` entirely — and the compromised tuple is then
+  rotated, never restored, because a cleared transport does not retire compose packets already
+  queued at the endpoint (see the configuration section).
 
 ## The remote Personal Account
 
@@ -570,17 +592,20 @@ account. `extraOptions` must carry the `lzCompose` gas the batch needs and, when
 sends more native than the mirror holds, a native drop. No typed helpers by decision: the common transfer is a one-call batch a
 wallet builds like any other, and one sender never grows a helper per use case.
 
-**Creation.** `createPersonalAccountRemote(xrplOwner)` on the loan-chain settings facet —
-permissionless and idempotent, the PA analog of the generic `createSubaccount`: the
-instruction machinery that creates PAs lazily on Flare does not exist here, so creation is an
-explicit route. It requires the registered remote PA implementation (the frozen
-BeaconProxy resolves it at construction) and registers the account, so `getPersonalAccount`
-answers with it afterwards. An empty owner cannot be created (the implementation rejects it),
-so no mirror can exist for an impossible owner. The route sits on the loan-chain settings
-facet only because that facet is the loan chain's configuration surface today; the account is
-not loan-specific, and the deferred facet split moves creation to a generic
-`createPersonalAccount` on `PersonalAccountsFacet` (or a dedicated remote-account creation
-facet), not into a transport facet.
+**Creation.** `createPersonalAccount(xrplOwner)` on the `PersonalAccountsFacet` — the generic,
+permissionless, idempotent, pause-gated route, cut on every chain, the PA analog of
+`createSubaccount`: on Flare the instruction machinery creates PAs lazily and the explicit route
+lets anyone materialize one earlier (an executor completing a loan subaccount's `sweepRedeem`
+needs the parent to exist); here, where no instruction machinery exists, it is the only route.
+The caller gains nothing: the frozen derivation commits to the owner and the controller, and the
+created account obeys only its Flare twin's authenticated compose. It requires the registered
+remote PA implementation (the frozen BeaconProxy resolves it at construction) and registers the
+account, so `getPersonalAccount` answers with it afterwards. An empty owner cannot be created
+(the implementation rejects it), so no mirror can exist for an impossible owner. The
+`PersonalAccounts` library behind it is account-type-agnostic — it deploys and records a
+deterministic proxy and returns a plain `address`; the Flare facets cast to `IIPersonalAccount`
+where they need Flare behavior, since the code behind the proxy here is not a Flare Personal
+Account.
 
 ## Deployment
 
@@ -590,7 +615,8 @@ facet), not into a transport facet.
   implementation, and type `1` is registered with `setSubaccountImplementation` before
   `setTimelockDuration`, while the timelock is still zero.
 - **Existing deployments** (flare, songbird, coston2): the facet needs no dedicated deploy
-  step — naming `SubaccountsFacet` and `LoanBridgeSettingsFacet` in a cut plan
+  step — naming `SubaccountsFacet`, `LoanBridgeSettingsFacet` and the replaced `PersonalAccountsFacet`
+  (it gains `createPersonalAccount`) in a cut plan
   (`deployment/cuts/<network>/cuts-<date>.json`, verified with `pnpm check_cut`, executed with
   `pnpm diamond_cut`) deploys it from the artifact as part of the cut flow. The implementation
   is deployed with `pnpm deploy_loan_subaccount_implementation <network>` and registered by
@@ -609,11 +635,11 @@ facet), not into a transport facet.
   diamond is owned by the historical `DiamondArgs.owner` EOA
   (`0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA`) — confirm that key is still controlled
   before relying on an Ethereum deployment. The Ethereum cut installs `SubaccountsFacet`,
-  `TimelockFacet`, `PauseFacet`, `PersonalAccountsFacet` (the PA beacon surface for the
-  loan-chain Personal Accounts), and `LoanChainSettingsFacet` through the standard cut flow
+  `TimelockFacet`, `PauseFacet`, `PersonalAccountsFacet` (the PA beacon and creation surface for the
+  remote Personal Accounts), `ComposeTransportFacet` and `LoanMarketsFacet` through the standard cut flow
   (the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
-  `deployment/deploys/ethereum.json` is seeded with the pinned contracts), and the
-  both implementations ship with `pnpm deploy_remote_account_implementations ethereum`. There is
+  `deployment/deploys/ethereum.json` is seeded with the pinned contracts), and both
+  implementations ship with `pnpm deploy_remote_account_implementations ethereum`. There is
   deliberately no `deployment/chain-config/ethereum.json`: the generic full-deploy script must
   not run against Ethereum — operators go through the pinned bootstrap and the scripts above.
   One ordering constraint is absolute: the pool-per-type settings scheme redefined payload
@@ -622,9 +648,10 @@ facet), not into a transport facet.
   anywhere in LayerZero, and no client or tooling holds prebuilt old-schema payloads — all
   true today, `deployment/deploys/ethereum.json` holds only the pinned bootstrap contracts. An
   environment that had shipped the old scheme would need a new payload version instead. (The
-  settings storage namespace is no longer shared: the rename to
-  `smartAccounts.LoanChainSettings.State` gave it a fresh slot — itself a pre-first-cut-only
-  move, covered by the same condition.)
+  settings storage namespaces are fresh - `smartAccounts.ComposeTransport.State` and
+  `smartAccounts.LoanMarkets.State`; splitting the earlier single settings namespace is itself a
+  pre-first-cut-only move, covered by the same condition: after a first cut it would need a
+  migration or a permanent legacy slot.)
 
   **Before the first Ethereum cut, still to be built and rehearsed:**
 
@@ -687,6 +714,6 @@ facet), not into a transport facet.
 - ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed, the surplus leaves through `recoverToken` to the parent Personal Account (the user's own loan-chain account). Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
 - **TODO, parked: atomic withdraw-and-bridge action.** If guaranteed withdrawal completion is ever required, the clean contract-level fix for the withdraw/redeposit ordering race (see the rails) is a single composed action that withdraws collateral and bridges it back in one execution. It is not free: it needs compose value (rejected today by `NonZeroComposeValue`, which exists to keep mistaken deliveries retriable), fee quoting inside the compose, and refund semantics for a permissionless deliverer. Decide if withdrawal-completion guarantees become a product requirement; until then, executor-side bundling of delivery with `sweepToOrigin` is the operational mitigation.
 - **TODO, in design: the Flare fee.** An interest-spread model (checkpoint accounting over the account's Morpho debt) was accepted by product and is in design review; it is kept out of this spec until the design settles, then documented here.
-- **TODO, deferred: split `LoanChainSettingsFacet`** into the general compose transport (the transport setter and getter) and the loan markets (write-once markets, borrow switch), with the compose-driven PA creation moving to a generic `createPersonalAccount` on `PersonalAccountsFacet` (or a dedicated creation facet). `ILoanChainSettingsFacet.Transport` and `LoanBridgeSettingsFacet` keep their names until then — the latter still configures the actual FXRP loan route. If the split gives the settings a new storage namespace it is a hard pre-first-cut task: after the first cut it would need a migration or a permanent legacy slot.
+- ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`. Remaining leftover: `LoanBridgeSettingsFacet` is the Flare end of the same route under a loan name (its validation is FXRP-specific); revisit if a second route ever exists.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.
 - ~~Native payability~~ — resolved the other way: no `receive()` and no native exit on the Flare subaccount (no protocol flow leaves native on it — the bridge refunds its caller, redemption outcomes land on the parent, and the compose value of its own bridge-back is forwarded within the same call); native landing without a call (pre-deployment funding of the predicted address, a force-send) strands — accepted; a beacon upgrade can add an exit if it ever matters.

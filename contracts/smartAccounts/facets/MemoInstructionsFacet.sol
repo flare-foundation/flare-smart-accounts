@@ -47,7 +47,7 @@ contract MemoInstructionsFacet is IIMemoInstructionsFacet, FacetBase {
             OnlyAssetManager()
         );
         // get or create PA
-        address personalAccount = address(PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress));
+        address personalAccount = PersonalAccounts.getOrCreatePersonalAccount(_sourceAddress);
 
         // check ignoreMemo first — before any memo validation
         // allows recovery from malformed memos (length < 6, bad instruction ID, malformed UserOp, ...)

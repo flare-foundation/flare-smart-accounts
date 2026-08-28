@@ -13,9 +13,8 @@ import {PersonalAccount} from "../contracts/smartAccounts/implementation/Persona
 import {
     PersonalAccountRemote
 } from "../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
-import {
-    LoanChainSettingsFacet
-} from "../contracts/smartAccounts/facets/LoanChainSettingsFacet.sol";
+import {ComposeTransportFacet} from "../contracts/smartAccounts/facets/ComposeTransportFacet.sol";
+import {LoanMarketsFacet} from "../contracts/smartAccounts/facets/LoanMarketsFacet.sol";
 import {
     IPersonalAccountRemote,
     PA_ACTION_EXECUTE
@@ -26,12 +25,8 @@ import {
     SKIP_REASON_DUPLICATE,
     SKIP_REASON_EXPIRED
 } from "../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
-import {
-    ILoanChainSettingsFacet
-} from "../contracts/userInterfaces/facets/ILoanChainSettingsFacet.sol";
-import {
-    IILoanChainSettingsFacet
-} from "../contracts/smartAccounts/interface/IILoanChainSettingsFacet.sol";
+import {IComposeTransportFacet} from "../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
+import {IIComposeTransportFacet} from "../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
 import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MockReentrantToken} from "../contracts/mock/MockReentrantToken.sol";
@@ -101,11 +96,16 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         personalAccountImplementation = address(new PersonalAccount());
         controller = _deployDiamond();
 
-        // the loan-chain diamond additionally carries the loan settings facet
-        IDiamond.FacetCut[] memory settingsCut = new IDiamond.FacetCut[](1);
+        // the remote diamond additionally carries the compose transport and the loan markets
+        IDiamond.FacetCut[] memory settingsCut = new IDiamond.FacetCut[](2);
         settingsCut[0] = _buildFacetCut(
-            address(new LoanChainSettingsFacet()),
-            "LoanChainSettingsFacet",
+            address(new ComposeTransportFacet()),
+            "ComposeTransportFacet",
+            IDiamond.FacetCutAction.Add
+        );
+        settingsCut[1] = _buildFacetCut(
+            address(new LoanMarketsFacet()),
+            "LoanMarketsFacet",
             IDiamond.FacetCutAction.Add
         );
         vm.prank(governance);
@@ -120,37 +120,38 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         _configureTransport();
     }
 
-    function testCreatePersonalAccountRemote() public {
-        // the explicit creation route: PAs are created lazily by instructions on Flare, but
-        // no instruction machinery exists here - creation is permissionless and idempotent
+    function testCreatePersonalAccount() public {
+        // the generic creation route on the PersonalAccountsFacet: PAs are also created lazily
+        // by instructions on Flare, but no instruction machinery exists here, so this is the
+        // only route - permissionless and idempotent
         address predicted = controller.getPersonalAccount(xrplOwner);
         assertEq(predicted.code.length, 0);
 
         address caller = makeAddr("anyone");
         vm.prank(caller);
-        address created = ILoanChainSettingsFacet(address(controller))
-            .createPersonalAccountRemote(xrplOwner);
+        address created = controller
+            .createPersonalAccount(xrplOwner);
         assertEq(created, predicted);
         assertNotEq(created.code.length, 0);
 
         // idempotent, and now registered
-        address again = ILoanChainSettingsFacet(address(controller))
-            .createPersonalAccountRemote(xrplOwner);
+        address again = controller
+            .createPersonalAccount(xrplOwner);
         assertEq(again, created);
         assertEq(controller.getPersonalAccount(xrplOwner), created);
     }
 
-    function testCreatePersonalAccountRemoteRevertWhenPaused() public {
+    function testCreatePersonalAccountRevertWhenPaused() public {
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanChainSettingsFacet(address(controller)).createPersonalAccountRemote(xrplOwner);
+        controller.createPersonalAccount(xrplOwner);
     }
 
-    function testCreatePersonalAccountRemoteRevertEmptyOwner() public {
+    function testCreatePersonalAccountRevertEmptyOwner() public {
         // the mirror implementation rejects an empty owner in initialize, so the whole
         // CREATE2 deployment reverts - no orphan mirror can exist for an impossible owner
         vm.expectRevert();
-        ILoanChainSettingsFacet(address(controller)).createPersonalAccountRemote("");
+        controller.createPersonalAccount("");
     }
 
     function testMirrorResolvesViaBeacon() public {
@@ -549,14 +550,13 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
 
     function testComposeRevertTransportNotConfigured() public {
         PersonalAccountRemote mirror = _createMirror();
-        ILoanChainSettingsFacet.Transport memory cleared;
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(cleared);
+        IIComposeTransportFacet(address(controller)).clearComposeTransport();
 
         _deliverExpectRevert(
             address(mirror), 1,
             _transferTokenPayload(bytes32("op-1"), makeAddr("token"), makeAddr("dest"), 1e18),
-            ILoanChainSettingsFacet.LoanChainTransportNotConfigured.selector
+            IComposeTransportFacet.ComposeTransportNotConfigured.selector
         );
     }
 
@@ -566,17 +566,17 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
 
     function _createMirror() private returns (PersonalAccountRemote) {
         return PersonalAccountRemote(payable(
-            ILoanChainSettingsFacet(address(controller)).createPersonalAccountRemote(xrplOwner)
+            controller.createPersonalAccount(xrplOwner)
         ));
     }
 
     function _configureTransport() private {
         fxrpOft.setPeer(originEid, originPeer);
         vm.prank(governance);
-        IILoanChainSettingsFacet(address(controller)).setLoanChainTransport(
-            ILoanChainSettingsFacet.Transport({
+        IIComposeTransportFacet(address(controller)).setComposeTransport(
+            IComposeTransportFacet.Transport({
                 lzEndpoint: lzEndpoint,
-                fxrpOft: address(fxrpOft),
+                oft: address(fxrpOft),
                 originEid: originEid,
                 originPeer: originPeer
             })

@@ -16,13 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Timelocked `setLoanBridgeSettings` (FXRP OFT, destination EID, pinned peer), validated against the token, its decimals, the live peer and `oftVersion`.
     - `borrow(...)`, `depositCollateral(...)` and `withdraw(...)` — typed parent-driven loan instructions; the compose payload is built on-chain and validated before any fee is paid.
     - `LoanSubaccountRemote` — the loan-chain-side implementation behind the same proxy and address: authenticated, replay-protected `lzCompose` (borrow, deposit, sweep deposit, withdraw) plus the permissionless rails `repay`, `depositIdleFxrp`, `sweepToOrigin(options)` (redeemed on Flare on arrival) and `recoverToken` (to the parent). No native.
-    - `LoanChainSettingsFacet` — loan-chain-only configuration: the global LayerZero transport, one write-once Morpho market per subaccount type with a per-type borrow kill-switch, and `createPersonalAccountRemote(xrplOwner)`.
+    - `ComposeTransportFacet` — the remote diamond's compose transport (endpoint, OFT, pinned origin route), one per diamond: timelocked `setComposeTransport(transport)`, immediate owner-only `clearComposeTransport()`.
+    - `LoanMarketsFacet` — one write-once Morpho market per subaccount type with a per-type borrow kill-switch.
     - `PersonalAccountRemote` — the compose-driven mirror of the Flare Personal Account at the same address, behind the same beacon; one action: execute the signed batch of calls (the loan-chain `executeUserOp`); accepts native. The Flare `PersonalAccount` gains the self-called `sendCrossChainUserOp(...)`.
     - `ComposeReceiverAccountBase` — the shared `lzCompose` authentication core of the compose receivers on both chains (operation-id replay protection for the signed actions); the Flare subaccount redeems its own bridge-back on arrival, capped at the packet's amount and until a stamped deadline.
   - `@layerzerolabs-oapp-evm` dependency (canonical `IOFT` interface).
   - `pnpm spellcheck` (cspell) with an advisory CI job.
 
 ### Changed
+  - `PersonalAccountsFacet` gains the permissionless, pause-gated `createPersonalAccount(xrplOwner)` (facet replacement on existing deployments); the `PersonalAccounts` library returns `address`.
   - `removeUnpausers` is immediate (`onlyOwner`) instead of timelocked; pauser removal stays timelocked. Mirrors `flare-dvn-contracts`.
 
 ### Fixed

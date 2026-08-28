@@ -53,7 +53,7 @@ contract SubaccountsFacet is IISubaccountsFacet, FacetBase {
         // on the loan-chain diamond until the owner's compose-driven mirror PA is created
         // through its explicit route
         address parentPersonalAccount =
-            address(PersonalAccounts.getState().personalAccounts[_xrplOwner]);
+            PersonalAccounts.getState().personalAccounts[_xrplOwner];
         if (parentPersonalAccount == address(0)) {
             parentPersonalAccount = PersonalAccounts.computePersonalAccountAddress(_xrplOwner);
         }
@@ -72,7 +72,7 @@ contract SubaccountsFacet is IISubaccountsFacet, FacetBase {
         require(_subaccountType != SUBACCOUNT_TYPE_NONE, InvalidSubaccountType());
 
         address parentPersonalAccount =
-            address(PersonalAccounts.getState().personalAccounts[_xrplOwner]);
+            PersonalAccounts.getState().personalAccounts[_xrplOwner];
         if (parentPersonalAccount == address(0)) {
             parentPersonalAccount = PersonalAccounts.computePersonalAccountAddress(_xrplOwner);
         }

@@ -41,6 +41,29 @@ interface IPersonalAccountsFacet is IBeacon {
     );
 
     /**
+     * @notice Creates the Personal Account of an XRPL owner on this chain, at its deterministic
+     * address (the same on every chain), and registers it so {getPersonalAccount} answers with
+     * it.
+     * @dev Permissionless and idempotent: the proxy derivation is frozen and commits to the
+     * owner and this controller, so the caller gains no authority - on Flare the account obeys
+     * only its owner's XRPL signatures, on a remote chain only the authenticated compose of
+     * its Flare twin. On Flare, Personal Accounts are otherwise created lazily by the owner's
+     * first instruction; the explicit route lets anyone materialize one earlier (an executor
+     * completing a loan subaccount's `sweepRedeem` needs the parent to exist). On a remote
+     * chain, where no instruction machinery exists, it is the only creation route. Requires
+     * the registered Personal Account implementation (the frozen proxy resolves it through
+     * the controller-as-beacon at construction); an empty owner reverts in the
+     * implementation's `initialize`. Reverts while the controller is paused.
+     * @param _xrplOwner The XRPL owner.
+     * @return The Personal Account address.
+     */
+    function createPersonalAccount(
+        string calldata _xrplOwner
+    )
+        external
+        returns (address);
+
+    /**
      * @notice Get the PersonalAccount contract for a given XRPL owner.
      * @param _xrplOwner The XRPL address of the owner.
      * @return The PersonalAccount contract address associated with the XRPL owner

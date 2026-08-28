@@ -3,7 +3,6 @@ pragma solidity ^0.8.27;
 
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IPersonalAccountsFacet} from "../../userInterfaces/facets/IPersonalAccountsFacet.sol";
 
 library PersonalAccounts {
@@ -13,7 +12,7 @@ library PersonalAccounts {
         /// @notice PersonalAccount implementation used by BeaconProxy PA instances via IBeacon
         address personalAccountImplementation;
         /// Mapping from XRPL address to Personal Account
-        mapping(string xrplAddress => IIPersonalAccount) personalAccounts;
+        mapping(string xrplAddress => address) personalAccounts;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -101,11 +100,11 @@ library PersonalAccounts {
         string memory _xrplOwner
     )
         internal
-        returns (IIPersonalAccount _personalAccount)
+        returns (address _personalAccount)
     {
         State storage state = getState();
         _personalAccount = state.personalAccounts[_xrplOwner];
-        if (address(_personalAccount) == address(0)) {
+        if (_personalAccount == address(0)) {
             // create new Personal Account
             _personalAccount = createPersonalAccount(_xrplOwner);
         }
@@ -115,7 +114,7 @@ library PersonalAccounts {
         string memory _xrplOwner
     )
         internal
-        returns (IIPersonalAccount _personalAccount)
+        returns (address _personalAccount)
     {
         bytes memory bytecode = generateBytecode(_xrplOwner);
         // check if already deployed
@@ -127,7 +126,7 @@ library PersonalAccounts {
             IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, bytes32(0));
         }
 
-        _personalAccount = IIPersonalAccount(payable(personalAccountProxyAddress));
+        _personalAccount = personalAccountProxyAddress;
 
         // ensure the proxy address is a contract
         codeSize = personalAccountProxyAddress.code.length;

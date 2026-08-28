@@ -14,7 +14,7 @@ import {
     SKIP_REASON_DUPLICATE,
     SKIP_REASON_EXPIRED
 } from "../../userInterfaces/IComposeReceiverAccountBase.sol";
-import {ILoanChainSettingsFacet} from "../../userInterfaces/facets/ILoanChainSettingsFacet.sol";
+import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 
 /**
@@ -72,7 +72,7 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
         external payable
         nonReentrant
     {
-        ILoanChainSettingsFacet.Transport memory transport = _getTransport();
+        IComposeTransportFacet.Transport memory transport = _getTransport();
         _authenticate(transport, _from, _guid, _message);
 
         (uint8 version, uint8 action, bytes memory actionData) =
@@ -116,12 +116,12 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
     }
 
     /// @dev The full authentication checklist: the caller must be the endpoint, the sender
-    /// the configured FXRP OFT, the source chain the origin, the source-chain sender this
+    /// the configured OFT, the source chain the origin, the source-chain sender this
     /// account itself, and the delivered GUID must recompute from the pinned origin peer
     /// (the compose wrapper alone does not commit to the source OApp, so this last check is
     /// what defeats a temporarily swapped OFT peer).
     function _authenticate(
-        ILoanChainSettingsFacet.Transport memory _transport,
+        IComposeTransportFacet.Transport memory _transport,
         address _from,
         bytes32 _guid,
         bytes calldata _message
@@ -129,7 +129,7 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
         internal view
     {
         require(msg.sender == _transport.lzEndpoint, OnlyEndpoint());
-        require(_from == _transport.fxrpOft, WrongComposeSender(_from));
+        require(_from == _transport.oft, WrongComposeSender(_from));
         uint32 srcEid = _message.srcEid();
         require(srcEid == _transport.originEid, WrongSourceEid(srcEid));
         // the canonical OFT codec records the source-chain caller of `send`; only this
@@ -146,7 +146,7 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
             srcEid,
             address(uint160(uint256(_transport.originPeer))),
             IMessagingChannel(_transport.lzEndpoint).eid(),
-            bytes32(uint256(uint160(_transport.fxrpOft)))
+            bytes32(uint256(uint160(_transport.oft)))
         );
         require(_guid == expectedGuid, WrongGuid(_guid));
     }
@@ -181,16 +181,16 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
 
     /// @dev The transport this receiver authenticates against: the endpoint that may call, the
     /// OFT that must be the sender, the chain the message must come from and the peer it must
-    /// have been sent by. The loan-chain accounts read the governance transport; a receiver on
-    /// another chain derives it from its own settings.
+    /// have been sent by. The remote accounts read the diamond's compose transport; the Flare
+    /// receiver derives it from its own bridge settings.
     function _getTransport()
         internal view virtual
-        returns (ILoanChainSettingsFacet.Transport memory _transport)
+        returns (IComposeTransportFacet.Transport memory _transport)
     {
-        _transport = ILoanChainSettingsFacet(controller).getLoanChainTransport();
+        _transport = IComposeTransportFacet(controller).getComposeTransport();
         require(
             _transport.lzEndpoint != address(0),
-            ILoanChainSettingsFacet.LoanChainTransportNotConfigured()
+            IComposeTransportFacet.ComposeTransportNotConfigured()
         );
     }
 

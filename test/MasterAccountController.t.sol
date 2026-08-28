@@ -2286,6 +2286,48 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         masterAccountController.setPersonalAccountImplementation(address(0));
     }
 
+    function testCreatePersonalAccount() public {
+        // the explicit, permissionless creation route: the same deterministic proxy the owner's
+        // first instruction would create lazily, materialized by anyone - the caller gains no
+        // authority over it (the account obeys only its owner's XRPL signatures)
+        address predicted = masterAccountController.getPersonalAccount(xrplAddress1);
+        assertEq(predicted.code.length, 0);
+
+        vm.prank(makeAddr("anyone"));
+        vm.expectEmit();
+        emit IPersonalAccountsFacet.PersonalAccountCreated(predicted, xrplAddress1);
+        address created = masterAccountController.createPersonalAccount(xrplAddress1);
+        assertEq(created, predicted);
+        assertGt(created.code.length, 0);
+        assertEq(IPersonalAccount(created).xrplOwner(), xrplAddress1);
+        assertEq(IPersonalAccount(created).controllerAddress(), address(masterAccountController));
+        assertEq(IPersonalAccount(created).implementation(), personalAccountImplementation);
+
+        // idempotent, and registered for the lazy path and the lookup alike
+        assertEq(masterAccountController.createPersonalAccount(xrplAddress1), created);
+        assertEq(masterAccountController.getPersonalAccount(xrplAddress1), created);
+    }
+
+    function testCreatePersonalAccountRevertWhenPaused() public {
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+        vm.prank(governance);
+        masterAccountController.addPausers(pausers);
+        vm.prank(pauser);
+        masterAccountController.pause();
+
+        vm.expectRevert(IPauseFacet.IsPaused.selector);
+        masterAccountController.createPersonalAccount(xrplAddress1);
+    }
+
+    function testCreatePersonalAccountRevertEmptyOwner() public {
+        // the implementation rejects an empty owner in initialize, so the CREATE2 deployment
+        // reverts as a whole - no account can exist for an impossible owner
+        vm.expectRevert();
+        masterAccountController.createPersonalAccount("");
+    }
+
     function testCreatePersonalAccountRevertPersonalAccountNotSuccessfullyDeployed() public {
         MockSingletonFactoryNoDeploy mockFactoryNoDeploy = new MockSingletonFactoryNoDeploy();
         vm.etch(SINGLETON_FACTORY, address(mockFactoryNoDeploy).code);
