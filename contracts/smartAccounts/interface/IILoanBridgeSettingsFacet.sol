@@ -12,7 +12,9 @@ interface IILoanBridgeSettingsFacet is ILoanBridgeSettingsFacet {
      * @notice Sets the settings used to bridge FXRP to the loan chain.
      * @dev Validates that the OFT wraps the FXRP token, shares its decimals, and that its live
      * peer for the destination endpoint equals `_destinationPeer` exactly. Passing zero for all
-     * arguments clears the settings, which disables the forward sweep until reconfigured.
+     * arguments clears the settings, which blocks the outbound sends that use them - the loan
+     * instructions and the cross-chain user operations - and fails the redeem-home compose
+     * authentication closed until reconfigured.
      * @param _fxrpOft The FXRP OFT used to bridge FXRP.
      * @param _destinationEid The LayerZero endpoint id of the loan chain.
      * @param _destinationPeer The expected remote OApp (peer) on the loan chain.

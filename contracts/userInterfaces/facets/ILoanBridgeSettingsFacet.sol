@@ -38,12 +38,12 @@ interface ILoanBridgeSettingsFacet {
 
     /**
      * @notice Returns the settings used to bridge FXRP to the loan chain.
-     * @dev These are governance-set rather than supplied by the caller, so that a permissionless
-     * sweep cannot choose where the assets are bridged to.
+     * @dev These are governance-set rather than supplied by the caller, so that no caller can
+     * choose the route the assets are bridged over.
      * @return _fxrpOft The FXRP OFT used to bridge FXRP.
      * @return _destinationEid The LayerZero endpoint id of the loan chain.
      * @return _destinationPeer The expected remote OApp (peer) on the loan chain. Pinned so a
-     * peer mutation on the OFT after configuration fails sweeps closed.
+     * peer mutation on the OFT after configuration fails the bridging instructions closed.
      */
     function getLoanBridgeSettings()
         external view

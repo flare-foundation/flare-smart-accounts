@@ -12,7 +12,6 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
-    ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanSubaccountRemote.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
@@ -35,12 +34,14 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * controller-as-beacon.
  * The account operates on exactly **one Morpho market for its whole life** — the market its
  * subaccount type is bound to (write-once in the settings), so the address itself commits to
- * the pool. The parent Personal Account has no local key or controller-driven action on
- * this chain (instructions exist only on Flare), so every authorized action
- * arrives through the authenticated `lzCompose` (see {ComposeReceiverAccountBase}), and everything
- * else is permissionless movement along fixed rails — into the account's own position, home
- * over the bridge, or to the parent Personal Account (the user's own compose-driven account
- * on this chain) — so no caller ever chooses a destination, a market, or an amount source.
+ * the pool. Every authorized action arrives through the authenticated `lzCompose` (see
+ * {ComposeReceiverAccountBase}) sent by this same account on Flare, with one exception: the
+ * parent Personal Account (the mirror, itself compose-driven) holds one narrow direct
+ * authority — the signed exit {sweepToOrigin}, which can only send idle FXRP to this
+ * account's own fixed Flare address, never redirect funds or touch collateral or debt.
+ * Everything else is permissionless movement along fixed rails — into the account's own
+ * position, or loan-token surplus to the parent — so no caller ever chooses a destination,
+ * a market, or an amount source.
  * It has no native rail: the only protocol-delivered native is a withdraw delivery's compose
  * value (the return leg's fee), spent or forwarded to the parent mirror within the same call;
  * a plain send reverts, and a balance landing without a call (pre-deployment funding, an LZ
@@ -63,6 +64,13 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     // compose value, spent or forwarded to the parent mirror within the same call, so plain
     // native sends revert at the sender; native landing without a call (pre-deployment
     // funding, an LZ native drop, a force-send) strands - accepted, upgradeable
+
+    modifier onlyParent() {
+        // the parent is the mirror Personal Account: this method is reached only through a
+        // user-signed cross-chain user operation executed by the mirror
+        require(msg.sender == parentPersonalAccount, OnlyParent());
+        _;
+    }
 
     /// @inheritdoc ISubaccount
     function initialize(
@@ -160,6 +168,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         bytes calldata _extraOptions
     )
         external payable
+        onlyParent
         nonReentrant
         returns (uint256 _amount)
     {
@@ -214,8 +223,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             _executeWithdraw(_actionData, _guid);
         } else if (_action == ACTION_DEPOSIT_COLLATERAL) {
             _executeDepositCollateral(_actionData, _guid, _amountLD);
-        } else if (_action == ACTION_DEPOSIT_SWEEP) {
-            _executeSweepDeposit(_guid, _amountLD);
         } else {
             revert UnsupportedAction(_action);
         }
@@ -295,24 +302,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
 
         _supplyAndBorrow(_bridgedAmount, 0, bytes32(0), 0);
         emit CollateralDeposited(parentPersonalAccount, operationId, _bridgedAmount, _guid);
-    }
-
-    /// @dev The permissionless forward sweep's compose: deposit exactly the authenticated bridged
-    /// amount, nothing to decode and no id to consume (nobody signed it - it can express no
-    /// choice; replay safety is the endpoint's at-most-once compose delivery per packet, and each
-    /// packet supplies only its own credit). Same pause rule as the signed deposit.
-    function _executeSweepDeposit(
-        bytes32 _guid,
-        uint256 _bridgedAmount
-    )
-        private
-    {
-        require(_bridgedAmount > 0, ZeroAmount());
-        if (IPauseFacet(controller).isPaused()) {
-            require(_borrowSharesOf(_myMarket()) > 0, IPauseFacet.IsPaused());
-        }
-        _supplyAndBorrow(_bridgedAmount, 0, bytes32(0), 0);
-        emit SweptFxrpDeposited(parentPersonalAccount, _bridgedAmount, _guid);
     }
 
     /// @dev The asset moves of the borrow and deposit actions, separated from the decodes to

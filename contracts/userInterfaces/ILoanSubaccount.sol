@@ -4,15 +4,16 @@ pragma solidity >=0.8.4 <0.9;
 import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
 
-/// @dev Redeem-home action: the compose the loan-chain `sweepToOrigin` attaches to the FXRP it
-/// bridges back. `actionData` is `abi.encode(uint64 deadline)`, stamped by the sender as its
-/// block time plus `REDEEM_HOME_TTL` - a permissionless sweep signed nothing, so it can express
-/// no choice. On arrival, `min(balance, amountLD)` - at most the packet's authenticated
+/// @dev Redeem-home action: the compose the loan-chain bridge-back attaches to the FXRP it
+/// returns - the parent-signed `sweepToOrigin`, or the withdraw action's return leg.
+/// `actionData` is `abi.encode(uint64 deadline)`, stamped by the sender as its block time plus
+/// `REDEEM_HOME_TTL` - the compose itself expresses no choice (fixed destination, capped
+/// amount). On arrival, `min(balance, amountLD)` - at most the packet's authenticated
 /// amount - goes through the sweep-redeem logic (to the parent, which redeems it; below the
 /// FAssets minimum pushed unredeemed), with the compose value as the executor fee; the rest of
-/// the balance is left for the public rails. FXRP is fungible: the cap bounds the amount one
+/// the balance is left for the public rail. FXRP is fungible: the cap bounds the amount one
 /// compose can move, it does not tie the compose to the units its packet credited. Past its
-/// deadline the packet skips terminally (the balance is left untouched for the public rails,
+/// deadline the packet skips terminally (the balance is left untouched for the public rail,
 /// any compose value goes to the parent), so a packet cannot outlive its delivery window as a
 /// standing instruction over later funds. The public `sweepRedeem` fee requirement does not
 /// apply here: the packet already cost its sender the LayerZero fee.
@@ -21,16 +22,16 @@ uint8 constant ACTION_REDEEM_HOME = 1;
 /// @dev Lifetime of a redeem-home packet, from the send on the loan chain to its delivery on
 /// Flare: the intended operational delivery window (verification, executor delivery and
 /// ordinary retries - normally minutes). A packet delivered later skips and its FXRP falls back
-/// to the public rails; an extended LayerZero outage is what that rail is for. Tune from
+/// to the public rail; an extended LayerZero outage is what that rail is for. Tune from
 /// observed delivery latency once deployment data exists.
 uint64 constant REDEEM_HOME_TTL = 1 hours;
 
 /**
  * @title ILoanSubaccount
  * @notice User interface for deterministic loan subaccounts on Flare. Besides its parent-driven
- * instructions and permissionless rails, the account is the compose receiver of its own
- * loan-chain twin's bridge-back (see {IComposeReceiverAccountBase}): FXRP coming home is redeemed on
- * arrival.
+ * instructions and its one permissionless rail (`sweepRedeem`), the account is the compose
+ * receiver of its own loan-chain twin's bridge-back (see {IComposeReceiverAccountBase}): FXRP
+ * coming home is redeemed on arrival.
  */
 interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
@@ -84,7 +85,7 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when a redeem-home compose arrives past its deadline and skips: nothing
-     * is redeemed, the packet's credit stays for the public rails, its value went to the parent.
+     * is redeemed, the packet's credit stays for the public rail, its value went to the parent.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param guid The LayerZero message id of the skipped packet.
      */
@@ -118,19 +119,6 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         uint256 amount
     );
 
-    /**
-     * @notice Emitted when idle FXRP is bridged onward to the loan chain.
-     * @param parentPersonalAccount The parent Personal Account address.
-     * @param amount Amount of FXRP bridged.
-     * @param destinationEid The LayerZero endpoint id it was bridged to.
-     * @param guid The LayerZero message id.
-     */
-    event FXrpSweptToLoan(
-        address indexed parentPersonalAccount,
-        uint256 amount,
-        uint32 destinationEid,
-        bytes32 guid
-    );
 
     /**
      * @notice Emitted when a borrow instruction is sent to this account's loan-chain twin.
@@ -202,10 +190,6 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
      */
     error NothingToRedeem();
 
-    /**
-     * @notice Reverts if there is no FXRP to sweep onward.
-     */
-    error NothingToSweep();
 
     /**
      * @notice Reverts if the loan bridge settings have not been configured on the controller.
@@ -291,29 +275,6 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         external payable
         returns (uint256 _amount, uint256 _redeemedAmount);
 
-    /**
-     * @notice Bridges all idle FXRP onward to this account's address on the loan chain, where
-     * it is deposited as collateral on arrival.
-     * @dev Permissionless: this is the forward cleanup move, so anyone may trigger it. The
-     * destination address is this account's own address, which is identical on every chain
-     * because it is CREATE2-derived from inputs that do not vary by chain, and the destination
-     * chain and OFT come from the controller, so the caller cannot choose where the assets go.
-     * The attached compose is argument-free (`ACTION_DEPOSIT_SWEEP`): the loan-chain twin
-     * supplies exactly the bridged amount as collateral, no debt, no operation id - nobody
-     * signed it, so it can express no choice. If that compose fails, the credit sits idle on
-     * the loan-chain account for its permissionless deposit rail. `_extraOptions` must carry
-     * the destination `lzReceive` and `lzCompose` gas (type-3). `msg.value` must cover the
-     * LayerZero messaging fee; any excess is returned to the caller. Reverts while the
-     * controller is paused: the forward sweep is the incident-containment surface, while
-     * {sweepRedeem} stays available during a pause.
-     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
-     * @return _amount Amount of FXRP bridged.
-     */
-    function sweepToLoan(
-        bytes calldata _extraOptions
-    )
-        external payable
-        returns (uint256 _amount);
 
     /**
      * @notice The borrow instruction: bridges exactly `_collateralAmount` FXRP (zero for a
@@ -326,8 +287,8 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
      * payload is built here, not passed in, so what the user signs is structured and
      * type-checked, and a malformed payload cannot reach the bridge. Arguments are validated
      * before any fee is paid (`InvalidLoanInstruction`); the loan chain re-validates on
-     * delivery. The bridge destination is this account's own cross-chain address, exactly as
-     * in {sweepToLoan}, with all of its guards: paused reverts, configured settings required,
+     * delivery. The bridge destination is this account's own cross-chain address, fixed in the
+     * shared bridging core with all of its guards: paused reverts, configured settings required,
      * live peer re-checked. `_extraOptions` must be type-3 options carrying both the
      * destination `lzReceive` gas and the `lzCompose` gas. `msg.value` must cover the
      * LayerZero fee; any excess is returned to the caller (the parent).

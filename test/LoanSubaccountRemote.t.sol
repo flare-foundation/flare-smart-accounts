@@ -32,7 +32,10 @@ import {
     REDEEM_HOME_TTL
 } from "../contracts/userInterfaces/ILoanSubaccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
-import {IPersonalAccountRemote} from "../contracts/userInterfaces/IPersonalAccountRemote.sol";
+import {
+    IPersonalAccountRemote,
+    PA_ACTION_EXECUTE
+} from "../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IComposeTransportFacet} from "../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
 import {ILoanMarketsFacet} from "../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
@@ -60,7 +63,6 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
-    ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM,
     DESTINATION_KIND_XRPL_WORMHOLE
 } from "../contracts/userInterfaces/ILoanSubaccountRemote.sol";
@@ -724,45 +726,6 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliverExpectRevertZeroAmount(
             subaccount, 2, _depositPayload(bytes32("op-2")), ILoanSubaccountRemote.ZeroAmount.selector
         );
-    }
-
-    function testLzComposeSweepDepositSuppliesBridgedAmount() public {
-        // the permissionless forward sweep's compose: argument-free, deposits exactly what
-        // arrived, no debt, no id - a second packet simply deposits again
-        address subaccount = _createConfiguredSubaccount();
-        fxrp.mint(subaccount, 100e6);
-        vm.expectEmit();
-        emit ILoanSubaccountRemote.SweptFxrpDeposited(parentPersonalAccount, 100e6, _guidFor(1));
-        _deliver(subaccount, 1, 100e6, _sweepDepositPayload());
-
-        (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
-        assertEq(collateral, 100e6);
-        assertEq(borrowShares, 0);
-
-        fxrp.mint(subaccount, 25e6);
-        _deliver(subaccount, 2, 25e6, _sweepDepositPayload());
-        (, , collateral) = morpho.position(_marketId(), subaccount);
-        assertEq(collateral, 125e6);
-
-        // a sweep that brings nothing is malformed
-        _deliverExpectRevertZeroAmount(
-            subaccount, 3, _sweepDepositPayload(), ILoanSubaccountRemote.ZeroAmount.selector
-        );
-    }
-
-    function testLzComposeSweepDepositWhilePausedRequiresLiveDebt() public {
-        // the deposit rule: defending an indebted position survives a pause, a debt-free
-        // deposit is new exposure and waits (a revert, retriable, not a skip)
-        address indebted = _borrowedSubaccount(500e18);
-        address debtFree = controller.createSubaccount("rDebtFreeOwner", SUBACCOUNT_TYPE_LOAN);
-        fxrp.mint(indebted, 50e6);
-        fxrp.mint(debtFree, 100e6);
-        _pauseController();
-
-        _deliverExpectRevert(debtFree, 1, _sweepDepositPayload(), IPauseFacet.IsPaused.selector);
-        _deliver(indebted, 2, 50e6, _sweepDepositPayload());
-        (, , uint128 collateral) = morpho.position(_marketId(), indebted);
-        assertEq(collateral, 150e6);
     }
 
     function testLzComposeBorrowAgainstExistingCollateral() public {
@@ -1573,9 +1536,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the revert rolled the whole delivery back: the id stays unconsumed for a retry
         assertFalse(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-1")));
 
-        // the stranded credit exits over the transport without needing a market
+        // the stranded credit exits over the transport without needing a market - as the
+        // signed action it now is, called by the parent
         uint256 messagingFee = 0.01 ether;
-        vm.deal(address(this), messagingFee);
+        vm.deal(parentPersonalAccount, messagingFee);
+        vm.prank(parentPersonalAccount);
         uint256 amount =
             ILoanSubaccountRemote(subaccountB).sweepToOrigin{value: messagingFee}("");
         assertEq(amount, 100e6);
@@ -1791,7 +1756,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 100e6);
         uint256 messagingFee = 0.01 ether;
 
-        address caller = makeAddr("keeper");
+        // the exit is a signed action: only the parent (the mirror) may call it
+        address caller = parentPersonalAccount;
         vm.deal(caller, messagingFee + 1 ether);
         vm.prank(caller);
         uint256 amount =
@@ -1824,40 +1790,42 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         bytes memory options = hex"0003010011010000000000000000000000000000c350";
-        vm.deal(address(this), 0.01 ether);
+        vm.deal(parentPersonalAccount, 0.01 ether);
+        vm.prank(parentPersonalAccount);
         ILoanSubaccountRemote(subaccount).sweepToOrigin{value: 0.01 ether}(options);
         (,,,, bytes memory sentOptions,,) = fxrpOft.lastSendParam();
         assertEq(sentOptions, options);
     }
 
     function testSweepToOriginNeverSpendsAccountNative() public {
-        // pre-existing native on the account must not subsidize a public caller
+        // pre-existing native on the account must not subsidize the parent's sweep - the
+        // LayerZero fee is paid from msg.value alone
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         vm.deal(subaccount, 5 ether);
         uint256 messagingFee = 0.01 ether;
 
-        address caller = makeAddr("keeper");
-        vm.deal(caller, messagingFee);
-        vm.prank(caller);
+        vm.deal(parentPersonalAccount, messagingFee);
+        vm.prank(parentPersonalAccount);
         ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
 
         assertEq(subaccount.balance, 5 ether);
-        assertEq(caller.balance, 0);
+        assertEq(parentPersonalAccount.balance, 0);
     }
 
     function testSweepToOriginReverts() public {
         address subaccount = _createConfiguredSubaccount();
         uint256 messagingFee = 0.01 ether;
         vm.deal(address(this), 1 ether);
+        vm.deal(parentPersonalAccount, 1 ether);
 
-        // nothing to sweep
-        vm.expectRevert(ILoanSubaccountRemote.NothingToSweep.selector);
+        // the exit is a signed action: anyone else is rejected before anything is read
+        fxrp.mint(subaccount, 100e6);
+        vm.expectRevert(ILoanSubaccountRemote.OnlyParent.selector);
         ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
 
-        fxrp.mint(subaccount, 100e6);
-
-        // insufficient fee
+        // nothing to sweep
+        vm.prank(parentPersonalAccount);
         vm.expectRevert(
             abi.encodeWithSelector(
                 ILoanSubaccountRemote.InsufficientFundsForSweep.selector, messagingFee
@@ -1867,14 +1835,143 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // a peer mutation fails closed
         fxrpOft.setPeer(originEid, bytes32(uint256(0xbad)));
+        vm.prank(parentPersonalAccount);
         vm.expectRevert(ILoanSubaccountRemote.WrongOriginPeer.selector);
         ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
         fxrpOft.setPeer(originEid, originPeer);
 
         // every exit from this chain rides the OFT: the pause stops it
         _pauseController();
+        vm.prank(parentPersonalAccount);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
         ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
+        _unpauseController();
+
+        // nothing to sweep (checked after authorization)
+        fxrp.burn(subaccount, 100e6);
+        vm.prank(parentPersonalAccount);
+        vm.expectRevert(ILoanSubaccountRemote.NothingToSweep.selector);
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
+    }
+
+    function testDepositFrontRunLeavesSignedSweepHarmless() public {
+        // the residue race that remains: a gas-only depositIdleFxrp can beat the signed exit;
+        // the sweep then reverts NothingToSweep (the batch stays retriable) and the funds sit
+        // as the user's own collateral - never redirected
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 50e6);
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+
+        vm.deal(parentPersonalAccount, 0.01 ether);
+        vm.prank(parentPersonalAccount);
+        vm.expectRevert(ILoanSubaccountRemote.NothingToSweep.selector);
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: 0.01 ether}("");
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 50e6);
+    }
+
+    function testSignedSweepToOriginThroughTheMirror() public {
+        // the remote exit end to end, one owner throughout: the production-created PA sends
+        // the signed batch while the beacon resolves the Flare implementation; the SAME proxy
+        // becomes the mirror when the beacon switches (same address, per-chain implementation,
+        // exactly the production model), executes the batch, funds the fee from its own native
+        // balance, and takes the excess refund into its plain receive()
+        _configureSettings();
+        string memory exitOwner = "rSignedExitOwner";
+        address subaccount = controller.createSubaccount(exitOwner, SUBACCOUNT_TYPE_LOAN);
+        fxrp.mint(subaccount, 9e6);
+        _flareSenderOnThisDiamond(); // wires the Flare bridge settings on this diamond
+
+        address pa = controller.createPersonalAccount(exitOwner);
+        assertEq(LoanSubaccountRemote(payable(subaccount)).parentPersonalAccount(), pa);
+        vm.deal(pa, 0.01 ether);
+        IPersonalAccount.Call[] memory batch = new IPersonalAccount.Call[](1);
+        batch[0] = IPersonalAccount.Call({
+            target: subaccount,
+            value: 0.05 ether,
+            data: abi.encodeCall(ILoanSubaccountRemote.sweepToOrigin, (""))
+        });
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: pa,
+            value: 0.01 ether,
+            data: abi.encodeCall(
+                IPersonalAccount.sendCrossChainUserOp,
+                (batch, bytes32("op-exit"), uint64(block.timestamp + 1 hours), "")
+            )
+        });
+        vm.prank(address(controller));
+        IPersonalAccount(pa).executeUserOp(calls);
+        (uint256 amountLD, bytes memory payload) = _lastSentCompose();
+        assertEq(amountLD, 0);
+        // the send targets the sender's own address: composeFrom on delivery is the sender
+        (, bytes32 to, , , , , ) = fxrpOft.lastSendParam();
+        assertEq(to, bytes32(uint256(uint160(pa))));
+
+        // the same proxy is the mirror once the beacon switches. On separate chains each
+        // proxy is initialized by its own implementation; on this shared diamond the switch
+        // leaves the mirror layout's xrplOwner slot (2) unset, so write what the mirror's
+        // initialize would have written (short-string encoding)
+        vm.prank(governance);
+        controller.setPersonalAccountImplementation(address(new PersonalAccountRemote()));
+        vm.store(
+            pa,
+            bytes32(uint256(2)),
+            bytes32(bytes(exitOwner)) | bytes32(uint256(bytes(exitOwner).length * 2))
+        );
+
+        // underfunded mirror: the batch's 0.05 call value exceeds the balance, the whole
+        // delivery reverts and the exact packet stays retriable
+        vm.deal(pa, 0.01 ether);
+        (bytes memory message, bytes32 guid) = _composeMessage(pa, 3, 0, payload);
+        vm.prank(lzEndpoint);
+        vm.expectRevert();
+        IPersonalAccountRemote(pa).lzCompose(address(fxrpOft), guid, message, executor, "");
+        assertFalse(IPersonalAccountRemote(pa).usedOperations(bytes32("op-exit")));
+        assertEq(fxrp.balanceOf(subaccount), 9e6);
+
+        // funded, the exact same packet replays and succeeds: bridged home with the
+        // redeem-home compose, exactly the quoted fee spent, the excess refunded to the mirror
+        vm.deal(pa, 1 ether);
+        vm.prank(lzEndpoint);
+        IPersonalAccountRemote(pa).lzCompose(address(fxrpOft), guid, message, executor, "");
+        (uint256 sweptLD, ) = _lastSentCompose();
+        assertEq(sweptLD, 9e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertEq(pa.balance, 1 ether - 0.01 ether);
+        assertTrue(IPersonalAccountRemote(pa).usedOperations(bytes32("op-exit")));
+
+        // a batch whose call value cannot cover the live fee rolls back whole too
+        fxrp.mint(subaccount, 5e6);
+        IPersonalAccountRemote.Call[] memory poorCalls = new IPersonalAccountRemote.Call[](1);
+        poorCalls[0] = IPersonalAccountRemote.Call({
+            target: subaccount,
+            value: 0.001 ether,
+            data: abi.encodeCall(ILoanSubaccountRemote.sweepToOrigin, (""))
+        });
+        bytes memory poor = abi.encode(
+            PAYLOAD_VERSION_1,
+            PA_ACTION_EXECUTE,
+            abi.encode(bytes32("op-poor"), uint64(block.timestamp + 1 hours), poorCalls)
+        );
+        (message, guid) = _composeMessage(pa, 4, 0, poor);
+        vm.prank(lzEndpoint);
+        vm.expectRevert();
+        IPersonalAccountRemote(pa).lzCompose(address(fxrpOft), guid, message, executor, "");
+        assertEq(fxrp.balanceOf(subaccount), 5e6);
+        assertFalse(IPersonalAccountRemote(pa).usedOperations(bytes32("op-poor")));
+    }
+
+    function testRetiredSweepDepositActionIsUnsupported() public {
+        // action id 4 is retired, never reused: a packet carrying it fails closed
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliverExpectRevert(
+            subaccount, 1, abi.encode(PAYLOAD_VERSION_1, uint8(4), bytes("")),
+            abi.encodeWithSelector(
+                IComposeReceiverAccountBase.UnsupportedAction.selector, uint8(4)
+            )
+        );
     }
 
     function testSurplusRecoveryWorksWhilePaused() public {
@@ -2079,17 +2176,6 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(sender), 0);
         assertEq(fxrp.balanceOf(parentPersonalAccount), 40e6);
 
-        // the permissionless forward sweep: whatever idles on the Flare side bridges with the
-        // argument-free deposit compose and becomes collateral on arrival
-        fxrp.mint(sender, 40e6);
-        ILoanSubaccount(sender).sweepToLoan{value: 0.01 ether}("");
-        (amountLD, payload) = _lastSentCompose();
-        assertEq(amountLD, 40e6);
-        fxrp.mint(subaccount, amountLD);
-        _deliver(subaccount, 3, amountLD, payload);
-        (, , collateral) = morpho.position(_marketId(), subaccount);
-        assertEq(collateral, 100e6);
-
         // the signed deposit: exactly the signed amount travels and is supplied, no debt
         fxrp.mint(sender, 30e6);
         vm.prank(parentPersonalAccount);
@@ -2099,7 +2185,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, amountLD);
         _deliver(subaccount, 4, amountLD, payload);
         (, , collateral) = morpho.position(_marketId(), subaccount);
-        assertEq(collateral, 130e6);
+        assertEq(collateral, 90e6);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-d")));
 
 
@@ -2638,9 +2724,5 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     /// The amount and compose payload of the last send the Flare side handed to the OFT.
     function _lastSentCompose() private view returns (uint256 _amountLD, bytes memory _payload) {
         (, , _amountLD, , , _payload, ) = fxrpOft.lastSendParam();
-    }
-
-    function _sweepDepositPayload() private pure returns (bytes memory) {
-        return abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_SWEEP, bytes(""));
     }
 }

@@ -15,7 +15,6 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
-    ACTION_DEPOSIT_SWEEP,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanSubaccountRemote.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
@@ -97,24 +96,6 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         (, uint256 executorFee) = IExecutorsFacet(controller).getExecutorInfo();
         require(msg.value >= executorFee, InsufficientFundsForRedeem(executorFee));
         return _sweepRedeem(msg.value, type(uint256).max);
-    }
-
-    /// @inheritdoc ILoanSubaccount
-    function sweepToLoan(
-        bytes calldata _extraOptions
-    )
-        external payable
-        nonReentrant
-        returns (uint256 _amount)
-    {
-        // cleanup sweeps the whole balance, with the argument-free deposit compose: on arrival
-        // the loan-chain twin supplies exactly what arrived as collateral - no choice for the
-        // permissionless caller to make, no id to consume
-        _amount = ContractRegistry.getAssetManagerFXRP().fAsset().balanceOf(address(this));
-        require(_amount > 0, NothingToSweep());
-        bytes memory payload = abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_SWEEP, bytes(""));
-        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, _extraOptions, payload);
-        emit FXrpSweptToLoan(parentPersonalAccount, _amount, destinationEid, guid);
     }
 
     /// @inheritdoc ILoanSubaccount
@@ -296,7 +277,7 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
     /// fee), the cap is the packet's authenticated amount, so no compose moves more than one
     /// packet's worth (FXRP is fungible; the cap bounds the amount, not the units). Past the
     /// sender-stamped deadline the packet skips terminally: nothing is redeemed, the balance is
-    /// left for the public rails, the value joins the parent's float - a packet cannot outlive
+    /// left for the public rail, the value joins the parent's float - a packet cannot outlive
     /// its delivery window as a standing instruction over later funds.
     function _executeRedeemHome(
         bytes memory _actionData,
@@ -369,8 +350,8 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         emit FXrpRedeemed(parentPersonalAccount, _amount, _redeemedAmount);
     }
 
-    /// @dev Shared forward-move core of {sweepToLoan}, {borrow}, {depositCollateral} and
-    /// {withdraw}: bridges exactly `_amount` FXRP over LayerZero to this account's own address
+    /// @dev Shared forward-move core of {borrow}, {depositCollateral} and {withdraw}:
+    /// bridges exactly `_amount` FXRP over LayerZero to this account's own address
     /// on the loan chain, so every entry point shares the same guards by construction. A zero
     /// amount is a message-only send (a withdraw, or a borrow against existing collateral); the
     /// destination is never caller-chosen.

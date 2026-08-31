@@ -16,7 +16,8 @@ library LoanBridgeSettings {
         /// @notice LayerZero endpoint id of the loan chain.
         uint32 destinationEid;
         /// @notice The expected remote OApp (peer) on the loan chain, pinned so that a later
-        /// peer mutation on the OFT fails sweeps closed instead of routing to an unknown OApp.
+        /// peer mutation on the OFT fails the bridging instructions closed instead of routing
+        /// to an unknown OApp.
         bytes32 destinationPeer;
     }
 
@@ -33,7 +34,8 @@ library LoanBridgeSettings {
     {
         State storage state = getState();
         if (_fxrpOft == address(0) && _destinationEid == 0 && _destinationPeer == bytes32(0)) {
-            // explicit clear: disables the forward sweep until reconfigured
+            // explicit clear: blocks the outbound sends that use these settings and fails the
+            // redeem-home compose authentication closed until reconfigured
             delete state.fxrpOft;
             delete state.destinationEid;
             delete state.destinationPeer;
@@ -51,9 +53,10 @@ library LoanBridgeSettings {
             ILoanBridgeSettingsFacet.InvalidDestinationPeer()
         );
         // the OFT must actually be an FXRP bridge: it must wrap the FXRP token, share its
-        // decimals (sweeps send with minAmountLD == amountLD, so any shared-decimal dust would
-        // make them revert), and its peer for the destination chain must be exactly the intended
-        // remote OApp - existence alone would accept a wrong route
+        // decimals (the token-bearing signed instructions send with minAmountLD == amountLD,
+        // so any shared-decimal dust would make them revert), and its peer for the destination
+        // chain must be exactly the intended remote OApp - existence alone would accept a
+        // wrong route
         address fxrp = address(ContractRegistry.getAssetManagerFXRP().fAsset());
         require(IOFT(_fxrpOft).token() == fxrp, ILoanBridgeSettingsFacet.InvalidFxrpOft());
         require(

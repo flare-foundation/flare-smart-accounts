@@ -46,17 +46,6 @@ uint8 constant ACTION_WITHDRAW = 2;
 /// new exposure and waits out the pause.
 uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
 
-/// @dev Sweep-deposit action: the compose the permissionless Flare `sweepToLoan` attaches.
-/// `actionData` is empty - nobody signed this, so it can express no choice: exactly the
-/// authenticated bridged amount (the codec's `amountLD`, non-zero) is supplied as collateral
-/// on the account's one market, no debt changes hands, and there is no operation id to
-/// consume: replay safety is the endpoint's - EndpointV2 executes a compose at most once per
-/// `(from, to, guid, index)` and a failed one stays retriable - and the action is additive,
-/// each packet supplying only its own credited amount. Same pause rule as the signed deposit:
-/// while paused only when the position carries live debt.
-/// If it fails, the credit sits idle for `depositIdleFxrp`, the fallback rail.
-uint8 constant ACTION_DEPOSIT_SWEEP = 4;
-
 /// @dev The destination is an EVM address (cleanly zero-padded into the `bytes32`), paid by a
 /// plain ERC-20 transfer — typically an exchange deposit address, or the user's own
 /// loan-chain Personal Account (the parent, a functional compose-driven account). It may not
@@ -73,13 +62,13 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  * for a loan subaccount type on the loan-chain diamond (Ethereum, at launch), living at the
  * same CREATE2 address
  * as its Flare counterpart. The account operates on exactly one Morpho market for its whole
- * life — the market its type is bound to — so the address itself commits to the pool. It has
- * no parent-driven methods — the parent Personal Account has no local key or
- * controller-driven action on this chain; instructions exist only on Flare — so every
+ * life — the market its type is bound to — so the address itself commits to the pool. Every
  * authorized action arrives as an authenticated LayerZero compose payload sent by this same
- * account on Flare, and everything else is permissionless movement along fixed rails: into
- * the account's own position, home over the bridge, or to the parent Personal Account (the
- * user's own compose-driven account on this chain). It has no native rail.
+ * account on Flare, with one exception: the parent Personal Account (the mirror, itself
+ * compose-driven) holds one narrow direct authority — the signed exit {sweepToOrigin}, which
+ * can only send idle FXRP home to this account's own fixed Flare address. Everything else is
+ * permissionless movement along fixed rails: into the account's own position, or loan-token
+ * surplus to the parent. It has no native rail.
  */
 interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
@@ -131,18 +120,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
         bytes32 guid
     );
 
-    /**
-     * @notice Emitted when a sweep-deposit action executes: FXRP swept forward from Flare was
-     * supplied as collateral on arrival.
-     * @param parentPersonalAccount The parent Personal Account address.
-     * @param amount FXRP supplied as collateral (the authenticated bridged amount).
-     * @param guid The LayerZero message id the action arrived with.
-     */
-    event SweptFxrpDeposited(
-        address indexed parentPersonalAccount,
-        uint256 amount,
-        bytes32 guid
-    );
 
     /**
      * @notice Emitted when a withdraw action executes; the withdrawn collateral is bridged
@@ -297,6 +274,15 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     error RefundFailed();
 
     /**
+     * @notice Reverts if {sweepToOrigin} is called by anything other than the parent
+     * Personal Account (the mirror): the remote exit is a user-signed action by policy -
+     * every permissionless arrival has exactly one meaning (FXRP deposits, RLUSD repays),
+     * and the exit direction requires the user's signature, carried by the mirror's
+     * cross-chain user operation.
+     */
+    error OnlyParent();
+
+    /**
      * @notice Reverts on a withdraw delivery carrying less compose value than the signed
      * floor: delivery is permissionless and the value unauthenticated, so anything below the
      * floor must not consume the packet - not even as a terminal skip. Retriable.
@@ -325,7 +311,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Reverts on an action carrying no amount: a borrow with a zero borrow amount, a
-     * deposit (signed or swept) with no bridged amount, or a withdraw of zero.
+     * deposit with no bridged amount, or a withdraw of zero.
      */
     error ZeroAmount();
 
@@ -380,16 +366,21 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     /**
      * @notice Bridges all idle FXRP back to this account's own address on the origin chain
      * (Flare), where it is redeemed on arrival toward the user's XRPL address.
-     * @dev Permissionless with a fixed destination. The attached compose is the Flare twin's
-     * redeem-home action, carrying only a deadline (this block time plus the protocol TTL):
-     * nobody signed it, so it can express no choice; on arrival it redeems at most this amount,
-     * and past the deadline it skips.
+     * @dev Restricted to the parent Personal Account (the mirror), so it is reached only
+     * through a user-signed cross-chain user operation: by policy, the remote exit requires
+     * the user's signature, while permissionless arrivals have exactly one meaning each. The
+     * mirror's batch supplies `msg.value` from its own native balance (fund it with a native
+     * drop in the same instruction if needed); temporary unavailability while the Flare side
+     * is paused or its route unconfigured is accepted - custody is unaffected and the call
+     * works again after. The attached compose is the Flare twin's redeem-home action,
+     * carrying only a deadline (this block time plus the protocol TTL): on arrival it redeems
+     * at most this amount, and past the deadline it skips.
      * `_extraOptions` must carry the Flare-side `lzReceive` and `lzCompose` gas (type-3) and
      * may carry compose value, which becomes the redemption's executor fee on Flare (zero
      * allowed). `msg.value` must cover the LayerZero fee; exactly the quote is spent, only this
-     * call's excess is refunded, and the account's own native never subsidizes a caller.
-     * Pause-gated (every exit rides the OFT); the live peer is re-checked against the pinned one
-     * on every call.
+     * call's excess is refunded to the mirror, and the account's own native never subsidizes
+     * the caller. Pause-gated on this chain (every exit rides the OFT); the live peer is
+     * re-checked against the pinned one on every call.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      * @return _amount Amount of FXRP bridged.
      */
