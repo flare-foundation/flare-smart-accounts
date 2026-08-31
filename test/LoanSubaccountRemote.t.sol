@@ -38,7 +38,10 @@ import {
 } from "../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IComposeTransportFacet} from "../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
-import {ILoanMarketsFacet} from "../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
+import {
+    ILoanMarketsFacet,
+    MAX_FEE_RATE
+} from "../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
 import {IIComposeTransportFacet} from "../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
 import {IILoanMarketsFacet} from "../contracts/smartAccounts/interface/IILoanMarketsFacet.sol";
 import {IMorpho} from "../contracts/smartAccounts/interface/IMorpho.sol";
@@ -300,6 +303,121 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
                 SUBACCOUNT_TYPE_LOAN
             )
         );
+
+        // the fee terms were configured by the setters after registration
+        ILoanMarketsFacet.FeeTerms memory terms =
+            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        assertEq(terms.feeFloor, 0.07e18);
+        assertEq(terms.feeSpread, 0.01e18);
+        assertEq(terms.feeRecipient, makeAddr("feeCollector"));
+    }
+
+    function testBorrowRevertsUntilFeeTermsConfigured() public {
+        // registration alone does not price the type: the recipient is the activation
+        // marker, so a borrow reverts - retriable, never consumed - until the terms are
+        // configured, and the exact same packet delivers afterwards
+        _configureTransport();
+        morpho.createMarket(_defaultMarket().marketParams);
+        vm.prank(governance);
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+            SUBACCOUNT_TYPE_LOAN, _defaultMarket()
+        );
+        ILoanMarketsFacet.FeeTerms memory terms =
+            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        assertEq(terms.feeFloor, 0);
+        assertEq(terms.feeSpread, 0);
+        assertEq(terms.feeRecipient, address(0));
+
+        address subaccount = address(_deploySubaccount());
+        fxrp.mint(subaccount, 100e6);
+        address destination = makeAddr("exchangeDeposit");
+        bytes memory payload = _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(destination))), 500e18
+        );
+        _deliverExpectRevert(
+            subaccount, 1, payload, ILoanSubaccountRemote.FeeTermsNotConfigured.selector
+        );
+
+        // rates first, the recipient last - its set is the activation
+        vm.startPrank(governance);
+        _setDefaultFeeTerms(address(controller), SUBACCOUNT_TYPE_LOAN);
+        vm.stopPrank();
+        _deliver(subaccount, 1, 100e6, payload);
+        assertEq(rlusd.balanceOf(destination), 500e18);
+    }
+
+    function testSetLoanFeeRatesZeroIsDeliberateFeeOff() public {
+        // explicit zero floor and spread are legal - with the recipient set, the type is
+        // configured and "fee off" is a deliberate state, distinct from unconfigured
+        _configureSettings();
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(SUBACCOUNT_TYPE_LOAN, 0, 0);
+        vm.stopPrank();
+        ILoanMarketsFacet.FeeTerms memory stored =
+            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        assertEq(stored.feeFloor, 0);
+        assertEq(stored.feeSpread, 0);
+        assertEq(stored.feeRecipient, makeAddr("feeCollector"));
+    }
+
+    function testSetLoanFeeRatesAndRecipient() public {
+        _configureSettings();
+        vm.startPrank(governance);
+
+        // rates change without touching the recipient; the caps are inclusive
+        vm.expectEmit();
+        emit ILoanMarketsFacet.LoanFeeRatesSet(SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE, MAX_FEE_RATE);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE, MAX_FEE_RATE
+        );
+        ILoanMarketsFacet.FeeTerms memory terms =
+            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        assertEq(terms.feeFloor, MAX_FEE_RATE);
+        assertEq(terms.feeSpread, MAX_FEE_RATE);
+        assertEq(terms.feeRecipient, makeAddr("feeCollector"));
+
+        // the recipient rotates without touching the rates
+        address newCollector = makeAddr("newCollector");
+        vm.expectEmit();
+        emit ILoanMarketsFacet.LoanFeeRecipientSet(SUBACCOUNT_TYPE_LOAN, newCollector);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
+            SUBACCOUNT_TYPE_LOAN, newCollector
+        );
+        terms = ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        assertEq(terms.feeFloor, MAX_FEE_RATE);
+        assertEq(terms.feeSpread, MAX_FEE_RATE);
+        assertEq(terms.feeRecipient, newCollector);
+        vm.stopPrank();
+    }
+
+    function testSetLoanFeeRatesReverts() public {
+        _configureSettings();
+        vm.startPrank(governance);
+
+        // both setters need a registered market: terms exist exactly as long as the type does
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, 9)
+        );
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(9, 0, 0);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, 9)
+        );
+        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(9, makeAddr("collector"));
+
+        vm.expectRevert(ILoanMarketsFacet.InvalidFeeTerms.selector);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE + 1, 0
+        );
+        vm.expectRevert(ILoanMarketsFacet.InvalidFeeTerms.selector);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0, MAX_FEE_RATE + 1
+        );
+        vm.expectRevert(ILoanMarketsFacet.InvalidFeeRecipient.selector);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
+            SUBACCOUNT_TYPE_LOAN, address(0)
+        );
+        vm.stopPrank();
     }
 
     function testSettingsRevertNotOwner() public {
@@ -326,6 +444,18 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         IILoanMarketsFacet(address(controller)).enableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
+        );
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0.07e18, 0.01e18
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
+        );
+        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
+            SUBACCOUNT_TYPE_LOAN, makeAddr("feeCollector")
         );
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
@@ -1383,6 +1513,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         IILoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
+        _setDefaultFeeTerms(address(controller), typeB);
         IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
@@ -1474,6 +1605,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         IILoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
+        _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
 
         // both accounts materialize through the production CREATE2 route, one per type
@@ -1570,10 +1702,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ILoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
-        vm.prank(governance);
+        vm.startPrank(governance);
         IILoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
+        _setDefaultFeeTerms(address(controller), typeB);
+        vm.stopPrank();
 
         _deliver(subaccountB, 1, 100e6, payload);
         (, , uint128 collateral) =
@@ -2045,7 +2179,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+            typeB, marketB
+        );
+        _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
 
         address subaccount = controller.createSubaccount("rFrozenParentOwner", typeB);
@@ -2254,6 +2391,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         IILoanMarketsFacet(address(minimal)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
+        _setDefaultFeeTerms(address(minimal), SUBACCOUNT_TYPE_LOAN);
         vm.stopPrank();
         string memory xrplOwner = "rMinimalTopologyOwner";
         address subaccount = minimalController.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_LOAN);
@@ -2326,6 +2464,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         });
     }
 
+    /// Configures the meeting-example fee terms (floor 7%, spread 1% annually, a fixed
+    /// collector) for `_subaccountType`: rates first, then the recipient - the activation
+    /// marker. The caller must already be pranked as the diamond's owner.
+    function _setDefaultFeeTerms(address _diamond, uint256 _subaccountType) private {
+        IILoanMarketsFacet(_diamond).setLoanFeeRates(_subaccountType, 0.07e18, 0.01e18);
+        IILoanMarketsFacet(_diamond).setLoanFeeRecipient(
+            _subaccountType, makeAddr("feeCollector")
+        );
+    }
+
     /// A valid alternate OFT adapter wrapping `_token`, wired like the default one.
     function _wiredOft(MintableERC20 _token) private returns (MockOft _oft) {
         _oft = new MockOft(_token, 0.01 ether);
@@ -2346,10 +2494,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function _configureSettings() private {
         _configureTransport();
         morpho.createMarket(_defaultMarket().marketParams);
-        vm.prank(governance);
+        vm.startPrank(governance);
         IILoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
+        _setDefaultFeeTerms(address(controller), SUBACCOUNT_TYPE_LOAN);
+        vm.stopPrank();
     }
 
     function _setTransportExpectRevert(

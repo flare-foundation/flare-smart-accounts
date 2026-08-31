@@ -266,6 +266,12 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // a debt increase respects the pause and the per-type borrow switch
         _checkNotPaused();
         require(!ILoanMarketsFacet(controller).isLoanBorrowingDisabled(subaccountType), BorrowingDisabled());
+        // and configured fee terms (the recipient is the activation marker); a revert, not
+        // a skip, so the packet stays retriable
+        require(
+            ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient != address(0),
+            FeeTermsNotConfigured()
+        );
         usedOperations[operationId] = true;
 
         _supplyAndBorrow(_bridgedAmount, destinationKind, destination, borrowAmount);

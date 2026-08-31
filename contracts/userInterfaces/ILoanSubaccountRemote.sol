@@ -238,6 +238,15 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     error BorrowingDisabled();
 
     /**
+     * @notice Reverts on a debt increase while the subaccount type's fee terms are not yet
+     * configured (the fee recipient is the activation marker, set last after the rates): a
+     * registered-but-unpriced type cannot take on debt, so no borrower can ever snapshot
+     * unset terms. Deliberately a revert, not a skip — the condition is
+     * temporary-by-configuration and a permissionless delivery must not consume the packet.
+     */
+    error FeeTermsNotConfigured();
+
+    /**
      * @notice Reverts if there are no idle loan tokens.
      */
     error NothingToRepay();

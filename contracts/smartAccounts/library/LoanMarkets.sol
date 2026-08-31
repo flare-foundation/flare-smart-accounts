@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {IOFT} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
-import {ILoanMarketsFacet} from "../../userInterfaces/facets/ILoanMarketsFacet.sol";
+import {ILoanMarketsFacet, MAX_FEE_RATE} from "../../userInterfaces/facets/ILoanMarketsFacet.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 import {SUBACCOUNT_TYPE_NONE, ISubaccountsFacet} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
@@ -17,6 +17,10 @@ library LoanMarkets {
         mapping(uint256 subaccountType => ILoanMarketsFacet.Market) markets;
         /// @dev Types with new debt increases disabled - the routine way to sunset a pool.
         mapping(uint256 subaccountType => bool) borrowingDisabled;
+        /// @dev Each type's Flare fee terms - set atomically with the market (never unset for
+        /// a registered type), mutable by timelock afterwards; kept out of the write-once
+        /// `markets` mapping because the terms may change while the binding never does.
+        mapping(uint256 subaccountType => ILoanMarketsFacet.FeeTerms) feeTerms;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -73,6 +77,41 @@ library LoanMarkets {
         ComposeTransport.pinToken(marketParams.collateralToken);
         state.markets[_subaccountType] = _market;
         emit ILoanMarketsFacet.LoanMarketRegistered(_subaccountType, _market.morpho, marketId);
+        // deliberately no fee terms here: the type stays unpriced - and borrowing stays
+        // blocked - until setLoanFeeRecipient activates it (rates first, recipient last)
+    }
+
+    function setLoanFeeRates(
+        uint256 _subaccountType,
+        uint64 _feeFloor,
+        uint64 _feeSpread
+    )
+        internal
+    {
+        _requireRegistered(_subaccountType);
+        // the cap bounds the accrual arithmetic for every rate an account can ever snapshot
+        require(
+            _feeFloor <= MAX_FEE_RATE && _feeSpread <= MAX_FEE_RATE,
+            ILoanMarketsFacet.InvalidFeeTerms()
+        );
+        ILoanMarketsFacet.FeeTerms storage terms = getState().feeTerms[_subaccountType];
+        terms.feeFloor = _feeFloor;
+        terms.feeSpread = _feeSpread;
+        emit ILoanMarketsFacet.LoanFeeRatesSet(_subaccountType, _feeFloor, _feeSpread);
+    }
+
+    function setLoanFeeRecipient(
+        uint256 _subaccountType,
+        address _feeRecipient
+    )
+        internal
+    {
+        _requireRegistered(_subaccountType);
+        // never zero: the first set (from zero) is the terms' activation - it opens borrowing
+        // for the type - and the marker can never return to unconfigured afterwards
+        require(_feeRecipient != address(0), ILoanMarketsFacet.InvalidFeeRecipient());
+        getState().feeTerms[_subaccountType].feeRecipient = _feeRecipient;
+        emit ILoanMarketsFacet.LoanFeeRecipientSet(_subaccountType, _feeRecipient);
     }
 
     function disableLoanBorrowing(
@@ -111,6 +150,15 @@ library LoanMarkets {
         return getState().borrowingDisabled[_subaccountType];
     }
 
+    function getLoanFeeTerms(
+        uint256 _subaccountType
+    )
+        internal view
+        returns (ILoanMarketsFacet.FeeTerms memory)
+    {
+        return getState().feeTerms[_subaccountType];
+    }
+
     function getState()
         internal pure
         returns (State storage _state)
@@ -128,11 +176,18 @@ library LoanMarkets {
     )
         private
     {
-        State storage state = getState();
+        _requireRegistered(_subaccountType);
+        getState().borrowingDisabled[_subaccountType] = _disabled;
+    }
+
+    function _requireRegistered(
+        uint256 _subaccountType
+    )
+        private view
+    {
         require(
-            state.markets[_subaccountType].morpho != address(0),
+            getState().markets[_subaccountType].morpho != address(0),
             ILoanMarketsFacet.MarketNotRegistered(_subaccountType)
         );
-        state.borrowingDisabled[_subaccountType] = _disabled;
     }
 }

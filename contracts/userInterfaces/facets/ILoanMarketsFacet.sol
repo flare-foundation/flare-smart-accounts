@@ -3,14 +3,23 @@ pragma solidity >=0.8.4 <0.9;
 
 import {IMorpho} from "../../smartAccounts/interface/IMorpho.sol";
 
+/// @dev The maximum fee floor and fee spread: annual WAD rates (`1e18` = 100% per year), each
+/// capped at 100%. The cap bounds the accrual arithmetic for every rate an account can ever
+/// snapshot - a bad stored rate could not be repaired by changing the global terms, since an
+/// account always prices its elapsed period at the terms it snapshotted.
+uint64 constant MAX_FEE_RATE = 1e18;
+
 /**
  * @title ILoanMarketsFacet
  * @notice Governance-set configuration of the remote loan subaccounts: one **write-once Morpho
  * market per subaccount type** — a position's market can never change under it, so exits
- * need no registry; a new pool is a new subaccount type — and a per-type borrow switch, the
- * routine way to sunset a pool. Registration requires the compose transport (the market's
- * collateral token must be the transport OFT's token) and permanently pins that token for
- * every later transport. Cut only on the loan-chain diamond (Ethereum, at launch).
+ * need no registry; a new pool is a new subaccount type — a per-type borrow switch, the
+ * routine way to sunset a pool, and the type's Flare fee terms, configured by timelock after
+ * registration: rates first, the recipient last — the recipient is the **activation marker**,
+ * and borrowing reverts while it is zero, so a registered-but-unpriced type cannot take on
+ * debt. Registration requires the compose transport (the market's collateral token must be
+ * the transport OFT's token) and permanently pins that token for every later transport. Cut
+ * only on the loan-chain diamond (Ethereum, at launch).
  */
 interface ILoanMarketsFacet {
 
@@ -23,6 +32,23 @@ interface ILoanMarketsFacet {
         /// token (enforced); the loan token is RLUSD by governance policy per registration,
         /// not an on-chain check.
         IMorpho.MarketParams marketParams;
+    }
+
+    /// @dev A subaccount type's Flare fee terms: the user's effective rate is
+    /// `max(feeFloor, market interest rate + feeSpread)`, measured checkpoint-to-checkpoint
+    /// by the subaccounts. Configured by timelock after registration - rates first, recipient
+    /// last - and mutable the same way (accounts snapshot the terms they accrue under, so a
+    /// change is never retroactive). Explicit zero rates are a deliberate "fee off".
+    struct FeeTerms {
+        /// @notice The minimum effective annual rate (WAD, at most {MAX_FEE_RATE}).
+        uint64 feeFloor;
+        /// @notice The annual spread over the market's rate (WAD, at most {MAX_FEE_RATE}).
+        uint64 feeSpread;
+        /// @notice The collector the fee is paid to. Zero exactly while the type's terms are
+        /// unconfigured - the activation marker: borrowing reverts until it is set, and the
+        /// setter never accepts zero, so it can never return to zero. Rotating it changes
+        /// where the fee goes, not what anyone owes.
+        address feeRecipient;
     }
 
     /**
@@ -51,6 +77,30 @@ interface ILoanMarketsFacet {
      */
     event LoanBorrowingEnabled(
         uint256 indexed subaccountType
+    );
+
+    /**
+     * @notice Emitted when a subaccount type's fee rates are set: at market registration and
+     * on every later timelocked change.
+     * @param subaccountType The subaccount type.
+     * @param feeFloor The minimum effective annual rate (WAD).
+     * @param feeSpread The annual spread over the market's rate (WAD).
+     */
+    event LoanFeeRatesSet(
+        uint256 indexed subaccountType,
+        uint64 feeFloor,
+        uint64 feeSpread
+    );
+
+    /**
+     * @notice Emitted when a subaccount type's fee recipient is set: at market registration
+     * and on every later timelocked rotation.
+     * @param subaccountType The subaccount type.
+     * @param feeRecipient The collector the fee is paid to.
+     */
+    event LoanFeeRecipientSet(
+        uint256 indexed subaccountType,
+        address feeRecipient
     );
 
     /**
@@ -83,6 +133,17 @@ interface ILoanMarketsFacet {
     );
 
     /**
+     * @notice Reverts on a fee floor or fee spread above {MAX_FEE_RATE}.
+     */
+    error InvalidFeeTerms();
+
+    /**
+     * @notice Reverts on a zero fee recipient: the terms must always name a collector, even
+     * with both rates deliberately zero.
+     */
+    error InvalidFeeRecipient();
+
+    /**
      * @notice Returns the market a subaccount type is bound to.
      * @param _subaccountType The subaccount type.
      * @return The market; a zero `morpho` means no market is registered for the type.
@@ -104,4 +165,16 @@ interface ILoanMarketsFacet {
     )
         external view
         returns (bool);
+
+    /**
+     * @notice Returns a subaccount type's Flare fee terms.
+     * @param _subaccountType The subaccount type.
+     * @return The fee terms; a zero `feeRecipient` means the type's terms are not yet
+     * configured, and borrowing reverts until they are.
+     */
+    function getLoanFeeTerms(
+        uint256 _subaccountType
+    )
+        external view
+        returns (FeeTerms memory);
 }
