@@ -207,7 +207,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         }
         if (flareDebtX18 / WAD != 0) {
             require(
-                _feeSecuredAfterWithdrawal(_myMarket(), 0),
+                _exitLeavesFeeSecured(_myMarket(), 0),
                 OutstandingLoanFee(flareDebtX18 / WAD)
             );
         } else {
@@ -470,8 +470,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // signed cap
         _checkpointFee(market);
         uint256 fxrpFee = 0;
-        if (!_feeSecuredAfterWithdrawal(market, amount)) {
-            fxrpFee = _settleFeeInFxrp(market, maxFeeFxrp, amount);
+        address feeRecipient = address(0);
+        if (!_exitLeavesFeeSecured(market, amount)) {
+            (fxrpFee, feeRecipient) = _settleFeeInFxrp(market, maxFeeFxrp, amount);
         }
         usedOperations[operationId] = true;
 
@@ -479,10 +480,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             market.marketParams, amount, address(this), address(this)
         );
         if (fxrpFee > 0) {
-            IERC20(market.marketParams.collateralToken).safeTransfer(
-                ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient,
-                fxrpFee
-            );
+            IERC20(market.marketParams.collateralToken).safeTransfer(feeRecipient, fxrpFee);
         }
         emit CollateralWithdrawn(parentPersonalAccount, operationId, amount, _guid);
 
@@ -651,7 +649,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// the collectible fee. Zero collectible needs no reads at all (and forgives debt-free
     /// dust); a zero, dead or reverting oracle values the security at nothing and falls
     /// through to the settlement branch (a parked exit is settled through repay, oracle-free).
-    function _feeSecuredAfterWithdrawal(
+    function _exitLeavesFeeSecured(
         ILoanMarketsFacet.Market memory _market,
         uint256 _withdrawAmount
     )
@@ -692,22 +690,24 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         uint256 _withdrawAmount
     )
         private
-        returns (uint256 _fxrpFee)
+        returns (uint256 _fxrpFee, address _feeRecipient)
     {
         uint256 collectible = flareDebtX18 / WAD;
         if (collectible > 0) {
-            uint256 price = IOracle(_market.marketParams.oracle).price();
+            uint256 price = 0;
+            try IOracle(_market.marketParams.oracle).price() returns (uint256 _price) {
+                price = _price;
+            } catch {
+                revert OracleUnavailable();
+            }
             require(price > 0, InvalidOraclePrice());
             _fxrpFee = Math.mulDiv(collectible, ORACLE_PRICE_SCALE, price, Math.Rounding.Ceil);
             require(_fxrpFee <= _maxFeeFxrp, FxrpFeeAboveSignedCap(_fxrpFee, _maxFeeFxrp));
             require(_fxrpFee < _withdrawAmount, FxrpFeeExceedsWithdrawal(_fxrpFee, _withdrawAmount));
             flareDebtX18 -= collectible * WAD;
-            emit LoanFeeCollectedFxrp(
-                ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient,
-                _fxrpFee,
-                collectible,
-                price
-            );
+            _feeRecipient =
+                ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient;
+            emit LoanFeeCollectedFxrp(_feeRecipient, _fxrpFee, collectible, price);
         }
         _forgiveFeeDust();
     }

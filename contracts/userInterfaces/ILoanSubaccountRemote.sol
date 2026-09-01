@@ -441,6 +441,14 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      */
     error InvalidOraclePrice();
 
+    /**
+     * @notice Reverts an under-secured withdraw delivery when the market oracle reverts (a
+     * dead or bricked oracle - the write-once market can never rotate it). Retriable: settle
+     * through {repay}, then the retried delivery passes with nothing collectible,
+     * oracle-free.
+     */
+    error OracleUnavailable();
+
 
 
     /**

@@ -1921,7 +1921,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(bytes("oracle reverted"));
+        vm.expectRevert(ILoanSubaccountRemote.OracleUnavailable.selector);
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -2132,6 +2132,256 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             address(fxrpOft), guid, message, executor, ""
         );
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w2")));
+    }
+
+    //
+    // step 4: the adversarial sweep - assembled-system scenarios
+    //
+
+    function testExternalRepayThenWithdrawBypassIsBlocked() public {
+        // the design's founding attack: extinguish the Morpho debt directly (bypassing
+        // repay so the fee leg never runs), then walk the collateral out - the gate
+        // collects regardless
+        _configureSettings();
+        (, address subaccount) = _borrowedPairWithFee("rBypassOwner");
+        // no ping in between: the withdrawal's own checkpoint must discover the whole
+        // year's fee across the external repayment (shares-first, floor on the old base)
+        _externalRepay(subaccount, 1000e18);
+
+        // stripping withdrawal with a zero cap parks - the fee cannot be walked around
+        bytes memory uncapped =
+            _withdrawPayloadWithCap(bytes32("op-w"), 100e6, RETURN_MIN_VALUE, 0);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, uncapped);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ILoanSubaccountRemote.FxrpFeeAboveSignedCap.selector, 35e6, 0
+            )
+        );
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+
+        // with the cap signed, the fee comes off the top and only the rest goes home
+        _deliverWithValue(
+            subaccount, 3, 0,
+            _withdrawPayloadWithCap(bytes32("op-w"), 100e6, RETURN_MIN_VALUE, 36e6),
+            RETURN_MIN_VALUE
+        );
+        assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 35e6);
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 65e6);
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
+    }
+
+    function testSelfLiquidationLeavesTheClaimStanding() public {
+        // the accepted junior-claim risk, end to end: a (self-)liquidation strips the
+        // position past the gates, but the claim is never auto-written-off - later assets
+        // on the account still answer to it
+        _configureSettings();
+        (address parent, address subaccount) = _borrowedPairWithFee("rSelfLiqOwner");
+        _liquidate(subaccount, 0);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 70e18 * 1e18);
+
+        // idle FXRP arriving later cannot sweep out past the now-unsecured claim
+        fxrp.mint(subaccount, 5e6);
+        vm.deal(parent, 0.02 ether);
+        vm.prank(parent);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 70e18)
+        );
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: 0.01 ether}("");
+
+        // paying the claim (the free direction + repay) reopens the exit
+        rlusd.mint(subaccount, 70e18);
+        ILoanSubaccountRemote(subaccount).repay();
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        vm.prank(parent);
+        ILoanSubaccountRemote(subaccount).sweepToOrigin{value: 0.01 ether}("");
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 5e6);
+    }
+
+    function testRepayConsumingSubaccountRlusdIsRepayFuel() public {
+        // the grief that motivated (and outlived) the parent-funded mode, proven moot:
+        // RLUSD parked on the subaccount IS repay fuel - a third party calling repay
+        // deleverages the user, which is correct behavior, not a loss
+        _configureSettings();
+        (, address subaccount) = _borrowedPairWithFee("rGriefOwner");
+        (, uint128 sharesBefore, ) = morpho.position(_marketId(), subaccount);
+        rlusd.mint(subaccount, 100e18);
+
+        vm.prank(makeAddr("griefer"));
+        ILoanSubaccountRemote(subaccount).repay();
+        (, uint128 sharesAfter, ) = morpho.position(_marketId(), subaccount);
+        assertLt(sharesAfter, sharesBefore);
+        assertEq(rlusd.balanceOf(subaccount), 0);
+        // the fee is measured and intact - nothing was stolen, nothing collected early
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 70e18 * 1e18);
+    }
+
+    function testSequentialExitsWithPriceMovesKeepTheLedgerConsistent() public {
+        // the stateful chain single tests cannot catch: secured exits, price moves, more
+        // accrual, then a settling exit - the ledger must be exact at every step
+        _configureSettings();
+        (, address subaccount) = _parentAndSubaccount("rSequenceOwner");
+        fxrp.mint(subaccount, 300e6);
+        _deliver(subaccount, 1, 300e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+
+        // half a year: fee 35; remaining 250 FXRP = 500 RLUSD >= 105 - secured, uncollected
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        _deliverWithValue(
+            subaccount, 2, 0,
+            _withdrawPayloadWithCap(bytes32("op-w1"), 50e6, RETURN_MIN_VALUE, 0),
+            RETURN_MIN_VALUE
+        );
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 35e18 * 1e18);
+
+        // price halves; remaining 200 FXRP = 200 RLUSD still >= 105 - still secured
+        oracle.setPrice(1e48);
+        _deliverWithValue(
+            subaccount, 3, 0,
+            _withdrawPayloadWithCap(bytes32("op-w2"), 50e6, RETURN_MIN_VALUE, 0),
+            RETURN_MIN_VALUE
+        );
+        assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 0);
+
+        // another half year (fee 70) and another halving: 200 FXRP = 100 RLUSD < 210 -
+        // the next exit settles at the CURRENT price: 70 RLUSD = 140 FXRP off the top
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        oracle.setPrice(0.5e48);
+        _deliverWithValue(
+            subaccount, 4, 0,
+            _withdrawPayloadWithCap(bytes32("op-w3"), 150e6, RETURN_MIN_VALUE, 140e6),
+            RETURN_MIN_VALUE
+        );
+        assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 140e6);
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 10e6);
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
+    }
+
+    function testRateChangeRunbookRehearsalWithAMissedAccount() public {
+        // the three-step runbook over three borrowers, one deliberately missed: the pinged
+        // accounts switch rates exactly at the boundary, the missed one keeps its old
+        // snapshot for BOTH years and is never retroactively repriced
+        _configureSettings();
+        address[3] memory subaccounts;
+        string[3] memory owners = ["rRunbookA", "rRunbookB", "rRunbookC"];
+        for (uint256 i = 0; i < 3; i++) {
+            subaccounts[i] = controller.createSubaccount(owners[i], SUBACCOUNT_TYPE_LOAN);
+            fxrp.mint(subaccounts[i], 100e6);
+            _deliver(subaccounts[i], 1, 100e6, _borrowPayload(
+                bytes32("op-borrow"), DESTINATION_KIND_EVM,
+                bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+            ));
+        }
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+
+        // step 1: pre-change pass (C missed); step 2: the change; step 3: post-change pass
+        ILoanSubaccountRemote(subaccounts[0]).checkpointFee();
+        ILoanSubaccountRemote(subaccounts[1]).checkpointFee();
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
+        );
+        vm.stopPrank();
+        ILoanSubaccountRemote(subaccounts[0]).checkpointFee();
+        ILoanSubaccountRemote(subaccounts[1]).checkpointFee();
+
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        for (uint256 i = 0; i < 3; i++) {
+            ILoanSubaccountRemote(subaccounts[i]).checkpointFee();
+        }
+        // A and B: year 1 at 7% (70) + year 2 at 14% (140)
+        (, uint256 feeA, , , , ) = ILoanSubaccountRemote(subaccounts[0]).getLoanFeeState();
+        (, uint256 feeB, , , , ) = ILoanSubaccountRemote(subaccounts[1]).getLoanFeeState();
+        assertEq(feeA, 210e18 * 1e18);
+        assertEq(feeB, 210e18 * 1e18);
+        // C, missed by both passes: two years at the OLD 7% snapshot - late, in the user's
+        // favor, never retroactive
+        (, uint256 feeC, , , , ) = ILoanSubaccountRemote(subaccounts[2]).getLoanFeeState();
+        assertEq(feeC, 140e18 * 1e18);
+    }
+
+    function testIdleCreditSurvivesTheGatesUntouched() public {
+        // a fee-terms-skipped borrow leaves its authenticated credit idle; a settling
+        // withdrawal takes its fee from the WITHDRAWN amount only, never from the idle
+        // balance, which depositIdleFxrp later absorbs
+        _configureSettings();
+        (address pairParent, address subaccount) = _borrowedPairWithFee("rIdleCreditOwner");
+        fxrp.mint(subaccount, 20e6);
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
+        );
+        vm.stopPrank();
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanActionSkipped(
+            pairParent, bytes32("op-2"), SKIP_REASON_FEE_TERMS, _guidFor(2)
+        );
+        _deliver(subaccount, 2, 20e6, _borrowPayload(
+            bytes32("op-2"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
+
+        // the elapsed year is priced at the 7% SNAPSHOT (fee 70 = 35 FXRP); the idle 20
+        // stays untouched - only the withdrawn 40 funds the settlement
+        _deliverWithValue(
+            subaccount, 3, 0,
+            _withdrawPayloadWithCap(bytes32("op-w"), 40e6, RETURN_MIN_VALUE, 36e6),
+            RETURN_MIN_VALUE
+        );
+        assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 35e6);
+        assertEq(fxrp.balanceOf(subaccount), 20e6);
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 5e6);
+
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        assertEq(fxrp.balanceOf(subaccount), 0);
+    }
+
+    function testMixedInterestCheckpointPathDependenceIsThePromise() public {
+        // the design's per-checkpoint promise, pinned: zero interest in the first half-year,
+        // heavy interest in the second - the account checkpointed halfway owes ~40 (35 floor
+        // + 5 spread), the untouched one owes ~10 (interest ate the whole-year floor). Both
+        // are correct; the advertised measurement is per-checkpoint, not whole-period.
+        _configureSettings();
+        address pinged = controller.createSubaccount("rPingedOwner", SUBACCOUNT_TYPE_LOAN);
+        address dormant = controller.createSubaccount("rDormantOwner", SUBACCOUNT_TYPE_LOAN);
+        fxrp.mint(pinged, 100e6);
+        fxrp.mint(dormant, 100e6);
+        _deliver(pinged, 1, 100e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        _deliver(dormant, 1, 100e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        ILoanSubaccountRemote(pinged).checkpointFee();
+        // the market's interest arrives entirely in the second half: 100 per position
+        morpho.addPendingInterest(_marketId(), 200e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        ILoanSubaccountRemote(pinged).checkpointFee();
+        ILoanSubaccountRemote(dormant).checkpointFee();
+
+        (, uint256 feePinged, , , , ) = ILoanSubaccountRemote(pinged).getLoanFeeState();
+        (, uint256 feeDormant, , , , ) = ILoanSubaccountRemote(dormant).getLoanFeeState();
+        assertApproxEqAbs(feePinged, 40e18 * 1e18, 2e18);
+        assertApproxEqAbs(feeDormant, 10e18 * 1e18, 2e18);
     }
 
     function testSweepToOriginBlockedByOutstandingFee() public {
@@ -2987,7 +3237,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             value: 0.01 ether,
             data: abi.encodeCall(
                 IPersonalAccount.sendCrossChainUserOp,
-                (batch, bytes32("op-exit"), uint64(block.timestamp + 1 hours), "")
+                (batch, bytes32("op-exit"), uint64(vm.getBlockTimestamp() + 1 hours), "")
             )
         });
         vm.prank(address(controller));
@@ -3042,7 +3292,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         bytes memory poor = abi.encode(
             PAYLOAD_VERSION_1,
             PA_ACTION_EXECUTE,
-            abi.encode(bytes32("op-poor"), uint64(block.timestamp + 1 hours), poorCalls)
+            abi.encode(bytes32("op-poor"), uint64(vm.getBlockTimestamp() + 1 hours), poorCalls)
         );
         (message, guid) = _composeMessage(pa, 4, 0, poor);
         vm.prank(lzEndpoint);
@@ -3219,7 +3469,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // production). No hand-built payload in between
         address subaccount = _createConfiguredSubaccount();
         address sender = _flareSenderOnThisDiamond();
-        uint64 deadline = uint64(block.timestamp + 1 hours);
+        uint64 deadline = uint64(vm.getBlockTimestamp() + 1 hours);
         vm.deal(parentPersonalAccount, 1 ether);
 
         // borrow: the sender bridges 100e6 with the typed payload; the receiver supplies the
@@ -3748,7 +3998,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             ACTION_BORROW,
             abi.encode(
                 _operationId,
-                uint64(block.timestamp + 1 hours),
+                uint64(vm.getBlockTimestamp() + 1 hours),
                 _destinationKind,
                 _destination,
                 _borrowAmount,
@@ -3767,7 +4017,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         return abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_DEPOSIT_COLLATERAL,
-            abi.encode(_operationId, uint64(block.timestamp + 1 hours))
+            abi.encode(_operationId, uint64(vm.getBlockTimestamp() + 1 hours))
         );
     }
 
@@ -3819,7 +4069,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
             abi.encode(
-                _operationId, uint64(block.timestamp + 1 hours), _amount, _minComposeValue,
+                _operationId, uint64(vm.getBlockTimestamp() + 1 hours), _amount, _minComposeValue,
                 _maxFeeFxrp, RETURN_OPTIONS
             )
         );
