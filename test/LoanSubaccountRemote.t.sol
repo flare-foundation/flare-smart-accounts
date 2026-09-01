@@ -339,12 +339,62 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             subaccount, 1, payload, ILoanSubaccountRemote.FeeTermsNotConfigured.selector
         );
 
-        // rates first, the recipient last - its set is the activation
+        // rates alone do not activate: the recipient is the marker, set last
         vm.startPrank(governance);
-        _setDefaultFeeTerms(address(controller), SUBACCOUNT_TYPE_LOAN);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0.07e18, 0.01e18
+        );
+        vm.stopPrank();
+        terms = ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        assertEq(terms.feeFloor, 0.07e18);
+        assertEq(terms.feeRecipient, address(0));
+        _deliverExpectRevert(
+            subaccount, 1, payload, ILoanSubaccountRemote.FeeTermsNotConfigured.selector
+        );
+
+        // the activating set opens borrowing (queued only after the rate call executed - the
+        // two-stage rule)
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
+            SUBACCOUNT_TYPE_LOAN, makeAddr("feeCollector")
+        );
         vm.stopPrank();
         _deliver(subaccount, 1, 100e6, payload);
         assertEq(rlusd.balanceOf(destination), 500e18);
+    }
+
+    function testZeroRateActivationIsDeliberateFeeOff() public {
+        // an explicit zero-rate configuration is a legal fee-off: rates are EXECUTED first
+        // even at zero (the two-stage rule), then the recipient marker opens borrowing, and
+        // nothing ever accrues
+        _configureTransport();
+        morpho.createMarket(_defaultMarket().marketParams);
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+            SUBACCOUNT_TYPE_LOAN, _defaultMarket()
+        );
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(SUBACCOUNT_TYPE_LOAN, 0, 0);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
+            SUBACCOUNT_TYPE_LOAN, makeAddr("feeCollector")
+        );
+        vm.stopPrank();
+        ILoanMarketsFacet.FeeTerms memory terms =
+            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        assertEq(terms.feeFloor, 0);
+        assertEq(terms.feeSpread, 0);
+        assertEq(terms.feeRecipient, makeAddr("feeCollector"));
+
+        // the fee-off type borrows and accrues nothing
+        address subaccount = address(_deploySubaccount());
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 500e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
     }
 
     function testSetLoanFeeRatesZeroIsDeliberateFeeOff() public {
@@ -1179,7 +1229,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // liquidation is visible to the very next call: the position is closed, repay has
         // nothing to repay, and the whole balance leaves as surplus
         address subaccount = _borrowedSubaccount(500e18);
-        morpho.simulateLiquidation(_marketId(), subaccount);
+        _liquidate(subaccount, 0);
         rlusd.mint(subaccount, 100e18);
 
         vm.expectEmit();
@@ -1196,12 +1246,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _borrowedSubaccount(500e18);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         uint128 liquidated = borrowShares / 2;
-        morpho.simulatePartialLiquidation(_marketId(), subaccount, liquidated);
+        _liquidate(subaccount, liquidated);
 
         (, uint128 remainingShares, uint128 collateral) =
             morpho.position(_marketId(), subaccount);
         assertEq(remainingShares, borrowShares - liquidated);
         assertEq(collateral, 50e6);
+        // the seized collateral left the pool to the liquidator - past the account entirely
+        assertEq(fxrp.balanceOf(makeAddr("liquidator")), 50e6);
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
             morpho.market(_marketId());
         assertEq(totalBorrowShares, remainingShares);
@@ -1224,7 +1276,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         morpho.addPendingInterest(_marketId(), 50e18);
 
-        morpho.simulateLiquidation(_marketId(), subaccount);
+        _liquidate(subaccount, 0);
 
         assertEq(morpho.pendingInterest(_marketId()), 0);
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
@@ -1248,7 +1300,440 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
 
         vm.expectRevert(bytes("no debt to liquidate"));
-        morpho.simulateLiquidation(_marketId(), subaccount);
+        morpho.simulateLiquidation(_defaultMarket().marketParams, subaccount);
+    }
+
+    //
+    // the Flare fee: checkpoint accounting and collection
+    //
+
+    function testBorrowInitializesFeeBaseline() public {
+        // the borrow's pre-checkpoint re-baselines (clock + terms snapshot) and the post-sync
+        // reads the canonical debt from Morpho - the first period accrues on the real
+        // principal at the current terms, never on zero or stale ones
+        address subaccount = _borrowedSubaccount(1000e18);
+        (uint256 principal, uint256 feeDebtX18, , uint64 last, uint64 fl, uint64 sp) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 1000e18);
+        assertEq(feeDebtX18, 0);
+        assertEq(last, vm.getBlockTimestamp());
+        assertEq(fl, 0.07e18);
+        assertEq(sp, 0.01e18);
+    }
+
+    function testCheckpointChargesFloorWhenMarketInterestIsLow() public {
+        // the worked example's first year: 6% market interest under a 7% floor - the fee is
+        // the difference, and the principal re-capitalizes to the live debt
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 60e18);
+
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanFeeCheckpointed(
+            parentPersonalAccount, 1060e18, 10e18 * 1e18
+        );
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (uint256 principal, , uint256 collectible, , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 1060e18);
+        assertEq(collectible, 10e18);
+    }
+
+    function testCheckpointChargesInterestPlusSpreadAboveFloor() public {
+        // above the floor the user pays market interest plus the spread; only the spread
+        // part is Flare's
+        _configureSettings();
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0.05e18, 0.03e18
+        );
+        vm.stopPrank();
+        address subaccount = address(_deploySubaccount());
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 100e18);
+
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        // owed = max(5% * 1000, 100 + 3% * 1000) = 130; the fee is 130 - 100 = 30
+        (uint256 principal, , uint256 collectible, , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 1100e18);
+        assertEq(collectible, 30e18);
+    }
+
+    function testExternalRepaymentClampsToZeroInterest() public {
+        // a debt decrease the account did not cause counts as zero interest: the elapsed
+        // period still owes the full floor on the old base (the donation leak), and only the
+        // future base shrinks
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _externalRepay(subaccount, 900e18);
+
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (uint256 principal, uint256 feeDebtX18, , , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(principal, 100e18, 1);
+        assertEq(feeDebtX18, 70e18 * 1e18);
+
+        // the shrunken base is what the next period is priced on
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(feeDebtX18, 77e18 * 1e18, 1e18);
+    }
+
+    function testLiquidationKeepsFloorAccruingUntilPing() public {
+        // a liquidation extinguishes debt with no event the account can see: the floor keeps
+        // accruing on the stale principal until someone pings - prospectively only - and the
+        // accrued claim is never auto-written-off
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _liquidate(subaccount, 0);
+
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (uint256 principal, uint256 feeDebtX18, , , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 0);
+        assertEq(feeDebtX18, 70e18 * 1e18);
+
+        // zero principal accrues nothing further; the claim simply stays outstanding
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 70e18 * 1e18);
+    }
+
+    function testCheckpointIsSharesFirstAndMorphoIndependentWhenDebtFree() public {
+        // no Morpho liveness where none is needed: zero principal makes no Morpho call at
+        // all, and zero live shares settle at zero debt without touching the IRM
+        address borrowed = _borrowedSubaccount(1000e18);
+        address subaccount = address(_deploySubaccount());
+        morpho.setAccrueInterestReverts(true);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        morpho.setAccrueInterestReverts(false);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _liquidate(borrowed, 0);
+        morpho.setAccrueInterestReverts(true);
+        // principal is stale-positive but the position has no shares: the checkpoint settles
+        // at zero debt, charges the floor, and never invokes the IRM
+        ILoanSubaccountRemote(borrowed).checkpointFee();
+        (uint256 principal, uint256 feeDebtX18, , , , ) =
+            ILoanSubaccountRemote(borrowed).getLoanFeeState();
+        assertEq(principal, 0);
+        assertEq(feeDebtX18, 70e18 * 1e18);
+    }
+
+    function testSameBlockCheckpointResyncsPrincipal() public {
+        // the front-run regression: checkpoint at t, external repayment, checkpoint in the
+        // same block - the zero-time checkpoint skips the fee math but must still re-read the
+        // debt, or the next period would be charged on the stale pre-repayment base
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        _externalRepay(subaccount, 900e18);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (uint256 principal, uint256 feeDebtX18, , , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(principal, 100e18, 1);
+        assertEq(feeDebtX18, 70e18 * 1e18);
+
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        // the second year is priced on ~100, not the stale 1000
+        assertApproxEqAbs(feeDebtX18, 77e18 * 1e18, 1e18);
+    }
+
+    function testRateChangeAppliesFromTheNextCheckpointOnly() public {
+        // periods are priced at the SNAPSHOTTED terms: a rate change never reprices elapsed
+        // time in either direction - a checkpoint settles the old period at the old rate and
+        // only then adopts the new one
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
+        );
+        vm.stopPrank();
+
+        // the elapsed year is still the old 7%
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, , , uint64 fl, ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 70e18 * 1e18);
+        assertEq(fl, 0.14e18);
+
+        // the next year is the new 14%
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 210e18 * 1e18);
+
+        // the decrease direction: a dormant account keeps paying its snapshotted higher rate
+        // until someone pings - the cut is never retroactive either
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0.035e18, 0.005e18
+        );
+        vm.stopPrank();
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 350e18 * 1e18);
+
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 385e18 * 1e18);
+    }
+
+    function testCheckpointTruncationBoundOnIndivisiblePartition() public {
+        // the documented bound: each /YEAR division truncates below one X18 unit, so a
+        // partition of N checkpoints loses at most N such units against the single reading -
+        // never a base unit, never more
+        address subaccount = _borrowedSubaccount(1000e18);
+        uint256 perSecond = (1000e18 * uint256(0.07e18)) / 365 days; // truncated, as mulDiv
+        uint256 threeSeconds = (1000e18 * uint256(0.07e18)) * 3 / 365 days;
+
+        for (uint256 i = 0; i < 3; i++) {
+            vm.warp(vm.getBlockTimestamp() + 1);
+            ILoanSubaccountRemote(subaccount).checkpointFee();
+        }
+        (, uint256 partitioned, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(partitioned, 3 * perSecond);
+        assertLe(partitioned, threeSeconds);
+        assertLt(threeSeconds - partitioned, 3);
+    }
+
+    function testReBorrowAfterFullCloseStartsAFreshPeriod() public {
+        // a complete close zeroes the base; the idle gap accrues nothing, and a re-borrow
+        // re-baselines at the current terms - no stale clock, no stale snapshot
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        rlusd.mint(subaccount, 1070e18);
+        ILoanSubaccountRemote(subaccount).repay();
+        (uint256 principal, uint256 feeDebtX18, , , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 0);
+        assertEq(feeDebtX18, 0);
+
+        // a year idle, then borrow again - only the new period accrues, at the current rates
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
+            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
+        );
+        vm.stopPrank();
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanFeePrincipalSynced(parentPersonalAccount, 500e18);
+        _deliver(subaccount, 2, 0, _borrowPayload(
+            bytes32("op-2"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 500e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (principal, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 500e18);
+        assertEq(feeDebtX18, 70e18 * 1e18);
+    }
+
+    function testMockAccruesBeforeEveryConversion() public {
+        // the multi-borrower regression: canonical Morpho accrues before converting assets
+        // and shares in borrow and repay, so a direct external repayment with pending
+        // interest must use the accrued exchange rate - a stale-rate mock would shift the
+        // other borrower's measured debt
+        address subaccountA = _borrowedSubaccount(1000e18);
+        address subaccountB =
+            controller.createSubaccount("rSecondBorrowerOwner", SUBACCOUNT_TYPE_LOAN);
+        fxrp.mint(subaccountB, 100e6);
+        _deliver(subaccountB, 1, 100e6, _borrowPayload(
+            bytes32("op-b"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        morpho.addPendingInterest(_marketId(), 100e18);
+
+        // A's external repayment of 500 converts at the ACCRUED rate (total 2100, not 2000)
+        _externalRepay(subaccountA, 500e18);
+        vm.warp(vm.getBlockTimestamp() + 1);
+        ILoanSubaccountRemote(subaccountB).checkpointFee();
+        (uint256 principalB, , , , , ) = ILoanSubaccountRemote(subaccountB).getLoanFeeState();
+        // B's share of the interest is exactly half: 1000 + 50; a stale-rate conversion
+        // would have shifted this to ~1066
+        assertApproxEqAbs(principalB, 1050e18, 1);
+    }
+
+    function testCheckpointPartitionPreservesTheFloorTotal() public {
+        // splitting never lowers the fee beyond the sub-X18 truncation bound (see the
+        // indivisible-partition test); here two half-year checkpoints charge exactly
+        // the full-year floor here (the general bound: partitioning loses at most one X18
+        // unit - below 1e-18 of a base unit - per checkpoint to the /YEAR truncation)
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 halfYear, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(halfYear, 35e18 * 1e18);
+
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 fullYear, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(fullYear, 70e18 * 1e18);
+    }
+
+    function testZeroRatesAccrueNothing() public {
+        // a deliberate fee-off type: configured recipient, zero rates - borrowing works and
+        // the checkpoint charges nothing, interest or not
+        _configureSettings();
+        vm.startPrank(governance);
+        IILoanMarketsFacet(address(controller)).setLoanFeeRates(SUBACCOUNT_TYPE_LOAN, 0, 0);
+        vm.stopPrank();
+        address subaccount = address(_deploySubaccount());
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 60e18);
+
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
+    }
+
+    function testSecondBorrowSettlesTheElapsedPeriodFirst() public {
+        // the worked example's second year opening: the new borrow's pre-checkpoint prices
+        // the elapsed period on the old base, and the post-sync capitalizes to the canonical
+        // new debt - the borrowed amount is never classified as market interest
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 60e18);
+
+        _deliver(subaccount, 2, 0, _borrowPayload(
+            bytes32("op-2"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        (uint256 principal, , uint256 collectible, uint64 last, , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(principal, 2060e18, 1);
+        assertEq(collectible, 10e18);
+        assertEq(last, vm.getBlockTimestamp());
+    }
+
+    function testCheckpointFeeRevertsUnregisteredType() public {
+        _configureSettings();
+        uint256 typeB = 2;
+        vm.prank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        address subaccountB = address(new SubaccountProxy(
+            address(controller), parentPersonalAccount, typeB
+        ));
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, typeB)
+        );
+        ILoanSubaccountRemote(subaccountB).checkpointFee();
+    }
+
+    function testRepayCollectsFeeThenPushesOnlyTheSurplus() public {
+        // the pinned order: Morpho first, then the fee from the remainder, then the surplus -
+        // closing through the rails costs the live debt plus the collectible, in one call
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        rlusd.mint(subaccount, 1100e18);
+
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), 70e18);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 30e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 1000e18);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 30e18);
+        assertEq(rlusd.balanceOf(subaccount), 0);
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
+    }
+
+    function testRepayCollectsPartiallyAndRetries() public {
+        // a balance short of the full fee pays what it can - the fee debt is reduced only by
+        // the successfully requested transfer - and a later repay collects the rest, then releases
+        // surplus
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        rlusd.mint(subaccount, 1050e18);
+        ILoanSubaccountRemote(subaccount).repay();
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 50e18);
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 20e18 * 1e18);
+
+        rlusd.mint(subaccount, 30e18);
+        ILoanSubaccountRemote(subaccount).repay();
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 10e18);
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
+    }
+
+    function testRepayFeeLegHoldsWhilePausedAndReserves() public {
+        // while paused the fee leg holds entirely: the Morpho repayment and the checkpoint
+        // still run, tokens covering the fee stay RESERVED here (never pushed as surplus),
+        // and a later repay collects them without another top-up
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        rlusd.mint(subaccount, 1100e18);
+        _pauseController();
+
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanFeeReserved(makeAddr("feeCollector"), 70e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 1000e18);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 0);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 30e18);
+        assertEq(rlusd.balanceOf(subaccount), 70e18);
+
+        _unpauseController();
+        ILoanSubaccountRemote(subaccount).repay();
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        assertEq(rlusd.balanceOf(subaccount), 0);
+    }
+
+    function testRepayFrozenFeeRecipientReservesAndRetries() public {
+        // a recipient the token refuses must never roll back the repayment: the fee stays
+        // owed and reserved, and a later repay retries the transfer
+        _configureSettings();
+        uint256 typeB = 2;
+        MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.loanToken = address(frozenRlusd);
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        _setDefaultFeeTerms(address(controller), typeB);
+        vm.stopPrank();
+        address subaccount = controller.createSubaccount("rFrozenFeeOwner", typeB);
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-frz"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        frozenRlusd.mint(subaccount, 1100e18);
+        frozenRlusd.setFrozen(makeAddr("feeCollector"), true);
+
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanFeeReserved(makeAddr("feeCollector"), 70e18);
+        ILoanSubaccountRemote(subaccount).repay();
+        assertEq(frozenRlusd.balanceOf(subaccount), 70e18);
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 70e18 * 1e18);
+
+        frozenRlusd.setFrozen(makeAddr("feeCollector"), false);
+        ILoanSubaccountRemote(subaccount).repay();
+        assertEq(frozenRlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
     }
 
     function testLzComposeRevertTransportNotConfigured() public {
@@ -2472,6 +2957,35 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         IILoanMarketsFacet(_diamond).setLoanFeeRecipient(
             _subaccountType, makeAddr("feeCollector")
         );
+    }
+
+    /// A third-party liquidator repays `_shares` of the subaccount's borrow shares (0 = all)
+    /// with its own loan tokens and seizes the collateral - entirely outside the account's
+    /// rails, which is what real Morpho liquidation does.
+    function _liquidate(address _subaccount, uint128 _shares) private {
+        address liquidator = makeAddr("liquidator");
+        rlusd.mint(liquidator, 1_000e18);
+        vm.startPrank(liquidator);
+        rlusd.approve(address(morpho), type(uint256).max);
+        if (_shares == 0) {
+            morpho.simulateLiquidation(_defaultMarket().marketParams, _subaccount);
+        } else {
+            morpho.simulatePartialLiquidation(
+                _defaultMarket().marketParams, _subaccount, _shares
+            );
+        }
+        vm.stopPrank();
+    }
+
+    /// A third party repays `_assets` of the subaccount's debt directly on Morpho - outside
+    /// the rails, unobserved by the account (the donation path).
+    function _externalRepay(address _subaccount, uint256 _assets) private {
+        address donor = makeAddr("donor");
+        rlusd.mint(donor, _assets);
+        vm.startPrank(donor);
+        rlusd.approve(address(morpho), _assets);
+        morpho.repay(_defaultMarket().marketParams, _assets, 0, _subaccount, "");
+        vm.stopPrank();
     }
 
     /// A valid alternate OFT adapter wrapping `_token`, wired like the default one.

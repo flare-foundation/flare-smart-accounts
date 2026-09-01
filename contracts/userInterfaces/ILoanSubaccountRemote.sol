@@ -185,6 +185,58 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
+     * @notice Emitted by every fee checkpoint, degenerate ones included (zero principal or a
+     * zero elapsed period, which skip the fee math but still re-baseline).
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param principal The canonical Morpho debt the account is re-baselined to (base
+     * units). A borrow or repayment in the same call re-syncs it right after
+     * ({LoanFeePrincipalSynced}); {getLoanFeeState} is the authoritative state.
+     * @param feeDeltaX18 The fee added for the elapsed period (base units at WAD precision);
+     * zero on degenerate checkpoints.
+     */
+    event LoanFeeCheckpointed(
+        address indexed parentPersonalAccount,
+        uint256 principal,
+        uint256 feeDeltaX18
+    );
+
+    /**
+     * @notice Emitted when a borrow or repayment re-syncs the fee base to the canonical
+     * post-action debt (the clock and terms snapshot stay).
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param principal The canonical Morpho debt after the action (base units) - the base
+     * the next period is priced on.
+     */
+    event LoanFeePrincipalSynced(
+        address indexed parentPersonalAccount,
+        uint256 principal
+    );
+
+    /**
+     * @notice Emitted when accrued fee is paid to the fee recipient at the end of {repay}.
+     * @param feeRecipient The collector paid.
+     * @param amount The amount paid (whole base units; the fee debt shrinks by exactly this).
+     */
+    event LoanFeeCollected(
+        address indexed feeRecipient,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when loan tokens covering still-outstanding fee stay reserved on the
+     * account instead of leaving as surplus: the fee leg held (paused) or the recipient
+     * refused the transfer; a later {repay} retries from the reservation. A snapshot, not a
+     * delta: repeated calls can emit the same amount, and a partial collection that empties
+     * the balance reserves zero (the claim then lives only in the fee debt).
+     * @param feeRecipient The collector the reservation is owed to.
+     * @param amount The reserved amount (whole base units).
+     */
+    event LoanFeeReserved(
+        address indexed feeRecipient,
+        uint256 amount
+    );
+
+    /**
      * @notice Emitted when a closed position's loan-token surplus is sent to the parent
      * Personal Account (the user's own account on this chain) at the end of {repay}.
      * @param parentPersonalAccount The parent Personal Account address paid.
@@ -239,10 +291,9 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Reverts on a debt increase while the subaccount type's fee terms are not yet
-     * configured (the fee recipient is the activation marker, set last after the rates): a
-     * registered-but-unpriced type cannot take on debt, so no borrower can ever snapshot
-     * unset terms. Deliberately a revert, not a skip — the condition is
-     * temporary-by-configuration and a permissionless delivery must not consume the packet.
+     * configured (the recipient is the activation marker, set last): a
+     * registered-but-unpriced type cannot take on debt. A revert, not a skip - the condition
+     * is temporary and must not consume the packet.
      */
     error FeeTermsNotConfigured();
 
@@ -338,24 +389,44 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Repays the account's debt with its idle loan-token balance, clamped to the
-     * live debt.
+     * live debt, then settles the accrued Flare fee from what remains.
      * @dev Permissionless - repayment only reduces debt on the account's own position.
-     * Stays available while paused (it moves the position toward safety). With live debt,
-     * interest accrues first; a balance covering the full debt closes by exact borrow shares
-     * (no over-repay revert), a smaller one repays by assets and keeps the balance as
-     * repayment material. Once the position carries no debt - closed by this call, or already
-     * zero (an external liquidation, tokens arriving after the close; accrual is skipped
-     * then, so a reverting IRM cannot trap the balance) - the whole remaining loan-token
-     * balance is the user's surplus and is pushed to the parent Personal Account in the same
-     * call ({LoanSurplusRecovered}). The push is best-effort: if the token refuses the parent
-     * (RLUSD can freeze addresses), the repayment stands, the surplus stays here
-     * ({LoanSurplusRetained}), and any later call retries - so loan tokens rest on a
-     * debt-free account only until a repay's push succeeds.
+     * Stays available while paused (it moves the position toward safety). The fee checkpoint
+     * runs first and the canonical debt is re-read after (see {checkpointFee}). With live
+     * debt, interest accrues; a balance covering the full debt closes by exact borrow shares
+     * (no over-repay revert), a smaller one repays by assets. Then, in order: the fee leg
+     * pays the collectible fee from the remainder - best-effort, held while paused, never
+     * rolling back the repayment ({LoanFeeCollected} / {LoanFeeReserved}; the fee debt
+     * shrinks only by the successfully requested transfer - conventional ERC-20 semantics
+     * are a market-registration policy) - tokens covering still-outstanding fee stay
+     * reserved here, and only the rest is surplus, pushed to the parent on a debt-free
+     * position ({LoanSurplusRecovered}; best-effort, {LoanSurplusRetained} on refusal).
+     * Closing through the rails therefore costs the live debt plus the collectible fee, from
+     * one balance in one call.
      * @return _assets The assets repaid.
      */
     function repay()
         external
         returns (uint256 _assets);
+
+    /**
+     * @notice Runs a bare fee checkpoint: prices the elapsed period at the snapshotted
+     * terms, adds the result to the fee debt, and re-baselines (principal to the canonical
+     * live debt, clock to now, snapshot to the current terms).
+     * @dev Permissionless and pause-exempt - notably the liquidated account's relief: a
+     * liquidation is invisible to the account, so the floor keeps accruing on the stale
+     * principal until someone checkpoints (prospectively only). Under unchanged terms and
+     * non-decreasing debt, splitting a period typically increases the total fee and never
+     * decreases it by more than one X18 unit (under 1e-18 of a base unit) per checkpoint,
+     * so checkpointing cannot be used against the protocol; a checkpoint after an external
+     * repayment or liquidation legitimately shrinks the FUTURE base - that is the
+     * prospective policy, not a loss. The advertised promise is the per-checkpoint
+     * measurement. Shares-first:
+     * zero principal makes no Morpho call, zero live shares settle at zero debt without
+     * touching the IRM.
+     */
+    function checkpointFee()
+        external;
 
     /**
      * @notice Deposits the whole idle FXRP balance as collateral into the account's position.
@@ -398,6 +469,30 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     )
         external payable
         returns (uint256 _amount);
+
+    /**
+     * @notice Returns the account's fee state, as of the last checkpoint or post-action
+     * sync (stored values, not a live projection - run {checkpointFee} first for current
+     * numbers).
+     * @return _principal The canonical Morpho debt at the last checkpoint or sync (base
+     * units).
+     * @return _feeDebtX18 The accrued, uncollected fee at WAD precision (base units × 1e18);
+     * the fractional part below one base unit is carried, never discarded.
+     * @return _collectible The fee payable now: `_feeDebtX18 / 1e18`, whole base units.
+     * @return _lastCheckpoint The last checkpoint's timestamp.
+     * @return _feeFloor The snapshotted floor the next elapsed period is priced at (WAD).
+     * @return _feeSpread The snapshotted spread the next elapsed period is priced at (WAD).
+     */
+    function getLoanFeeState()
+        external view
+        returns (
+            uint256 _principal,
+            uint256 _feeDebtX18,
+            uint256 _collectible,
+            uint64 _lastCheckpoint,
+            uint64 _feeFloor,
+            uint64 _feeSpread
+        );
 
     /// @inheritdoc ISubaccount
     function controllerAddress()

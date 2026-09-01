@@ -17,9 +17,10 @@ library LoanMarkets {
         mapping(uint256 subaccountType => ILoanMarketsFacet.Market) markets;
         /// @dev Types with new debt increases disabled - the routine way to sunset a pool.
         mapping(uint256 subaccountType => bool) borrowingDisabled;
-        /// @dev Each type's Flare fee terms - set atomically with the market (never unset for
-        /// a registered type), mutable by timelock afterwards; kept out of the write-once
-        /// `markets` mapping because the terms may change while the binding never does.
+        /// @dev Each type's Flare fee terms - configured by timelock after registration
+        /// (rates first, the recipient last as the activation marker); kept out of the
+        /// write-once `markets` mapping because the terms may change while the binding
+        /// never does.
         mapping(uint256 subaccountType => ILoanMarketsFacet.FeeTerms) feeTerms;
     }
 
@@ -108,7 +109,9 @@ library LoanMarkets {
     {
         _requireRegistered(_subaccountType);
         // never zero: the first set (from zero) is the terms' activation - it opens borrowing
-        // for the type - and the marker can never return to unconfigured afterwards
+        // for the type - and the marker can never return to unconfigured afterwards. Rates
+        // first by two-stage queueing (see IILoanMarketsFacet): queue this only after the
+        // rate call has executed
         require(_feeRecipient != address(0), ILoanMarketsFacet.InvalidFeeRecipient());
         getState().feeTerms[_subaccountType].feeRecipient = _feeRecipient;
         emit ILoanMarketsFacet.LoanFeeRecipientSet(_subaccountType, _feeRecipient);

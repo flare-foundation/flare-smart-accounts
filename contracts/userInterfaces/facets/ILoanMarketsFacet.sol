@@ -80,8 +80,8 @@ interface ILoanMarketsFacet {
     );
 
     /**
-     * @notice Emitted when a subaccount type's fee rates are set: at market registration and
-     * on every later timelocked change.
+     * @notice Emitted on every timelocked fee-rate change, the initial configuration
+     * included.
      * @param subaccountType The subaccount type.
      * @param feeFloor The minimum effective annual rate (WAD).
      * @param feeSpread The annual spread over the market's rate (WAD).
@@ -93,8 +93,8 @@ interface ILoanMarketsFacet {
     );
 
     /**
-     * @notice Emitted when a subaccount type's fee recipient is set: at market registration
-     * and on every later timelocked rotation.
+     * @notice Emitted on the recipient set that activates a type's terms and on every later
+     * timelocked rotation.
      * @param subaccountType The subaccount type.
      * @param feeRecipient The collector the fee is paid to.
      */

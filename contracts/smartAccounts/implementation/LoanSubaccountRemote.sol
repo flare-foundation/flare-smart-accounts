@@ -53,12 +53,24 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// @dev Morpho's virtual-share offsets for share/asset conversion.
     uint256 private constant VIRTUAL_SHARES = 1e6;
     uint256 private constant VIRTUAL_ASSETS = 1;
+    /// @dev Fee arithmetic: annual WAD rates over a fixed 365-day year.
+    uint256 private constant WAD = 1e18;
+    uint256 private constant YEAR = 365 days;
 
     /// @notice Parent Personal Account address (the same address on every chain; on this
     /// chain it carries no code until its compose-driven mirror is created).
     address public parentPersonalAccount;
     /// @notice Subaccount type.
     uint256 public subaccountType;
+
+    // fee accounting, appended after the existing fields (layout-safe): the canonical debt
+    // at the last checkpoint, the uncollected fee at WAD precision (the fractional carry is
+    // kept), and the packed clock and terms snapshot the next period is priced at
+    uint256 private feePrincipal;
+    uint256 private flareDebtX18;
+    uint64 private feeLastCheckpoint;
+    uint64 private feeSnapshotFloor;
+    uint64 private feeSnapshotSpread;
 
     // deliberately no receive(): the only protocol-delivered native is a withdraw delivery's
     // compose value, spent or forwarded to the parent mirror within the same call, so plain
@@ -102,10 +114,12 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         uint256 balance = loanToken.balanceOf(address(this));
         require(balance > 0, NothingToRepay());
 
-        // shares first: the debt-free surplus path must not depend on interest accrual (a
-        // reverting IRM must not trap recoverable tokens)
+        // fee checkpoint before, re-sync after. Shares first: the debt-free paths must not
+        // depend on accrual (a reverting IRM must not trap recoverable tokens)
+        _checkpointFee(market);
         if (_borrowSharesOf(market) > 0) {
-            // accrue first, so the clamp compares against the live debt
+            // accrue first, so the clamp compares against the live debt (idempotent after
+            // the checkpoint's accrual)
             IMorpho(market.morpho).accrueInterest(market.marketParams);
             (uint128 borrowShares, uint256 fullDebt) = _debtOf(market);
             if (balance >= fullDebt) {
@@ -122,23 +136,21 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
                 );
             }
             loanToken.forceApprove(market.morpho, 0);
+            _syncFeePrincipal(market);
             emit LoanRepaid(parentPersonalAccount, _assets);
         }
 
-        // once the debt is gone - closed by this call, or already zero (an external
-        // liquidation, tokens arriving after the close) - the remaining balance is the
-        // user's surplus and leaves to the parent; while debt remains it stays repayment
-        // material. Best-effort by design: a parent the token refuses (RLUSD can freeze
-        // addresses) must never roll back the repayment that just succeeded, so a failed
-        // push leaves the surplus here for a later repay to retry
-        uint256 surplus = loanToken.balanceOf(address(this));
-        if (surplus > 0 && _borrowSharesOf(market) == 0) {
-            if (loanToken.trySafeTransfer(parentPersonalAccount, surplus)) {
-                emit LoanSurplusRecovered(parentPersonalAccount, surplus);
-            } else {
-                emit LoanSurplusRetained(parentPersonalAccount, surplus);
-            }
-        }
+        _collectFeeAndPushSurplus(market, loanToken);
+    }
+
+    /// @inheritdoc ILoanSubaccountRemote
+    function checkpointFee()
+        external
+        nonReentrant
+    {
+        // permissionless, pause-exempt: also the liquidated account's relief (the floor
+        // accrues on the stale principal until someone checkpoints)
+        _checkpointFee(_myMarket());
     }
 
     /// @inheritdoc ILoanSubaccountRemote
@@ -184,6 +196,28 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // per-call value accounting: exactly the quoted fee is spent, only this call's excess
         // is refunded - pre-existing native on the account never subsidizes a caller
         _bridgeHome(transport, _amount, _extraOptions, msg.value, msg.sender);
+    }
+
+    /// @inheritdoc ILoanSubaccountRemote
+    function getLoanFeeState()
+        external view
+        returns (
+            uint256 _principal,
+            uint256 _feeDebtX18,
+            uint256 _collectible,
+            uint64 _lastCheckpoint,
+            uint64 _feeFloor,
+            uint64 _feeSpread
+        )
+    {
+        return (
+            feePrincipal,
+            flareDebtX18,
+            flareDebtX18 / WAD,
+            feeLastCheckpoint,
+            feeSnapshotFloor,
+            feeSnapshotSpread
+        );
     }
 
     /// @inheritdoc ISubaccount
@@ -349,9 +383,13 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
                     destinationAddress != address(this),
                 InvalidDestination()
             );
+            // fee checkpoint before, re-sync after: an unsynced new principal would read
+            // as market interest at the next checkpoint
+            _checkpointFee(market);
             (uint256 assetsBorrowed, ) = IMorpho(market.morpho).borrow(
                 market.marketParams, _borrowAmount, 0, address(this), address(this)
             );
+            _syncFeePrincipal(market);
             IERC20(market.marketParams.loanToken).safeTransfer(destinationAddress, assetsBorrowed);
         }
     }
@@ -510,6 +548,109 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // slither-disable-end arbitrary-send-eth
         require(success, RefundFailed());
         emit NativeSweptToParent(parentPersonalAccount, _value);
+    }
+
+    /// @dev Prices the elapsed period at the SNAPSHOTTED terms - `owed = max(floor·P·T,
+    /// I + spread·P·T)` with `I = max(0, D − P)`, so an external repayment or liquidation
+    /// counts as zero interest and the delta never underflows - then re-baselines: principal
+    /// to the live debt, clock to now, snapshot to the current terms. The re-baseline runs
+    /// on EVERY checkpoint (a first borrow must accrue at current terms, not stale ones).
+    /// Shares-first: zero principal makes no Morpho call; a zero elapsed period skips the
+    /// fee math but still re-reads the debt raw (a same-block checkpoint after an external
+    /// repayment must not keep a stale base); zero live shares settle at `D = 0` without
+    /// touching the IRM.
+    function _checkpointFee(
+        ILoanMarketsFacet.Market memory _market
+    )
+        private
+    {
+        uint256 feeDeltaX18 = 0;
+        uint256 principal = feePrincipal;
+        if (principal != 0) {
+            uint256 elapsed = block.timestamp - feeLastCheckpoint;
+            if (elapsed == 0) {
+                (, feePrincipal) = _debtOf(_market);
+            } else {
+                uint256 liveDebt = 0;
+                if (_borrowSharesOf(_market) > 0) {
+                    IMorpho(_market.morpho).accrueInterest(_market.marketParams);
+                    (, liveDebt) = _debtOf(_market);
+                }
+                uint256 interestX18 = (liveDebt > principal ? liveDebt - principal : 0) * WAD;
+                uint256 owedX18 = Math.max(
+                    Math.mulDiv(principal * feeSnapshotFloor, elapsed, YEAR),
+                    interestX18 + Math.mulDiv(principal * feeSnapshotSpread, elapsed, YEAR)
+                );
+                feeDeltaX18 = owedX18 - interestX18;
+                flareDebtX18 += feeDeltaX18;
+                feePrincipal = liveDebt;
+            }
+        }
+        ILoanMarketsFacet.FeeTerms memory terms =
+            ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType);
+        feeLastCheckpoint = uint64(block.timestamp);
+        feeSnapshotFloor = terms.feeFloor;
+        feeSnapshotSpread = terms.feeSpread;
+        emit LoanFeeCheckpointed(parentPersonalAccount, feePrincipal, feeDeltaX18);
+    }
+
+    /// @dev Re-reads the canonical debt after a Morpho borrow or repayment - never the
+    /// requested amount (shares and rounding matter). The clock stays: the action's
+    /// checkpoint just set it.
+    function _syncFeePrincipal(
+        ILoanMarketsFacet.Market memory _market
+    )
+        private
+    {
+        (, feePrincipal) = _debtOf(_market);
+        emit LoanFeePrincipalSynced(parentPersonalAccount, feePrincipal);
+    }
+
+    /// @dev The tail of {repay}: pay `min(collectible, balance)` to the fee recipient -
+    /// best-effort, held while paused, never rolling back the repayment; the fee debt
+    /// shrinks only by the successfully requested transfer (conventional ERC-20 semantics
+    /// are a registration policy) - then reserve tokens covering still-outstanding fee (a
+    /// later repay retries without a new top-up) and push only the rest to the parent, on a
+    /// debt-free position. Debt presupposes the borrow gate, so the recipient is configured
+    /// whenever there is something to pay.
+    function _collectFeeAndPushSurplus(
+        ILoanMarketsFacet.Market memory _market,
+        IERC20 _loanToken
+    )
+        private
+    {
+        uint256 balance = _loanToken.balanceOf(address(this));
+        if (balance == 0) return;
+
+        uint256 collectible = flareDebtX18 / WAD;
+        if (collectible > 0) {
+            address recipient =
+                ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient;
+            if (!IPauseFacet(controller).isPaused()) {
+                uint256 payment = Math.min(collectible, balance);
+                if (_loanToken.trySafeTransfer(recipient, payment)) {
+                    flareDebtX18 -= payment * WAD;
+                    balance -= payment;
+                    collectible = flareDebtX18 / WAD;
+                    emit LoanFeeCollected(recipient, payment);
+                }
+            }
+            uint256 reserved = Math.min(collectible, balance);
+            if (reserved > 0) {
+                balance -= reserved;
+                emit LoanFeeReserved(recipient, reserved);
+            }
+        }
+
+        // best-effort: a parent the token refuses (RLUSD can freeze addresses) must never
+        // roll back the repayment - a failed push waits here for a later repay
+        if (balance > 0 && _borrowSharesOf(_market) == 0) {
+            if (_loanToken.trySafeTransfer(parentPersonalAccount, balance)) {
+                emit LoanSurplusRecovered(parentPersonalAccount, balance);
+            } else {
+                emit LoanSurplusRetained(parentPersonalAccount, balance);
+            }
+        }
     }
 
     /// @dev The account's one market, bound write-once to its type. If its Morpho stops

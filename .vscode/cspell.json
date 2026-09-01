@@ -19,6 +19,9 @@
     "*.json"
   ],
   "words": [
+    "baselined",
+    "checkpointing",
+    "Checkpointed",
     "tload",
     "tstore",
     "abicoder",

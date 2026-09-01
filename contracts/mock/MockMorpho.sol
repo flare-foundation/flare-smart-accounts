@@ -57,28 +57,31 @@ contract MockMorpho is IMorpho {
         accrueInterestReverts = _reverts;
     }
 
-    /// @notice Simulates a full external liquidation: a third party repays the account's
-    /// whole debt and seizes its collateral, without the account observing it - visible to
-    /// the account only through its live position reads, which is what tests assert.
-    function simulateLiquidation(bytes32 marketId, address account) external {
-        _simulateLiquidation(marketId, account, _positions[marketId][account].borrowShares);
+    /// @notice Simulates a full external liquidation: the CALLER repays the account's whole
+    /// debt and receives the seized collateral - entirely outside the account. Health and
+    /// the liquidation incentive are not modeled; the money flow is.
+    function simulateLiquidation(MarketParams calldata marketParams, address account) external {
+        bytes32 id = _id(marketParams);
+        _simulateLiquidation(marketParams, account, _positions[id][account].borrowShares);
     }
 
-    /// @notice Simulates a partial external liquidation of `shares` borrow shares, seizing
-    /// proportional collateral; the position keeps its remaining debt.
-    function simulatePartialLiquidation(bytes32 marketId, address account, uint128 shares) external {
-        _simulateLiquidation(marketId, account, shares);
+    /// @notice Simulates a partial external liquidation of `shares` borrow shares: the caller
+    /// repays them and seizes proportional collateral; the position keeps its remaining debt.
+    function simulatePartialLiquidation(
+        MarketParams calldata marketParams,
+        address account,
+        uint128 shares
+    )
+        external
+    {
+        _simulateLiquidation(marketParams, account, shares);
     }
 
     /// @inheritdoc IMorpho
     function accrueInterest(MarketParams calldata marketParams) external {
-        require(!accrueInterestReverts, "IRM reverted");
         bytes32 id = _id(marketParams);
-        MarketState storage m = _markets[id];
-        require(m.lastUpdate != 0, "market not created");
-        m.totalBorrowAssets += SafeCast.toUint128(pendingInterest[id]);
-        pendingInterest[id] = 0;
-        m.lastUpdate = uint128(block.timestamp);
+        require(_markets[id].lastUpdate != 0, "market not created");
+        _accrue(id);
     }
 
     /// @inheritdoc IMorpho
@@ -128,6 +131,8 @@ contract MockMorpho is IMorpho {
         bytes32 id = _id(marketParams);
         MarketState storage m = _markets[id];
         require(m.lastUpdate != 0, "market not created");
+        // canonical Morpho accrues before converting, so the exchange rate is never stale
+        _accrue(id);
 
         uint256 sharesUp = _toSharesUp(assets, m.totalBorrowAssets, m.totalBorrowShares);
         m.totalBorrowAssets += uint128(assets);
@@ -153,6 +158,8 @@ contract MockMorpho is IMorpho {
         bytes32 id = _id(marketParams);
         MarketState storage m = _markets[id];
         require(m.lastUpdate != 0, "market not created");
+        // canonical Morpho accrues before converting, so the exchange rate is never stale
+        _accrue(id);
 
         if (shares == 0) {
             shares = _toSharesDown(assets, m.totalBorrowAssets, m.totalBorrowShares);
@@ -197,16 +204,22 @@ contract MockMorpho is IMorpho {
         return (0, 0, m.totalBorrowAssets, m.totalBorrowShares, m.lastUpdate, 0);
     }
 
-    /// @dev Liquidation accounting stays canonical: interest accrues first (as real Morpho's
-    /// liquidate does), a debt-free position cannot be liquidated, and totals shrink by the
-    /// assets the repaid shares represent, so later borrows and repayments on the market
-    /// convert correctly.
-    function _simulateLiquidation(bytes32 marketId, address account, uint128 shares) private {
+    /// @dev Canonical accounting: interest accrues first, a debt-free position cannot be
+    /// liquidated, and totals shrink by the assets the repaid shares represent. The money
+    /// flow is real Morpho's too: repaid loan tokens are pulled from the caller (and burned,
+    /// like `repay`), seized collateral goes to the caller - past the borrower entirely.
+    function _simulateLiquidation(
+        MarketParams calldata marketParams,
+        address account,
+        uint128 shares
+    )
+        private
+    {
+        bytes32 marketId = _id(marketParams);
         PositionState storage p = _positions[marketId][account];
         MarketState storage m = _markets[marketId];
         require(shares > 0 && shares <= p.borrowShares, "no debt to liquidate");
-        m.totalBorrowAssets += SafeCast.toUint128(pendingInterest[marketId]);
-        pendingInterest[marketId] = 0;
+        _accrue(marketId);
         uint256 assets = _toAssetsUp(shares, m.totalBorrowAssets, m.totalBorrowShares);
         uint128 seized = shares == p.borrowShares
             ? p.collateral
@@ -217,6 +230,19 @@ contract MockMorpho is IMorpho {
             ? 0
             : m.totalBorrowAssets - uint128(assets);
         p.collateral -= seized;
+        IERC20(marketParams.loanToken).safeTransferFrom(msg.sender, address(this), assets);
+        MintableERC20(marketParams.loanToken).burn(address(this), assets);
+        IERC20(marketParams.collateralToken).safeTransfer(msg.sender, seized);
+    }
+
+    /// @dev The one accrual routine, shared by `accrueInterest`, `borrow`, `repay` and the
+    /// liquidation, as in canonical Morpho - so the broken-IRM switch breaks them all.
+    function _accrue(bytes32 id) private {
+        require(!accrueInterestReverts, "IRM reverted");
+        MarketState storage m = _markets[id];
+        m.totalBorrowAssets += SafeCast.toUint128(pendingInterest[id]);
+        pendingInterest[id] = 0;
+        m.lastUpdate = uint128(block.timestamp);
     }
 
     function _id(MarketParams calldata marketParams) private pure returns (bytes32) {
