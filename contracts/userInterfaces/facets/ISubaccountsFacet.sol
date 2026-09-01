@@ -69,13 +69,13 @@ interface ISubaccountsFacet {
 
     /**
      * @notice Creates the subaccount for an XRPL owner if it does not exist yet.
-     * @dev Permissionless: anyone can trigger creation. An executor uses it to materialize a
-     * subaccount whose predicted address already received assets, so that they can be swept; a
-     * user operation uses it as its first call, before calling a method on the subaccount. The
-     * parent Personal Account resolves to the registered account when one exists, and to its
-     * computed address otherwise (the derivation is frozen and chain-independent, so the two
-     * can never diverge) - creation therefore works before the Personal Account exists, and
-     * on chains where Personal Accounts never exist at all.
+     * @dev Permissionless and pause-gated. An executor uses it to materialize a subaccount
+     * whose predicted address already received assets, so that they can be swept; a user
+     * operation uses it as its first call, before calling a method on the subaccount. The
+     * parent is the registered Personal Account when one exists and its frozen computed address
+     * otherwise (the derivation is chain-independent, so the two can never diverge), so
+     * creation works before the parent is deployed - and on chains where Personal Accounts
+     * never exist at all. Requires a registered implementation for the type.
      * @param _xrplOwner The XRPL address of the owner.
      * @param _subaccountType The subaccount type.
      * @return The subaccount contract address.

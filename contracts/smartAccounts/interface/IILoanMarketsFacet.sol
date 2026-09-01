@@ -27,11 +27,11 @@ interface IILoanMarketsFacet is ILoanMarketsFacet {
         external;
 
     /**
-     * @notice Sets a subaccount type's fee rates. Configure them before the recipient (the
-     * activation marker) — on a live diamond, EXECUTE this call first and only afterward
-     * queue the recipient activation. Never retroactive: accounts snapshot the terms they
-     * accrue under at every checkpoint, and the operational runbook checkpoints every
-     * account with live fee state before and after a change.
+     * @notice Sets a subaccount type's fee rates. Accounts adopt them prospectively at their
+     * next checkpoint — never retroactively, since each snapshots the terms it accrues under —
+     * so follow the settle-before-and-after runbook for live accounts.
+     * @dev For the initial activation, EXECUTE this call before queueing
+     * {setLoanFeeRecipient}.
      * @param _subaccountType The subaccount type (its market must be registered).
      * @param _feeFloor The minimum effective annual rate (WAD, at most `MAX_FEE_RATE`).
      * @param _feeSpread The annual spread over the market's rate (WAD, at most
@@ -46,14 +46,12 @@ interface IILoanMarketsFacet is ILoanMarketsFacet {
         external;
 
     /**
-     * @notice Sets a subaccount type's fee recipient — the terms' **activation marker**: the
-     * first call (from zero) opens borrowing for the type, so it comes last, after the
-     * rates. Matured timelocked calls execute permissionlessly in any order, so on a live
-     * diamond use **two-stage queueing**: queue this only after the rate call has executed —
-     * an unqueued call cannot be executed early, so no ordering opens borrowing at
-     * unintended rates (a botched order is bounded anyway: zero rates until the first
-     * post-rates checkpoint). A later call rotates the collector: it changes where the fee
-     * goes, not what anyone owes.
+     * @notice Sets a subaccount type's non-zero fee recipient. The first call (from zero)
+     * activates borrowing for the type, so it comes last, after the rates; a later call only
+     * rotates the collector, changing where the fee goes, not what anyone owes.
+     * @dev On a live diamond, queue this only after the initial rate call has EXECUTED:
+     * matured timelocked calls execute permissionlessly and in any order, while an unqueued
+     * call cannot be executed early.
      * @param _subaccountType The subaccount type (its market must be registered).
      * @param _feeRecipient The collector the fee is paid to (non-zero).
      * Can only be called by the owner (timelocked).

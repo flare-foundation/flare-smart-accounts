@@ -18,23 +18,21 @@ uint8 constant SKIP_REASON_EXPIRED = 2;
 
 /// @dev Skip reason: the subaccount type's current fee rates exceed the maxima the user
 /// signed (a delayed packet must not execute at a worse rate than agreed). The operation id
-/// is not consumed - a corrected instruction may reuse it; any credited FXRP stays idle for
-/// the rails (`depositIdleFxrp` before a zero-collateral retry - a new packet cannot absorb
-/// the old packet's authenticated credit).
+/// is not consumed - a corrected instruction may reuse it - and any credited FXRP stays idle
+/// for the account's fixed rails.
 uint8 constant SKIP_REASON_FEE_TERMS = 3;
 
 /**
  * @title IComposeReceiverAccountBase
- * @notice The compose-receiver surface shared by every account that receives authenticated
- * compose messages: the loan-chain subaccount and Personal Account (Ethereum, at launch), and the
- * Flare loan subaccount as the receiver of its own bridge-back. It is that ingress only — the
- * subaccounts also have parent-driven and public rails outside it. Users are XRPL-only and their
- * signatures become on-chain authority only on Flare, so every action that arrives through this
- * entry was sent by this same address on the other chain — the account's own twin. The
- * authentication checklist is identical for every such account and lives in one shared base, as
- * does the operation-id replay protection the signed actions use (an unsigned action, such as the
- * Flare redeem-on-arrival, carries no id and relies on the endpoint's at-most-once compose
- * delivery).
+ * @notice The shared authenticated `lzCompose` surface of the same-address cross-chain
+ * accounts: the loan-chain subaccount and Personal Account (Ethereum, at launch), and the Flare
+ * loan subaccount as the receiver of its own bridge-back. It authenticates the endpoint, the
+ * OFT, the origin chain, the pinned peer and `composeFrom`, and tracks replay state for the
+ * signed actions (an unsigned action, such as the Flare redeem-on-arrival, carries no id and
+ * relies on the endpoint's at-most-once compose delivery). Users are XRPL-only and their
+ * signatures become on-chain authority only on Flare, so every action arriving here was sent by
+ * this same address on the other chain — the account's own twin. Account-specific
+ * parent-driven and public rails live outside this interface.
  */
 interface IComposeReceiverAccountBase is ILayerZeroComposer {
 

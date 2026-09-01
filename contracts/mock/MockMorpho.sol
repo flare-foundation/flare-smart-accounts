@@ -10,12 +10,10 @@ import {MintableERC20} from "./MintableERC20.sol";
 
 /**
  * @title MockMorpho
- * @notice Behavioral Morpho mock with canonical accounting: positions and totals are kept per
- * market id, borrowing and repayment convert between assets and shares with Morpho's virtual
- * offsets, interest can be accrued between calls, and repaying more shares than owed reverts
- * (as real Morpho's share-math underflow does) — so the repay clamp is exercised against real
- * share math instead of stubbed values. Position health and liquidation eligibility are not
- * modeled; tests exercise flows, not liquidation math.
+ * @notice Behavioral Morpho mock with per-market positions and totals, virtual-share
+ * conversions, queued interest and over-repay reverts (as real Morpho's share-math underflow
+ * does), so the repay clamp is exercised against real share math instead of stubbed values.
+ * Position health and liquidation eligibility are intentionally not modeled.
  */
 contract MockMorpho is IMorpho {
     using SafeERC20 for IERC20;

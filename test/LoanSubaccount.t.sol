@@ -2552,13 +2552,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    /// Canonically encoded type-3 options: destination lzReceive gas plus index-0 lzCompose
-    /// gas. Byte-identical to LayerZero's `OptionsBuilder.newOptions()
-    /// .addExecutorLzReceiveOption(150_000, 0).addExecutorLzComposeOption(0, 700_000, 0)`
-    /// (not imported: it pulls two extra packages); the encoding was validated against the
-    /// live FXRP adapter's `quoteSend`. The gas VALUES are illustrative headroom for the mock
-    /// path only - production options must be profiled per action against the real Morpho,
-    /// oracle and token contracts before deployment (release checklist).
+    /// Canonical type-3 options - destination lzReceive gas plus index-0 lzCompose gas -
+    /// validated against the live FXRP adapter's `quoteSend`. Byte-identical to LayerZero's
+    /// `OptionsBuilder.newOptions().addExecutorLzReceiveOption(150_000, 0)
+    /// .addExecutorLzComposeOption(0, 700_000, 0)`, kept inline to avoid two test-only
+    /// dependencies. The gas VALUES are mock-only; deployment must profile them per action
+    /// against the real Morpho, oracle and token contracts (release checklist).
     function _canonicalLoanOptions() private pure returns (bytes memory) {
         // worker id 1 = executor; option type 1 = lzReceive (gas), type 3 = lzCompose
         // (index ++ gas); each option is [workerId ++ size ++ optionType ++ payload]

@@ -10,17 +10,15 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
  * @title PersonalAccountRemote contract
- * @notice The remote Personal Account implementation (the loan chain, at launch): the
- * same frozen PA proxy and CREATE2 address as the user's Flare Personal Account, resolved per
- * chain through the controller-as-beacon. Instructions exist only on Flare, so this account has no
- * controller-driven methods at all; every authorized action arrives through the authenticated
- * `lzCompose` (see {ComposeReceiverAccountBase}) sent by this same account on Flare. It does what
- * the Flare account does: execute the batch of calls the user signed — here carried by the
- * compose instead of the controller — and nothing permissionless. Borrow proceeds the user
- * directed here, recovered loan-token surplus from the loan subaccount, mistaken sends and
- * strays land here, where the user can always move or use them by signature. Native is
- * accepted (a LayerZero native drop delivered with a message funds value-carrying calls) and
- * leaves the same way, as a value-carrying call.
+ * @notice The compose-controlled remote counterpart of the user's Flare Personal Account (the
+ * loan chain, at launch): the same frozen PA proxy and CREATE2 address, resolved per chain
+ * through the controller-as-beacon. Instructions exist only on Flare, so this account has no
+ * controller-driven methods and no permissionless rail; authenticated `PA_ACTION_EXECUTE`
+ * messages ({ComposeReceiverAccountBase}), sent by this same account on Flare, run the batch of
+ * calls the user signed. Borrow proceeds the user directed here, the loan subaccount's
+ * loan-token surplus, mistaken sends and strays land here, where the user's next batch moves or
+ * uses them. Native is accepted (a LayerZero native drop delivered with a message funds
+ * value-carrying calls) and leaves the same way, as a value-carrying call.
  */
 contract PersonalAccountRemote is IPersonalAccountRemote, ComposeReceiverAccountBase {
 
@@ -79,10 +77,9 @@ contract PersonalAccountRemote is IPersonalAccountRemote, ComposeReceiverAccount
         }
     }
 
-    /// @dev The loan-chain `executeUserOp`: hard argument checks revert (retriable), terminal
-    /// gates skip (finalize without effect), then the pause is checked, the id consumed and the
-    /// calls run in order - all or nothing for calls that revert, exactly like the Flare
-    /// account's multicall.
+    /// @dev The loan-chain `executeUserOp`: validates the arguments (a revert stays
+    /// retriable), applies the terminal skips, checks the pause, consumes the id, then
+    /// executes the signed calls atomically in order, exactly like the Flare multicall.
     function _executeUserOp(
         bytes memory _actionData,
         bytes32 _guid

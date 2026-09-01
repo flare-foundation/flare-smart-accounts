@@ -81,10 +81,8 @@ library ComposeTransport {
     function clearComposeTransport()
         internal
     {
-        // disables lzCompose on every receiver and the bridge-back until a new transport is set;
-        // the token pin and everything outside the transport persist. Queued transport sets and
-        // compose packets already queued at the endpoint are NOT retired by this (see the
-        // interface): cancel the sets first, and never restore a compromised tuple
+        // disables the compose receivers and the bridge-back while preserving markets and the
+        // token pin; the caller must follow the incident runbook in IComposeTransportFacet
         delete getState().transport;
         emit IComposeTransportFacet.ComposeTransportCleared();
     }

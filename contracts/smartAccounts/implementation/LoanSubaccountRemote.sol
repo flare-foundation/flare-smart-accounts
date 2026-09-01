@@ -35,22 +35,20 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * @title LoanSubaccountRemote contract
  * @notice The loan-chain-side subaccount implementation (Ethereum, at launch): same frozen
  * proxy and CREATE2 address as the Flare-side account, resolved per type through the
- * controller-as-beacon.
- * The account operates on exactly **one Morpho market for its whole life** — the market its
- * subaccount type is bound to (write-once in the settings), so the address itself commits to
- * the pool. Every authorized action arrives through the authenticated `lzCompose` (see
- * {ComposeReceiverAccountBase}) sent by this same account on Flare, with one exception: the
- * parent Personal Account (the remote implementation, itself compose-driven) holds one narrow direct
- * authority — the signed exit {sweepToOrigin}, which can only send idle FXRP to this
- * account's own fixed Flare address, never redirect funds or touch collateral or debt.
- * Everything else is permissionless movement along fixed rails — into the account's own
- * position, loan-token surplus to the parent, or the accrued Flare fee to the
- * governance-set recipient — so no caller ever chooses a destination, a market, or an
- * amount source.
- * It has no native rail: the only protocol-delivered native is a withdraw delivery's compose
- * value (the return leg's fee), spent or forwarded to the parent within the same call;
- * a plain send reverts, and a balance landing without a call (pre-deployment funding, an LZ
- * native drop, a force-send) strands until a beacon upgrade adds a rail - accepted.
+ * controller-as-beacon. Authenticated compose actions ({ComposeReceiverAccountBase}), sent by
+ * this same account on Flare, operate on its type's write-once Morpho market - so the address
+ * itself commits to the pool. Repayment, idle-collateral deposit and the fee checkpoint are
+ * permissionless fixed rails; the one narrow direct authority is the parent's signed exit
+ * {sweepToOrigin}, which can only send idle FXRP to this account's own fixed Flare address,
+ * never redirect funds or touch collateral or debt. On the permissionless and cleanup rails
+ * every destination is fixed on-chain - the account's own position, the parent, the
+ * governance-set fee recipient, or this account's own address on Flare - so no caller ever
+ * chooses a destination, a market or an amount source. The one user-chosen destination is a
+ * signed borrow's disbursement, authorized by the XRPL signature its payload carries.
+ * @dev No native rail: the only protocol-delivered native is a withdraw delivery's compose
+ * value (the return leg's fee), spent or forwarded to the parent within the same call, so a
+ * plain send reverts; native landing without a call (pre-deployment funding, an LZ native
+ * drop, a force-send) strands until a beacon upgrade adds a rail - accepted.
  */
 contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
@@ -63,9 +61,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     uint256 private constant YEAR = 365 days;
     /// @dev Morpho's oracle scale: `loanAmount = mulDiv(collateralAmount, price, 1e36)`.
     uint256 private constant ORACLE_PRICE_SCALE = 1e36;
-    /// @dev The secured-claim gate's headroom: an exit passes uncollected while the
-    /// remaining collateral is worth this multiple of the collectible fee - room for the
-    /// fee's growth until the next gate event and for price drift; deliberately not
+    /// @dev The secured-claim gate's headroom: an exit passes uncollected while the remaining
+    /// collateral is worth this multiple of the collectible fee. It allows for the fee's growth
+    /// until the next gate event and for price drift, and is deliberately not
     /// liquidation-proof (the accepted junior-claim risk).
     uint256 private constant FEE_SECURITY_FACTOR = 3;
 
@@ -75,19 +73,17 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// @notice Subaccount type.
     uint256 public subaccountType;
 
-    // fee accounting, appended after the existing fields (layout-safe): the canonical debt
-    // at the last checkpoint, the uncollected fee at WAD precision (the fractional carry is
-    // kept), and the packed clock and terms snapshot the next period is priced at
+    // fee state, appended after the existing fields (layout-safe): the canonical principal at
+    // the last checkpoint, the WAD fee carry, and the checkpoint clock and rate snapshot the
+    // next period is priced at
     uint256 private feePrincipal;
     uint256 private flareDebtX18;
     uint64 private feeLastCheckpoint;
     uint64 private feeSnapshotFloor;
     uint64 private feeSnapshotSpread;
 
-    // deliberately no receive(): the only protocol-delivered native is a withdraw delivery's
-    // compose value, spent or forwarded to the parent within the same call, so plain
-    // native sends revert at the sender; native landing without a call (pre-deployment
-    // funding, an LZ native drop, a force-send) strands - accepted, upgradeable
+    // deliberately no receive() and no native exit: a withdraw delivery's compose value is
+    // spent or forwarded in-call; pre-deployment, dropped or force-sent native strands
 
     modifier onlyParent() {
         // the parent is the remote Personal Account: this method is reached only through a
@@ -199,11 +195,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         IComposeTransportFacet.Transport memory transport = _getTransport();
         // every exit from this chain rides the OFT itself, so an OFT incident must stop it
         _checkNotPaused();
-        // the secured-claim gate over the full current position (the sweep moves idle FXRP,
-        // not the position): under-secured blocks - settle through repay or a withdraw
-        // first. With no principal and nothing collectible the check is storage-only, so the
-        // stuck-FXRP exit keeps its independence (a live principal checkpoints first), and
-        // sub-unit dust is forgiven, never blocking
+        // check the fee claim against the full position (the sweep moves idle FXRP, not the
+        // position): under-secured blocks - settle through repay or a withdraw first. A live
+        // principal checkpoints first; zero principal and zero collectible need no
+        // Morpho/oracle read, and debt-free dust is forgiven rather than blocking
         if (feePrincipal != 0) {
             _checkpointFee(_myMarket());
         }
@@ -298,9 +293,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         return _action == ACTION_WITHDRAW;
     }
 
-    /// @dev A borrow on the account's one market: exactly the authenticated bridged amount (if
-    /// any) becomes collateral, and the debt increase disburses to the destination. Gating
-    /// failures revert, not skip - a temporary window must not consume the packet.
+    /// @dev Supplies the authenticated bridged amount (if any) as collateral and borrows on the
+    /// type's market, disbursing to the destination. Temporary debt gates revert rather than
+    /// skip, so the packet stays retriable.
     function _executeBorrow(
         bytes memory _actionData,
         bytes32 _guid,
@@ -354,10 +349,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         );
     }
 
-    /// @dev A pure collateral deposit on the account's one market: exactly the authenticated
-    /// bridged amount becomes collateral. While paused it needs live debt - defending a
-    /// position stays available, new exposure waits (a revert, not a skip, so the packet is
-    /// not consumed by a temporary window).
+    /// @dev Supplies exactly the authenticated bridged amount as collateral, without changing
+    /// debt. During a pause only an indebted position may receive it - defending stays
+    /// available, new exposure waits - and a temporary rejection reverts, leaving the packet
+    /// retriable.
     function _executeDepositCollateral(
         bytes memory _actionData,
         bytes32 _guid,
@@ -428,13 +423,12 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         }
     }
 
-    /// @dev The atomic withdrawal: withdraws collateral from the position and bridges it
-    /// home with the redeem-home compose, in the same execution - no idle window
-    /// between the two, so the redeposit race cannot touch a withdrawal. The compose value
-    /// delivered with the action pays the return leg's LayerZero fee (quoted live against the
-    /// signed `returnOptions`); the excess goes to the parent. Too little value
-    /// reverts, and the delivery stays retriable - fee quotes drift both ways. Morpho
-    /// enforces position health.
+    /// @dev The atomic withdrawal: withdraws collateral and bridges the net amount home with
+    /// the redeem-home compose in the same execution - no idle window, so the redeposit race
+    /// cannot touch a withdrawal. The delivered compose value pays the return leg's live quote
+    /// against the signed `returnOptions`, with the excess to the parent; too little value or
+    /// any other failure reverts and leaves the delivery retriable. Morpho enforces position
+    /// health.
     function _executeWithdraw(
         bytes memory _actionData,
         bytes32 _guid
@@ -516,14 +510,13 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     }
 
     /// @dev The shared bridge-home core of {sweepToOrigin} and the withdraw action: sends
-    /// exactly `_amount` FXRP to this account's own Flare address with the redeem-home
-    /// compose (a deadline, this block time plus `REDEEM_HOME_TTL`, and nothing else), so
-    /// the Flare twin redeems at most this amount on arrival. The account is its own
-    /// destination (same address on every chain); decimals match (validated in the
-    /// transport), so `minAmountLD` equals `amountLD`. `_options` carry the Flare-side gas
-    /// and, optionally, the redemption's executor fee as compose value. Exactly the quoted
-    /// fee is spent from `_value`; the excess goes to `_excessTo` (the caller on the sweep
-    /// rail, the parent on the withdraw action).
+    /// exactly `_amount` FXRP to this account's own Flare address (same address on every
+    /// chain) with the redeem-home compose - a deadline, this block time plus
+    /// `REDEEM_HOME_TTL`, and nothing else - so the Flare twin redeems at most this amount on
+    /// arrival. Equal validated decimals allow `minAmountLD == amountLD`. `_options` carry the
+    /// Flare-side gas and, optionally, the redemption's executor fee as compose value. Exactly
+    /// the quoted fee is spent from `_value` and the excess goes to `_excessTo` (the caller on
+    /// the sweep rail, the parent on the withdraw action).
     function _bridgeHome(
         IComposeTransportFacet.Transport memory _transport,
         uint256 _amount,
@@ -585,9 +578,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         emit FXrpSweptToOrigin(parentPersonalAccount, _amount, _transport.originEid, receipt.guid);
     }
 
-    /// @dev Forwards a terminally skipped withdraw delivery's compose value to the
-    /// parent: it must not strand on an account with no native rail, and msg.sender on this
-    /// path is the endpoint - never a refund target.
+    /// @dev Forwards a skipped withdraw's compose value to the parent: the endpoint is not a
+    /// valid refund target, and this account has no native exit.
     function _sweepValueToParent(
         uint256 _value
     )
@@ -742,10 +734,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// best-effort, held while paused, never rolling back the repayment; the fee debt
     /// shrinks only by the successfully requested transfer (conventional ERC-20 semantics
     /// are a registration policy) - then reserve as much of the still-outstanding fee as the
-    /// remaining balance covers (a later repay retries that reservation without a new
-    /// top-up; an uncovered shortfall needs new funds) and push only the rest to the parent,
-    /// on a debt-free position. Debt presupposes the borrow gate, so the recipient is
-    /// configured whenever there is something to pay.
+    /// remaining balance covers (a later repay retries that reservation without a new top-up;
+    /// an uncovered shortfall needs new funds) and send only the unreserved balance to the
+    /// parent, once debt-free. Debt implies a configured recipient.
     function _collectFeeAndPushSurplus(
         ILoanMarketsFacet.Market memory _market,
         IERC20 _loanToken

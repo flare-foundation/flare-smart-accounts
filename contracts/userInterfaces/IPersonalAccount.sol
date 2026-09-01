@@ -266,23 +266,21 @@ interface IPersonalAccount {
     );
 
     /**
-     * @notice Sends a signed batch of calls to this account's remote twin (the remote Personal Account at this
-     * same address on the other chain; the loan chain today) for execution there:
-     * the remote `executeUserOp`, carried by the authenticated compose instead of the controller.
-     * @dev Callable only by this account itself — the method is reached through an
-     * {executeUserOp} multicall, so the XRPL signature covers every target, value and
-     * calldata end-to-end. The batch is not interpreted here (the remote account runs it all or
-     * nothing, and a failed call leaves the delivery retriable with the id unconsumed); only
-     * the envelope is validated before any fee is paid (`InvalidCrossChainUserOp`: zero
-     * operation id, passed deadline, empty batch). Sent as a message-only compose over the
-     * configured FXRP OFT to this same address: configured settings required, live peer
-     * re-checked against the pinned one, exact quoted fee spent; `msg.value` rides from the
-     * account's own balance, so any excess simply remains on the account. Reverts while the
-     * controller is paused (a forward move). Deliberately not reentrancy-guarded: it runs
-     * inside {executeUserOp}'s guard. `_extraOptions` must carry the `lzCompose` gas the batch
-     * needs and, when the batch sends more native than the remote account holds, a native drop. The
-     * message id is
-     * recorded in {CrossChainUserOpSent}.
+     * @notice Sends a signed batch of calls to this account's remote twin (the remote Personal
+     * Account at this same address on the other chain; the loan chain today) for atomic
+     * execution there - the remote `executeUserOp`, carried by the authenticated compose
+     * instead of the controller.
+     * @dev Callable only by this account itself, so it is reached through an {executeUserOp}
+     * multicall and the XRPL signature covers every target, value and calldata end-to-end;
+     * deliberately not reentrancy-guarded, since it runs inside that call's guard. The batch is
+     * not interpreted here (the remote account runs it all or nothing, and a failed call leaves
+     * the delivery retriable with the id unconsumed); only the envelope is validated before any
+     * fee is paid (`InvalidCrossChainUserOp`: zero operation id, passed deadline, empty batch).
+     * It validates the pause, the settings and the pinned peer, then sends a message-only
+     * compose to the same address: exactly the quoted fee is paid from this account and any
+     * excess remains here. `_extraOptions` must carry the `lzCompose` gas the batch needs and,
+     * when the batch sends more native than the remote account holds, a native drop. The
+     * message id is recorded in {CrossChainUserOpSent}.
      * @param _calls The calls to execute from the remote account, in order.
      * @param _operationId The user-chosen operation id (non-zero, unique per account).
      * @param _deadline Unix time after which the remote account skips the instruction unexecuted.
@@ -299,20 +297,17 @@ interface IPersonalAccount {
     /**
      * @notice Redeems FXRP pushed here by one of this account's subaccounts to this account's
      * XRPL owner: pulls exactly `_amount` from the calling subaccount and redeems exactly that.
-     * @dev Callable only by this account's own subaccounts (the controller's prediction for
-     * this owner and the caller's type must be the caller). This is the backward cleanup rail
-     * of the subaccounts, relocated: the subaccount approves and calls, this account is the
-     * redeemer, so every redemption outcome - a partial fill, a payment-default payout, a
-     * refund - lands here, where {executeUserOp} handles anything (including triggering the
-     * default on the asset manager directly). This account's own balance is never part of it.
-     * The controller's executor is appointed and `msg.value` travels whole as its fee (FAssets
-     * records it in whole gwei). The fee policy lives at the entry, not here: the subaccount's
-     * permissionless rail requires the controller's configured fee, while an authenticated
-     * route may send less or nothing (the executor stays appointed, unpaid). Not pause-gated
-     * (an exit toward the user); guarded in its own reentrancy domain, since the
-     * legitimate path re-enters this account from inside {executeUserOp} - a bounded nesting:
-     * the method writes no account state and pulls before it redeems, so it can never touch
-     * this account's pre-existing FXRP, and a nested redemption is refused.
+     * @dev Callable only by this account's own deterministic subaccounts (the controller's
+     * prediction for this owner and the caller's type must be the caller). This account is the
+     * recorded redeemer, so every outcome - a partial fill, a payment-default payout, a refund
+     * - lands here, where {executeUserOp} handles anything, including triggering the default on
+     * the asset manager directly; this account's own balance is never part of it. The
+     * controller's executor is appointed and all `msg.value` is forwarded as its fee (FAssets
+     * records it in whole gwei); the caller rail, not this method, enforces any minimum fee.
+     * Pause-exempt (an exit toward the user) and guarded in its own reentrancy domain, so the
+     * signed {executeUserOp} -> sweepRedeem path works - a bounded nesting: the method writes no
+     * account state and pulls before it redeems, so it can never touch this account's
+     * pre-existing FXRP, and a nested redemption is refused.
      * @param _amount The amount pushed by the subaccount, pulled and redeemed here.
      * @return _redeemedAmount Amount actually redeemed; the remainder stays on this account.
      */

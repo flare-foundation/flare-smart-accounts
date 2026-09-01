@@ -60,22 +60,21 @@ contract PersonalAccount is
         _;
     }
 
-    /// @dev The caller must be one of this account's own subaccounts: the controller's
-    /// prediction for (this account's owner, the caller's type) must be the caller itself. The
-    /// proxy creation code and the derivation are frozen, so no other contract can sit at that
-    /// address; the caller's self-reported type is only the index into that check.
+    /// @dev The caller must equal the controller's prediction for this account's owner and
+    /// the caller's reported non-zero type. The proxy creation code and the derivation are
+    /// frozen, so no other contract can sit at that address; the self-reported type is only
+    /// the index into that check.
     modifier onlySubaccount() {
         require(_isOwnSubaccount(msg.sender), OnlySubaccount());
         _;
     }
 
-    /// @dev A guard domain of its own, because the legitimate call path re-enters this account:
-    /// user -> {executeUserOp} (shared guard held) -> subaccount.sweepRedeem ->
-    /// {redeemFromSubaccount}. The nesting this allows is bounded: the method writes no account
-    /// state, creates no allowance of this account's, and pulls before it redeems, so even a
-    /// redemption reached from beneath another guarded method through an external dependency (no
-    /// such trigger exists with canonical FXRP and FAssets) cannot touch this account's
-    /// pre-existing FXRP; a nested redemption is refused by this guard.
+    /// @dev A separate guard domain, because the legitimate path re-enters this account:
+    /// {executeUserOp} (shared guard held) -> subaccount.sweepRedeem ->
+    /// {redeemFromSubaccount}. What it permits is bounded: the method writes no account state,
+    /// creates no allowance of this account's and pulls before it redeems, so a redemption
+    /// reached from beneath another guarded method cannot touch this account's pre-existing
+    /// FXRP; a nested redemption is refused by this guard.
     modifier nonReentrantSubaccountRedemption() {
         require(
             !SUBACCOUNT_REDEMPTION_GUARD_SLOT.asBoolean().tload(),
@@ -289,9 +288,9 @@ contract PersonalAccount is
     )
         external payable
     {
-        // reachable only through executeUserOp (a self-call), so the batch is user-signed
-        // end-to-end and is not interpreted here; deliberately not nonReentrant - it runs
-        // inside executeUserOp's transient guard, which a nested guard would trip
+        // only a self-call from executeUserOp can reach this method, so the batch is
+        // user-signed end-to-end and is not interpreted here; it reuses that call's active
+        // guard rather than entering a second one, which a nested guard would trip
         require(msg.sender == address(this), OnlySelf());
         require(
             _operationId != bytes32(0) && _deadline >= block.timestamp && _calls.length > 0,
@@ -311,16 +310,14 @@ contract PersonalAccount is
         nonReentrantSubaccountRedemption
         returns (uint256 _redeemedAmount)
     {
-        // the controller's executor is appointed whatever the value: msg.value travels whole
-        // as its fee. The fee policy lives at the entry (the subaccount's permissionless rail
-        // requires the configured fee); an authenticated route may send nothing - the executor
-        // stays appointed, unpaid. Deliberately not enforced here
+        // value is optional here: sweepRedeem enforces the fee at the public entry, while an
+        // authenticated compose redemption may appoint the executor unpaid. Whatever arrives
+        // travels whole as the fee
         // slither-disable-next-line unused-return
         (address payable executor, ) = IExecutorsFacet(controllerAddress).getExecutorInfo();
 
-        // pull exactly the amount from the calling subaccount and redeem exactly that: this
-        // account's own balance is never part of a subaccount-initiated redemption. What FAssets
-        // does not fill stays here, under the user's control, like every redemption outcome
+        // pull and redeem exactly the caller's amount; this account's pre-existing FXRP is
+        // never included, and what FAssets does not fill stays here, under the user's control
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
         assetManager.fAsset().safeTransferFrom(msg.sender, address(this), _amount);
         _redeemedAmount = assetManager.redeemAmount{value: msg.value}(
@@ -387,11 +384,10 @@ contract PersonalAccount is
             super.supportsInterface(_interfaceId); // ERC1155Holder covers IERC1155Receiver and IERC165
     }
 
-    /// @dev The transport of {sendCrossChainUserOp}: sends the signed batch as a
-    /// message-only compose over the configured FXRP OFT to this account's
-    /// own address on the loan chain, where the remote account authenticates composeFrom back to here
-    /// and executes it. Configured settings required, live peer re-checked against the pinned
-    /// one, exact quoted fee spent, pause-gated (a forward move).
+    /// @dev Sends the signed batch as a message-only compose to this account's fixed remote
+    /// address, where the twin authenticates `composeFrom` back to here and executes it.
+    /// Requires an unpaused, configured route with the live peer still pinned; exactly the
+    /// quoted fee is spent.
     function _sendCrossChainUserOp(
         IPersonalAccount.Call[] memory _calls,
         bytes32 _operationId,

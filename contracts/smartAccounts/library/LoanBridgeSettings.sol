@@ -44,29 +44,23 @@ library LoanBridgeSettings {
         }
         require(_fxrpOft.code.length > 0, ILoanBridgeSettingsFacet.InvalidFxrpOft());
         require(_destinationEid != 0, ILoanBridgeSettingsFacet.InvalidDestinationEid());
-        // the destination peer is an EVM OApp address and must be cleanly zero-padded: the
-        // source-computed GUID commits to the full bytes32 receiver, and the destination-side
-        // compose authentication recomputes it from the clean local address, so dirty upper
-        // bits would route correctly yet fail every delivery
+        // require a clean EVM peer: the destination recomputes the GUID from the local
+        // address form, so dirty upper bits would route correctly yet fail every delivery
         require(
             _destinationPeer != bytes32(0) && uint256(_destinationPeer) >> 160 == 0,
             ILoanBridgeSettingsFacet.InvalidDestinationPeer()
         );
-        // the OFT must actually be an FXRP bridge: it must wrap the FXRP token, share its
-        // decimals (the token-bearing signed instructions send with minAmountLD == amountLD,
-        // so any shared-decimal dust would make them revert), and its peer for the destination
-        // chain must be exactly the intended remote OApp - existence alone would accept a
-        // wrong route
+        // the adapter must wrap FXRP with equal shared decimals (the token-bearing signed
+        // instructions send with minAmountLD == amountLD, so dust would make them revert) and
+        // use exactly the pinned destination peer - existence alone would accept a wrong route
         address fxrp = address(ContractRegistry.getAssetManagerFXRP().fAsset());
         require(IOFT(_fxrpOft).token() == fxrp, ILoanBridgeSettingsFacet.InvalidFxrpOft());
         require(
             IOFT(_fxrpOft).sharedDecimals() == IERC20Metadata(fxrp).decimals(),
             ILoanBridgeSettingsFacet.InvalidFxrpOft()
         );
-        // the destination-side compose authentication depends on the canonical OFT message
-        // codec (composeFrom = source caller), so the adapter must declare the canonical
-        // interface and codec version exactly; version stability of the pinned adapter is a
-        // deployment assumption (the production adapter is not a proxy)
+        // compose authentication depends on the canonical OFT codec v1 (composeFrom = source
+        // caller); adapter version stability is a deployment assumption (it is not a proxy)
         (bytes4 interfaceId, uint64 version) = IOFT(_fxrpOft).oftVersion();
         require(
             interfaceId == type(IOFT).interfaceId && version == 1,

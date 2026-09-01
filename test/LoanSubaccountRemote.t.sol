@@ -80,11 +80,11 @@ import {
 
 /**
  * @title LoanSubaccountRemoteTest
- * @notice The loan-chain-side subaccount (Ethereum, at launch), step 1: the same frozen
- * proxy resolves a per-chain implementation through the controller-as-beacon, so the
- * account keeps its cross-chain CREATE2 address while behaving differently per chain. Covers initialization,
- * the implementation self-lock, resolution and upgrade routing, and address invariance
- * across implementations.
+ * @notice The loan-chain-side subaccount (Ethereum, at launch): the same frozen proxy
+ * resolves a per-chain implementation through the controller-as-beacon, so the account keeps
+ * its cross-chain CREATE2 address while behaving differently per chain. Covers creation and
+ * implementation resolution, the authenticated compose actions, the Morpho rails, the Flare
+ * fee accounting and gates, and cross-chain payload integration.
  */
 // solhint-disable-next-line max-states-count
 contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
@@ -1572,10 +1572,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testCheckpointPartitionPreservesTheFloorTotal() public {
-        // splitting never lowers the fee beyond the sub-X18 truncation bound (see the
-        // indivisible-partition test); here two half-year checkpoints charge exactly
-        // the full-year floor here (the general bound: partitioning loses at most one X18
-        // unit - below 1e-18 of a base unit - per checkpoint to the /YEAR truncation)
+        // two half-year checkpoints charge exactly the full-year floor; the
+        // indivisible-partition test covers the sub-X18 truncation bound
         address subaccount = _borrowedSubaccount(1000e18);
         vm.warp(vm.getBlockTimestamp() + 365 days / 2);
         ILoanSubaccountRemote(subaccount).checkpointFee();
@@ -3211,11 +3209,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testSignedSweepToOriginThroughTheParent() public {
-        // the remote exit end to end, one owner throughout: the production-created PA sends
-        // the signed batch while the beacon resolves the Flare implementation; the SAME proxy
-        // becomes the parent when the beacon switches (same address, per-chain implementation,
-        // exactly the production model), executes the batch, funds the fee from its own native
-        // balance, and takes the excess refund into its plain receive()
+        // models the same-address production path: the Flare PA sends the signed batch, and
+        // after this harness switches the beacon to the remote implementation, that same
+        // address executes it, funds the fee from its own native balance and receives the
+        // excess refund
         _configureSettings();
         string memory exitOwner = "rSignedExitOwner";
         address subaccount = controller.createSubaccount(exitOwner, SUBACCOUNT_TYPE_LOAN);
@@ -3248,10 +3245,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, bytes32 to, , , , , ) = fxrpOft.lastSendParam();
         assertEq(to, bytes32(uint256(uint160(pa))));
 
-        // the same proxy is the parent once the beacon switches. On separate chains each
-        // proxy is initialized by its own implementation; on this shared diamond the switch
-        // leaves the parent layout's xrplOwner slot (2) unset, so write what the parent's
-        // initialize would have written (short-string encoding)
+        // real chains initialize separate same-address proxies; this one-diamond harness
+        // switches an initialized Flare proxy, so seed slot 2 with the remote layout's
+        // xrplOwner value (short-string encoding)
         vm.prank(governance);
         controller.setPersonalAccountImplementation(address(new PersonalAccountRemote()));
         vm.store(
@@ -3460,13 +3456,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testFlareSendersProduceThePayloadsTheLoanChainDecodes() public {
-        // sender and receiver in one place: the Flare-side senders (LoanSubaccount,
-        // PersonalAccount) and the loan-chain decoders (LoanSubaccountRemote,
-        // PersonalAccountRemote) run on this one diamond, so the bytes the Flare side
-        // actually hands to the OFT's send are what the receivers execute - wrapped by the
-        // canonical compose codec exactly as the OFT's lzReceive -> sendCompose wraps them
-        // (composeFrom being the receiver's own address: sender and receiver share it in
-        // production). No hand-built payload in between
+        // end-to-end codec check: capture the payloads the Flare senders hand to the OFT's
+        // send, wrap them with the canonical compose codec exactly as lzReceive ->
+        // sendCompose does, and execute them on the remote receivers at the same address. No
+        // hand-built payload in between
         address subaccount = _createConfiguredSubaccount();
         address sender = _flareSenderOnThisDiamond();
         uint64 deadline = uint64(vm.getBlockTimestamp() + 1 hours);

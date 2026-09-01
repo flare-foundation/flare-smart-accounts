@@ -4,11 +4,11 @@ pragma solidity >=0.8.4 <0.9;
 import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 
 /// @dev Execute action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// Call[] calls)`. Runs the signed batch of calls from this account, in order, all or nothing
-/// for calls that revert: the remote form of the Flare `executeUserOp`, carried by the
-/// authenticated compose instead of the controller. The user's XRPL signature covers every
-/// target, value and calldata, exactly as it does on Flare - and, as there, return data is
-/// not interpreted: a callee that reports failure by returning `false` (some ERC-20s) or a
+/// Call[] calls)`. Executes the signed calls from this account in order and atomically for
+/// calls that revert - the remote form of the Flare `executeUserOp`, carried by the
+/// authenticated compose instead of the controller, with the user's XRPL signature covering
+/// every target, value and calldata. Return data is not interpreted, matching Flare's
+/// `executeUserOp`: a callee that reports failure by returning `false` (some ERC-20s) or a
 /// codeless target counts as a successful call, so the wallet must know the callee's success
 /// convention.
 uint8 constant PA_ACTION_EXECUTE = 1;

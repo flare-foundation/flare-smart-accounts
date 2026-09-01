@@ -6,52 +6,48 @@ import {ISubaccount} from "./ISubaccount.sol";
 
 /// @dev Borrow action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
 /// uint8 destinationKind, bytes32 destination, uint256 borrowAmount, uint64 maxFeeFloor,
-/// uint64 maxFeeSpread)`. The market is not a
-/// payload field: the account operates on exactly one market — the one its subaccount type
-/// is bound to (write-once) — so the subaccount address itself commits to the pool.
-/// The maxima are the signed fee bound: if the type's current rates exceed either, the
-/// delivery terminal-skips with `SKIP_REASON_FEE_TERMS` (id unconsumed, credit idle) — a
-/// delayed packet never executes at a worse rate than the user signed, while a favorable
-/// decrease still executes.
-/// The operation id must be non-zero and globally unique per subaccount across all action
-/// types; clients retrying an expired intent must reuse its id only for the same intent
-/// with a fresh deadline (a convention, not contract-enforced). The authenticated bridged
-/// amount (the codec's `amountLD`, never the idle balance) is supplied as collateral, and
-/// `borrowAmount` (non-zero) of the loan token is borrowed and sent to `destination`. A zero
-/// bridged amount borrows against the existing position. A debt increase: pause-gated and
-/// subject to the per-type borrow switch. A pure collateral deposit is its own action
-/// (`ACTION_DEPOSIT_COLLATERAL`).
+/// uint64 maxFeeSpread)`. The market is not a payload field: the account type fixes it
+/// (write-once), so the subaccount address itself commits to the pool. The authenticated
+/// bridged amount (the codec's `amountLD`, never the idle balance) becomes collateral - zero
+/// borrows against the existing position - and `borrowAmount` (non-zero) is borrowed and sent
+/// to `destination`. Rates above either signed maximum terminal-skip with
+/// `SKIP_REASON_FEE_TERMS` without consuming the id, so a delayed packet never executes at a
+/// worse rate than the user signed, while a favorable decrease still executes. It is a debt
+/// increase: pause-gated and subject to the per-type borrow switch, both of which revert
+/// retriably. The operation id must be non-zero and globally unique per subaccount across all
+/// action types; clients retrying an expired intent must reuse its id only for the same intent
+/// with a fresh deadline (a convention, not contract-enforced). A pure collateral deposit is
+/// its own action (`ACTION_DEPOSIT_COLLATERAL`).
 uint8 constant ACTION_BORROW = 1;
 
 /// @dev Withdraw action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
 /// uint256 withdrawAmount, uint256 minComposeValue, uint256 maxFeeFxrp,
-/// bytes returnOptions)`. The atomic withdrawal: withdraws collateral
-/// from the account's one position and bridges it back to the account's own
-/// Flare address in the same execution, with the redeem-home compose - no idle window, so the
-/// redeposit ordering race cannot touch a withdrawal. **The fee is a secured claim**: a
-/// withdrawal collects nothing while the collateral remaining after it, valued at the
-/// market oracle's price, covers three times the collectible fee (headroom for accrual and
-/// price drift); the exit that would leave the fee under-secured settles it in FXRP,
-/// converted at the market oracle's price (`ceil(collectible · 1e36 / price)`, the same
-/// oracle the market's liquidations price by) and deducted from the withdrawn collateral
-/// before the bridge-back. The signed `maxFeeFxrp` cap bounds the FXRP taken - a worse
-/// price parks the delivery retriably (reissue with a higher cap on the same operation id;
-/// the parked packet then duplicate-skips) - and a dead or zero-priced oracle parks it too:
-/// settle through {repay} (send loan tokens to the account, the free direction), then the
-/// retried delivery passes with nothing collectible, oracle-free. The signed `returnOptions` are the
-/// return send's LayerZero options (Flare-side gas and, optionally, the redemption's executor
-/// fee as compose value); the return leg's fee is paid from the compose value delivered with
-/// this action - the only action that accepts value - and the excess goes to the
-/// parent. Compose delivery is permissionless and LayerZero does not authenticate the
-/// delivered value, so the signed `minComposeValue` is the delivery floor: any delivery
-/// carrying less - execution and terminal skip alike - reverts (`InsufficientDeliveryValue`)
-/// and stays retriable, so a zero-value front-run cannot consume the packet and burn the
-/// prepaid value. Too little value for the live quote also reverts and stays retriable (fee
-/// quotes drift both ways); bad `returnOptions` are frozen in the signed packet - the
-/// accepted residual, fixed by a fresh instruction that reuses the same operation id, so the
-/// parked packet terminal-skips as a duplicate. The redemption fee optionally bought inside
-/// `returnOptions` stays best-effort on the second leg (the Flare redeem-home accepts zero
-/// value by design). Position health is enforced by Morpho.
+/// bytes returnOptions)`. The atomic withdrawal: withdraws collateral from the account's one
+/// position and bridges the net amount back to the account's own Flare address in the same
+/// execution, with the redeem-home compose - no idle window, so the redeposit ordering race
+/// cannot touch a withdrawal. **The fee is a secured claim**: the withdrawal collects nothing
+/// while the collateral remaining after it, valued at the market oracle's price, covers three
+/// times the collectible fee; an exit that would leave the fee under-secured settles it in
+/// FXRP at that same oracle (`ceil(collectible · 1e36 / price)`), deducted from the withdrawn
+/// collateral under the signed `maxFeeFxrp` cap. `minComposeValue` is the delivery floor:
+/// compose delivery is permissionless and LayerZero does not authenticate the delivered value,
+/// so a delivery carrying less - execution and terminal skip alike - reverts
+/// (`InsufficientDeliveryValue`), which is what stops a zero-value front-run from consuming
+/// the packet and burning the prepaid value. `returnOptions` are the signed return-send
+/// options (Flare-side gas and, optionally, the redemption's executor fee as compose value,
+/// best-effort on that leg - the Flare redeem-home accepts zero value by design); the return
+/// fee is paid from the compose value delivered with this action - the only action that
+/// accepts value - and the excess goes to the parent. Oracle, cap, quote and return-send
+/// failures all revert and leave the delivery retriable; what recovers them differs by cause,
+/// and this is the one place it is written out. A quote shortfall: retry the SAME packet with
+/// more value. Another transient return-send failure: retry the same packet once its cause
+/// clears - more value cannot help, since exactly the newly quoted fee is forwarded. A dead or
+/// zero-priced oracle: settle through {repay} first (loan tokens to the account, the free
+/// direction), after which the retried delivery passes with nothing collectible, oracle-free.
+/// A fee above the cap, or bad `returnOptions` frozen into the signed packet (the accepted
+/// residual - no retry can fix the blob itself): issue a corrected instruction reusing the SAME
+/// operation id, whereupon the parked packet later duplicate-skips. Position health is enforced
+/// by Morpho.
 uint8 constant ACTION_WITHDRAW = 2;
 
 /// @dev Deposit-collateral action: `actionData` is `abi.encode(bytes32 operationId,
@@ -74,18 +70,15 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
 
 /**
  * @title ILoanSubaccountRemote
- * @notice User interface for the loan-chain-side subaccount: the implementation registered
- * for a loan subaccount type on the loan-chain diamond (Ethereum, at launch), living at the
- * same CREATE2 address
- * as its Flare counterpart. The account operates on exactly one Morpho market for its whole
- * life — the market its type is bound to — so the address itself commits to the pool. Every
- * authorized action arrives as an authenticated LayerZero compose payload sent by this same
- * account on Flare, with one exception: the parent Personal Account (the remote
- * implementation, itself compose-driven) holds one narrow direct authority — the signed exit {sweepToOrigin}, which
- * can only send idle FXRP home to this account's own fixed Flare address. Everything else is
- * permissionless movement along fixed rails: into the account's own position, loan-token
- * surplus to the parent, or the accrued Flare fee to the governance-set recipient. It has
- * no native rail.
+ * @notice User interface for the loan-chain-side subaccount (Ethereum, at launch), at the same
+ * CREATE2 address as its Flare counterpart. Authenticated compose payloads, sent by this same
+ * account on Flare, execute the typed actions on the type's write-once Morpho market — so the
+ * address itself commits to the pool. Repayment, idle-collateral deposit and the fee
+ * checkpoint are permissionless fixed rails; only the parent Personal Account (the remote
+ * implementation, itself compose-driven) may sweep idle FXRP home ({sweepToOrigin}). On those
+ * rails every destination is fixed on-chain - the account's own position, the parent, the
+ * governance-set fee recipient, or this account's own address on Flare - while the one
+ * user-chosen destination is a signed borrow's disbursement. It has no native rail.
  */
 interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
@@ -203,14 +196,14 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted by every fee checkpoint, degenerate ones included (zero principal or a
-     * zero elapsed period, which skip the fee math but still re-baseline).
+     * @notice Emitted after each fee checkpoint and re-baseline, degenerate ones included
+     * (zero principal or a zero elapsed period skip the fee math but still re-baseline).
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param principal The canonical Morpho debt the account is re-baselined to (base
-     * units). A borrow or repayment in the same call re-syncs it right after
-     * ({LoanFeePrincipalSynced}); {getLoanFeeState} is the authoritative state.
-     * @param feeDeltaX18 The fee added for the elapsed period (base units at WAD precision);
-     * zero on degenerate checkpoints.
+     * @param principal The canonical Morpho debt measured at the checkpoint (base units); a
+     * borrow or repayment in the same call re-syncs it afterward
+     * ({LoanFeePrincipalSynced}), and {getLoanFeeState} is authoritative.
+     * @param feeDeltaX18 The fee accrued for the interval (base units at WAD precision); zero
+     * on degenerate checkpoints.
      */
     event LoanFeeCheckpointed(
         address indexed parentPersonalAccount,
@@ -271,11 +264,10 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when loan tokens covering still-outstanding fee stay reserved on the
-     * account instead of leaving as surplus: the fee leg held (paused) or the recipient
-     * refused the transfer; a later {repay} retries from the reservation. A snapshot, not a
-     * delta: repeated calls can emit the same amount, and a partial collection that empties
-     * the balance reserves zero (the claim then lives only in the fee debt).
+     * @notice Emitted with the amount of outstanding fee covered by loan tokens retained on
+     * the account instead of leaving as surplus; a later {repay} retries from it. A snapshot,
+     * not a delta: repeated calls can emit the same amount, and a collection that empties the
+     * balance reserves zero (the claim then lives only in the fee debt).
      * @param feeRecipient The collector the reservation is owed to.
      * @param amount The reserved amount (whole base units).
      */
@@ -338,10 +330,9 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     error BorrowingDisabled();
 
     /**
-     * @notice Reverts on a debt increase while the subaccount type's fee terms are not yet
-     * configured (the recipient is the activation marker, set last): a
-     * registered-but-unpriced type cannot take on debt. A revert, not a skip - the condition
-     * is temporary and must not consume the packet.
+     * @notice Reverts a debt increase before the subaccount type's fee recipient activates
+     * its terms: a registered-but-unpriced type cannot take on debt. Retriable - the packet
+     * is not consumed by this temporary condition.
      */
     error FeeTermsNotConfigured();
 
@@ -383,17 +374,15 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Reverts if {sweepToOrigin} is called by anything other than the parent
-     * Personal Account (the remote implementation): the remote exit is a user-signed action by policy -
-     * every permissionless arrival has exactly one meaning (FXRP deposits, RLUSD repays),
-     * and the exit direction requires the user's signature, carried by the parent's
-     * cross-chain user operation.
+     * Personal Account (the remote implementation): by policy the exit direction requires the
+     * user's signature, carried by the parent's cross-chain user operation.
      */
     error OnlyParent();
 
     /**
-     * @notice Reverts on a withdraw delivery carrying less compose value than the signed
-     * floor: delivery is permissionless and the value unauthenticated, so anything below the
-     * floor must not consume the packet - not even as a terminal skip. Retriable.
+     * @notice Reverts a withdraw delivered below its signed compose-value floor, so that an
+     * underfunded permissionless delivery cannot consume the packet - not even as a terminal
+     * skip. Retriable.
      * @param required The signed delivery-value floor.
      */
     error InsufficientDeliveryValue(
@@ -401,10 +390,9 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts a {sweepToOrigin} while the collectible fee is under-secured (the
-     * position's collateral, at the market oracle's price, is worth less than three times
-     * the fee): the exit gate. Settle first - send loan tokens to the account (the free
-     * direction) and let {repay} collect, or let a withdraw pay it - then sweep.
+     * @notice Reverts a {sweepToOrigin} while the collectible fee is under-secured - the
+     * position's collateral, at the market oracle's price, is worth less than three times the
+     * fee. Settle through {repay} or a withdraw first, then sweep.
      * @param collectible The fee currently payable.
      */
     error OutstandingLoanFee(
@@ -412,10 +400,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts an under-secured withdraw delivery whose fee, converted at the current
-     * oracle price, exceeds the signed `maxFeeFxrp` cap - the user's price protection.
-     * Retriable, never consumed: reissue with a higher cap on the same operation id, or
-     * settle through {repay} first.
+     * @notice Reverts when the current FXRP fee exceeds the signed cap - the user's price
+     * protection. Retriable: reissue with a higher cap on the same operation id.
      * @param requiredFxrp The FXRP the fee converts to at the current price.
      * @param cap The signed cap.
      */
@@ -425,8 +411,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts an under-secured withdraw delivery whose converted fee would consume
-     * the whole withdrawal. Retriable: withdraw more, or settle through {repay} first.
+     * @notice Reverts when the converted fee would consume the whole withdrawal. Retriable:
+     * withdraw more, or settle through {repay} first.
      * @param requiredFxrp The FXRP the fee converts to at the current price.
      * @param withdrawAmount The collateral being withdrawn.
      */
@@ -436,17 +422,15 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts an under-secured withdraw delivery when the market oracle returns a
-     * zero price. Retriable: settle through {repay}, then the retried delivery passes with
-     * nothing collectible, oracle-free.
+     * @notice Reverts an under-secured withdraw when the market oracle returns a zero price.
+     * Retriable: settle through {repay} first.
      */
     error InvalidOraclePrice();
 
     /**
-     * @notice Reverts an under-secured withdraw delivery when the market oracle reverts (a
-     * dead or bricked oracle - the write-once market can never rotate it). Retriable: settle
-     * through {repay}, then the retried delivery passes with nothing collectible,
-     * oracle-free.
+     * @notice Reverts an under-secured withdraw when the market oracle reverts (a dead
+     * oracle - the write-once market can never rotate it). Retriable: settle through {repay}
+     * first.
      */
     error OracleUnavailable();
 
@@ -488,19 +472,18 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     /**
      * @notice Repays the account's debt with its idle loan-token balance, clamped to the
      * live debt, then settles the accrued Flare fee from what remains.
-     * @dev Permissionless - repayment only reduces debt on the account's own position.
-     * Stays available while paused (it moves the position toward safety). The fee checkpoint
-     * runs first and the canonical debt is re-read after (see {checkpointFee}). With live
-     * debt, interest accrues; a balance covering the full debt closes by exact borrow shares
-     * (no over-repay revert), a smaller one repays by assets. Then, in order: the fee leg
-     * pays the collectible fee from the remainder - best-effort, held while paused, never
-     * rolling back the repayment ({LoanFeeCollected} / {LoanFeeReserved}; the fee debt
-     * shrinks only by the successfully requested transfer - conventional ERC-20 semantics
-     * are a market-registration policy) - tokens covering still-outstanding fee stay
-     * reserved here, and only the rest is surplus, pushed to the parent on a debt-free
-     * position ({LoanSurplusRecovered}; best-effort, {LoanSurplusRetained} on refusal).
-     * Closing through the rails therefore costs the live debt plus the collectible fee, from
-     * one balance in one call.
+     * @dev Permissionless and pause-exempt for the debt reduction, which only moves the
+     * account's own position toward safety. It checkpoints before the repayment and re-syncs
+     * the canonical debt after (see {checkpointFee}). With live debt, interest accrues; a
+     * balance covering the full debt closes by exact borrow shares (no over-repay revert), a
+     * smaller one repays by assets. Then, in order: the fee leg pays the collectible fee from
+     * the remainder - best-effort, held while paused, never rolling back the repayment
+     * ({LoanFeeCollected}; the fee debt shrinks only by the successfully requested transfer,
+     * conventional ERC-20 semantics being a market-registration policy) - as much of the rest
+     * as the outstanding fee needs stays reserved here ({LoanFeeReserved}), and only the
+     * unreserved balance is pushed to the parent once debt-free ({LoanSurplusRecovered};
+     * best-effort, {LoanSurplusRetained} on refusal). Closing through the rails therefore
+     * costs the live debt plus the collectible fee, from one balance in one call.
      * @return _assets The assets repaid.
      */
     function repay()
@@ -511,17 +494,14 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * @notice Runs a bare fee checkpoint: prices the elapsed period at the snapshotted
      * terms, adds the result to the fee debt, and re-baselines (principal to the canonical
      * live debt, clock to now, snapshot to the current terms).
-     * @dev Permissionless and pause-exempt - notably the liquidated account's relief: a
-     * liquidation is invisible to the account, so the floor keeps accruing on the stale
-     * principal until someone checkpoints (prospectively only). Under unchanged terms and
-     * non-decreasing debt, splitting a period typically increases the total fee and never
-     * decreases it by more than one X18 unit (under 1e-18 of a base unit) per checkpoint,
-     * so checkpointing cannot be used against the protocol; a checkpoint after an external
-     * repayment or liquidation legitimately shrinks the FUTURE base - that is the
-     * prospective policy, not a loss. The advertised promise is the per-checkpoint
-     * measurement. Shares-first:
-     * zero principal makes no Morpho call, zero live shares settle at zero debt without
-     * touching the IRM.
+     * @dev Permissionless and pause-exempt - notably the liquidated account's relief: an
+     * external repayment or liquidation is invisible to the account, so the floor keeps
+     * accruing on the stale principal until someone checkpoints, and only prospectively.
+     * Under unchanged terms and non-decreasing debt, splitting a period typically increases
+     * the total fee and never decreases it by more than one X18 unit (under 1e-18 of a base
+     * unit) per checkpoint, so checkpointing cannot be used against the protocol; the
+     * advertised promise is that per-checkpoint measurement. Shares-first: zero principal
+     * makes no Morpho call, zero live shares settle at zero debt without touching the IRM.
      */
     function checkpointFee()
         external;
@@ -529,12 +509,9 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     /**
      * @notice Deposits the whole idle FXRP balance as collateral into the account's position.
      * @dev Permissionless with a fixed destination (the account's own position): the retry
-     * rail for FXRP that arrived without a successful composed action. Defending an indebted
-     * position survives a pause, like repayment; the debt-free case is new exposure and
-     * reverts while paused. The direction race versus {sweepToOrigin} is accepted but
-     * asymmetric: redepositing costs only gas, while re-completing a withdrawal costs a new
-     * signed operation and bridge fee; an executor can narrow (not close) the race by
-     * bundling compose delivery with the sweep.
+     * rail for FXRP that arrived without a successful composed action. It remains available
+     * while paused only to defend a position with live debt; a debt-free deposit is new
+     * exposure and is pause-gated.
      * @return _amount The amount deposited.
      */
     function depositIdleFxrp()
@@ -544,27 +521,22 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     /**
      * @notice Bridges all idle FXRP back to this account's own address on the origin chain
      * (Flare), where it is redeemed on arrival toward the user's XRPL address.
-     * @dev Restricted to the parent Personal Account (the remote implementation), so it is reached only
-     * through a user-signed cross-chain user operation: by policy, the remote exit requires
-     * the user's signature, while permissionless arrivals have exactly one meaning each. The
-     * parent's batch supplies `msg.value` from its own native balance (fund it with a native
-     * drop in the same instruction if needed); temporary unavailability while the Flare side
-     * is paused or its route unconfigured is accepted - custody is unaffected and the call
-     * works again after. The attached compose is the Flare twin's redeem-home action,
-     * carrying only a deadline (this block time plus the protocol TTL): on arrival it redeems
-     * at most this amount, and past the deadline it skips.
-     * `_extraOptions` must carry the Flare-side `lzReceive` and `lzCompose` gas (type-3) and
-     * may carry compose value, which becomes the redemption's executor fee on Flare (zero
-     * allowed). `msg.value` must cover the LayerZero fee; exactly the quote is spent, only this
-     * call's excess is refunded to the parent, and the account's own native never subsidizes
-     * the caller. Pause-gated on this chain (every exit rides the OFT); the live peer is
-     * re-checked against the pinned one on every call. The exit gate is the secured-claim
-     * rule: an UNDER-secured collectible fee blocks the sweep ({OutstandingLoanFee} - settle
-     * through {repay} or a withdraw first), while a fee still covered three times over by
-     * the position's collateral rides along uncollected. With no fee principal and nothing
-     * collectible the check is storage-only, so the stuck-FXRP exit keeps its independence
-     * (a live principal checkpoints first, and a collectible fee reads the position and its
-     * oracle), and sub-unit dust is forgiven, never blocking.
+     * @dev Restricted to the parent Personal Account (the remote implementation), so it is
+     * reached only through a user-signed cross-chain user operation - by policy the exit
+     * direction requires the user's signature - and pause-gated on this chain, since every
+     * exit rides the OFT. The parent's batch supplies `msg.value` from its own native balance
+     * (fund it with a native drop in the same instruction if needed); exactly the quote is
+     * spent, only this call's excess is refunded to the parent, and the account's own native
+     * never subsidizes the caller. The live peer is re-checked against the pinned one, and
+     * the attached compose is the Flare twin's redeem-home action, carrying only a deadline
+     * (this block time plus the protocol TTL): on arrival it redeems at most this amount, and
+     * past the deadline it skips. Waiting while the Flare side is paused or its route
+     * unconfigured is accepted - custody is unaffected. The secured-claim exit gate applies: a
+     * live fee principal checkpoints first, an under-secured collectible fee blocks the sweep
+     * ({OutstandingLoanFee} - settle through {repay} or a withdraw first), and a fee still
+     * covered three times over by the position's collateral rides along uncollected. With zero
+     * principal and nothing collectible the gate avoids Morpho and the oracle entirely and
+     * forgives sub-unit dust, never blocking.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      * @return _amount Amount of FXRP bridged.
      */

@@ -5,25 +5,19 @@ import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
 
 /// @dev Redeem-home action: the compose the loan-chain bridge-back attaches to the FXRP it
-/// returns - the parent-signed `sweepToOrigin`, or the withdraw action's return leg.
+/// returns - the parent-signed `sweepToOrigin`, or the withdraw action's return leg. Its
 /// `actionData` is `abi.encode(uint64 deadline)`, stamped by the sender as its block time plus
-/// `REDEEM_HOME_TTL` - the compose itself expresses no choice (fixed destination, capped
-/// amount). On arrival, `min(balance, amountLD)` - at most the packet's authenticated
-/// amount - goes through the sweep-redeem logic (to the parent, which redeems it; below the
-/// FAssets minimum pushed unredeemed), with the compose value as the executor fee; the rest of
-/// the balance is left for the public rail. FXRP is fungible: the cap bounds the amount one
-/// compose can move, it does not tie the compose to the units its packet credited. Past its
-/// deadline the packet skips terminally (the balance is left untouched for the public rail,
-/// any compose value goes to the parent), so a packet cannot outlive its delivery window as a
-/// standing instruction over later funds. The public `sweepRedeem` fee requirement does not
-/// apply here: the packet already cost its sender the LayerZero fee.
+/// `REDEEM_HOME_TTL`. Before expiry, at most the authenticated `amountLD` is redeemed through
+/// the parent; below the FAssets minimum it is transferred unredeemed, and the compose value is
+/// the executor fee (zero allowed - the packet already cost its sender the LayerZero fee).
+/// Expired packets skip terminally, leaving the FXRP for {sweepRedeem} and forwarding the
+/// compose value to the parent. The cap limits the amount, not the token provenance.
 uint8 constant ACTION_REDEEM_HOME = 1;
 
-/// @dev Lifetime of a redeem-home packet, from the send on the loan chain to its delivery on
-/// Flare: the intended operational delivery window (verification, executor delivery and
-/// ordinary retries - normally minutes). A packet delivered later skips and its FXRP falls back
-/// to the public rail; an extended LayerZero outage is what that rail is for. Tune from
-/// observed delivery latency once deployment data exists.
+/// @dev Redeem-home delivery window: verification, executor delivery and ordinary retries,
+/// normally minutes. Later packets skip and leave their FXRP for {sweepRedeem}, which is what
+/// an extended LayerZero outage falls back to. Tune from observed delivery latency after
+/// deployment.
 uint64 constant REDEEM_HOME_TTL = 1 hours;
 
 /**
@@ -35,10 +29,10 @@ uint64 constant REDEEM_HOME_TTL = 1 hours;
  */
 interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
-    /// @notice The two LayerZero option blobs a withdraw instruction carries - one per leg of
-    /// the atomic withdrawal. The operator quotes the return leg first, puts that fee (plus
-    /// headroom; the excess lands on the parent) into `destinationOptions` as compose value,
-    /// then quotes and sends the first message.
+    /// @notice The signed LayerZero options and safety bounds of the two-leg withdrawal. The
+    /// operator quotes the return leg first, puts that fee (plus headroom; the excess lands on
+    /// the parent) into `destinationOptions` as compose value, then quotes and sends the first
+    /// message.
     struct WithdrawOptions {
         /// @notice Flare -> loan chain: the withdraw compose's gas and, as compose value, the
         /// native that pays the return leg's LayerZero fee.
@@ -260,23 +254,18 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Pushes all idle FXRP to the parent Personal Account and has it redeemed to the
-     * parent's XRPL owner in the same call.
-     * @dev Permissionless: this is the backward cleanup move, so anyone may trigger it. It takes
-     * no parameters: the destination is the parent (fixed at deployment, part of this account's
-     * address), which redeems through {IPersonalAccount-redeemFromSubaccount} - pulling exactly
-     * the pushed amount and redeeming exactly that, with the controller's executor and this
-     * call's whole `msg.value` as the fee (FAssets records it in whole gwei). `msg.value` must
-     * cover the controller's configured executor fee ({InsufficientFundsForRedeem}): the fee is
-     * the price of the permissionless rail, so forcing the backward direction is never
-     * gas-only. The parent is the recorded redeemer, so every redemption outcome (a partial
-     * fill when FAssets tickets run out, a payment-default payout, a refund) lands on the
-     * parent, under the user's control. The whole balance is redeemed rather than whole lots,
-     * so nothing is left stranded here. A balance below the FAssets minimum redemption amount
-     * is pushed to the parent unredeemed instead (FAssets would reject it): `_redeemedAmount`
-     * is zero, the value goes to the parent as well ({NativeSweptToParent}), and
-     * {TokenSweptToParent} is emitted in place of {FXrpRedeemed} - the rail never fails on
-     * amount, and it costs the same either way.
+     * @notice Redeems all idle FXRP through the parent Personal Account, to its XRPL owner.
+     * @dev Permissionless and parameterless: the destination is the parent (fixed at
+     * deployment, part of this account's address), which pulls and redeems exactly the pushed
+     * amount through {IPersonalAccount-redeemFromSubaccount}, so every outcome - a partial fill
+     * when FAssets tickets run out, a payment-default payout, a refund - remains under the
+     * user's control. `msg.value` must cover the controller's configured executor fee
+     * ({InsufficientFundsForRedeem}) and travels whole as that fee (FAssets records it in whole
+     * gwei); the fee is the price of the permissionless rail. The whole balance is redeemed
+     * rather than whole lots, so nothing strands here. Below the FAssets minimum, the FXRP and
+     * the value are transferred to the parent unredeemed instead ({TokenSweptToParent} and
+     * {NativeSweptToParent} in place of {FXrpRedeemed}, `_redeemedAmount` zero) - the rail
+     * never fails on amount and costs the same either way.
      * @return _amount Amount of FXRP pushed to the parent (the whole balance).
      * @return _redeemedAmount Amount of FXRP actually redeemed; zero below the minimum.
      */
@@ -286,21 +275,20 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
 
     /**
-     * @notice The borrow instruction: bridges exactly `_collateralAmount` FXRP (zero for a
-     * borrow against existing collateral) to this account's own address on the loan chain,
-     * with the typed borrow payload the loan-chain twin executes on arrival — supply the
-     * bridged amount as collateral, borrow `_borrowAmount` and disburse it. A pure collateral
-     * deposit is its own instruction, {depositCollateral}.
+     * @notice The borrow instruction: bridges `_collateralAmount` FXRP (zero for a borrow
+     * against existing collateral) with the typed payload that supplies it as collateral,
+     * borrows `_borrowAmount` on the loan-chain twin's market and disburses it. A pure
+     * collateral deposit is its own instruction, {depositCollateral}.
      * @dev Restricted to the parent Personal Account: the instruction names a loan action and
      * a user-chosen disbursement destination, so it must carry the user's XRPL signature. The
-     * payload is built here, not passed in, so what the user signs is structured and
-     * type-checked, and a malformed payload cannot reach the bridge. Arguments are validated
-     * before any fee is paid (`InvalidLoanInstruction`); the loan chain re-validates on
-     * delivery. The bridge destination is this account's own cross-chain address, fixed in the
-     * shared bridging core with all of its guards: paused reverts, configured settings required,
-     * live peer re-checked. `_extraOptions` must be type-3 options carrying both the
-     * destination `lzReceive` gas and the `lzCompose` gas. `msg.value` must cover the
-     * LayerZero fee; any excess is returned to the caller (the parent).
+     * payload is built here, not passed in, so a malformed payload cannot reach the bridge; the
+     * envelope and the EVM destination are validated before quoting
+     * ({InvalidLoanInstruction}) and the loan chain re-validates on delivery. It sends to this
+     * account's own cross-chain address through the configured pinned peer, sharing the
+     * bridging core's guards: paused reverts, configured settings required, live peer
+     * re-checked. `_extraOptions` must be type-3 options carrying both the destination
+     * `lzReceive` gas and the `lzCompose` gas. `msg.value` must cover the LayerZero fee; the
+     * excess is refunded to the parent.
      * @param _collateralAmount FXRP to bridge and supply as collateral; may be zero, at most
      * the account's balance.
      * @param _borrowAmount Loan-token amount to borrow and disburse; non-zero.
@@ -349,16 +337,15 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         external payable;
 
     /**
-     * @notice The withdraw instruction: a message-only send to this account's own address on
-     * the loan chain, with the typed withdraw payload — withdraw `_amount` of collateral from
-     * the position and bridge it back here in the same execution, to be redeemed on arrival
-     * (the atomic withdrawal: no idle window on the loan chain, so nothing can be redeposited
-     * from under it).
+     * @notice The withdraw instruction: a typed, message-only send that atomically withdraws
+     * `_amount` of collateral on the loan chain and bridges the net amount home for redemption
+     * — no idle window there, so nothing can be redeposited from under it.
      * @dev Restricted to the parent Personal Account; same validation, guards, and fee
      * handling as {borrow}. No FXRP travels with it, but `_options.destinationOptions` must
-     * carry, as compose value, the native that pays the return leg's LayerZero fee (quoted
+     * carry, as compose value, the native that prepays the return leg's LayerZero fee (quoted
      * against `_options.returnOptions` on the loan chain; the excess lands on the parent, and
-     * too little parks the delivery as retriable).
+     * too little parks the delivery as retriable). See {WithdrawOptions} for the signed
+     * delivery-value floor and the FXRP fee cap.
      * @param _amount Collateral to withdraw on the loan chain and bridge home; non-zero.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.

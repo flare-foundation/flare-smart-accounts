@@ -30,34 +30,31 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
  * @title LoanSubaccount contract
- * @notice Deterministic staging account for loan-related assets owned by a Personal Account.
- * It has no native rail: no `receive()`, no persistent native balance by any protocol flow, and no
- * native exit. The bridge refunds its caller and redemption outcomes land on the parent, so a
- * plain send reverts at the sender; the one protocol-delivered native is the compose value of
- * its own twin's bridge-back, forwarded whole within the same call (a revert unwinds it).
- * Native can otherwise land only without a call: value sent with an instruction to the predicted
- * address before the account existed, or a force-send. Both are very unlikely, neither is caused
- * by the protocol, and neither is worth a rail: such a balance strands, deliberately. As a last
- * resort, if it ever actually mattered, the implementation is beacon-upgradeable and an exit can
- * be added then.
- * It is also the compose receiver of its own loan-chain twin's bridge-back ({ComposeReceiverAccountBase}
- * with the transport read from the bridge settings): FXRP coming home is redeemed on arrival.
- * @dev The controller (MasterAccountController Diamond) is the beacon: the proxy and this
- * contract resolve the implementation per subaccount type through {implementationForType}.
+ * @notice Flare-side deterministic staging account for loan-related assets owned by a Personal
+ * Account. Its parent sends the typed loan instructions; anyone may sweep idle FXRP home, and
+ * authenticated bridge-back FXRP from its loan-chain twin is redeemed on arrival
+ * ({ComposeReceiverAccountBase}, with the transport read from the bridge settings).
+ * @dev No native rail: no `receive()` and no native exit. The one protocol-delivered native is
+ * the compose value of its own twin's bridge-back, forwarded whole within the same call (a
+ * revert unwinds it), so a plain send reverts at the sender. Native landing without a call
+ * (pre-deployment funding of the predicted address, a force-send) strands deliberately - nobody
+ * in the protocol causes it, and the beacon-upgradeable implementation can add an exit if it
+ * ever matters. The controller (MasterAccountController Diamond) is the beacon: the proxy and
+ * this contract resolve the implementation per subaccount type through {implementationForType}.
  */
 contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
 
-    // storage: slots 0-1 are the shared base prefix (controller, usedOperations); the same
-    // layout as the loan-chain twin, so the two lineages read alike
+    // storage: slots 0-1 are the shared base prefix (controller, usedOperations); this
+    // proxy lineage's own fields start at slot 2. Only the chain-local lineage must keep its
+    // layout - the chains share the address, not the layout
     /// @notice Parent Personal Account address.
     address public parentPersonalAccount;
     /// @notice Subaccount type.
     uint256 public subaccountType;
 
-    /// @dev Restricted methods are reached through FSA account abstraction: an XRPL-signed
-    /// instruction drives the controller, which drives the parent Personal Account, which calls
-    /// this subaccount. The parent is fixed at deployment and is part of this account's address.
+    /// @dev Restricted calls arrive through the parent's signed user operation. The parent is
+    /// fixed at deployment and is part of this account's address.
     modifier onlyParent() {
         require(msg.sender == parentPersonalAccount, OnlyParent());
         _;
@@ -89,9 +86,8 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         nonReentrant
         returns (uint256 _amount, uint256 _redeemedAmount)
     {
-        // the permissionless rail costs the configured executor fee - paid to the FAssets
-        // executor when a redemption happens, to the parent when it does not - so forcing the
-        // backward direction is never gas-only (the accepted sweep-direction griefing bound)
+        // a public sweep must fund the configured executor fee, including the dust branch;
+        // this bounds the accepted permissionless-direction griefing
         // slither-disable-next-line unused-return
         (, uint256 executorFee) = IExecutorsFacet(controller).getExecutorInfo();
         require(msg.value >= executorFee, InsufficientFundsForRedeem(executorFee));
@@ -114,9 +110,9 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         onlyParent
         nonReentrant
     {
-        // fail fast on Flare, before any bridge fee is paid; the loan chain re-validates. Only
-        // the EVM destination form exists today: a clean non-zero address other than this
-        // account (the parent - the user's own loan-chain account - is a valid target)
+        // mirror the remote static checks before paying the bridge fee. V1 supports only a
+        // clean, non-zero EVM destination other than this subaccount (the parent - the user's
+        // own loan-chain account - is a valid target)
         {
             address destinationAddress = address(uint160(uint256(_destination)));
             require(
@@ -185,10 +181,11 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         onlyParent
         nonReentrant
     {
-        // the delivery-value floor is what makes the prepaid return fee reach the loan chain
-        // (delivery is permissionless and the value unauthenticated), so a zero floor is a
-        // mistake; the option blobs themselves are only checkable on the loan chain (the
-        // accepted frozen-options residual)
+        // require a non-zero signed delivery-value floor: it is what makes the prepaid return
+        // fee reach the loan chain, where delivery is permissionless and the value
+        // unauthenticated. destinationOptions are processed here, by the OFT at quote time;
+        // only returnOptions first reach a validator remotely, which is why a bad blob there
+        // is the frozen-options residual
         require(
             _operationId != bytes32(0) && _deadline >= block.timestamp && _amount > 0 &&
                 _options.minComposeValue > 0,
@@ -247,9 +244,9 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         }
     }
 
-    /// @dev This receiver's transport is the Flare bridge settings seen from the other side: the
-    /// FXRP OFT adapter and its endpoint, the loan chain as the origin, the pinned peer as the
-    /// sender - the same values the forward moves send with.
+    /// @dev Derives the inbound bridge-back transport by reversing the configured Flare route:
+    /// the same OFT adapter, endpoint and pinned peer the forward moves send with, read as
+    /// origin instead of destination.
     function _getTransport()
         internal view override
         returns (IComposeTransportFacet.Transport memory _transport)
@@ -279,13 +276,11 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         return _action == ACTION_REDEEM_HOME;
     }
 
-    /// @dev Redeem at most what this packet brought: the compose value is the executor fee
-    /// (whatever the sender attached, zero included - the packet already cost it the LayerZero
-    /// fee), the cap is the packet's authenticated amount, so no compose moves more than one
-    /// packet's worth (FXRP is fungible; the cap bounds the amount, not the units). Past the
-    /// sender-stamped deadline the packet skips terminally: nothing is redeemed, the balance is
-    /// left for the public rail, the value joins the parent's float - a packet cannot outlive
-    /// its delivery window as a standing instruction over later funds.
+    /// @dev Before expiry, redeems at most the authenticated `_amountLD` (the cap limits the
+    /// amount, not the token provenance - FXRP is fungible) with the compose value as the
+    /// executor fee, zero included. After the sender-stamped deadline the packet skips
+    /// terminally: the balance is left for {sweepRedeem} and the value goes to the parent, so a
+    /// packet cannot outlive its delivery window as a standing instruction over later funds.
     function _executeRedeemHome(
         bytes memory _actionData,
         bytes32 _guid,
@@ -308,11 +303,10 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         _sweepRedeem(msg.value, _amountLD);
     }
 
-    /// @dev The backward move, shared by the public {sweepRedeem} (whole balance) and the
-    /// redeem-home compose (capped at the packet's authenticated amount): the amount goes to the parent,
-    /// which redeems it with `_fee` as the executor fee; below the FAssets minimum it is pushed
-    /// unredeemed and the fee joins the parent's float - the rail never fails on amount, and
-    /// never refunds to `msg.sender` (on the compose path that would be the endpoint).
+    /// @dev Shared redemption core: the public rail uses the whole balance, a compose delivery
+    /// caps it at the authenticated `amountLD`. The parent redeems the amount with `_fee` as
+    /// the executor fee, or receives it unredeemed below the FAssets minimum, and receives all
+    /// attached value - never `msg.sender`, which on the compose path is the endpoint.
     function _sweepRedeem(
         uint256 _fee,
         uint256 _cap
@@ -329,9 +323,8 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         require(_amount > 0, NothingToRedeem());
 
         if (_amount < assetManager.minimumRedeemAmountUBA()) {
-            // FAssets would reject the redemption: the balance still goes home, unredeemed, and
-            // the value joins the user's float on the parent. Whatever FAssets does not redeem
-            // stays on the parent
+            // FAssets rejects sub-minimum redemptions; send both the FXRP and the value to the
+            // parent, where whatever FAssets does not redeem stays anyway
             fxrp.safeTransfer(parentPersonalAccount, _amount);
             if (_fee > 0) {
                 // false positive (arbitrary-send-eth): the recipient is the parent, fixed at
@@ -346,9 +339,8 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
             return (_amount, 0);
         }
 
-        // the parent redeems: it pulls exactly this amount and redeems exactly that, so it is
-        // the recorded redeemer and every redemption outcome lands on it, under the user's
-        // control; the whole fee rides along for the executor
+        // the parent pulls and redeems exactly this amount, so it is the recorded redeemer and
+        // every outcome remains with the user; the whole fee rides along for the executor
         fxrp.forceApprove(parentPersonalAccount, _amount);
         _redeemedAmount = IPersonalAccount(parentPersonalAccount).redeemFromSubaccount{
             value: _fee

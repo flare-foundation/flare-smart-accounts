@@ -23,12 +23,13 @@ interface IIComposeTransportFacet is IComposeTransportFacet {
         external;
 
     /**
-     * @notice Clears the compose transport immediately: disables `lzCompose` on every compose
-     * receiver of this diamond and the remote loan subaccount's bridge-back until a new
-     * transport is set; markets, the token pin, repayment, defensive deposits and recovery
-     * persist. The containment lever for a compromised endpoint, OFT or peer: cancel queued
-     * {setComposeTransport} calls first (the clear does not), and never restore the
-     * compromised tuple afterwards - rotate it (see {IComposeTransportFacet}).
+     * @notice Immediately clears the compose transport: disables `lzCompose` on every compose
+     * receiver of this diamond and the remote loan subaccount's bridge-back, while markets,
+     * the token pin, repayment and defensive deposits keep working.
+     * @dev Owner-only and not timelocked - the containment lever for a compromised endpoint,
+     * OFT or peer. It cancels neither queued {setComposeTransport} calls nor compose packets
+     * already queued at the endpoint; follow the incident runbook in
+     * {IComposeTransportFacet}.
      * Can only be called by the owner (immediate, not timelocked).
      */
     function clearComposeTransport()

@@ -19,27 +19,21 @@ import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 
 /**
  * @title ComposeReceiverAccountBase contract
- * @notice The compose-receiver surface shared by the accounts that receive authenticated compose
- * messages - the loan-chain subaccount and Personal Account, and the Flare loan subaccount as the
- * receiver of its own bridge-back (their parent-driven and public rails live outside it): the
- * authenticated `lzCompose` entry (endpoint, OFT, origin chain, self-as-sender, GUID recomputed
- * from the pinned origin peer) and, for the signed id-carrying actions, operation-id replay
- * protection. Derived accounts define only
- * their action set (in {_dispatch}), where their transport configuration lives
- * ({_getTransport}), whether compose value is accepted ({_acceptsComposeValue}), and their
- * identity. The authentication is deliberately in one place: it is the security root of every
- * action that arrives without a local signature.
+ * @notice Shared authenticated `lzCompose` ingress and operation-id replay protection for the
+ * accounts that receive compose messages from their own twin on the other chain. Derived
+ * accounts define their action set ({_dispatch}), their transport source ({_getTransport}),
+ * whether compose value is accepted ({_acceptsComposeValue}) and their identity; their
+ * parent-driven and public rails stay outside this base. The authentication is deliberately in
+ * one place: it is the security root of every action that arrives without a local signature.
  */
 abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, ReentrancyGuardTransient {
     using OFTComposeMsgCodec for bytes;
 
     address internal constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
 
-    // STORAGE PREFIX of every derived account's proxy lineage (the subaccounts on both chains
-    // and the remote Personal Account alike): these two fields occupy slots 0 and 1 of
-    // every proxy. Once the first proxy is deployed, never insert, remove, or reorder base fields -
-    // append new base state only after the derived contracts' own fields would be a layout
-    // break too, so base state is effectively frozen at these two.
+    // STORAGE PREFIX: slots 0-1 of every derived proxy lineage - the subaccounts on both
+    // chains and the remote Personal Account alike. Once the first proxy is deployed, never
+    // insert, remove or reorder them; add new state to each derived lineage, not to the base.
 
     /// @dev MasterAccountController address; exposed through {controllerAddress}. Internal
     /// storage rather than a public variable so derived contracts can disambiguate the

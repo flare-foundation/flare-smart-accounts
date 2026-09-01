@@ -11,15 +11,12 @@ uint64 constant MAX_FEE_RATE = 1e18;
 
 /**
  * @title ILoanMarketsFacet
- * @notice Governance-set configuration of the remote loan subaccounts: one **write-once Morpho
- * market per subaccount type** — a position's market can never change under it, so exits
- * need no registry; a new pool is a new subaccount type — a per-type borrow switch, the
- * routine way to sunset a pool, and the type's Flare fee terms, configured by timelock after
- * registration: rates first, the recipient last — the recipient is the **activation marker**,
- * and borrowing reverts while it is zero, so a registered-but-unpriced type cannot take on
- * debt. Registration requires the compose transport (the market's collateral token must be
- * the transport OFT's token) and permanently pins that token for every later transport. Cut
- * only on the loan-chain diamond (Ethereum, at launch).
+ * @notice Governance-set per-type configuration of the remote loan subaccounts: a write-once
+ * Morpho market (a position's market can never change under it, so exits need no registry; a
+ * new pool is a new subaccount type), a mutable borrow switch — the routine way to sunset a
+ * pool — and mutable Flare fee terms. Registration pins the collateral token to the transport
+ * OFT's token, for that market and every later transport; the first non-zero fee recipient
+ * activates borrowing. Cut only on the loan-chain diamond (Ethereum, at launch).
  */
 interface ILoanMarketsFacet {
 
