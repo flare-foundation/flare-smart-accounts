@@ -83,8 +83,9 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  * account on Flare, with one exception: the parent Personal Account (the remote
  * implementation, itself compose-driven) holds one narrow direct authority — the signed exit {sweepToOrigin}, which
  * can only send idle FXRP home to this account's own fixed Flare address. Everything else is
- * permissionless movement along fixed rails: into the account's own position, or loan-token
- * surplus to the parent. It has no native rail.
+ * permissionless movement along fixed rails: into the account's own position, loan-token
+ * surplus to the parent, or the accrued Flare fee to the governance-set recipient. It has
+ * no native rail.
  */
 interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
@@ -560,9 +561,10 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * re-checked against the pinned one on every call. The exit gate is the secured-claim
      * rule: an UNDER-secured collectible fee blocks the sweep ({OutstandingLoanFee} - settle
      * through {repay} or a withdraw first), while a fee still covered three times over by
-     * the position's collateral rides along uncollected. With no collectible the check is
-     * storage-only, so the stuck-FXRP exit keeps its independence, and sub-unit dust is
-     * forgiven, never blocking.
+     * the position's collateral rides along uncollected. With no fee principal and nothing
+     * collectible the check is storage-only, so the stuck-FXRP exit keeps its independence
+     * (a live principal checkpoints first, and a collectible fee reads the position and its
+     * oracle), and sub-unit dust is forgiven, never blocking.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      * @return _amount Amount of FXRP bridged.
      */

@@ -362,8 +362,8 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
      * @param _amount Collateral to withdraw on the loan chain and bridge home; non-zero.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
-     * @param _options The two option blobs plus the delivery-value floor ({WithdrawOptions});
-     * `minComposeValue` must be non-zero.
+     * @param _options The two option blobs, the delivery-value floor and the signed FXRP fee
+     * cap ({WithdrawOptions}); `minComposeValue` must be non-zero.
      */
     function withdraw(
         uint256 _amount,

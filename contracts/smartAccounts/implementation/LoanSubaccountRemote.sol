@@ -44,8 +44,9 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * authority — the signed exit {sweepToOrigin}, which can only send idle FXRP to this
  * account's own fixed Flare address, never redirect funds or touch collateral or debt.
  * Everything else is permissionless movement along fixed rails — into the account's own
- * position, or loan-token surplus to the parent — so no caller ever chooses a destination,
- * a market, or an amount source.
+ * position, loan-token surplus to the parent, or the accrued Flare fee to the
+ * governance-set recipient — so no caller ever chooses a destination, a market, or an
+ * amount source.
  * It has no native rail: the only protocol-delivered native is a withdraw delivery's compose
  * value (the return leg's fee), spent or forwarded to the parent within the same call;
  * a plain send reverts, and a balance landing without a call (pre-deployment funding, an LZ
@@ -200,8 +201,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         _checkNotPaused();
         // the secured-claim gate over the full current position (the sweep moves idle FXRP,
         // not the position): under-secured blocks - settle through repay or a withdraw
-        // first. With no collectible the check is storage-only, so the stuck-FXRP exit
-        // keeps its independence, and sub-unit dust is forgiven, never blocking
+        // first. With no principal and nothing collectible the check is storage-only, so the
+        // stuck-FXRP exit keeps its independence (a live principal checkpoints first), and
+        // sub-unit dust is forgiven, never blocking
         if (feePrincipal != 0) {
             _checkpointFee(_myMarket());
         }
@@ -739,10 +741,11 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// @dev The tail of {repay}: pay `min(collectible, balance)` to the fee recipient -
     /// best-effort, held while paused, never rolling back the repayment; the fee debt
     /// shrinks only by the successfully requested transfer (conventional ERC-20 semantics
-    /// are a registration policy) - then reserve tokens covering still-outstanding fee (a
-    /// later repay retries without a new top-up) and push only the rest to the parent, on a
-    /// debt-free position. Debt presupposes the borrow gate, so the recipient is configured
-    /// whenever there is something to pay.
+    /// are a registration policy) - then reserve as much of the still-outstanding fee as the
+    /// remaining balance covers (a later repay retries that reservation without a new
+    /// top-up; an uncovered shortfall needs new funds) and push only the rest to the parent,
+    /// on a debt-free position. Debt presupposes the borrow gate, so the recipient is
+    /// configured whenever there is something to pay.
     function _collectFeeAndPushSurplus(
         ILoanMarketsFacet.Market memory _market,
         IERC20 _loanToken
