@@ -22,9 +22,13 @@ import {
 } from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/ILoanSubaccount.sol";
-import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
+import {
+    PAYLOAD_VERSION_1,
+    SKIP_REASON_FEE_TERMS
+} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
+import {IOracle} from "../interface/IOracle.sol";
 import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
@@ -36,14 +40,14 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * subaccount type is bound to (write-once in the settings), so the address itself commits to
  * the pool. Every authorized action arrives through the authenticated `lzCompose` (see
  * {ComposeReceiverAccountBase}) sent by this same account on Flare, with one exception: the
- * parent Personal Account (the mirror, itself compose-driven) holds one narrow direct
+ * parent Personal Account (the remote implementation, itself compose-driven) holds one narrow direct
  * authority — the signed exit {sweepToOrigin}, which can only send idle FXRP to this
  * account's own fixed Flare address, never redirect funds or touch collateral or debt.
  * Everything else is permissionless movement along fixed rails — into the account's own
  * position, or loan-token surplus to the parent — so no caller ever chooses a destination,
  * a market, or an amount source.
  * It has no native rail: the only protocol-delivered native is a withdraw delivery's compose
- * value (the return leg's fee), spent or forwarded to the parent mirror within the same call;
+ * value (the return leg's fee), spent or forwarded to the parent within the same call;
  * a plain send reverts, and a balance landing without a call (pre-deployment funding, an LZ
  * native drop, a force-send) strands until a beacon upgrade adds a rail - accepted.
  */
@@ -56,9 +60,16 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// @dev Fee arithmetic: annual WAD rates over a fixed 365-day year.
     uint256 private constant WAD = 1e18;
     uint256 private constant YEAR = 365 days;
+    /// @dev Morpho's oracle scale: `loanAmount = mulDiv(collateralAmount, price, 1e36)`.
+    uint256 private constant ORACLE_PRICE_SCALE = 1e36;
+    /// @dev The secured-claim gate's headroom: an exit passes uncollected while the
+    /// remaining collateral is worth this multiple of the collectible fee - room for the
+    /// fee's growth until the next gate event and for price drift; deliberately not
+    /// liquidation-proof (the accepted junior-claim risk).
+    uint256 private constant FEE_SECURITY_FACTOR = 3;
 
     /// @notice Parent Personal Account address (the same address on every chain; on this
-    /// chain it carries no code until its compose-driven mirror is created).
+    /// chain it carries no code until its remote Personal Account is created).
     address public parentPersonalAccount;
     /// @notice Subaccount type.
     uint256 public subaccountType;
@@ -73,13 +84,13 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     uint64 private feeSnapshotSpread;
 
     // deliberately no receive(): the only protocol-delivered native is a withdraw delivery's
-    // compose value, spent or forwarded to the parent mirror within the same call, so plain
+    // compose value, spent or forwarded to the parent within the same call, so plain
     // native sends revert at the sender; native landing without a call (pre-deployment
     // funding, an LZ native drop, a force-send) strands - accepted, upgradeable
 
     modifier onlyParent() {
-        // the parent is the mirror Personal Account: this method is reached only through a
-        // user-signed cross-chain user operation executed by the mirror
+        // the parent is the remote Personal Account: this method is reached only through a
+        // user-signed cross-chain user operation executed by the parent
         require(msg.sender == parentPersonalAccount, OnlyParent());
         _;
     }
@@ -187,6 +198,21 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         IComposeTransportFacet.Transport memory transport = _getTransport();
         // every exit from this chain rides the OFT itself, so an OFT incident must stop it
         _checkNotPaused();
+        // the secured-claim gate over the full current position (the sweep moves idle FXRP,
+        // not the position): under-secured blocks - settle through repay or a withdraw
+        // first. With no collectible the check is storage-only, so the stuck-FXRP exit
+        // keeps its independence, and sub-unit dust is forgiven, never blocking
+        if (feePrincipal != 0) {
+            _checkpointFee(_myMarket());
+        }
+        if (flareDebtX18 / WAD != 0) {
+            require(
+                _feeSecuredAfterWithdrawal(_myMarket(), 0),
+                OutstandingLoanFee(flareDebtX18 / WAD)
+            );
+        } else {
+            _forgiveFeeDust();
+        }
 
         // the OFT's own underlying is the authoritative FXRP identity on this chain
         IERC20 fxrp = IERC20(IOFT(transport.oft).token());
@@ -250,10 +276,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         if (_action == ACTION_BORROW) {
             _executeBorrow(_actionData, _guid, _amountLD);
         } else if (_action == ACTION_WITHDRAW) {
-            // pause-gated - the atomic withdrawal exits over the OFT, and the compose stays
-            // queued at the endpoint and re-delivers after unpausing (borrow and deposit gate
-            // themselves after their terminal skips)
-            _checkNotPaused();
             _executeWithdraw(_actionData, _guid);
         } else if (_action == ACTION_DEPOSIT_COLLATERAL) {
             _executeDepositCollateral(_actionData, _guid, _amountLD);
@@ -263,7 +285,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     }
 
     /// @dev The withdraw action spends compose value in the same call - the return leg's
-    /// LayerZero fee, with the excess pushed to the parent mirror - so it opts in; every
+    /// LayerZero fee, with the excess pushed to the parent - so it opts in; every
     /// other action must not carry value (a mistaken delivery stays retriable without it).
     function _acceptsComposeValue(
         uint8 _action
@@ -289,14 +311,24 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             uint64 deadline,
             uint8 destinationKind,
             bytes32 destination,
-            uint256 borrowAmount
-        ) = abi.decode(_actionData, (bytes32, uint64, uint8, bytes32, uint256));
+            uint256 borrowAmount,
+            uint64 maxFeeFloor,
+            uint64 maxFeeSpread
+        ) = abi.decode(_actionData, (bytes32, uint64, uint8, bytes32, uint256, uint64, uint64));
         require(borrowAmount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
         // terminal gates come first, so a duplicate or expired delivery finalizes even when
         // borrowing is disabled or the market is not yet registered, instead of reverting
         // forever
         if (_skipped(operationId, deadline, _guid)) return;
+        // the signed fee bound: a delayed packet must not execute at a worse rate than the
+        // user signed - a terminal skip, id unconsumed, so a corrected instruction may reuse it
+        if (_feeRatesAboveSigned(maxFeeFloor, maxFeeSpread)) {
+            emit LoanActionSkipped(
+                parentPersonalAccount, operationId, SKIP_REASON_FEE_TERMS, _guid
+            );
+            return;
+        }
         // a debt increase respects the pause and the per-type borrow switch
         _checkNotPaused();
         require(!ILoanMarketsFacet(controller).isLoanBorrowingDisabled(subaccountType), BorrowingDisabled());
@@ -394,11 +426,11 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         }
     }
 
-    /// @dev The atomic withdrawal: withdraws collateral from the position and bridges exactly
-    /// that amount home with the redeem-home compose, in the same execution - no idle window
+    /// @dev The atomic withdrawal: withdraws collateral from the position and bridges it
+    /// home with the redeem-home compose, in the same execution - no idle window
     /// between the two, so the redeposit race cannot touch a withdrawal. The compose value
     /// delivered with the action pays the return leg's LayerZero fee (quoted live against the
-    /// signed `returnOptions`); the excess goes to the parent mirror. Too little value
+    /// signed `returnOptions`); the excess goes to the parent. Too little value
     /// reverts, and the delivery stays retriable - fee quotes drift both ways. Morpho
     /// enforces position health.
     function _executeWithdraw(
@@ -412,8 +444,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             uint64 deadline,
             uint256 amount,
             uint256 minComposeValue,
+            uint256 maxFeeFxrp,
             bytes memory returnOptions
-        ) = abi.decode(_actionData, (bytes32, uint64, uint256, uint256, bytes));
+        ) = abi.decode(_actionData, (bytes32, uint64, uint256, uint256, uint256, bytes));
         require(amount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
         // the signed delivery floor comes before every consuming branch: delivery is
@@ -428,17 +461,36 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             _sweepValueToParent(msg.value);
             return;
         }
+        // pause after the terminal gates (duplicates and expired packets finalize during a
+        // pause); the exit itself waits - it rides the OFT
+        _checkNotPaused();
         ILoanMarketsFacet.Market memory market = _myMarket();
+        // the secured-claim gate: checkpoint, then collect only when this withdrawal would
+        // leave the fee under-secured - FXRP deducted from the withdrawal itself, under the
+        // signed cap
+        _checkpointFee(market);
+        uint256 fxrpFee = 0;
+        if (!_feeSecuredAfterWithdrawal(market, amount)) {
+            fxrpFee = _settleFeeInFxrp(market, maxFeeFxrp, amount);
+        }
         usedOperations[operationId] = true;
 
         IMorpho(market.morpho).withdrawCollateral(
             market.marketParams, amount, address(this), address(this)
         );
+        if (fxrpFee > 0) {
+            IERC20(market.marketParams.collateralToken).safeTransfer(
+                ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient,
+                fxrpFee
+            );
+        }
         emit CollateralWithdrawn(parentPersonalAccount, operationId, amount, _guid);
 
-        // the return leg, in the same execution; the fee rode in as compose value
-        uint256 excess =
-            _bridgeHome(_getTransport(), amount, returnOptions, msg.value, parentPersonalAccount);
+        // the return leg (net of an FXRP-mode fee), in the same execution; the LayerZero fee
+        // rode in as compose value
+        uint256 excess = _bridgeHome(
+            _getTransport(), amount - fxrpFee, returnOptions, msg.value, parentPersonalAccount
+        );
         if (excess > 0) {
             emit NativeSweptToParent(parentPersonalAccount, excess);
         }
@@ -471,7 +523,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// transport), so `minAmountLD` equals `amountLD`. `_options` carry the Flare-side gas
     /// and, optionally, the redemption's executor fee as compose value. Exactly the quoted
     /// fee is spent from `_value`; the excess goes to `_excessTo` (the caller on the sweep
-    /// rail, the parent mirror on the withdraw action).
+    /// rail, the parent on the withdraw action).
     function _bridgeHome(
         IComposeTransportFacet.Transport memory _transport,
         uint256 _amount,
@@ -522,7 +574,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         _excess = _value - fee.nativeFee;
         if (_excess > 0) {
             // the excess never strands here (no native rail): back to the sweep caller, or
-            // forward to the parent mirror for the withdraw action (which emits for it)
+            // forward to the parent for the withdraw action (which emits for it)
             // slither-disable-start arbitrary-send-eth
             // solhint-disable-next-line avoid-low-level-calls
             (bool success, ) = _excessTo.call{value: _excess}("");
@@ -533,8 +585,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         emit FXrpSweptToOrigin(parentPersonalAccount, _amount, _transport.originEid, receipt.guid);
     }
 
-    /// @dev Forwards a terminally skipped withdraw delivery's compose value to the parent
-    /// mirror: it must not strand on an account with no native rail, and msg.sender on this
+    /// @dev Forwards a terminally skipped withdraw delivery's compose value to the
+    /// parent: it must not strand on an account with no native rail, and msg.sender on this
     /// path is the endpoint - never a refund target.
     function _sweepValueToParent(
         uint256 _value
@@ -592,6 +644,84 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         feeSnapshotFloor = terms.feeFloor;
         feeSnapshotSpread = terms.feeSpread;
         emit LoanFeeCheckpointed(parentPersonalAccount, feePrincipal, feeDeltaX18);
+    }
+
+    /// @dev The secured-claim rule: the exit passes uncollected while the collateral that
+    /// would remain, valued at the market oracle's price, covers FEE_SECURITY_FACTOR times
+    /// the collectible fee. Zero collectible needs no reads at all (and forgives debt-free
+    /// dust); a zero, dead or reverting oracle values the security at nothing and falls
+    /// through to the settlement branch (a parked exit is settled through repay, oracle-free).
+    function _feeSecuredAfterWithdrawal(
+        ILoanMarketsFacet.Market memory _market,
+        uint256 _withdrawAmount
+    )
+        private
+        returns (bool)
+    {
+        uint256 collectible = flareDebtX18 / WAD;
+        if (collectible == 0) {
+            _forgiveFeeDust();
+            return true;
+        }
+        uint256 collateral = _collateralOf(_market);
+        uint256 remaining = collateral > _withdrawAmount ? collateral - _withdrawAmount : 0;
+        if (remaining == 0) return false;
+        uint256 price = 0;
+        try IOracle(_market.marketParams.oracle).price() returns (uint256 _price) {
+            price = _price;
+        } catch {
+            price = 0;
+        }
+        if (price == 0) return false;
+        return Math.mulDiv(remaining, price, ORACLE_PRICE_SCALE)
+            >= FEE_SECURITY_FACTOR * collectible;
+    }
+
+    /// @dev The withdraw gate's settlement: the collectible fee converts at the market
+    /// oracle's price - the same write-once oracle the market's liquidations price by,
+    /// rounded up so the overcollection stays below one FXRP base unit - and the caller
+    /// deducts the returned amount from the withdrawn collateral before the bridge-back.
+    /// The signed cap is the user's price protection (a worse price reverts, retriable); a
+    /// dead or zero-priced oracle parks the exit - settle through repay (send loan tokens to
+    /// the account, the free direction), then retry. The fee clears for every whole collectible unit - no partial
+    /// settlement; a sub-unit X18 remainder can survive while principal lives (debt-free
+    /// exits forgive it).
+    function _settleFeeInFxrp(
+        ILoanMarketsFacet.Market memory _market,
+        uint256 _maxFeeFxrp,
+        uint256 _withdrawAmount
+    )
+        private
+        returns (uint256 _fxrpFee)
+    {
+        uint256 collectible = flareDebtX18 / WAD;
+        if (collectible > 0) {
+            uint256 price = IOracle(_market.marketParams.oracle).price();
+            require(price > 0, InvalidOraclePrice());
+            _fxrpFee = Math.mulDiv(collectible, ORACLE_PRICE_SCALE, price, Math.Rounding.Ceil);
+            require(_fxrpFee <= _maxFeeFxrp, FxrpFeeAboveSignedCap(_fxrpFee, _maxFeeFxrp));
+            require(_fxrpFee < _withdrawAmount, FxrpFeeExceedsWithdrawal(_fxrpFee, _withdrawAmount));
+            flareDebtX18 -= collectible * WAD;
+            emit LoanFeeCollectedFxrp(
+                ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient,
+                _fxrpFee,
+                collectible,
+                price
+            );
+        }
+        _forgiveFeeDust();
+    }
+
+    /// @dev A sub-unit remainder on a debt-free position can never be transferred (ERC-20
+    /// moves whole units) and never grows again - a raw-zero gate would park the exits
+    /// forever over dust, so it is forgiven when a gate passes.
+    function _forgiveFeeDust()
+        private
+    {
+        if (feePrincipal == 0 && flareDebtX18 > 0) {
+            emit LoanFeeRemainderForgiven(flareDebtX18);
+            flareDebtX18 = 0;
+        }
     }
 
     /// @dev Re-reads the canonical debt after a Morpho borrow or repayment - never the
@@ -653,6 +783,20 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         }
     }
 
+    /// @dev The signed fee bound of a borrow: true when the type's current rates exceed
+    /// either signed maximum (a favorable decrease passes).
+    function _feeRatesAboveSigned(
+        uint64 _maxFeeFloor,
+        uint64 _maxFeeSpread
+    )
+        private view
+        returns (bool)
+    {
+        ILoanMarketsFacet.FeeTerms memory terms =
+            ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType);
+        return terms.feeFloor > _maxFeeFloor || terms.feeSpread > _maxFeeSpread;
+    }
+
     /// @dev The account's one market, bound write-once to its type. If its Morpho stops
     /// answering, this account's debt-gated paths block - inherent to where the position
     /// lives; hence the operational policy of only canonical immutable Morpho Blue deployments.
@@ -664,6 +808,18 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         require(
             _market.morpho != address(0),
             ILoanMarketsFacet.MarketNotRegistered(subaccountType)
+        );
+    }
+
+    /// @dev The account's collateral on its market, a plain Morpho storage read.
+    function _collateralOf(
+        ILoanMarketsFacet.Market memory _market
+    )
+        private view
+        returns (uint128 _collateral)
+    {
+        (, , _collateral) = IMorpho(_market.morpho).position(
+            keccak256(abi.encode(_market.marketParams)), address(this)
         );
     }
 

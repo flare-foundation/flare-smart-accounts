@@ -100,6 +100,9 @@ contract MockMorpho is IMorpho {
     }
 
     /// @inheritdoc IMorpho
+    /// @dev Canonical Morpho accrues interest and oracle-checks position health here when
+    /// borrow shares are live; the mock models neither (tests exercise account flows, and
+    /// the live-debt/dead-oracle blocking premise belongs to the integration harness).
     function withdrawCollateral(
         MarketParams calldata marketParams,
         uint256 assets,

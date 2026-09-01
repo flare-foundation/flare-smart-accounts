@@ -106,6 +106,8 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         bytes32 _destination,
         bytes32 _operationId,
         uint64 _deadline,
+        uint64 _maxFeeFloor,
+        uint64 _maxFeeSpread,
         bytes calldata _extraOptions
     )
         external payable
@@ -115,21 +117,22 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         // fail fast on Flare, before any bridge fee is paid; the loan chain re-validates. Only
         // the EVM destination form exists today: a clean non-zero address other than this
         // account (the parent - the user's own loan-chain account - is a valid target)
-        address destinationAddress = address(uint160(uint256(_destination)));
-        require(
-            _operationId != bytes32(0) &&
-                _deadline >= block.timestamp &&
-                _borrowAmount > 0 &&
-                _destinationKind == DESTINATION_KIND_EVM &&
-                uint256(_destination) >> 160 == 0 &&
-                destinationAddress != address(0) &&
-                destinationAddress != address(this),
-            InvalidLoanInstruction()
-        );
-        bytes memory payload = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(_operationId, _deadline, _destinationKind, _destination, _borrowAmount)
+        {
+            address destinationAddress = address(uint160(uint256(_destination)));
+            require(
+                _operationId != bytes32(0) &&
+                    _deadline >= block.timestamp &&
+                    _borrowAmount > 0 &&
+                    _destinationKind == DESTINATION_KIND_EVM &&
+                    uint256(_destination) >> 160 == 0 &&
+                    destinationAddress != address(0) &&
+                    destinationAddress != address(this),
+                InvalidLoanInstruction()
+            );
+        }
+        bytes memory payload = _borrowActionPayload(
+            _operationId, _deadline, _destinationKind, _destination, _borrowAmount,
+            _maxFeeFloor, _maxFeeSpread
         );
         (uint32 destinationEid, bytes32 guid) =
             _bridgeToSelf(_collateralAmount, _extraOptions, payload);
@@ -195,7 +198,11 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
             abi.encode(
-                _operationId, _deadline, _amount, _options.minComposeValue,
+                _operationId,
+                _deadline,
+                _amount,
+                _options.minComposeValue,
+                _options.maxFeeFxrp,
                 _options.returnOptions
             )
         );
@@ -430,5 +437,29 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
 
         _destinationEid = destinationEid;
         _guid = receipt.guid;
+    }
+
+    /// @dev The typed borrow payload, in its own frame ({borrow} carries too many fields for
+    /// one stack under coverage's optimizer-less compilation).
+    function _borrowActionPayload(
+        bytes32 _operationId,
+        uint64 _deadline,
+        uint8 _destinationKind,
+        bytes32 _destination,
+        uint256 _borrowAmount,
+        uint64 _maxFeeFloor,
+        uint64 _maxFeeSpread
+    )
+        private pure
+        returns (bytes memory)
+    {
+        return abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_BORROW,
+            abi.encode(
+                _operationId, _deadline, _destinationKind, _destination, _borrowAmount,
+                _maxFeeFloor, _maxFeeSpread
+            )
+        );
     }
 }

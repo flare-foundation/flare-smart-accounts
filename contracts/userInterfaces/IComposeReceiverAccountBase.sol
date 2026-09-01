@@ -16,6 +16,13 @@ uint8 constant SKIP_REASON_DUPLICATE = 1;
 /// operation id is not consumed, so the same intent can be retried with a fresh deadline.
 uint8 constant SKIP_REASON_EXPIRED = 2;
 
+/// @dev Skip reason: the subaccount type's current fee rates exceed the maxima the user
+/// signed (a delayed packet must not execute at a worse rate than agreed). The operation id
+/// is not consumed - a corrected instruction may reuse it; any credited FXRP stays idle for
+/// the rails (`depositIdleFxrp` before a zero-collateral retry - a new packet cannot absorb
+/// the old packet's authenticated credit).
+uint8 constant SKIP_REASON_FEE_TERMS = 3;
+
 /**
  * @title IComposeReceiverAccountBase
  * @notice The compose-receiver surface shared by every account that receives authenticated

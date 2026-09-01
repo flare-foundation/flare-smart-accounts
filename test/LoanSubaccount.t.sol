@@ -1415,7 +1415,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     function testSendCrossChainUserOp() public {
         // the user-signed instruction to the loan-chain twin: reached only through an
         // executeUserOp multicall (a self-call), the envelope is built here and sent as a
-        // message-only compose to this same address, where the mirror authenticates it and
+        // message-only compose to this same address, where the remote account authenticates it and
         // executes the batch - any calls the user signs
         address personalAccount = _createPersonalAccount(xrplOwner);
         _configureLoanBridge();
@@ -1577,7 +1577,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testSendCrossChainUserOpAcceptsDeadlineEqualToNow() public {
-        // inclusive boundary, matching the mirror's skip rule (past the deadline, not at it)
+        // inclusive boundary, matching the remote account's skip rule (past the deadline, not at it)
         address personalAccount = _createPersonalAccount(xrplOwner);
         _configureLoanBridge();
         vm.deal(personalAccount, messagingFee);
@@ -1774,7 +1774,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            amount, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, extraOptions
+            amount, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline,
+            0.07e18, 0.01e18, extraOptions
         );
 
         // exactly the signed amount left; the adapter locked it; no standing approval remains
@@ -1796,7 +1797,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             abi.encode(
                 PAYLOAD_VERSION_1,
                 ACTION_BORROW,
-                abi.encode(bytes32("op-1"), deadline, DESTINATION_KIND_EVM, destination, uint256(500e18))
+                abi.encode(
+                    bytes32("op-1"), deadline, DESTINATION_KIND_EVM, destination,
+                    uint256(500e18), uint64(0.07e18), uint64(0.01e18)
+                )
             )
         );
         assertEq(fxrpOft.lastValue(), messagingFee);
@@ -1814,7 +1818,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
             0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))),
-            bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+            bytes32("op-1"), uint64(block.timestamp + 1 hours), 0.07e18, 0.01e18, ""
         );
 
         assertEq(fxrp.balanceOf(subaccount), 100e6);
@@ -1825,7 +1829,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testBorrowAllowsParentAsDestination() public {
         // the parent Personal Account is a functional account on the loan chain (the
-        // compose-driven mirror), so disbursing into it is a legitimate user choice
+        // compose-driven remote account), so disbursing into it is a legitimate user choice
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         _configureLoanBridge();
@@ -1834,7 +1838,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
             0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(personalAccount))),
-            bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+            bytes32("op-1"), uint64(block.timestamp + 1 hours), 0.07e18, 0.01e18, ""
         );
         (,,,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
         (, , bytes memory actionData) = abi.decode(composeMsgSent, (uint8, uint8, bytes));
@@ -1896,8 +1900,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 PAYLOAD_VERSION_1,
                 ACTION_WITHDRAW,
                 abi.encode(
-                    bytes32("op-w"), deadline, uint256(30e6),
-                    _withdrawOptions().minComposeValue, _withdrawOptions().returnOptions
+                    bytes32("op-w"), deadline, uint256(30e6), _withdrawOptions().minComposeValue,
+                    _withdrawOptions().maxFeeFxrp, _withdrawOptions().returnOptions
                 )
             )
         );
@@ -1927,8 +1931,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 PAYLOAD_VERSION_1,
                 ACTION_WITHDRAW,
                 abi.encode(
-                    bytes32("op-w"), deadline, uint256(30e6),
-                    _withdrawOptions().minComposeValue, _withdrawOptions().returnOptions
+                    bytes32("op-w"), deadline, uint256(30e6), _withdrawOptions().minComposeValue,
+                    _withdrawOptions().maxFeeFxrp, _withdrawOptions().returnOptions
                 )
             )
         );
@@ -1991,7 +1995,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // nothing to collateralize or borrow
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, ""
+            100e6, 0, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
         );
         // deposit: zero amount, zero operation id, deadline already passed
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
@@ -2006,21 +2010,21 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // the subaccount itself
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, 2, destination, bytes32("op-1"), deadline, ""
+            0, 300e18, 2, destination, bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, DESTINATION_KIND_EVM, bytes32(0), bytes32("op-1"), deadline, ""
+            0, 300e18, DESTINATION_KIND_EVM, bytes32(0), bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
             0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(subaccount))),
-            bytes32("op-1"), deadline, ""
+            bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
             0, 300e18, DESTINATION_KIND_EVM, destination | bytes32(uint256(1) << 200),
-            bytes32("op-1"), deadline, ""
+            bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
         );
         // a zero withdrawal
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
@@ -2035,7 +2039,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             ILoanSubaccount.WithdrawOptions({
                 destinationOptions: "",
                 returnOptions: hex"0003",
-                minComposeValue: 0
+                minComposeValue: 0,
+                maxFeeFxrp: 0
             })
         );
         vm.stopPrank();
@@ -2076,7 +2081,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             value: messagingFee,
             data: abi.encodeCall(
                 ILoanSubaccount.borrow,
-                (100e6, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, _canonicalLoanOptions())
+                (
+                    100e6, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"),
+                    deadline, 0.07e18, 0.01e18, _canonicalLoanOptions()
+                )
             )
         });
         _executeUserOpWithValue(personalAccount, calls, bytes32("dmLoanCall"), messagingFee);
@@ -2088,7 +2096,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             abi.encode(
                 PAYLOAD_VERSION_1,
                 ACTION_BORROW,
-                abi.encode(bytes32("op-1"), deadline, DESTINATION_KIND_EVM, destination, uint256(500e18))
+                abi.encode(
+                    bytes32("op-1"), deadline, DESTINATION_KIND_EVM, destination,
+                    uint256(500e18), uint64(0.07e18), uint64(0.01e18)
+                )
             )
         );
     }
@@ -2126,7 +2137,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ILoanSubaccount.borrow,
                 (
                     loanAmount, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"),
-                    deadline, _canonicalLoanOptions()
+                    deadline, 0.07e18, 0.01e18, _canonicalLoanOptions()
                 )
             )
         });
@@ -2589,7 +2600,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         return ILoanSubaccount.WithdrawOptions({
             destinationOptions: "",
             returnOptions: "",
-            minComposeValue: 0.01 ether
+            minComposeValue: 0.01 ether,
+            maxFeeFxrp: 0
         });
     }
 }

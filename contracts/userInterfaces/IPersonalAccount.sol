@@ -235,7 +235,7 @@ interface IPersonalAccount {
 
     /**
      * @notice Reverts on a cross-chain user operation whose envelope cannot execute on the
-     * mirror: a zero operation id, a deadline already passed, or an empty batch. Checked
+     * remote account: a zero operation id, a deadline already passed, or an empty batch. Checked
      * here, before any bridge fee is paid; the batch itself is not interpreted.
      */
     error InvalidCrossChainUserOp();
@@ -266,12 +266,12 @@ interface IPersonalAccount {
     );
 
     /**
-     * @notice Sends a signed batch of calls to this account's remote twin (the mirror at this
+     * @notice Sends a signed batch of calls to this account's remote twin (the remote Personal Account at this
      * same address on the other chain; the loan chain today) for execution there:
      * the remote `executeUserOp`, carried by the authenticated compose instead of the controller.
      * @dev Callable only by this account itself — the method is reached through an
      * {executeUserOp} multicall, so the XRPL signature covers every target, value and
-     * calldata end-to-end. The batch is not interpreted here (the mirror runs it all or
+     * calldata end-to-end. The batch is not interpreted here (the remote account runs it all or
      * nothing, and a failed call leaves the delivery retriable with the id unconsumed); only
      * the envelope is validated before any fee is paid (`InvalidCrossChainUserOp`: zero
      * operation id, passed deadline, empty batch). Sent as a message-only compose over the
@@ -280,12 +280,12 @@ interface IPersonalAccount {
      * account's own balance, so any excess simply remains on the account. Reverts while the
      * controller is paused (a forward move). Deliberately not reentrancy-guarded: it runs
      * inside {executeUserOp}'s guard. `_extraOptions` must carry the `lzCompose` gas the batch
-     * needs and, when the batch sends more native than the mirror holds, a native drop. The
+     * needs and, when the batch sends more native than the remote account holds, a native drop. The
      * message id is
      * recorded in {CrossChainUserOpSent}.
-     * @param _calls The calls to execute from the mirror, in order.
+     * @param _calls The calls to execute from the remote account, in order.
      * @param _operationId The user-chosen operation id (non-zero, unique per account).
-     * @param _deadline Unix time after which the mirror skips the instruction unexecuted.
+     * @param _deadline Unix time after which the remote account skips the instruction unexecuted.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
     function sendCrossChainUserOp(

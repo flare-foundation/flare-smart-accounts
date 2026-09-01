@@ -389,7 +389,7 @@ contract PersonalAccount is
 
     /// @dev The transport of {sendCrossChainUserOp}: sends the signed batch as a
     /// message-only compose over the configured FXRP OFT to this account's
-    /// own address on the loan chain, where the mirror authenticates composeFrom back to here
+    /// own address on the loan chain, where the remote account authenticates composeFrom back to here
     /// and executes it. Configured settings required, live peer re-checked against the pinned
     /// one, exact quoted fee spent, pause-gated (a forward move).
     function _sendCrossChainUserOp(
@@ -418,7 +418,7 @@ contract PersonalAccount is
         );
 
         // the envelope is built here, so what the user signed is structured and a malformed
-        // envelope cannot reach the bridge; the batch encodes as the mirror's Call[]
+        // envelope cannot reach the bridge; the batch encodes as the remote account's Call[]
         bytes memory payload = abi.encode(
             PAYLOAD_VERSION_1,
             PA_ACTION_EXECUTE,

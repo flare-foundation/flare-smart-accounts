@@ -42,7 +42,7 @@ import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.so
 
 /**
  * @title PersonalAccountRemoteTest
- * @notice The remote Personal Account: the mirror of the user's Flare Personal
+ * @notice The remote Personal Account: the remotePa of the user's Flare Personal
  * Account on the loan chain, at the same frozen CREATE2 address. Covers the explicit creation
  * route, beacon resolution, and the authenticated compose entry with the signed execute
  * action (the loan-chain `executeUserOp`).
@@ -51,7 +51,7 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
 
     IIMasterAccountController private controller;
-    PersonalAccountRemote private mirrorImpl;
+    PersonalAccountRemote private remotePaImpl;
 
     address private initialOwner;
     address private governance;
@@ -83,7 +83,7 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         sourceId = bytes32("testXRP");
         paymentProofValidityDurationSeconds = 1 days;
         defaultInstructionFee = 1_000_000;
-        xrplOwner = "rMirrorPersonalAccountOwner";
+        xrplOwner = "rRemotePersonalAccountOwner";
 
         fxrp = new MintableERC20("F-XRPL", "fXRP", 6);
         fxrpOft = new MockOft(fxrp, 0.01 ether);
@@ -113,9 +113,9 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
 
         // register the remote Personal Account implementation behind the PA beacon
         // (timelock is 0 in tests)
-        mirrorImpl = new PersonalAccountRemote();
+        remotePaImpl = new PersonalAccountRemote();
         vm.prank(governance);
-        controller.setPersonalAccountImplementation(address(mirrorImpl));
+        controller.setPersonalAccountImplementation(address(remotePaImpl));
 
         _configureTransport();
     }
@@ -148,51 +148,51 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testCreatePersonalAccountRevertEmptyOwner() public {
-        // the mirror implementation rejects an empty owner in initialize, so the whole
-        // CREATE2 deployment reverts - no orphan mirror can exist for an impossible owner
+        // the remotePa implementation rejects an empty owner in initialize, so the whole
+        // CREATE2 deployment reverts - no orphan remotePa can exist for an impossible owner
         vm.expectRevert();
         controller.createPersonalAccount("");
     }
 
-    function testMirrorResolvesViaBeacon() public {
-        PersonalAccountRemote mirror = _createMirror();
-        assertEq(mirror.implementation(), address(mirrorImpl));
-        assertEq(mirror.xrplOwner(), xrplOwner);
-        assertEq(mirror.controllerAddress(), address(controller));
+    function testRemotePaResolvesViaBeacon() public {
+        PersonalAccountRemote remotePa = _createRemotePa();
+        assertEq(remotePa.implementation(), address(remotePaImpl));
+        assertEq(remotePa.xrplOwner(), xrplOwner);
+        assertEq(remotePa.controllerAddress(), address(controller));
 
-        // the controller-as-beacon upgrades every mirror in one registration, exactly like
+        // the controller-as-beacon upgrades every remotePa in one registration, exactly like
         // the Flare Personal Accounts
         PersonalAccountRemote newImpl = new PersonalAccountRemote();
         vm.prank(governance);
         controller.setPersonalAccountImplementation(address(newImpl));
-        assertEq(mirror.implementation(), address(newImpl));
+        assertEq(remotePa.implementation(), address(newImpl));
     }
 
     function testInitializeRevertAlreadyInitialized() public {
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
-        mirror.initialize(address(controller), xrplOwner);
+        remotePa.initialize(address(controller), xrplOwner);
     }
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
         // the implementation locks itself in its constructor
         vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
-        mirrorImpl.initialize(address(controller), xrplOwner);
+        remotePaImpl.initialize(address(controller), xrplOwner);
     }
 
     function testAcceptsNativeExceptOnTheImplementation() public {
         // native funds value-carrying calls (a LayerZero native drop lands this way) and
         // leaves as one; the implementation contract, never initialized, rejects it since
         // nothing could ever move it out of there
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         vm.deal(address(this), 2);
 
-        (bool success, ) = address(mirror).call{value: 1}("");
+        (bool success, ) = address(remotePa).call{value: 1}("");
         assertTrue(success);
-        assertEq(address(mirror).balance, 1);
-        (success, ) = address(mirrorImpl).call{value: 1}("");
+        assertEq(address(remotePa).balance, 1);
+        (success, ) = address(remotePaImpl).call{value: 1}("");
         assertFalse(success);
-        assertEq(address(mirrorImpl).balance, 0);
+        assertEq(address(remotePaImpl).balance, 0);
     }
 
     //
@@ -201,31 +201,31 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
 
     function testTransferTokenViaCompose() public {
         // the common instruction, as a wallet builds it: a one-call transfer batch
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
+        stray.mint(address(remotePa), 42e18);
         address destination = makeAddr("userChosenDestination");
 
         bytes32 operationId = bytes32("op-1");
         vm.expectEmit();
         emit IPersonalAccountRemote.UserOpExecuted(operationId, 1, _guidFor(1));
-        _deliver(address(mirror), 1, _transferTokenPayload(
+        _deliver(address(remotePa), 1, _transferTokenPayload(
             operationId, address(stray), destination, 10e18
         ));
 
         assertEq(stray.balanceOf(destination), 10e18);
-        assertEq(stray.balanceOf(address(mirror)), 32e18);
-        assertTrue(mirror.usedOperations(operationId));
+        assertEq(stray.balanceOf(address(remotePa)), 32e18);
+        assertTrue(remotePa.usedOperations(operationId));
     }
 
     function testExecuteBatchWithNativeAndCalls() public {
         // the general case: several calls in one signed batch - a token transfer, a plain
         // native send (target = recipient, empty data) funded by native that landed with a
         // message, and an arbitrary contract call (an approval) - in order, one operation id
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
-        vm.deal(address(mirror), 1 ether);
+        stray.mint(address(remotePa), 42e18);
+        vm.deal(address(remotePa), 1 ether);
         address tokenDest = makeAddr("tokenDest");
         address nativeDest = makeAddr("nativeDest");
         address spender = makeAddr("spender");
@@ -240,22 +240,22 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         });
         vm.expectEmit();
         emit IPersonalAccountRemote.UserOpExecuted(bytes32("op-1"), 3, _guidFor(1));
-        _deliver(address(mirror), 1, _executePayload(bytes32("op-1"), calls));
+        _deliver(address(remotePa), 1, _executePayload(bytes32("op-1"), calls));
 
         assertEq(stray.balanceOf(tokenDest), 10e18);
         assertEq(nativeDest.balance, 0.4 ether);
-        assertEq(address(mirror).balance, 0.6 ether);
-        assertEq(stray.allowance(address(mirror), spender), 5e18);
-        assertTrue(mirror.usedOperations(bytes32("op-1")));
+        assertEq(address(remotePa).balance, 0.6 ether);
+        assertEq(stray.allowance(address(remotePa), spender), 5e18);
+        assertTrue(remotePa.usedOperations(bytes32("op-1")));
     }
 
     function testExecuteIsAllOrNothing() public {
         // a failing call anywhere in the batch reverts the whole delivery with its index and
         // the callee's revert data; nothing before it sticks, the id stays unconsumed, and the
         // exact same packet succeeds once the cause is fixed (here: the native to send)
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
+        stray.mint(address(remotePa), 42e18);
         address tokenDest = makeAddr("tokenDest");
         address nativeDest = makeAddr("nativeDest");
 
@@ -267,14 +267,14 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         bytes memory payload = _executePayload(bytes32("op-1"), calls);
 
         _deliverExpectRevert(
-            address(mirror), 1, payload,
+            address(remotePa), 1, payload,
             abi.encodeWithSelector(IPersonalAccountRemote.CallFailed.selector, 1, bytes(""))
         );
         assertEq(stray.balanceOf(tokenDest), 0);
-        assertFalse(mirror.usedOperations(bytes32("op-1")));
+        assertFalse(remotePa.usedOperations(bytes32("op-1")));
 
-        vm.deal(address(mirror), 1 ether);
-        _deliver(address(mirror), 1, payload);
+        vm.deal(address(remotePa), 1 ether);
+        _deliver(address(remotePa), 1, payload);
         assertEq(stray.balanceOf(tokenDest), 10e18);
         assertEq(nativeDest.balance, 1 ether);
     }
@@ -284,9 +284,9 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         // returning false (no revert) and a call to a codeless target both count as successful
         // calls - the batch completes, the id is consumed, and no token moved. The wallet must
         // know the callee's success convention; nothing here can tell for it
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MockFalseReturningToken sneaky = new MockFalseReturningToken();
-        sneaky.mint(address(mirror), 10e18);
+        sneaky.mint(address(remotePa), 10e18);
         address destination = makeAddr("dest");
 
         IPersonalAccountRemote.Call[] memory calls = new IPersonalAccountRemote.Call[](2);
@@ -298,27 +298,27 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         });
         vm.expectEmit();
         emit IPersonalAccountRemote.UserOpExecuted(bytes32("op-1"), 2, _guidFor(1));
-        _deliver(address(mirror), 1, _executePayload(bytes32("op-1"), calls));
+        _deliver(address(remotePa), 1, _executePayload(bytes32("op-1"), calls));
 
-        assertTrue(mirror.usedOperations(bytes32("op-1")));
-        assertEq(sneaky.balanceOf(address(mirror)), 10e18);
+        assertTrue(remotePa.usedOperations(bytes32("op-1")));
+        assertEq(sneaky.balanceOf(address(remotePa)), 10e18);
         assertEq(sneaky.balanceOf(destination), 0);
     }
 
     function testExecuteGuards() public {
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
+        stray.mint(address(remotePa), 42e18);
 
         // zero operation id
         _deliverExpectRevert(
-            address(mirror), 1,
+            address(remotePa), 1,
             _transferTokenPayload(bytes32(0), address(stray), makeAddr("dest"), 1e18),
             IComposeReceiverAccountBase.InvalidOperationId.selector
         );
         // an empty batch would only consume the id
         _deliverExpectRevert(
-            address(mirror), 1,
+            address(remotePa), 1,
             _executePayload(bytes32("op-1"), new IPersonalAccountRemote.Call[](0)),
             IPersonalAccountRemote.EmptyUserOp.selector
         );
@@ -327,29 +327,29 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
     function testTransferRevertWhenPausedThenRetriable() public {
         // outward moves stop while paused - even signed-looking traffic, since a transport
         // compromise is exactly what an incident looks like; the packet stays retriable
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
+        stray.mint(address(remotePa), 42e18);
         bytes memory payload =
             _transferTokenPayload(bytes32("op-1"), address(stray), makeAddr("dest"), 1e18);
 
         _pauseController();
-        _deliverExpectRevert(address(mirror), 1, payload, IPauseFacet.IsPaused.selector);
-        assertFalse(mirror.usedOperations(bytes32("op-1")));
+        _deliverExpectRevert(address(remotePa), 1, payload, IPauseFacet.IsPaused.selector);
+        assertFalse(remotePa.usedOperations(bytes32("op-1")));
 
         _unpauseController();
-        _deliver(address(mirror), 1, payload);
+        _deliver(address(remotePa), 1, payload);
         assertEq(stray.balanceOf(makeAddr("dest")), 1e18);
     }
 
     function testTerminalSkipsRunBeforeThePauseGate() public {
         // a duplicate or expired delivery finalizes even while paused, instead of reverting
         // forever on an incident: terminal gates come before the pause check
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
+        stray.mint(address(remotePa), 42e18);
         address destination = makeAddr("dest");
-        _deliver(address(mirror), 1, _transferTokenPayload(
+        _deliver(address(remotePa), 1, _transferTokenPayload(
             bytes32("op-1"), address(stray), destination, 1e18
         ));
 
@@ -358,7 +358,7 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         emit IPersonalAccountRemote.ActionSkipped(
             bytes32("op-1"), SKIP_REASON_DUPLICATE, _guidFor(2)
         );
-        _deliver(address(mirror), 2, _transferTokenPayload(
+        _deliver(address(remotePa), 2, _transferTokenPayload(
             bytes32("op-1"), address(stray), destination, 1e18
         ));
 
@@ -371,8 +371,8 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         emit IPersonalAccountRemote.ActionSkipped(
             bytes32("op-2"), SKIP_REASON_EXPIRED, _guidFor(3)
         );
-        _deliver(address(mirror), 3, expired);
-        assertFalse(mirror.usedOperations(bytes32("op-2")));
+        _deliver(address(remotePa), 3, expired);
+        assertFalse(remotePa.usedOperations(bytes32("op-2")));
         assertEq(stray.balanceOf(destination), 1e18);
     }
 
@@ -380,29 +380,29 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         // a transfer that fails (here: balance too low) reverts the whole delivery with the
         // callee's own revert data wrapped in CallFailed, so the id is not consumed and the
         // exact same packet succeeds once the balance is there
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 1e18);
+        stray.mint(address(remotePa), 1e18);
         address destination = makeAddr("dest");
         bytes memory payload =
             _transferTokenPayload(bytes32("op-1"), address(stray), destination, 5e18);
 
         _deliverExpectRevert(
-            address(mirror), 1, payload,
+            address(remotePa), 1, payload,
             abi.encodeWithSelector(
                 IPersonalAccountRemote.CallFailed.selector,
                 0,
                 abi.encodeWithSelector(
-                    IERC20Errors.ERC20InsufficientBalance.selector, address(mirror), 1e18, 5e18
+                    IERC20Errors.ERC20InsufficientBalance.selector, address(remotePa), 1e18, 5e18
                 )
             )
         );
-        assertFalse(mirror.usedOperations(bytes32("op-1")));
+        assertFalse(remotePa.usedOperations(bytes32("op-1")));
 
-        stray.mint(address(mirror), 4e18);
-        _deliver(address(mirror), 1, payload);
+        stray.mint(address(remotePa), 4e18);
+        _deliver(address(remotePa), 1, payload);
         assertEq(stray.balanceOf(destination), 5e18);
-        assertTrue(mirror.usedOperations(bytes32("op-1")));
+        assertTrue(remotePa.usedOperations(bytes32("op-1")));
     }
 
     function testMaliciousTokenCannotReenter() public {
@@ -410,40 +410,40 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         // asserted by the guard's own error, so the test fails if the guard is ever removed
         // (the callback would then fail later, on OnlyEndpoint, for another reason);
         // the whole action reverts and stays retriable - nothing executes twice or is consumed
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MockReentrantToken evil = new MockReentrantToken();
-        evil.mint(address(mirror), 10e18);
+        evil.mint(address(remotePa), 10e18);
         bytes memory payload =
             _transferTokenPayload(bytes32("op-1"), address(evil), makeAddr("dest"), 1e18);
 
-        // re-entering the compose entry (the mirror's only public entry)
-        (bytes memory message, bytes32 guid) = _composeMessage(address(mirror), 1, payload);
+        // re-entering the compose entry (the remotePa's only public entry)
+        (bytes memory message, bytes32 guid) = _composeMessage(address(remotePa), 1, payload);
         evil.setCallback(
-            address(mirror),
+            address(remotePa),
             abi.encodeCall(
                 ILayerZeroComposer.lzCompose,
                 (address(fxrpOft), guid, message, executor, "")
             )
         );
         _deliverExpectRevert(
-            address(mirror), 1, payload,
+            address(remotePa), 1, payload,
             abi.encodeWithSelector(
                 IPersonalAccountRemote.CallFailed.selector,
                 0,
                 abi.encodePacked(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector)
             )
         );
-        assertFalse(mirror.usedOperations(bytes32("op-1")));
-        assertEq(evil.balanceOf(address(mirror)), 10e18);
+        assertFalse(remotePa.usedOperations(bytes32("op-1")));
+        assertEq(evil.balanceOf(address(remotePa)), 10e18);
     }
 
     function testComposeSkipDuplicateOperation() public {
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
+        stray.mint(address(remotePa), 42e18);
         address destination = makeAddr("dest");
 
-        _deliver(address(mirror), 1, _transferTokenPayload(
+        _deliver(address(remotePa), 1, _transferTokenPayload(
             bytes32("op-1"), address(stray), destination, 1e18
         ));
 
@@ -452,16 +452,16 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         emit IPersonalAccountRemote.ActionSkipped(
             bytes32("op-1"), SKIP_REASON_DUPLICATE, _guidFor(2)
         );
-        _deliver(address(mirror), 2, _transferTokenPayload(
+        _deliver(address(remotePa), 2, _transferTokenPayload(
             bytes32("op-1"), address(stray), destination, 1e18
         ));
         assertEq(stray.balanceOf(destination), 1e18);
     }
 
     function testComposeSkipExpiredWithoutConsumingTheOperation() public {
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
+        stray.mint(address(remotePa), 42e18);
 
         bytes memory expired = _executePayloadAt(
             bytes32("op-1"),
@@ -472,28 +472,28 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         emit IPersonalAccountRemote.ActionSkipped(
             bytes32("op-1"), SKIP_REASON_EXPIRED, _guidFor(1)
         );
-        _deliver(address(mirror), 1, expired);
-        assertFalse(mirror.usedOperations(bytes32("op-1")));
+        _deliver(address(remotePa), 1, expired);
+        assertFalse(remotePa.usedOperations(bytes32("op-1")));
     }
 
     function testComposeAuthentication() public {
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         MintableERC20 stray = new MintableERC20("Stray", "STR", 18);
-        stray.mint(address(mirror), 42e18);
+        stray.mint(address(remotePa), 42e18);
         bytes memory payload =
             _transferTokenPayload(bytes32("op-1"), address(stray), makeAddr("dest"), 1e18);
-        (bytes memory message, bytes32 guid) = _composeMessage(address(mirror), 1, payload);
+        (bytes memory message, bytes32 guid) = _composeMessage(address(remotePa), 1, payload);
 
         // only the endpoint may deliver
         vm.prank(makeAddr("notTheEndpoint"));
         vm.expectRevert(IComposeReceiverAccountBase.OnlyEndpoint.selector);
-        mirror.lzCompose(address(fxrpOft), guid, message, executor, "");
+        remotePa.lzCompose(address(fxrpOft), guid, message, executor, "");
 
         // compose value is rejected, keeping a mistaken delivery retriable
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
         vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
-        mirror.lzCompose{value: 1}(address(fxrpOft), guid, message, executor, "");
+        remotePa.lzCompose{value: 1}(address(fxrpOft), guid, message, executor, "");
 
         // the compose sender must be the configured OFT
         vm.prank(lzEndpoint);
@@ -502,7 +502,7 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
                 IComposeReceiverAccountBase.WrongComposeSender.selector, makeAddr("otherOft")
             )
         );
-        mirror.lzCompose(makeAddr("otherOft"), guid, message, executor, "");
+        remotePa.lzCompose(makeAddr("otherOft"), guid, message, executor, "");
 
         // the source-chain sender must be this account itself - its own Flare twin
         bytes memory forged = OFTComposeMsgCodec.encode(
@@ -516,7 +516,7 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
                 bytes32(uint256(uint160(makeAddr("intruder"))))
             )
         );
-        mirror.lzCompose(address(fxrpOft), guid, forged, executor, "");
+        remotePa.lzCompose(address(fxrpOft), guid, forged, executor, "");
 
         // the GUID must recompute from the pinned origin peer
         bytes32 wrongGuid = GUID.generate(
@@ -527,15 +527,15 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(IComposeReceiverAccountBase.WrongGuid.selector, wrongGuid)
         );
-        mirror.lzCompose(address(fxrpOft), wrongGuid, message, executor, "");
+        remotePa.lzCompose(address(fxrpOft), wrongGuid, message, executor, "");
     }
 
     function testComposeRevertUnsupportedPayloads() public {
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
 
         bytes memory wrongVersion = abi.encode(uint8(2), PA_ACTION_EXECUTE, bytes(""));
         _deliverExpectRevert(
-            address(mirror), 1, wrongVersion,
+            address(remotePa), 1, wrongVersion,
             abi.encodeWithSelector(
                 IComposeReceiverAccountBase.UnsupportedPayloadVersion.selector, uint8(2)
             )
@@ -543,18 +543,18 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
 
         bytes memory wrongAction = abi.encode(PAYLOAD_VERSION_1, uint8(77), bytes(""));
         _deliverExpectRevert(
-            address(mirror), 1, wrongAction,
+            address(remotePa), 1, wrongAction,
             abi.encodeWithSelector(IComposeReceiverAccountBase.UnsupportedAction.selector, uint8(77))
         );
     }
 
     function testComposeRevertTransportNotConfigured() public {
-        PersonalAccountRemote mirror = _createMirror();
+        PersonalAccountRemote remotePa = _createRemotePa();
         vm.prank(governance);
         IIComposeTransportFacet(address(controller)).clearComposeTransport();
 
         _deliverExpectRevert(
-            address(mirror), 1,
+            address(remotePa), 1,
             _transferTokenPayload(bytes32("op-1"), makeAddr("token"), makeAddr("dest"), 1e18),
             IComposeTransportFacet.ComposeTransportNotConfigured.selector
         );
@@ -564,7 +564,7 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
     // helpers
     //
 
-    function _createMirror() private returns (PersonalAccountRemote) {
+    function _createRemotePa() private returns (PersonalAccountRemote) {
         return PersonalAccountRemote(payable(
             controller.createPersonalAccount(xrplOwner)
         ));
@@ -584,44 +584,44 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
     }
 
     function _deliver(
-        address _mirror,
+        address _remotePa,
         uint64 _nonce,
         bytes memory _payload
     )
         private
     {
-        (bytes memory message, bytes32 guid) = _composeMessage(_mirror, _nonce, _payload);
+        (bytes memory message, bytes32 guid) = _composeMessage(_remotePa, _nonce, _payload);
         vm.prank(lzEndpoint);
-        IPersonalAccountRemote(_mirror).lzCompose(
+        IPersonalAccountRemote(_remotePa).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
 
     function _deliverExpectRevert(
-        address _mirror,
+        address _remotePa,
         uint64 _nonce,
         bytes memory _payload,
         bytes memory _expectedRevert
     )
         private
     {
-        (bytes memory message, bytes32 guid) = _composeMessage(_mirror, _nonce, _payload);
+        (bytes memory message, bytes32 guid) = _composeMessage(_remotePa, _nonce, _payload);
         vm.prank(lzEndpoint);
         vm.expectRevert(_expectedRevert);
-        IPersonalAccountRemote(_mirror).lzCompose(
+        IPersonalAccountRemote(_remotePa).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
 
     function _deliverExpectRevert(
-        address _mirror,
+        address _remotePa,
         uint64 _nonce,
         bytes memory _payload,
         bytes4 _selector
     )
         private
     {
-        _deliverExpectRevert(_mirror, _nonce, _payload, abi.encodePacked(_selector));
+        _deliverExpectRevert(_remotePa, _nonce, _payload, abi.encodePacked(_selector));
     }
 
     /// The common instruction as a wallet builds it: a one-call transfer batch.
@@ -712,7 +712,7 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
     }
 
     function _composeMessage(
-        address _mirror,
+        address _remotePa,
         uint64 _nonce,
         bytes memory _payload
     )
@@ -723,7 +723,7 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
             _nonce,
             originEid,
             0,
-            abi.encodePacked(bytes32(uint256(uint160(_mirror))), _payload)
+            abi.encodePacked(bytes32(uint256(uint160(_remotePa))), _payload)
         );
         _guid = _guidFor(_nonce);
     }

@@ -37,7 +37,7 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
     /// @notice The two LayerZero option blobs a withdraw instruction carries - one per leg of
     /// the atomic withdrawal. The operator quotes the return leg first, puts that fee (plus
-    /// headroom; the excess lands on the mirror) into `destinationOptions` as compose value,
+    /// headroom; the excess lands on the parent) into `destinationOptions` as compose value,
     /// then quotes and sends the first message.
     struct WithdrawOptions {
         /// @notice Flare -> loan chain: the withdraw compose's gas and, as compose value, the
@@ -54,6 +54,15 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         /// this. Set it to the compose value bought in `destinationOptions`, so a front-run
         /// with less cannot consume the packet and burn the prepaid value.
         uint256 minComposeValue;
+        /// @notice The signed cap on the loan fee this withdrawal may settle, in FXRP
+        /// deducted from the withdrawn collateral at the market oracle's price. Binds only
+        /// when the withdrawal would leave the fee under-secured (the secured-claim rule;
+        /// most mid-loan withdrawals collect nothing). The cap is the user's price
+        /// protection: a worse price parks the delivery retriably (reissue with a higher
+        /// cap on the same operation id), and a dead oracle is escaped by settling through
+        /// the subaccount's repay first. Quote the converted fee plus headroom; zero when
+        /// no collection is expected.
+        uint256 maxFeeFxrp;
     }
 
     /**
@@ -300,6 +309,10 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
      * `DESTINATION_KIND_EVM`).
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
+     * @param _maxFeeFloor The signed fee-rate bound: the loan chain terminal-skips the borrow
+     * (id unconsumed, credit idle) if the type's current fee floor exceeds this - a delayed
+     * packet never executes at a worse rate than signed; a favorable decrease still executes.
+     * @param _maxFeeSpread The signed bound on the fee spread, same semantics.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
     function borrow(
@@ -309,6 +322,8 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         bytes32 _destination,
         bytes32 _operationId,
         uint64 _deadline,
+        uint64 _maxFeeFloor,
+        uint64 _maxFeeSpread,
         bytes calldata _extraOptions
     )
         external payable;
@@ -342,7 +357,7 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
      * @dev Restricted to the parent Personal Account; same validation, guards, and fee
      * handling as {borrow}. No FXRP travels with it, but `_options.destinationOptions` must
      * carry, as compose value, the native that pays the return leg's LayerZero fee (quoted
-     * against `_options.returnOptions` on the loan chain; the excess lands on the mirror, and
+     * against `_options.returnOptions` on the loan chain; the excess lands on the parent, and
      * too little parks the delivery as retriable).
      * @param _amount Collateral to withdraw on the loan chain and bridge home; non-zero.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
