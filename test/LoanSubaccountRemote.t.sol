@@ -142,6 +142,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         lzEndpoint = address(new MockLzEndpoint(dstEid));
         fxrpOft.setEndpoint(lzEndpoint);
         morpho = new MockMorpho();
+        // the fee and gate tests exercise the account's arithmetic under leverage a real
+        // market would not allow; the canonical-Morpho tests switch the health check back on
+        morpho.setHealthCheckDisabled(true);
         // Morpho oracle convention: 1 FXRP (6 decimals) = 2 RLUSD (18 decimals)
         oracle = new MockOracle(2e48);
         originEid = 30295; // Flare
@@ -1928,6 +1931,108 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ILoanSubaccountRemote(subaccount).repay();
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+    }
+
+    function testMorphoBlocksLiveDebtWithdrawUnderDeadOracleBeforeTheGate() public {
+        // the premise the exit gate leans on, modelled by the mock: with live borrow shares
+        // canonical Morpho reads the oracle in withdrawCollateral, so a dead oracle blocks a
+        // live-debt withdrawal at Morpho itself - here with nothing collectible, where the
+        // gate is oracle-free and Morpho is the only thing in the way. The escape is the
+        // spec's: settle through repay (no shares, no health check), then the packet passes
+        morpho.setHealthCheckDisabled(false);
+        _configureSettings();
+        (, address subaccount) = _parentAndSubaccount("rMorphoDeadOracleOwner");
+        fxrp.mint(subaccount, 1000e6);
+        _deliver(subaccount, 1, 1000e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 500e18
+        ));
+        oracle.setPriceReverts(true);
+
+        bytes memory payload = _withdrawPayload(bytes32("op-w"), 10e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(bytes("oracle reverted"));
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+
+        rlusd.mint(subaccount, 501e18);
+        ILoanSubaccountRemote(subaccount).repay();
+        _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+    }
+
+    function testMorphoEnforcesPositionHealthOnWithdraw() public {
+        // "Morpho enforces position health": a withdrawal the fee gate passes still reverts
+        // at Morpho when it would leave the position under its LLTV - retriable, id unconsumed
+        morpho.setHealthCheckDisabled(false);
+        _configureSettings();
+        (, address subaccount) = _parentAndSubaccount("rMorphoHealthOwner");
+        fxrp.mint(subaccount, 1000e6);
+        _deliver(subaccount, 1, 1000e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+
+        // 600 FXRP left = 1200 RLUSD x 77% = 924 < the 1000 owed
+        bytes memory tooMuch = _withdrawPayload(bytes32("op-w"), 400e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, tooMuch);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(bytes("insufficient collateral"));
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+
+        // 700 FXRP left = 1400 RLUSD x 77% = 1078 >= 1000: Morpho lets it through
+        _deliverWithValue(
+            subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 300e6), RETURN_MIN_VALUE
+        );
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+    }
+
+    function testMorphoEnforcesPositionHealthOnBorrow() public {
+        // 100 FXRP = 200 RLUSD of collateral carries at most 154 RLUSD at LLTV 77%: a borrow
+        // beyond it reverts at Morpho (retriable, id unconsumed), one within it executes
+        morpho.setHealthCheckDisabled(false);
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        bytes32 dest = bytes32(uint256(uint160(makeAddr("dest"))));
+
+        _deliverExpectRevert(
+            subaccount, 1, _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 1000e18),
+            bytes("insufficient collateral")
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+
+        _deliver(
+            subaccount, 1, 100e6,
+            _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 150e18)
+        );
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+    }
+
+    function testWithdrawBeyondCollateralRevertsAtMorpho() public {
+        // the account passes the signed amount through; Morpho's own bound (an underflow in
+        // canonical Morpho, a require in the mock) rejects more than the position holds
+        _configureSettings();
+        (, address subaccount) = _parentAndSubaccount("rOverdrawOwner");
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-dep")));
+
+        bytes memory payload = _withdrawPayload(bytes32("op-w"), 101e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(bytes("withdraw exceeds collateral"));
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testWithdrawSettlesFeeInFxrp() public {

@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IMorpho} from "../smartAccounts/interface/IMorpho.sol";
+import {IOracle} from "../smartAccounts/interface/IOracle.sol";
 import {MintableERC20} from "./MintableERC20.sol";
 
 /**
@@ -13,7 +14,11 @@ import {MintableERC20} from "./MintableERC20.sol";
  * @notice Behavioral Morpho mock with per-market positions and totals, virtual-share
  * conversions, queued interest and over-repay reverts (as real Morpho's share-math underflow
  * does), so the repay clamp is exercised against real share math instead of stubbed values.
- * Position health and liquidation eligibility are intentionally not modeled.
+ * `borrow` and `withdrawCollateral` run the canonical health check - accrue, read the market
+ * oracle, require `collateral · price / 1e36 · lltv >= debt` while borrow shares are live - so a
+ * dead oracle or an under-collateralized position reverts here as it does in Morpho; the check
+ * is switchable for tests that exercise the account's arithmetic under leverage a real market
+ * would not allow. Liquidation eligibility is intentionally not modeled.
  */
 contract MockMorpho is IMorpho {
     using SafeERC20 for IERC20;
@@ -31,11 +36,15 @@ contract MockMorpho is IMorpho {
 
     uint256 private constant VIRTUAL_SHARES = 1e6;
     uint256 private constant VIRTUAL_ASSETS = 1;
+    uint256 private constant ORACLE_PRICE_SCALE = 1e36;
+    uint256 private constant WAD = 1e18;
 
     /// @notice Interest waiting to be applied on the next `accrueInterest` call, per market.
     mapping(bytes32 marketId => uint256 assets) public pendingInterest;
 
     bool public accrueInterestReverts;
+    /// @notice Skips the canonical health check in `borrow` and `withdrawCollateral`.
+    bool public healthCheckDisabled;
     mapping(bytes32 marketId => MarketState) private _markets;
     mapping(bytes32 marketId => mapping(address account => PositionState)) private _positions;
 
@@ -53,6 +62,12 @@ contract MockMorpho is IMorpho {
     /// @notice Makes `accrueInterest` revert, standing in for a broken or hostile IRM.
     function setAccrueInterestReverts(bool _reverts) external {
         accrueInterestReverts = _reverts;
+    }
+
+    /// @notice Switches the canonical health check off (or back on) for tests that exercise
+    /// the account's gate arithmetic under leverage a real market would not allow.
+    function setHealthCheckDisabled(bool _disabled) external {
+        healthCheckDisabled = _disabled;
     }
 
     /// @notice Simulates a full external liquidation: the CALLER repays the account's whole
@@ -98,9 +113,9 @@ contract MockMorpho is IMorpho {
     }
 
     /// @inheritdoc IMorpho
-    /// @dev Canonical Morpho accrues interest and oracle-checks position health here when
-    /// borrow shares are live; the mock models neither (tests exercise account flows, and
-    /// the live-debt/dead-oracle blocking premise belongs to the integration harness).
+    /// @dev As canonical Morpho: accrues, then - with live borrow shares - reads the market
+    /// oracle and requires the position to stay healthy, so a dead oracle or an
+    /// under-collateralized position reverts here before the account's own logic can matter.
     function withdrawCollateral(
         MarketParams calldata marketParams,
         uint256 assets,
@@ -112,7 +127,11 @@ contract MockMorpho is IMorpho {
         bytes32 id = _id(marketParams);
         require(msg.sender == onBehalf, "unauthorized");
         require(assets <= _positions[id][onBehalf].collateral, "withdraw exceeds collateral");
+        _accrue(id);
         _positions[id][onBehalf].collateral -= uint128(assets);
+        if (_positions[id][onBehalf].borrowShares != 0) {
+            _requireHealthy(marketParams, id, onBehalf);
+        }
         IERC20(marketParams.collateralToken).safeTransfer(receiver, assets);
     }
 
@@ -139,6 +158,7 @@ contract MockMorpho is IMorpho {
         m.totalBorrowAssets += uint128(assets);
         m.totalBorrowShares += uint128(sharesUp);
         _positions[id][onBehalf].borrowShares += uint128(sharesUp);
+        _requireHealthy(marketParams, id, onBehalf);
         // stands in for market liquidity leaving the pool
         MintableERC20(marketParams.loanToken).mint(receiver, assets);
         return (assets, sharesUp);
@@ -236,14 +256,35 @@ contract MockMorpho is IMorpho {
         IERC20(marketParams.collateralToken).safeTransfer(msg.sender, seized);
     }
 
-    /// @dev The one accrual routine, shared by `accrueInterest`, `borrow`, `repay` and the
-    /// liquidation, as in canonical Morpho - so the broken-IRM switch breaks them all.
+    /// @dev The one accrual routine, shared by `accrueInterest`, `borrow`, `repay`,
+    /// `withdrawCollateral` and the liquidation, as in canonical Morpho - so the broken-IRM
+    /// switch breaks them all.
     function _accrue(bytes32 id) private {
         require(!accrueInterestReverts, "IRM reverted");
         MarketState storage m = _markets[id];
         m.totalBorrowAssets += SafeCast.toUint128(pendingInterest[id]);
         pendingInterest[id] = 0;
         m.lastUpdate = uint128(block.timestamp);
+    }
+
+    /// @dev Canonical `_isHealthy`: the collateral's oracle value at the market's LLTV must
+    /// cover the rounded-up debt. The oracle read is live, so a reverting oracle reverts here.
+    function _requireHealthy(
+        MarketParams calldata marketParams,
+        bytes32 id,
+        address account
+    )
+        private view
+    {
+        if (healthCheckDisabled) return;
+        PositionState storage p = _positions[id][account];
+        MarketState storage m = _markets[id];
+        uint256 price = IOracle(marketParams.oracle).price();
+        uint256 borrowed = _toAssetsUp(p.borrowShares, m.totalBorrowAssets, m.totalBorrowShares);
+        uint256 maxBorrow = Math.mulDiv(
+            Math.mulDiv(p.collateral, price, ORACLE_PRICE_SCALE), marketParams.lltv, WAD
+        );
+        require(maxBorrow >= borrowed, "insufficient collateral");
     }
 
     function _id(MarketParams calldata marketParams) private pure returns (bytes32) {
