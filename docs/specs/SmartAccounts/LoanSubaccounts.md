@@ -166,9 +166,7 @@ subaccount the FXRP came from.
 
 The forward moves are the **loan
 instructions**: `borrow(collateralAmount, borrowAmount, destinationKind, destination,
-operationId, deadline, maxFeeFloor, maxFeeSpread, extraOptions)` (the two maxima are the
-signed fee-terms commitment — the loan chain refuses to execute at a worse rate than the
-user signed; see The Flare fee), `depositCollateral(amount, operationId, deadline,
+operationId, deadline, extraOptions)`, `depositCollateral(amount, operationId, deadline,
 extraOptions)` and `withdraw(amount, operationId, deadline, options)`: typed methods that
 build the compose payload
 **on-chain** and bridge it to this account's own address on the loan chain, where the
@@ -180,9 +178,9 @@ are validated here — before any bridge fee is paid — for the static argument
 chain would reject on delivery (`InvalidLoanInstruction`: zero operation id, deadline already
 passed, a zero borrow, deposit or withdrawal amount, a disbursement destination that is not a
 clean non-zero EVM address other than this account, a zero withdraw delivery-value floor).
-Remote-state rejections — unconfigured or worse-than-signed fee terms, the pause, the borrow
-switch, balances, quotes, Morpho itself — surface only on delivery; the loan chain also
-re-validates the shapes there.
+Remote-state rejections — unconfigured fee terms, the pause, the borrow switch, balances,
+quotes, Morpho itself — surface only on delivery; the loan chain also re-validates the shapes
+there.
 
 The withdraw is the one instruction with a second leg, so it takes
 `WithdrawOptions` — `{destinationOptions, returnOptions, minComposeValue, maxFeeFxrp}`. The first
@@ -425,11 +423,9 @@ address itself commits to the pool:
   collateral, if any, and borrows `borrowAmount` (non-zero) against the account's own position,
   paying the destination — EVM kind only, clean zero-padded address, Wormhole kind reserved. As a
   debt increase it is pause-gated, subject to the per-type borrow switch, and gated on the fee:
-  the payload's signed `maxFeeFloor`/`maxFeeSpread` are checked against the type's current terms
-  right after the duplicate/expired guards (a worse rate terminal-skips with
-  `SKIP_REASON_FEE_TERMS`, leaving the id unconsumed and the credited FXRP idle), unconfigured
-  fee terms revert retriably (`FeeTermsNotConfigured`), and the fee checkpoint runs before the
-  borrow with the principal re-syncing after it (see The Flare fee).
+  unconfigured fee terms revert retriably (`FeeTermsNotConfigured`), the loan is priced at the
+  type's terms current at delivery (see the front-end requirement under The Flare fee), and the
+  fee checkpoint runs before the borrow with the principal re-syncing after it.
 - **`ACTION_DEPOSIT_COLLATERAL`** supplies exactly the authenticated bridged amount (non-zero) as
   collateral and changes no debt — the defensive action: while the controller is paused it
   executes only when the position carries live debt.
@@ -653,17 +649,19 @@ The safety net for a missed account: each account **snapshots the terms it accru
 every checkpoint. A checkpoint prices the elapsed interval at the *stored* terms, then adopts
 the current ones. No retroactive-repricing lever exists in either direction.
 
-**The signed fee-terms commitment.** The borrow payload carries `maxFeeFloor` and
-`maxFeeSpread`; on delivery, the loan chain compares them against the type's current terms
-and refuses to execute at a worse rate than the user signed (execution after a favorable
-decrease is fine — maxima, not equality). The check runs after the duplicate/expired guards
-and before the pause gate and any checkpoint; a mismatch **terminal-skips with
-`SKIP_REASON_FEE_TERMS`**, does not consume the operation id, and leaves any credited FXRP
-idle — a corrected instruction may reuse the same operation id, but it cannot absorb the
-previous packet's authenticated credit: the idle FXRP needs `depositIdleFxrp()` before a
-zero-collateral borrow retry. The commitment protects execution-time terms only; later
-timelocked repricing of a live position is part of the chosen product model (decision 3), so
-the front end should present the signed maxima as a bound on execution, not a rate lock.
+**Consent to the terms is a front-end requirement, not a payload field.** A borrow is priced
+at the type's terms current when it executes on the loan chain, and a borrow executes minutes
+after signing under normal conditions — at most until its deadline. A signed rate bound in the
+payload was built and then removed (2026-09-02): a terms change is timelocked and publicly
+queued, so it is never a surprise, and after it lands every open position moves to the new
+terms at its next checkpoint anyway (decision 3), so the bound only ever protected the first
+period of a borrow that straddled the change. Two integration requirements replace it, in the
+same spirit as the withdraw wallet invariant above: the front end must **warn (or refuse) while
+a `setLoanFeeTerms` for the type is pending in the timelock queue**, and must **sign borrow
+deadlines under one hour**, so a delayed packet cannot execute past that warning. A borrow
+that straddles a change without those safeguards opens at the new terms from its first
+second — the same position every existing borrower reaches at their next checkpoint; nobody's
+funds are at stake, only the chance to reconsider.
 
 ### Checkpoint accounting
 
@@ -727,7 +725,7 @@ and a repayment would keep charging the old base.
 
 Scope of "debt-touching": `borrow` and `repay` (checkpoint before, sync after). A pure
 collateral top-up (`depositCollateral`, `depositIdleFxrp`) changes no debt and runs no
-transition. Terminal guards (duplicate, expired, the fee-terms mismatch) run **before** any
+transition. Terminal guards (duplicate, expired) run **before** any
 checkpoint; a reverted action rolls its checkpoint back atomically. Settling before the
 action is load-bearing: a borrow first raises `D`, and an unsettled period would count the
 borrowed amount as market interest, eroding the floor. Re-capitalizing makes the fee compound
@@ -912,10 +910,8 @@ terms accrue zero, and debt presupposes the borrow gate passed).
 
 **The frozen V1 wire schemas (exact types and ordering):**
 
-- Borrow action data: `abi.encode(bytes32 operationId, uint64 deadline,
-  uint8 destinationKind, bytes32 destination, uint256 borrowAmount, uint64 maxFeeFloor,
-  uint64 maxFeeSpread)` — the two maxima appended to the pre-fee five-field tuple (WAD
-  rates fit `uint64` under the enforced `≤ 1e18` cap).
+- Borrow action data, unchanged from before the fee: `abi.encode(bytes32 operationId,
+  uint64 deadline, uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`.
 - Withdraw action data: `abi.encode(bytes32 operationId, uint64 deadline, uint256 amount,
   uint256 minComposeValue, uint256 maxFeeFxrp, bytes returnOptions)` — the fee cap inserted
   before the dynamic tail.
@@ -923,9 +919,9 @@ terms accrue zero, and debt presupposes the borrow gate passed).
   uint64 deadline)`.
 - `WithdrawOptions` (Flare, signed): `{bytes destinationOptions; bytes returnOptions;
   uint256 minComposeValue; uint256 maxFeeFxrp;}`.
-- Skip reason: `SKIP_REASON_FEE_TERMS = 3` (1 = duplicate, 2 = expired; raw ids are never
+- Skip reasons: 1 = duplicate, 2 = expired (3, the retired signed-terms skip, is never
   reused).
-- Sender/receiver byte-equivalence tests pin both extended tuples.
+- Sender/receiver byte-equivalence tests pin the tuples.
 
 ### Worked example
 
@@ -1106,10 +1102,10 @@ version 1 relative to the earlier route-registry draft, which is safe **only** w
 loan-chain settings facet has ever been cut, no old-V1 packet is queued or in flight anywhere
 in LayerZero, and no client or tooling holds prebuilt old-schema payloads — all true today,
 `deployment/deploys/ethereum.json` holds only the pinned bootstrap contracts. The same condition
-covers every later in-place V1 change, most recently the fee fields (the borrow action gaining
-`maxFeeFloor`/`maxFeeSpread`, the withdraw action `maxFeeFxrp`), before that the withdraw
-action's `actionData` gaining `minComposeValue` and `returnOptions`, and the removal of the
-sweep-deposit action (id 4 retired, never reused; ids 1–3 unchanged). An environment that had
+covers every later in-place V1 change, most recently the fee's withdraw field (`maxFeeFxrp`;
+signed borrow rate bounds were added and removed again in the same pre-cut window), before
+that the withdraw action's `actionData` gaining `minComposeValue` and `returnOptions`, and the
+removal of the sweep-deposit action (id 4 retired, never reused; ids 1–3 unchanged). An environment that had
 shipped the old scheme would need a new payload version instead. The settings storage namespaces
 are fresh — `smartAccounts.ComposeTransport.State` and `smartAccounts.LoanMarkets.State` —
 and splitting the earlier single settings namespace is itself a pre-first-cut-only move under
@@ -1209,7 +1205,7 @@ deliberately not built. One leftover is still live: the `LoanBridgeSettingsFacet
 
 - ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed — by `repay` itself or by a full external liquidation — the same `repay` call pushes the surplus to the parent Personal Account (the user's own loan-chain account), best-effort: a push the token refuses stays on the account for a later `repay` to retry, never rolling back the repayment. No generic `recoverToken`: stray tokens strand, as on the Flare side. Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
 - ~~Atomic withdraw-and-bridge action~~ — resolved, built as `ACTION_WITHDRAW` itself: the withdraw compose withdraws the collateral and bridges it home in the same execution (the withdraw/redeposit race is closed for withdrawals; it survives only for residue). Compose value is accepted for this one action and spent in the same call — the return leg's fee, prepaid from Flare as message-1 compose value, quoted against the signed `returnOptions`, excess to the parent; every delivery must carry the signed `minComposeValue` floor (delivery is permissionless, the value unauthenticated — below the floor nothing consumes the packet), and a short delivery reverts and stays retriable. Two accepted residuals: bad signed `returnOptions` park that withdrawal until a fresh instruction reusing the same operation id (the parked packet then terminal-skips as a duplicate), and the redeem-home packet residual above applies to the return leg as to any bridge-back — including its best-effort redemption fee.
-- ~~The Flare fee~~ — resolved, designed and built: checkpoint accounting of `max(feeFloor, market interest + feeSpread)` over the account's Morpho debt, per-type timelocked terms behind a recipient activation marker, signed bounds in the borrow and withdraw payloads, collection in `repay` and — as a secured claim — at the exits (an under-secured withdrawal settles in FXRP at the market oracle's price). See The Flare fee.
+- ~~The Flare fee~~ — resolved, designed and built: checkpoint accounting of `max(feeFloor, market interest + feeSpread)` over the account's Morpho debt, per-type timelocked terms behind a recipient activation marker, a signed FXRP settlement cap in the withdraw payload, collection in `repay` and — as a secured claim — at the exits (an under-secured withdrawal settles in FXRP at the market oracle's price). See The Flare fee.
 - ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`. Remaining leftover: `LoanBridgeSettingsFacet` is the Flare end of the same route under a loan name (its validation is FXRP-specific); revisit if a second route ever exists.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.
 - ~~Native payability~~ — resolved the other way: no `receive()` and no native exit on the Flare subaccount (no protocol flow leaves native on it — the bridge refunds its caller, redemption outcomes land on the parent, and the compose value of its own bridge-back is forwarded within the same call); native landing without a call (pre-deployment funding of the predicted address, a force-send) strands — accepted; a beacon upgrade can add an exit if it ever matters.

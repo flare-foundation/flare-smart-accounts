@@ -14,13 +14,9 @@ uint8 constant SKIP_REASON_DUPLICATE = 1;
 
 /// @dev Skip reason: the deadline passed before delivery; the user's intent is stale. The
 /// operation id is not consumed, so the same intent can be retried with a fresh deadline.
+/// (Reason 3, the signed fee-terms bound, was retired before any deployment and is never
+/// reused.)
 uint8 constant SKIP_REASON_EXPIRED = 2;
-
-/// @dev Skip reason: the subaccount type's current fee rates exceed the maxima the user
-/// signed (a delayed packet must not execute at a worse rate than agreed). The operation id
-/// is not consumed - a corrected instruction may reuse it - and any credited FXRP stays idle
-/// for the account's fixed rails.
-uint8 constant SKIP_REASON_FEE_TERMS = 3;
 
 /**
  * @title IComposeReceiverAccountBase

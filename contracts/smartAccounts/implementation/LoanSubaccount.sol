@@ -102,8 +102,6 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         bytes32 _destination,
         bytes32 _operationId,
         uint64 _deadline,
-        uint64 _maxFeeFloor,
-        uint64 _maxFeeSpread,
         bytes calldata _extraOptions
     )
         external payable
@@ -126,9 +124,10 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
                 InvalidLoanInstruction()
             );
         }
-        bytes memory payload = _borrowActionPayload(
-            _operationId, _deadline, _destinationKind, _destination, _borrowAmount,
-            _maxFeeFloor, _maxFeeSpread
+        bytes memory payload = abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_BORROW,
+            abi.encode(_operationId, _deadline, _destinationKind, _destination, _borrowAmount)
         );
         (uint32 destinationEid, bytes32 guid) =
             _bridgeToSelf(_collateralAmount, _extraOptions, payload);
@@ -429,29 +428,5 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
 
         _destinationEid = destinationEid;
         _guid = receipt.guid;
-    }
-
-    /// @dev The typed borrow payload, in its own frame ({borrow} carries too many fields for
-    /// one stack under coverage's optimizer-less compilation).
-    function _borrowActionPayload(
-        bytes32 _operationId,
-        uint64 _deadline,
-        uint8 _destinationKind,
-        bytes32 _destination,
-        uint256 _borrowAmount,
-        uint64 _maxFeeFloor,
-        uint64 _maxFeeSpread
-    )
-        private pure
-        returns (bytes memory)
-    {
-        return abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(
-                _operationId, _deadline, _destinationKind, _destination, _borrowAmount,
-                _maxFeeFloor, _maxFeeSpread
-            )
-        );
     }
 }

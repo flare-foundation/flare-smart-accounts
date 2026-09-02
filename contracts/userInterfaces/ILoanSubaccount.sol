@@ -301,10 +301,9 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
      * `DESTINATION_KIND_EVM`).
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
-     * @param _maxFeeFloor The signed fee-rate bound: the loan chain terminal-skips the borrow
-     * (id unconsumed, credit idle) if the type's current fee floor exceeds this - a delayed
-     * packet never executes at a worse rate than signed; a favorable decrease still executes.
-     * @param _maxFeeSpread The signed bound on the fee spread, same semantics.
+     * Keep it short (under an hour): the loan is priced at the type's fee terms current at
+     * delivery, so the front end warns while a terms change is pending in the timelock, and a
+     * short deadline is what bounds how far past that warning a delayed packet can execute.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
     function borrow(
@@ -314,8 +313,6 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         bytes32 _destination,
         bytes32 _operationId,
         uint64 _deadline,
-        uint64 _maxFeeFloor,
-        uint64 _maxFeeSpread,
         bytes calldata _extraOptions
     )
         external payable;

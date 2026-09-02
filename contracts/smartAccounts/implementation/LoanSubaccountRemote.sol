@@ -22,10 +22,7 @@ import {
 } from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
 import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/ILoanSubaccount.sol";
-import {
-    PAYLOAD_VERSION_1,
-    SKIP_REASON_FEE_TERMS
-} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
+import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
 import {IOracle} from "../interface/IOracle.sol";
@@ -308,24 +305,14 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             uint64 deadline,
             uint8 destinationKind,
             bytes32 destination,
-            uint256 borrowAmount,
-            uint64 maxFeeFloor,
-            uint64 maxFeeSpread
-        ) = abi.decode(_actionData, (bytes32, uint64, uint8, bytes32, uint256, uint64, uint64));
+            uint256 borrowAmount
+        ) = abi.decode(_actionData, (bytes32, uint64, uint8, bytes32, uint256));
         require(borrowAmount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
         // terminal gates come first, so a duplicate or expired delivery finalizes even when
         // borrowing is disabled or the market is not yet registered, instead of reverting
         // forever
         if (_skipped(operationId, deadline, _guid)) return;
-        // the signed fee bound: a delayed packet must not execute at a worse rate than the
-        // user signed - a terminal skip, id unconsumed, so a corrected instruction may reuse it
-        if (_feeRatesAboveSigned(maxFeeFloor, maxFeeSpread)) {
-            emit LoanActionSkipped(
-                parentPersonalAccount, operationId, SKIP_REASON_FEE_TERMS, _guid
-            );
-            return;
-        }
         // a debt increase respects the pause and the per-type borrow switch
         _checkNotPaused();
         require(!ILoanMarketsFacet(controller).isLoanBorrowingDisabled(subaccountType), BorrowingDisabled());
@@ -775,20 +762,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
                 emit LoanSurplusRetained(parentPersonalAccount, balance);
             }
         }
-    }
-
-    /// @dev The signed fee bound of a borrow: true when the type's current rates exceed
-    /// either signed maximum (a favorable decrease passes).
-    function _feeRatesAboveSigned(
-        uint64 _maxFeeFloor,
-        uint64 _maxFeeSpread
-    )
-        private view
-        returns (bool)
-    {
-        ILoanMarketsFacet.FeeTerms memory terms =
-            ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType);
-        return terms.feeFloor > _maxFeeFloor || terms.feeSpread > _maxFeeSpread;
     }
 
     /// @dev The account's one market, bound write-once to its type. If its Morpho stops

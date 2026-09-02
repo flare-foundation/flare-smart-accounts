@@ -74,8 +74,7 @@ import {
     IComposeReceiverAccountBase,
     PAYLOAD_VERSION_1,
     SKIP_REASON_DUPLICATE,
-    SKIP_REASON_EXPIRED,
-    SKIP_REASON_FEE_TERMS
+    SKIP_REASON_EXPIRED
 } from "../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 
 /**
@@ -1330,9 +1329,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.stopPrank();
         address subaccount = address(_deploySubaccount());
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _borrowPayloadWithMaxima(
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
             bytes32("op-borrow"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18, 0.05e18, 0.03e18
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
         morpho.addPendingInterest(_marketId(), 100e18);
@@ -1504,9 +1503,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.stopPrank();
         vm.expectEmit();
         emit ILoanSubaccountRemote.LoanFeePrincipalSynced(parentPersonalAccount, 500e18);
-        _deliver(subaccount, 2, 0, _borrowPayloadWithMaxima(
+        _deliver(subaccount, 2, 0, _borrowPayload(
             bytes32("op-2"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 500e18, 0.14e18, 0.02e18
+            bytes32(uint256(uint160(makeAddr("dest")))), 500e18
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
         ILoanSubaccountRemote(subaccount).checkpointFee();
@@ -1671,56 +1670,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     //
-    // step 3: the signed fee bounds and the exit gates
+    // step 3: the exit gates
     //
-
-    function testBorrowSkipsWhenFeeRatesExceedSignedMaxima() public {
-        // a rate raise between signing and delivery: the packet terminal-skips (id
-        // unconsumed, credit idle), and the corrected same-id instruction executes after
-        // depositIdleFxrp absorbs the stranded credit
-        _configureSettings();
-        address subaccount = address(_deploySubaccount());
-        fxrp.mint(subaccount, 100e6);
-        bytes memory signedAtOldRates = _borrowPayload(
-            bytes32("op-1"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 500e18
-        );
-        vm.startPrank(governance);
-        _setFeeRates(0.14e18, 0.02e18);
-        vm.stopPrank();
-
-        vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanActionSkipped(
-            parentPersonalAccount, bytes32("op-1"), SKIP_REASON_FEE_TERMS, _guidFor(1)
-        );
-        _deliver(subaccount, 1, 100e6, signedAtOldRates);
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
-        assertEq(fxrp.balanceOf(subaccount), 100e6);
-
-        // the corrected instruction: same id, maxima matching the new rates, zero collateral
-        // (a new packet cannot absorb the old packet's credit - deposit it first)
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
-        _deliver(subaccount, 2, 0, _borrowPayloadWithMaxima(
-            bytes32("op-1"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 500e18, 0.14e18, 0.02e18
-        ));
-        assertEq(rlusd.balanceOf(makeAddr("dest")), 500e18);
-    }
-
-    function testBorrowExecutesUnderFavorableRateDecrease() public {
-        // the maxima are bounds, not equality: a rate cut below what the user signed executes
-        _configureSettings();
-        address subaccount = address(_deploySubaccount());
-        fxrp.mint(subaccount, 100e6);
-        vm.startPrank(governance);
-        _setFeeRates(0.035e18, 0.005e18);
-        vm.stopPrank();
-        _deliver(subaccount, 1, 100e6, _borrowPayload(
-            bytes32("op-1"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 500e18
-        ));
-        assertEq(rlusd.balanceOf(makeAddr("dest")), 500e18);
-    }
 
     function testWithdrawHigherCapReissueOnSameId() public {
         // a parked under-cap packet is fixed by a fresh higher-cap instruction on the SAME
@@ -2378,21 +2329,18 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testIdleCreditSurvivesTheGatesUntouched() public {
-        // a fee-terms-skipped borrow leaves its authenticated credit idle; a settling
+        // a skipped borrow (here: expired) leaves its authenticated credit idle; a settling
         // withdrawal takes its fee from the WITHDRAWN amount only, never from the idle
         // balance, which depositIdleFxrp later absorbs
         _configureSettings();
         (address pairParent, address subaccount) = _borrowedPairWithFee("rIdleCreditOwner");
         fxrp.mint(subaccount, 20e6);
-        vm.startPrank(governance);
-        _setFeeRates(0.14e18, 0.02e18);
-        vm.stopPrank();
         vm.expectEmit();
         emit ILoanSubaccountRemote.LoanActionSkipped(
-            pairParent, bytes32("op-2"), SKIP_REASON_FEE_TERMS, _guidFor(2)
+            pairParent, bytes32("op-2"), SKIP_REASON_EXPIRED, _guidFor(2)
         );
-        _deliver(subaccount, 2, 20e6, _borrowPayload(
-            bytes32("op-2"), DESTINATION_KIND_EVM,
+        _deliver(subaccount, 2, 20e6, _borrowPayloadAt(
+            bytes32("op-2"), uint64(vm.getBlockTimestamp() - 1), DESTINATION_KIND_EVM,
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
 
@@ -3555,7 +3503,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.prank(parentPersonalAccount);
         ILoanSubaccount(sender).borrow{value: 0.01 ether}(
             100e6, 500e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(parentPersonalAccount))),
-            bytes32("op-b"), deadline, 0.07e18, 0.01e18, ""
+            bytes32("op-b"), deadline, ""
         );
         (uint256 amountLD, bytes memory payload) = _lastSentCompose();
         assertEq(amountLD, 100e6);
@@ -4060,35 +4008,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         private
         returns (bytes memory)
     {
-        // the signed maxima match the default terms exactly
-        return _borrowPayloadWithMaxima(
-            _operationId, _destinationKind, _destination, _borrowAmount, 0.07e18, 0.01e18
-        );
-    }
-
-    function _borrowPayloadWithMaxima(
-        bytes32 _operationId,
-        uint8 _destinationKind,
-        bytes32 _destination,
-        uint256 _borrowAmount,
-        uint64 _maxFeeFloor,
-        uint64 _maxFeeSpread
-    )
-        private
-        returns (bytes memory)
-    {
-        return abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_BORROW,
-            abi.encode(
-                _operationId,
-                uint64(vm.getBlockTimestamp() + 1 hours),
-                _destinationKind,
-                _destination,
-                _borrowAmount,
-                _maxFeeFloor,
-                _maxFeeSpread
-            )
+        return _borrowPayloadAt(
+            _operationId, uint64(vm.getBlockTimestamp() + 1 hours), _destinationKind,
+            _destination, _borrowAmount
         );
     }
 
@@ -4281,5 +4203,22 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         return ILoanMarketsFacet.FeeTerms({
             feeFloor: _feeFloor, feeSpread: _feeSpread, feeRecipient: _feeRecipient
         });
+    }
+
+    function _borrowPayloadAt(
+        bytes32 _operationId,
+        uint64 _deadline,
+        uint8 _destinationKind,
+        bytes32 _destination,
+        uint256 _borrowAmount
+    )
+        private pure
+        returns (bytes memory)
+    {
+        return abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_BORROW,
+            abi.encode(_operationId, _deadline, _destinationKind, _destination, _borrowAmount)
+        );
     }
 }

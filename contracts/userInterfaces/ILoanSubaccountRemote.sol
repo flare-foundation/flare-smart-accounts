@@ -5,19 +5,18 @@ import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
 
 /// @dev Borrow action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// uint8 destinationKind, bytes32 destination, uint256 borrowAmount, uint64 maxFeeFloor,
-/// uint64 maxFeeSpread)`. The market is not a payload field: the account type fixes it
-/// (write-once), so the subaccount address itself commits to the pool. The authenticated
-/// bridged amount (the codec's `amountLD`, never the idle balance) becomes collateral - zero
-/// borrows against the existing position - and `borrowAmount` (non-zero) is borrowed and sent
-/// to `destination`. Rates above either signed maximum terminal-skip with
-/// `SKIP_REASON_FEE_TERMS` without consuming the id, so a delayed packet never executes at a
-/// worse rate than the user signed, while a favorable decrease still executes. It is a debt
-/// increase: pause-gated and subject to the per-type borrow switch, both of which revert
-/// retriably. The operation id must be non-zero and globally unique per subaccount across all
-/// action types; clients retrying an expired intent must reuse its id only for the same intent
-/// with a fresh deadline (a convention, not contract-enforced). A pure collateral deposit is
-/// its own action (`ACTION_DEPOSIT_COLLATERAL`).
+/// uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`. The market is not a
+/// payload field: the account type fixes it (write-once), so the subaccount address itself
+/// commits to the pool. The authenticated bridged amount (the codec's `amountLD`, never the
+/// idle balance) becomes collateral - zero borrows against the existing position - and
+/// `borrowAmount` (non-zero) is borrowed and sent to `destination`. The fee terms are the
+/// type's current terms at delivery (the front end warns while a change is pending in the
+/// timelock and keeps deadlines short; see the spec). It is a debt increase: pause-gated and
+/// subject to the per-type borrow switch, both of which revert retriably. The operation id
+/// must be non-zero and globally unique per subaccount across all action types; clients
+/// retrying an expired intent must reuse its id only for the same intent with a fresh
+/// deadline (a convention, not contract-enforced). A pure collateral deposit is its own action
+/// (`ACTION_DEPOSIT_COLLATERAL`).
 uint8 constant ACTION_BORROW = 1;
 
 /// @dev Withdraw action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
@@ -304,8 +303,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * FXRP that arrived with the message stays on the account, recoverable along the fixed
      * rails.
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param operationId The payload's operation id. A duplicate was already consumed;
-     * expired and fee-terms skips leave it unconsumed (the intent can retry under it).
+     * @param operationId The payload's operation id. A duplicate was already consumed; an
+     * expired skip leaves it unconsumed (the intent can retry under it).
      * @param reason The skip reason (see the `SKIP_REASON_*` constants).
      * @param guid The LayerZero message id the action arrived with.
      */

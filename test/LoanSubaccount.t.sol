@@ -1791,8 +1791,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            amount, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline,
-            0.07e18, 0.01e18, extraOptions
+            amount, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, extraOptions
         );
 
         // exactly the signed amount left; the adapter locked it; no standing approval remains
@@ -1816,7 +1815,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ACTION_BORROW,
                 abi.encode(
                     bytes32("op-1"), deadline, DESTINATION_KIND_EVM, destination,
-                    uint256(500e18), uint64(0.07e18), uint64(0.01e18)
+                    uint256(500e18)
                 )
             )
         );
@@ -1835,7 +1834,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
             0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))),
-            bytes32("op-1"), uint64(block.timestamp + 1 hours), 0.07e18, 0.01e18, ""
+            bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
 
         assertEq(fxrp.balanceOf(subaccount), 100e6);
@@ -1855,7 +1854,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
             0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(personalAccount))),
-            bytes32("op-1"), uint64(block.timestamp + 1 hours), 0.07e18, 0.01e18, ""
+            bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
         (,,,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
         (, , bytes memory actionData) = abi.decode(composeMsgSent, (uint8, uint8, bytes));
@@ -2012,7 +2011,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // nothing to collateralize or borrow
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
+            100e6, 0, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, ""
         );
         // deposit: zero amount, zero operation id, deadline already passed
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
@@ -2027,21 +2026,21 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // the subaccount itself
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, 2, destination, bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
+            0, 300e18, 2, destination, bytes32("op-1"), deadline, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, DESTINATION_KIND_EVM, bytes32(0), bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
+            0, 300e18, DESTINATION_KIND_EVM, bytes32(0), bytes32("op-1"), deadline, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
             0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(subaccount))),
-            bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
+            bytes32("op-1"), deadline, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
             0, 300e18, DESTINATION_KIND_EVM, destination | bytes32(uint256(1) << 200),
-            bytes32("op-1"), deadline, 0.07e18, 0.01e18, ""
+            bytes32("op-1"), deadline, ""
         );
         // a zero withdrawal
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
@@ -2100,7 +2099,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ILoanSubaccount.borrow,
                 (
                     100e6, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"),
-                    deadline, 0.07e18, 0.01e18, _canonicalLoanOptions()
+                    deadline, _canonicalLoanOptions()
                 )
             )
         });
@@ -2115,7 +2114,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ACTION_BORROW,
                 abi.encode(
                     bytes32("op-1"), deadline, DESTINATION_KIND_EVM, destination,
-                    uint256(500e18), uint64(0.07e18), uint64(0.01e18)
+                    uint256(500e18)
                 )
             )
         );
@@ -2154,7 +2153,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ILoanSubaccount.borrow,
                 (
                     loanAmount, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"),
-                    deadline, 0.07e18, 0.01e18, _canonicalLoanOptions()
+                    deadline, _canonicalLoanOptions()
                 )
             )
         });
