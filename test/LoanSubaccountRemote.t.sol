@@ -347,44 +347,27 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             subaccount, 1, payload, ILoanSubaccountRemote.FeeTermsNotConfigured.selector
         );
 
-        // rates alone do not activate: the recipient is the marker, set last
+        // the one activating set opens borrowing: the same packet now delivers
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.07e18, 0.01e18
-        );
+        _setFeeRates(0.07e18, 0.01e18);
         vm.stopPrank();
         terms = ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, 0.07e18);
-        assertEq(terms.feeRecipient, address(0));
-        _deliverExpectRevert(
-            subaccount, 1, payload, ILoanSubaccountRemote.FeeTermsNotConfigured.selector
-        );
-
-        // the activating set opens borrowing (queued only after the rate call executed - the
-        // two-stage rule)
-        vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
-            SUBACCOUNT_TYPE_LOAN, makeAddr("feeCollector")
-        );
-        vm.stopPrank();
+        assertEq(terms.feeRecipient, makeAddr("feeCollector"));
         _deliver(subaccount, 1, 100e6, payload);
         assertEq(rlusd.balanceOf(destination), 500e18);
     }
 
     function testZeroRateActivationIsDeliberateFeeOff() public {
-        // an explicit zero-rate configuration is a legal fee-off: rates are EXECUTED first
-        // even at zero (the two-stage rule), then the recipient marker opens borrowing, and
-        // nothing ever accrues
+        // an explicit zero-rate configuration is a legal fee-off: the activating set names a
+        // collector with both rates at zero, borrowing opens, and nothing ever accrues
         _configureTransport();
         morpho.createMarket(_defaultMarket().marketParams);
         vm.startPrank(governance);
         IILoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(SUBACCOUNT_TYPE_LOAN, 0, 0);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
-            SUBACCOUNT_TYPE_LOAN, makeAddr("feeCollector")
-        );
+        _setFeeRates(0, 0);
         vm.stopPrank();
         ILoanMarketsFacet.FeeTerms memory terms =
             ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
@@ -405,12 +388,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(feeDebtX18, 0);
     }
 
-    function testSetLoanFeeRatesZeroIsDeliberateFeeOff() public {
+    function testSetLoanFeeTermsZeroRatesIsDeliberateFeeOff() public {
         // explicit zero floor and spread are legal - with the recipient set, the type is
         // configured and "fee off" is a deliberate state, distinct from unconfigured
         _configureSettings();
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(SUBACCOUNT_TYPE_LOAN, 0, 0);
+        _setFeeRates(0, 0);
         vm.stopPrank();
         ILoanMarketsFacet.FeeTerms memory stored =
             ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
@@ -419,28 +402,30 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(stored.feeRecipient, makeAddr("feeCollector"));
     }
 
-    function testSetLoanFeeRatesAndRecipient() public {
+    function testSetLoanFeeTerms() public {
         _configureSettings();
         vm.startPrank(governance);
 
-        // rates change without touching the recipient; the caps are inclusive
+        // a rate change restates the collector; the caps are inclusive
         vm.expectEmit();
-        emit ILoanMarketsFacet.LoanFeeRatesSet(SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE, MAX_FEE_RATE);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE, MAX_FEE_RATE
+        emit ILoanMarketsFacet.LoanFeeTermsSet(
+            SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE, MAX_FEE_RATE, makeAddr("feeCollector")
         );
+        _setFeeRates(MAX_FEE_RATE, MAX_FEE_RATE);
         ILoanMarketsFacet.FeeTerms memory terms =
             ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, MAX_FEE_RATE);
         assertEq(terms.feeSpread, MAX_FEE_RATE);
         assertEq(terms.feeRecipient, makeAddr("feeCollector"));
 
-        // the recipient rotates without touching the rates
+        // a collector rotation restates the rates
         address newCollector = makeAddr("newCollector");
         vm.expectEmit();
-        emit ILoanMarketsFacet.LoanFeeRecipientSet(SUBACCOUNT_TYPE_LOAN, newCollector);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
-            SUBACCOUNT_TYPE_LOAN, newCollector
+        emit ILoanMarketsFacet.LoanFeeTermsSet(
+            SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE, MAX_FEE_RATE, newCollector
+        );
+        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+            SUBACCOUNT_TYPE_LOAN, _feeTerms(MAX_FEE_RATE, MAX_FEE_RATE, newCollector)
         );
         terms = ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, MAX_FEE_RATE);
@@ -449,31 +434,28 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.stopPrank();
     }
 
-    function testSetLoanFeeRatesReverts() public {
+    function testSetLoanFeeTermsReverts() public {
         _configureSettings();
         vm.startPrank(governance);
+        address collector = makeAddr("collector");
 
-        // both setters need a registered market: terms exist exactly as long as the type does
+        // the setter needs a registered market: terms exist exactly as long as the type does
         vm.expectRevert(
             abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, 9)
         );
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(9, 0, 0);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, 9)
-        );
-        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(9, makeAddr("collector"));
+        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(9, _feeTerms(0, 0, collector));
 
         vm.expectRevert(ILoanMarketsFacet.InvalidFeeTerms.selector);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE + 1, 0
+        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+            SUBACCOUNT_TYPE_LOAN, _feeTerms(MAX_FEE_RATE + 1, 0, collector)
         );
         vm.expectRevert(ILoanMarketsFacet.InvalidFeeTerms.selector);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0, MAX_FEE_RATE + 1
+        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+            SUBACCOUNT_TYPE_LOAN, _feeTerms(0, MAX_FEE_RATE + 1, collector)
         );
         vm.expectRevert(ILoanMarketsFacet.InvalidFeeRecipient.selector);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
-            SUBACCOUNT_TYPE_LOAN, address(0)
+        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+            SUBACCOUNT_TYPE_LOAN, _feeTerms(0, 0, address(0))
         );
         vm.stopPrank();
     }
@@ -506,15 +488,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.07e18, 0.01e18
-        );
-        vm.expectRevert(
-            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
-        );
-        IILoanMarketsFacet(address(controller)).setLoanFeeRecipient(
-            SUBACCOUNT_TYPE_LOAN, makeAddr("feeCollector")
-        );
+        _setFeeRates(0.07e18, 0.01e18);
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
@@ -1352,9 +1326,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // part is Flare's
         _configureSettings();
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.05e18, 0.03e18
-        );
+        _setFeeRates(0.05e18, 0.03e18);
         vm.stopPrank();
         address subaccount = address(_deploySubaccount());
         fxrp.mint(subaccount, 100e6);
@@ -1463,9 +1435,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _borrowedSubaccount(1000e18);
         vm.warp(vm.getBlockTimestamp() + 365 days);
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
-        );
+        _setFeeRates(0.14e18, 0.02e18);
         vm.stopPrank();
 
         // the elapsed year is still the old 7%
@@ -1484,9 +1454,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the decrease direction: a dormant account keeps paying its snapshotted higher rate
         // until someone pings - the cut is never retroactive either
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.035e18, 0.005e18
-        );
+        _setFeeRates(0.035e18, 0.005e18);
         vm.stopPrank();
         vm.warp(vm.getBlockTimestamp() + 365 days);
         ILoanSubaccountRemote(subaccount).checkpointFee();
@@ -1532,9 +1500,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // a year idle, then borrow again - only the new period accrues, at the current rates
         vm.warp(vm.getBlockTimestamp() + 365 days);
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
-        );
+        _setFeeRates(0.14e18, 0.02e18);
         vm.stopPrank();
         vm.expectEmit();
         emit ILoanSubaccountRemote.LoanFeePrincipalSynced(parentPersonalAccount, 500e18);
@@ -1594,7 +1560,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the checkpoint charges nothing, interest or not
         _configureSettings();
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(SUBACCOUNT_TYPE_LOAN, 0, 0);
+        _setFeeRates(0, 0);
         vm.stopPrank();
         address subaccount = address(_deploySubaccount());
         fxrp.mint(subaccount, 100e6);
@@ -1720,9 +1686,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 500e18
         );
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
-        );
+        _setFeeRates(0.14e18, 0.02e18);
         vm.stopPrank();
 
         vm.expectEmit();
@@ -1749,9 +1713,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = address(_deploySubaccount());
         fxrp.mint(subaccount, 100e6);
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.035e18, 0.005e18
-        );
+        _setFeeRates(0.035e18, 0.005e18);
         vm.stopPrank();
         _deliver(subaccount, 1, 100e6, _borrowPayload(
             bytes32("op-1"), DESTINATION_KIND_EVM,
@@ -2395,9 +2357,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ILoanSubaccountRemote(subaccounts[0]).checkpointFee();
         ILoanSubaccountRemote(subaccounts[1]).checkpointFee();
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
-        );
+        _setFeeRates(0.14e18, 0.02e18);
         vm.stopPrank();
         ILoanSubaccountRemote(subaccounts[0]).checkpointFee();
         ILoanSubaccountRemote(subaccounts[1]).checkpointFee();
@@ -2425,9 +2385,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (address pairParent, address subaccount) = _borrowedPairWithFee("rIdleCreditOwner");
         fxrp.mint(subaccount, 20e6);
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).setLoanFeeRates(
-            SUBACCOUNT_TYPE_LOAN, 0.14e18, 0.02e18
-        );
+        _setFeeRates(0.14e18, 0.02e18);
         vm.stopPrank();
         vm.expectEmit();
         emit ILoanSubaccountRemote.LoanActionSkipped(
@@ -3791,12 +3749,19 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     /// Configures the meeting-example fee terms (floor 7%, spread 1% annually, a fixed
-    /// collector) for `_subaccountType`: rates first, then the recipient - the activation
-    /// marker. The caller must already be pranked as the diamond's owner.
+    /// collector) for `_subaccountType` - the one call that activates the type. The caller
+    /// must already be pranked as the diamond's owner.
     function _setDefaultFeeTerms(address _diamond, uint256 _subaccountType) private {
-        IILoanMarketsFacet(_diamond).setLoanFeeRates(_subaccountType, 0.07e18, 0.01e18);
-        IILoanMarketsFacet(_diamond).setLoanFeeRecipient(
-            _subaccountType, makeAddr("feeCollector")
+        IILoanMarketsFacet(_diamond).setLoanFeeTerms(
+            _subaccountType, _feeTerms(0.07e18, 0.01e18, makeAddr("feeCollector"))
+        );
+    }
+
+    /// Changes the loan type's rates on this diamond, keeping the default collector. The
+    /// caller must already be pranked as the diamond's owner.
+    function _setFeeRates(uint64 _feeFloor, uint64 _feeSpread) private {
+        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+            SUBACCOUNT_TYPE_LOAN, _feeTerms(_feeFloor, _feeSpread, makeAddr("feeCollector"))
         );
     }
 
@@ -4303,5 +4268,18 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     /// The amount and compose payload of the last send the Flare side handed to the OFT.
     function _lastSentCompose() private view returns (uint256 _amountLD, bytes memory _payload) {
         (, , _amountLD, , , _payload, ) = fxrpOft.lastSendParam();
+    }
+
+    function _feeTerms(
+        uint64 _feeFloor,
+        uint64 _feeSpread,
+        address _feeRecipient
+    )
+        private pure
+        returns (ILoanMarketsFacet.FeeTerms memory)
+    {
+        return ILoanMarketsFacet.FeeTerms({
+            feeFloor: _feeFloor, feeSpread: _feeSpread, feeRecipient: _feeRecipient
+        });
     }
 }

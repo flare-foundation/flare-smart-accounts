@@ -26,26 +26,14 @@ contract LoanMarketsFacet is IILoanMarketsFacet, FacetBase {
     }
 
     /// @inheritdoc IILoanMarketsFacet
-    function setLoanFeeRates(
+    function setLoanFeeTerms(
         uint256 _subaccountType,
-        uint64 _feeFloor,
-        uint64 _feeSpread
+        ILoanMarketsFacet.FeeTerms calldata _terms
     )
         external
         onlyOwnerWithTimelock
     {
-        LoanMarkets.setLoanFeeRates(_subaccountType, _feeFloor, _feeSpread);
-    }
-
-    /// @inheritdoc IILoanMarketsFacet
-    function setLoanFeeRecipient(
-        uint256 _subaccountType,
-        address _feeRecipient
-    )
-        external
-        onlyOwnerWithTimelock
-    {
-        LoanMarkets.setLoanFeeRecipient(_subaccountType, _feeRecipient);
+        LoanMarkets.setLoanFeeTerms(_subaccountType, _terms);
     }
 
     /// @inheritdoc IILoanMarketsFacet

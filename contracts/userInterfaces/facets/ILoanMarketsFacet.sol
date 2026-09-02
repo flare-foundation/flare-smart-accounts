@@ -33,18 +33,18 @@ interface ILoanMarketsFacet {
 
     /// @dev A subaccount type's Flare fee terms: the user's effective rate is
     /// `max(feeFloor, market interest rate + feeSpread)`, measured checkpoint-to-checkpoint
-    /// by the subaccounts. Configured by timelock after registration - rates first, recipient
-    /// last - and mutable the same way (accounts snapshot the terms they accrue under, so a
-    /// change is never retroactive). Explicit zero rates are a deliberate "fee off".
+    /// by the subaccounts. Set as one unit by timelock after registration, and changed the
+    /// same way (accounts snapshot the terms they accrue under, so a change is never
+    /// retroactive). Explicit zero rates are a deliberate "fee off".
     struct FeeTerms {
         /// @notice The minimum effective annual rate (WAD, at most {MAX_FEE_RATE}).
         uint64 feeFloor;
         /// @notice The annual spread over the market's rate (WAD, at most {MAX_FEE_RATE}).
         uint64 feeSpread;
         /// @notice The collector the fee is paid to. Zero exactly while the type's terms are
-        /// unconfigured - the activation marker: borrowing reverts until it is set, and the
-        /// setter never accepts zero, so it can never return to zero. Rotating it changes
-        /// where the fee goes, not what anyone owes.
+        /// unconfigured - the activation marker: borrowing reverts until the terms are set,
+        /// and the setter never accepts zero, so it can never return to zero. Rotating it
+        /// changes where the fee goes, not what anyone owes.
         address feeRecipient;
     }
 
@@ -77,26 +77,17 @@ interface ILoanMarketsFacet {
     );
 
     /**
-     * @notice Emitted on every timelocked fee-rate change, the initial configuration
-     * included.
+     * @notice Emitted on every timelocked fee-terms set: the activating configuration and
+     * every later rate change or recipient rotation.
      * @param subaccountType The subaccount type.
      * @param feeFloor The minimum effective annual rate (WAD).
      * @param feeSpread The annual spread over the market's rate (WAD).
-     */
-    event LoanFeeRatesSet(
-        uint256 indexed subaccountType,
-        uint64 feeFloor,
-        uint64 feeSpread
-    );
-
-    /**
-     * @notice Emitted on the recipient set that activates a type's terms and on every later
-     * timelocked rotation.
-     * @param subaccountType The subaccount type.
      * @param feeRecipient The collector the fee is paid to.
      */
-    event LoanFeeRecipientSet(
+    event LoanFeeTermsSet(
         uint256 indexed subaccountType,
+        uint64 feeFloor,
+        uint64 feeSpread,
         address feeRecipient
     );
 

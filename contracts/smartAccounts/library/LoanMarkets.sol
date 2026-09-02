@@ -77,42 +77,28 @@ library LoanMarkets {
         state.markets[_subaccountType] = _market;
         emit ILoanMarketsFacet.LoanMarketRegistered(_subaccountType, _market.morpho, marketId);
         // fee terms are configured separately: borrowing stays blocked until
-        // setLoanFeeRecipient activates the type
+        // setLoanFeeTerms activates the type
     }
 
-    function setLoanFeeRates(
+    function setLoanFeeTerms(
         uint256 _subaccountType,
-        uint64 _feeFloor,
-        uint64 _feeSpread
+        ILoanMarketsFacet.FeeTerms calldata _terms
     )
         internal
     {
         _requireRegistered(_subaccountType);
         // the cap bounds the accrual arithmetic for every rate an account can ever snapshot
         require(
-            _feeFloor <= MAX_FEE_RATE && _feeSpread <= MAX_FEE_RATE,
+            _terms.feeFloor <= MAX_FEE_RATE && _terms.feeSpread <= MAX_FEE_RATE,
             ILoanMarketsFacet.InvalidFeeTerms()
         );
-        ILoanMarketsFacet.FeeTerms storage terms = getState().feeTerms[_subaccountType];
-        terms.feeFloor = _feeFloor;
-        terms.feeSpread = _feeSpread;
-        emit ILoanMarketsFacet.LoanFeeRatesSet(_subaccountType, _feeFloor, _feeSpread);
-    }
-
-    function setLoanFeeRecipient(
-        uint256 _subaccountType,
-        address _feeRecipient
-    )
-        internal
-    {
-        _requireRegistered(_subaccountType);
-        // never zero: the first set (from zero) is the terms' activation - it opens borrowing
-        // for the type - and the marker can never return to unconfigured afterwards. Rates
-        // first by two-stage queueing (see IILoanMarketsFacet): queue this only after the
-        // rate call has executed
-        require(_feeRecipient != address(0), ILoanMarketsFacet.InvalidFeeRecipient());
-        getState().feeTerms[_subaccountType].feeRecipient = _feeRecipient;
-        emit ILoanMarketsFacet.LoanFeeRecipientSet(_subaccountType, _feeRecipient);
+        // never zero: the first set is the terms' activation - it opens borrowing for the
+        // type - and the marker can never return to unconfigured afterwards
+        require(_terms.feeRecipient != address(0), ILoanMarketsFacet.InvalidFeeRecipient());
+        getState().feeTerms[_subaccountType] = _terms;
+        emit ILoanMarketsFacet.LoanFeeTermsSet(
+            _subaccountType, _terms.feeFloor, _terms.feeSpread, _terms.feeRecipient
+        );
     }
 
     function disableLoanBorrowing(

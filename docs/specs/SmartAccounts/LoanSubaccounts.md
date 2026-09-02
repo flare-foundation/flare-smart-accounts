@@ -624,18 +624,21 @@ Per subaccount type, in [`LoanMarkets`](../../../contracts/smartAccounts/library
 `feeFloor` and `feeSpread` (annual WAD rates, `1e18 = 100%`, each **enforced ≤ `1e18`** at set
 time, so no snapshotted rate can overflow the accrual math — a bad snapshot could not be
 repaired by changing the global terms, since the account computes at its stored terms first)
-and a non-zero `feeRecipient`. After market registration, execute `setLoanFeeRates` first and
-`setLoanFeeRecipient` last: the recipient is the permanent **activation marker**, borrowing
-reverts (`FeeTermsNotConfigured`, retriably, never consuming the packet) until it is set, and
-the setter never accepts zero, so the marker cannot return to unconfigured. That on-chain gate
-is what closes the fee-free window — without it, borrowing is enabled at registration and an
-early borrower would snapshot zero terms, pricing their whole first period at zero when the real
-rate later arrives. Terms are deliberately separate from registration rather than atomic with
-it: governance controls the values and deployment runs with the timelock at zero, so the
-activation gate achieves the same guarantee with a cleaner API — but on a live diamond, EXECUTE
-the rate call before queueing the activation, since an unqueued call cannot be executed early.
-Zero rates are a legal, deliberate "fee off" once the recipient is set. Rates and recipient stay
-independently timelock-rotatable (changing where the fee goes changes nobody's debt).
+and a non-zero `feeRecipient`, set **as one unit** by the timelocked
+`setLoanFeeTerms(type, terms)` after market registration — the same one-call shape as
+`setLoanBridgeSettings` and `setComposeTransport`. The recipient is the permanent **activation
+marker**: borrowing reverts (`FeeTermsNotConfigured`, retriably, never consuming the packet)
+until the terms are set, and the setter never accepts a zero recipient, so the marker cannot
+return to unconfigured. That on-chain gate is what closes the fee-free window — without it,
+borrowing is enabled at registration and an early borrower would snapshot zero terms, pricing
+their whole first period at zero when the real rate later arrives. Terms are deliberately
+separate from registration rather than atomic with it: governance controls the values and
+deployment runs with the timelock at zero, so the activation gate achieves the same guarantee
+with a cleaner API — and because activation is a single call, there is no ordering for the
+timelock's permissionless execution to get wrong. Zero rates are a legal, deliberate "fee off"
+once the recipient is set. Later calls change the rates or rotate the collector, always
+restating all three fields (rotating the collector changes where the fee goes, not what anyone
+owes).
 
 A rate change follows a **runbook, part of the design**: subaccounts are enumerable off-chain
 from creation events, and the timelock gives notice. Three steps: (1) checkpoint every
@@ -895,12 +898,12 @@ deployed, so the fee **ships before the first live position** — no lazy-migrat
 needed. The fee touches **three coordinated surfaces**, and activation verifies the
 reviewed version of every one before any route opens: the remote `LoanSubaccountRemote`
 (accrual, gates, collection), the Flare `LoanSubaccount` (the extended borrow/withdraw
-payload encoders), and `LoanMarketsFacet` (the timelocked terms setters and the activation
+payload encoders), and `LoanMarketsFacet` (the timelocked terms setter and the activation
 marker). Activation order, distinguishing the two chains: on the remote diamond, the compose
 transport first (market registration already requires it), then the verified remote
-implementation, then `registerLoanMarket`, `setLoanFeeRates`, and `setLoanFeeRecipient` last
-(the activation marker; borrowing reverts until it is set, so the market is registered but
-inert across the gap — verify all three fields before opening any route); on Flare, the
+implementation, then `registerLoanMarket`, then `setLoanFeeTerms` (the activation; borrowing
+reverts until it executes, so the market is registered but inert across the gap — verify all
+three fields before opening any route); on Flare, the
 verified sender implementation, and the forward route (`setLoanBridgeSettings`) enabled
 **last**, as the deployment gates already require. Borrowing is impossible without
 configured terms at every point in that order. Missing fee configuration never makes the
@@ -1164,10 +1167,9 @@ storage-lineage gate below is the third member of this family.
   `repay` (see The Flare fee). The mock deliberately does not model this; verify it
   against the canonical Morpho source and the real market in the integration harness
   before launch;
-- **fee terms configured before any route opens**: `registerLoanMarket`, then
-  `setLoanFeeRates`, then `setLoanFeeRecipient` last (the activation marker — borrowing
-  reverts until it is set); on a live diamond, execute the rate call before queueing the
-  activation, and verify all three fields before enabling the forward route;
+- **fee terms configured before any route opens**: `registerLoanMarket`, then the one
+  `setLoanFeeTerms` call (the activation — borrowing reverts until it executes); verify all
+  three fields before enabling the forward route;
 - **the Ethereum FXRP OFT's decimals**: `token().decimals()` must equal its `sharedDecimals()`
   (6) on the loan chain — the no-dust argument (`minAmountLD == amountLD`) rests on it on both
   chains; `setComposeTransport` fails closed otherwise, so confirm the representation before
@@ -1182,8 +1184,7 @@ storage-lineage gate below is the third member of this family.
   and every deploy and cut flow — the `check_cut` preview included — verifies that the RPC's
   chain id matches the named network before acting, so a mis-set `<NETWORK>_RPC_URL` fails
   instead of retargeting the flow;
-- **the fee-activation runbook rehearsed** once on a testnet diamond with a non-zero timelock,
-  including the case where a third party executes the matured recipient call before the rates;
+- **the fee-activation runbook rehearsed** once on a testnet diamond with a non-zero timelock;
 - **the real Endpoint/OFT compose-delivery integration harness** for every action, in both
   directions (the local sender→codec→receiver tests run each
   sender's bytes — borrow, deposit, the atomic withdraw with its real return

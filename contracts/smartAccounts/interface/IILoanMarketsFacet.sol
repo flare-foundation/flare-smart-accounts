@@ -14,7 +14,7 @@ interface IILoanMarketsFacet is ILoanMarketsFacet {
      * must be the OFT's token) and an existing market on the Morpho contract. The first
      * registration permanently pins the collateral token for every later transport.
      * Registration does not configure the type's fee terms: borrowing reverts until
-     * {setLoanFeeRecipient} activates them, so a registered-but-unpriced type cannot take on
+     * {setLoanFeeTerms} activates them, so a registered-but-unpriced type cannot take on
      * debt.
      * @param _subaccountType The subaccount type to bind.
      * @param _market The Morpho contract and market.
@@ -27,38 +27,20 @@ interface IILoanMarketsFacet is ILoanMarketsFacet {
         external;
 
     /**
-     * @notice Sets a subaccount type's fee rates. Accounts adopt them prospectively at their
-     * next checkpoint — never retroactively, since each snapshots the terms it accrues under —
-     * so follow the settle-before-and-after runbook for live accounts.
-     * @dev For the initial activation, EXECUTE this call before queueing
-     * {setLoanFeeRecipient}.
+     * @notice Sets a subaccount type's fee terms as one unit: both rates (each at most
+     * `MAX_FEE_RATE`) and the non-zero recipient. The first call activates borrowing for the
+     * type; later calls change the rates or rotate the collector, always restating all three
+     * fields. Accounts adopt new rates prospectively at their next checkpoint — never
+     * retroactively, since each snapshots the terms it accrues under — so follow the
+     * settle-before-and-after runbook for live accounts. Explicit zero rates are a deliberate
+     * "fee off".
      * @param _subaccountType The subaccount type (its market must be registered).
-     * @param _feeFloor The minimum effective annual rate (WAD, at most `MAX_FEE_RATE`).
-     * @param _feeSpread The annual spread over the market's rate (WAD, at most
-     * `MAX_FEE_RATE`).
+     * @param _terms The fee floor, the fee spread and the collector.
      * Can only be called by the owner (timelocked).
      */
-    function setLoanFeeRates(
+    function setLoanFeeTerms(
         uint256 _subaccountType,
-        uint64 _feeFloor,
-        uint64 _feeSpread
-    )
-        external;
-
-    /**
-     * @notice Sets a subaccount type's non-zero fee recipient. The first call (from zero)
-     * activates borrowing for the type, so it comes last, after the rates; a later call only
-     * rotates the collector, changing where the fee goes, not what anyone owes.
-     * @dev On a live diamond, queue this only after the initial rate call has EXECUTED:
-     * matured timelocked calls execute permissionlessly and in any order, while an unqueued
-     * call cannot be executed early.
-     * @param _subaccountType The subaccount type (its market must be registered).
-     * @param _feeRecipient The collector the fee is paid to (non-zero).
-     * Can only be called by the owner (timelocked).
-     */
-    function setLoanFeeRecipient(
-        uint256 _subaccountType,
-        address _feeRecipient
+        ILoanMarketsFacet.FeeTerms calldata _terms
     )
         external;
 
