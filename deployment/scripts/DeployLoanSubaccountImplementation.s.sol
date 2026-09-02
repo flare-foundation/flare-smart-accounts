@@ -9,6 +9,10 @@ contract DeployLoanSubaccountImplementation is Script {
     function run(bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
+        // the Flare-side implementation lays out storage for the Flare proxy lineage; the loan
+        // chain registers LoanSubaccountRemote instead (see DeployRemoteAccountImplementations)
+        require(block.chainid != 1, "the Flare-side implementation does not belong on Ethereum");
+
         string memory network = _getNetwork(block.chainid);
         if (_staging) {
             network = string.concat(network, "-staging");

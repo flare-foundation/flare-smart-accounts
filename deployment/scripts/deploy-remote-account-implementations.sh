@@ -20,11 +20,10 @@ if [[ "$NETWORK" == *-staging ]]; then
   BASE_NETWORK="${NETWORK%-staging}"
 fi
 
-# only known networks: the forge script maps unknown chain ids to scdev, so an
-# unsupported name would broadcast on whatever <NETWORK>_RPC_URL points at and then
-# record the deployment under scdev
+# only the loan chain (and the local dev chain): the remote implementations lay out storage
+# for the loan chain's proxy lineages, and the forge script refuses Flare-family chain ids too
 case "$BASE_NETWORK" in
-  flare|songbird|coston|coston2|ethereum|scdev) ;;
+  ethereum|scdev) ;;
   *)
     echo "Unsupported network: $NETWORK" >&2
     exit 2

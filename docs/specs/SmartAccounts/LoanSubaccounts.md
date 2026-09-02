@@ -1066,7 +1066,8 @@ Account.
   (it gains `createPersonalAccount`) in a cut plan
   (`deployment/cuts/<network>/cuts-<date>.json`, verified with `pnpm check_cut`, executed with
   `pnpm diamond_cut`) deploys it from the artifact as part of the cut flow. The implementation
-  is deployed with `pnpm deploy_loan_subaccount_implementation <network>` and registered by
+  is deployed with `pnpm deploy_loan_subaccount_implementation <network>` (Flare-family
+  networks only — the script refuses Ethereum) and registered by
   governance with the timelocked
   `setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, <address>)`.
 
@@ -1089,7 +1090,9 @@ before relying on an Ethereum deployment. The Ethereum cut installs `Subaccounts
 remote Personal Accounts), `ComposeTransportFacet` and `LoanMarketsFacet` through the standard cut flow
 (the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
 `deployment/deploys/ethereum.json` is seeded with the pinned contracts), and both
-implementations ship with `pnpm deploy_remote_account_implementations ethereum`. There is
+implementations ship with `pnpm deploy_remote_account_implementations ethereum` (the script
+refuses the Flare-family chain ids: a remote implementation recorded on Flare would look like a
+legitimate artifact and, registered there, corrupt every Personal Account's storage). There is
 deliberately no `deployment/chain-config/ethereum.json`: the generic full-deploy script must
 not run against Ethereum — operators go through the pinned bootstrap and the scripts above.
 
@@ -1174,9 +1177,9 @@ storage-lineage gate below is the third member of this family.
   executor with a zero fee is accepted (the vendored interfaces do not say) — if it is not,
   every zero-value bridge-back would terminal-skip after its TTL and fall back to the
   fee-paying public rail;
-- **operator chain checks**: run each implementation deploy script only on the chain kind it
-  is for (a remote implementation registered on Flare would corrupt every Personal Account's
-  storage), and confirm the RPC's chain id matches the named network before any cut;
+- **operator chain checks**: the implementation deploy scripts refuse the wrong chain family
+  (a remote implementation registered on Flare would corrupt every Personal Account's storage);
+  still confirm the RPC's chain id matches the named network before any cut;
 - **the fee-activation runbook rehearsed** once on a testnet diamond with a non-zero timelock,
   including the case where a third party executes the matured recipient call before the rates;
 - **the real Endpoint/OFT compose-delivery integration harness** for every action, in both

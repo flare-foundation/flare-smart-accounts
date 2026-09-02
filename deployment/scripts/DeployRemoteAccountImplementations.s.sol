@@ -12,6 +12,11 @@ contract DeployRemoteAccountImplementations is Script {
     function run(bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
+        // the remote implementations lay out storage for the loan chain's proxy lineages; a copy
+        // deployed and recorded on a Flare-family chain would look like a legitimate artifact
+        // and, registered there, corrupt every Personal Account's storage
+        require(!_isFlareFamily(block.chainid), "remote implementations do not belong on a Flare-family chain");
+
         string memory network = _getNetwork(block.chainid);
         if (_staging) {
             network = string.concat(network, "-staging");
@@ -37,6 +42,10 @@ contract DeployRemoteAccountImplementations is Script {
                 vm.toString(address(personalAccountRemoteImpl))
             )
         );
+    }
+
+    function _isFlareFamily(uint256 _chainId) private pure returns (bool) {
+        return _chainId == 14 || _chainId == 19 || _chainId == 16 || _chainId == 114;
     }
 
     function _getNetwork(uint256 _chainId) private pure returns (string memory) {
