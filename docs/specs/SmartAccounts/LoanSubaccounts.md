@@ -192,7 +192,12 @@ as compose value). The **signed delivery-value floor** stops an underfunded perm
 delivery from consuming the packet — LayerZero does not authenticate the delivered value, so
 without it anyone could execute the packet with less than the prepaid headroom, or terminal-skip
 an expiring one with zero, and the prepaid value would never reach the user; the loan chain
-refuses any delivery below the floor, which stays retriable. The signed **`maxFeeFxrp`** bounds
+refuses any delivery below the floor, which stays retriable. The wallet must keep the two
+consistent: because the floor is checked before the expiry skip, a compose value bought below
+the signed floor makes a packet that reverts on every delivery, even after its deadline, and
+never finalizes — no funds are at risk (the value was never delivered) and a same-id reissue
+executes normally, but the orphan stays in the endpoint's queue until someone delivers it with
+value of their own. The signed **`maxFeeFxrp`** bounds
 the FXRP fee settlement, and binds only when the exit gate's security rule requires settling (see
 The Flare fee); a fee above it parks the delivery retriably. Quote the return leg first
 (`quoteSend` on the loan chain is a view), put that fee plus headroom into `destinationOptions`

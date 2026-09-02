@@ -46,7 +46,11 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         /// LayerZero does not authenticate the delivered value, so the loan chain refuses any
         /// delivery of this withdraw - execution and terminal skip alike - carrying less than
         /// this. Set it to the compose value bought in `destinationOptions`, so a front-run
-        /// with less cannot consume the packet and burn the prepaid value.
+        /// with less cannot consume the packet and burn the prepaid value - and never above
+        /// it: the floor is checked before the expiry skip, so a packet whose bought value is
+        /// below its own floor reverts on every delivery, even after its deadline, and never
+        /// finalizes (no funds at risk - the value was never delivered, and a reissue on the
+        /// same operation id executes normally - but the orphan stays queued at the endpoint).
         uint256 minComposeValue;
         /// @notice The signed cap on the loan fee this withdrawal may settle, in FXRP
         /// deducted from the withdrawn collateral at the market oracle's price. Binds only
