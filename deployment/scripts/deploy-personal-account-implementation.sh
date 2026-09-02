@@ -20,22 +20,16 @@ if [[ "$NETWORK" == *-staging ]]; then
   BASE_NETWORK="${NETWORK%-staging}"
 fi
 
-# only known networks: the forge script maps unknown chain ids to scdev, so an
-# unsupported name would broadcast on whatever <NETWORK>_RPC_URL points at and then
-# record the deployment under scdev
+# only Flare-family networks (and the local dev chain): the Flare Personal Account lays out
+# storage for the Flare PA proxy lineage - the loan chain gets PersonalAccountRemote through
+# deploy-remote-account-implementations.sh - and the forge script refuses Ethereum too
 case "$BASE_NETWORK" in
-  flare|songbird|coston|coston2|ethereum|scdev) ;;
+  flare|songbird|coston|coston2|scdev) ;;
   *)
     echo "Unsupported network: $NETWORK" >&2
     exit 2
     ;;
 esac
-
-# Ethereum has only the pinned production deployment (the cut flow rejects this too)
-if [[ "$BASE_NETWORK" == "ethereum" && "$STAGING" == "true" ]]; then
-  echo "ethereum-staging is not supported: Ethereum has only the pinned production deployment" >&2
-  exit 2
-fi
 
 NETWORK_UPPER=$(echo "$BASE_NETWORK" | tr '[:lower:]' '[:upper:]')
 RPC_ENV_VAR="${NETWORK_UPPER}_RPC_URL"

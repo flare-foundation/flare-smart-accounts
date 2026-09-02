@@ -9,6 +9,10 @@ contract DeployPersonalAccountImplementation is Script {
     function run(string calldata _expectedNetwork, bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
+        // the Flare Personal Account lays out storage for the Flare PA proxy lineage; the loan
+        // chain registers PersonalAccountRemote instead (see DeployRemoteAccountImplementations)
+        require(block.chainid != 1, "the Flare Personal Account does not belong on Ethereum");
+
         string memory network = _getNetwork(block.chainid);
         _requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {

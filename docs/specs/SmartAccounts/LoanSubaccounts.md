@@ -1164,9 +1164,10 @@ storage-lineage gate below is the third member of this family.
   canonical Morpho's `withdrawCollateral` accrues interest and oracle-checks position
   health, so a dead oracle blocks live-debt withdrawals at Morpho itself — which is why
   the gate's dead-oracle parked case is effectively the debt-free one, settleable through
-  `repay` (see The Flare fee). The mock deliberately does not model this; verify it
-  against the canonical Morpho source and the real market in the integration harness
-  before launch;
+  `repay` (see The Flare fee). `MockMorpho` models this check behind a switch (the fee
+  fixtures run over-leveraged with it off; dedicated tests run with it on), so the
+  interplay is pinned at the unit level; what remains is verifying the premise against the
+  canonical Morpho source and the real market in the integration harness before launch;
 - **fee terms configured before any route opens**: `registerLoanMarket`, then the one
   `setLoanFeeTerms` call (the activation — borrowing reverts until it executes); verify all
   three fields before enabling the forward route;
