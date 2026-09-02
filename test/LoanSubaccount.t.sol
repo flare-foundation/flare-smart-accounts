@@ -1297,6 +1297,23 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(mockAssetManager.lastRequestId(), 0);
     }
 
+    function testRedeemHomeComposeExpiredRevertNativeSweepFailed() public {
+        // an expired packet forwards its value to the parent; a parent that cannot take native
+        // (impossible for a real Personal Account) fails the delivery rather than stranding it
+        SubaccountProxy proxy =
+            new SubaccountProxy(address(controller), address(fxrp), SUBACCOUNT_TYPE_LOAN);
+        address subaccount = address(proxy);
+        _configureLoanBridge();
+        fxrp.mint(subaccount, 100e6);
+        bytes memory stale = _redeemHomePayloadAt(uint64(block.timestamp - 1));
+        (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, stale);
+
+        vm.deal(lzEndpoint, executorFee);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(ILoanSubaccount.NativeSweepFailed.selector);
+        ILoanSubaccount(subaccount).lzCompose{value: executorFee}(address(fxrpOft), guid, message, executor, "");
+    }
+
     function testStaleRedeemHomeComposeIsBoundedInAmountAndTime() public {
         // the residual accepted risk, pinned: a packet whose credit a public rail already moved
         // stays retriable, but can redeem at most its own amount out of later funds, and only

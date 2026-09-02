@@ -2755,6 +2755,27 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
     }
 
+    function testLzComposeRevertHardChecksOnEveryAction() public {
+        // each action carries its own copy of the hard checks, so each copy needs its own
+        // negative delivery - the deposit test above cannot stand in for borrow or withdraw
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+
+        _deliverExpectRevert(
+            subaccount, 1,
+            _borrowPayload(bytes32(0), DESTINATION_KIND_EVM, bytes32(uint256(1)), 500e18),
+            IComposeReceiverAccountBase.InvalidOperationId.selector
+        );
+        _deliverExpectRevert(
+            subaccount, 1, _withdrawPayload(bytes32("op-1"), 0),
+            ILoanSubaccountRemote.ZeroAmount.selector
+        );
+        _deliverExpectRevert(
+            subaccount, 1, _withdrawPayload(bytes32(0), 50e6),
+            IComposeReceiverAccountBase.InvalidOperationId.selector
+        );
+    }
+
     function testLzComposeRevertInsufficientComposeBalance() public {
         // the credited tokens were moved before the compose executed (the documented race):
         // the action fails closed instead of consuming unrelated idle balance
