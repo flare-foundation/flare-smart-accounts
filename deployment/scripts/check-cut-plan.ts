@@ -56,6 +56,8 @@ interface StaleSelector {
 
 const ZERO_CODE = "0x";
 const SUPPORTED_BASE_NETWORKS = ["coston2", "coston", "flare", "songbird", "scdev", "ethereum"];
+// scdev is a local chain with no fixed id and is not checked
+const CHAIN_IDS: Record<string, number> = { flare: 14, songbird: 19, coston: 16, coston2: 114, ethereum: 1 };
 const FACETS_ABI = {
   type: "tuple[]",
   components: [
@@ -85,6 +87,7 @@ async function main() {
   const diamond = cutConfig?.diamond ?? findDiamondAddress(deployedContracts);
   const rpcUrl = resolveRpcUrl(network);
   const web3 = new Web3(rpcUrl);
+  await assertRpcChain(web3, network);
 
   const deployedFacets = deployedContracts.filter((contract) => contract.name.endsWith("Facet"));
   const deployedByName = new Map(deployedFacets.map((contract) => [contract.name, contract]));
@@ -883,6 +886,23 @@ function validateNetwork(network: string) {
     // the pin logic keys on the exact "ethereum" network while the executor keys on
     // chain id 1; a staging alias would skip every preview pin check yet execute pinned
     throw new Error(`Unsupported network: ${network} — Ethereum has only the pinned production deployment`);
+  }
+}
+
+// the RPC is picked by network name while every downstream decision keys on the chain the RPC
+// actually serves; a mis-set <NETWORK>_RPC_URL would otherwise preview - and let the executor
+// cut - another chain
+async function assertRpcChain(web3: Web3, network: string) {
+  const baseNetwork = baseNetworkName(network);
+  const expected = CHAIN_IDS[baseNetwork];
+  if (expected === undefined) {
+    return;
+  }
+  const actual = Number(await web3.eth.getChainId());
+  if (actual !== expected) {
+    throw new Error(
+      `RPC for ${network} answers chain id ${actual}, expected ${expected} - check ${baseNetwork.toUpperCase()}_RPC_URL`
+    );
   }
 }
 

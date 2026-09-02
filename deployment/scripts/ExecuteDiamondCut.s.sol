@@ -22,6 +22,7 @@ contract ExecuteDiamondCut is Script {
     string private configFileName;
 
     function run(
+        string calldata _expectedNetwork,
         string calldata _configFileName,
         bool _staging
     )
@@ -47,6 +48,7 @@ contract ExecuteDiamondCut is Script {
         } else {
             network = "scdev";
         }
+        _requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -671,5 +673,20 @@ contract ExecuteDiamondCut is Script {
             );
         }
         return (address(0), bytes32(0), false);
+    }
+
+    /// @dev The wrapper picks the RPC by network name while this script derives the network
+    /// from the chain id; the two must agree, or a mis-set RPC variable would silently
+    /// retarget the whole flow to another chain.
+    function _requireExpectedNetwork(
+        string memory _derived,
+        string calldata _expected
+    )
+        private pure
+    {
+        require(
+            keccak256(bytes(_derived)) == keccak256(bytes(_expected)),
+            string.concat("RPC chain is ", _derived, ", not the named network ", _expected)
+        );
     }
 }

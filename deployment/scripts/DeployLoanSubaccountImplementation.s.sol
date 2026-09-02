@@ -6,7 +6,7 @@ import {LoanSubaccount} from "../../contracts/smartAccounts/implementation/LoanS
 
 // solhint-disable no-console
 contract DeployLoanSubaccountImplementation is Script {
-    function run(bool _staging) external {
+    function run(string calldata _expectedNetwork, bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         // the Flare-side implementation lays out storage for the Flare proxy lineage; the loan
@@ -14,6 +14,7 @@ contract DeployLoanSubaccountImplementation is Script {
         require(block.chainid != 1, "the Flare-side implementation does not belong on Ethereum");
 
         string memory network = _getNetwork(block.chainid);
+        _requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -31,6 +32,21 @@ contract DeployLoanSubaccountImplementation is Script {
                 "LoanSubaccount.sol: ",
                 vm.toString(loanSubaccountImplAddress)
             )
+        );
+    }
+
+    /// @dev The wrapper picks the RPC by network name while this script derives the network
+    /// from the chain id; the two must agree, or a mis-set RPC variable would silently
+    /// retarget the whole flow to another chain.
+    function _requireExpectedNetwork(
+        string memory _derived,
+        string calldata _expected
+    )
+        private pure
+    {
+        require(
+            keccak256(bytes(_derived)) == keccak256(bytes(_expected)),
+            string.concat("RPC chain is ", _derived, ", not the named network ", _expected)
         );
     }
 

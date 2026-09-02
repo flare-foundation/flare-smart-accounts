@@ -96,7 +96,7 @@ contract DeploySmartAccounts is Script {
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
-    function run(bool _fullDeploy, bool _staging) external {
+    function run(string calldata _expectedNetwork, bool _fullDeploy, bool _staging) external {
         // Ethereum is reproduced from pinned historical bytes, never deployed from current
         // source: the generic deployment would derive different addresses and its recorder
         // would overwrite the pinned deployment records
@@ -124,6 +124,7 @@ contract DeploySmartAccounts is Script {
         } else {
             network = "scdev";
         }
+        _requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -519,5 +520,19 @@ contract DeploySmartAccounts is Script {
             )
         );
     }
-}
 
+    /// @dev The wrapper picks the RPC by network name while this script derives the network
+    /// from the chain id; the two must agree, or a mis-set RPC variable would silently
+    /// retarget the whole flow to another chain.
+    function _requireExpectedNetwork(
+        string memory _derived,
+        string calldata _expected
+    )
+        private pure
+    {
+        require(
+            keccak256(bytes(_derived)) == keccak256(bytes(_expected)),
+            string.concat("RPC chain is ", _derived, ", not the named network ", _expected)
+        );
+    }
+}

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: scripts/deploy-cuts.sh <network> <cut-json-file-name-without-extension>
-# Example: scripts/deploy-cuts.sh coston2 cut-example
-# Example: scripts/deploy-cuts.sh coston2-staging cut-example
+# Usage: deployment/scripts/execute-diamond-cut.sh <network> <cut-json-file-name-without-extension>
+# Example: deployment/scripts/execute-diamond-cut.sh coston2 cut-example
+# Example: deployment/scripts/execute-diamond-cut.sh coston2-staging cut-example
 
 if [[ $# -ne 2 ]]; then
   echo "Usage: $0 <network> <cut-json-file-name-without-extension>" >&2
@@ -58,4 +58,4 @@ forge script deployment/scripts/ExecuteDiamondCut.s.sol:ExecuteDiamondCut \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
   --offline \
   --broadcast \
-  --sig "run(string,bool)" "$CUT_JSON" "$STAGING"
+  --sig "run(string,string,bool)" "$BASE_NETWORK" "$CUT_JSON" "$STAGING"

@@ -1178,8 +1178,10 @@ storage-lineage gate below is the third member of this family.
   every zero-value bridge-back would terminal-skip after its TTL and fall back to the
   fee-paying public rail;
 - **operator chain checks**: the implementation deploy scripts refuse the wrong chain family
-  (a remote implementation registered on Flare would corrupt every Personal Account's storage);
-  still confirm the RPC's chain id matches the named network before any cut;
+  (a remote implementation registered on Flare would corrupt every Personal Account's storage),
+  and every deploy and cut flow — the `check_cut` preview included — verifies that the RPC's
+  chain id matches the named network before acting, so a mis-set `<NETWORK>_RPC_URL` fails
+  instead of retargeting the flow;
 - **the fee-activation runbook rehearsed** once on a testnet diamond with a non-zero timelock,
   including the case where a third party executes the matured recipient call before the rates;
 - **the real Endpoint/OFT compose-delivery integration harness** for every action, in both

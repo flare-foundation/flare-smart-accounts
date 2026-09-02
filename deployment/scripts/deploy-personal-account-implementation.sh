@@ -63,7 +63,7 @@ forge script deployment/scripts/DeployPersonalAccountImplementation.s.sol:Deploy
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
   --offline \
-  --sig "run(bool)" "$STAGING" \
+  --sig "run(string,bool)" "$BASE_NETWORK" "$STAGING" \
   --broadcast | tee forge-deploy-output.txt
 
 npx tsx deployment/scripts/save-deployed-addresses.ts

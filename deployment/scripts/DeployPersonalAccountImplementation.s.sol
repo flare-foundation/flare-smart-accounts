@@ -6,10 +6,11 @@ import {PersonalAccount} from "../../contracts/smartAccounts/implementation/Pers
 
 // solhint-disable no-console
 contract DeployPersonalAccountImplementation is Script {
-    function run(bool _staging) external {
+    function run(string calldata _expectedNetwork, bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         string memory network = _getNetwork(block.chainid);
+        _requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -27,6 +28,21 @@ contract DeployPersonalAccountImplementation is Script {
                 "PersonalAccount.sol: ",
                 vm.toString(personalAccountImplAddress)
             )
+        );
+    }
+
+    /// @dev The wrapper picks the RPC by network name while this script derives the network
+    /// from the chain id; the two must agree, or a mis-set RPC variable would silently
+    /// retarget the whole flow to another chain.
+    function _requireExpectedNetwork(
+        string memory _derived,
+        string calldata _expected
+    )
+        private pure
+    {
+        require(
+            keccak256(bytes(_derived)) == keccak256(bytes(_expected)),
+            string.concat("RPC chain is ", _derived, ", not the named network ", _expected)
         );
     }
 

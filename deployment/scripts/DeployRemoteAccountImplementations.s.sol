@@ -9,7 +9,7 @@ import {
 
 // solhint-disable no-console
 contract DeployRemoteAccountImplementations is Script {
-    function run(bool _staging) external {
+    function run(string calldata _expectedNetwork, bool _staging) external {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         // the remote implementations lay out storage for the loan chain's proxy lineages; a copy
@@ -18,6 +18,7 @@ contract DeployRemoteAccountImplementations is Script {
         require(!_isFlareFamily(block.chainid), "remote implementations do not belong on a Flare-family chain");
 
         string memory network = _getNetwork(block.chainid);
+        _requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -46,6 +47,21 @@ contract DeployRemoteAccountImplementations is Script {
 
     function _isFlareFamily(uint256 _chainId) private pure returns (bool) {
         return _chainId == 14 || _chainId == 19 || _chainId == 16 || _chainId == 114;
+    }
+
+    /// @dev The wrapper picks the RPC by network name while this script derives the network
+    /// from the chain id; the two must agree, or a mis-set RPC variable would silently
+    /// retarget the whole flow to another chain.
+    function _requireExpectedNetwork(
+        string memory _derived,
+        string calldata _expected
+    )
+        private pure
+    {
+        require(
+            keccak256(bytes(_derived)) == keccak256(bytes(_expected)),
+            string.concat("RPC chain is ", _derived, ", not the named network ", _expected)
+        );
     }
 
     function _getNetwork(uint256 _chainId) private pure returns (string memory) {

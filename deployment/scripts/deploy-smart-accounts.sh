@@ -51,6 +51,6 @@ forge script deployment/scripts/DeploySmartAccounts.s.sol:DeploySmartAccounts \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
   --offline \
-  --sig "run(bool,bool)" "$FULL_DEPLOY" "$STAGING" \
+  --sig "run(string,bool,bool)" "$BASE_NETWORK" "$FULL_DEPLOY" "$STAGING" \
   --broadcast | tee forge-deploy-output.txt
 npx tsx deployment/scripts/save-deployed-addresses.ts
