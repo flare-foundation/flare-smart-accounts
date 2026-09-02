@@ -402,6 +402,11 @@ function loadArtifact(contractName: string): { bytecode?: unknown; deployedBytec
   };
 }
 
+// The trailer length is read from the compared code itself, which is sound: a reuse verdict
+// requires the functional prefix to hash-match the artifact's functional code, so a crafted
+// trailer can only append unreachable bytes to functionally identical code - a poisoned deploy
+// record cannot route selectors to different logic. The artifact side always carries a real
+// trailer (foundry.toml keeps the default CBOR metadata).
 function stripMetadata(code: Buffer): Buffer {
   const suffixLength = metadataSuffixLength(code);
   return code.subarray(0, code.length - suffixLength);

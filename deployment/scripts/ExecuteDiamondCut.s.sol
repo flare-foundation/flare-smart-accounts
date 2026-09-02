@@ -421,6 +421,12 @@ contract ExecuteDiamondCut is Script {
         return address(0);
     }
 
+    /// @dev Hashes the code without its CBOR metadata trailer. The trailer length is read from
+    /// the compared code itself, which is sound: REUSE requires the functional prefix to
+    /// hash-match the artifact's functional code, so a crafted trailer can only append
+    /// unreachable bytes to functionally identical code - a poisoned deploy record cannot route
+    /// selectors to different logic. The artifact side always carries a real trailer
+    /// (foundry.toml keeps the default CBOR metadata).
     function _runtimeCodeHash(
         bytes memory _code
     )
