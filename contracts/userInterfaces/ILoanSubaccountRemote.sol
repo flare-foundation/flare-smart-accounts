@@ -236,10 +236,11 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when a sub-unit fee remainder is forgiven at an exit gate: on a
-     * debt-free position it can never be transferred (ERC-20 moves whole base units) and
-     * never grows again, so a raw-zero gate would park the exits forever over less than one
-     * base unit.
+     * @notice Emitted when a sub-unit fee remainder is forgiven - at an exit gate, or when a
+     * {payLoanFee} brings the fee down to it: on a debt-free position it can never be
+     * transferred (ERC-20 moves whole base units) and never grows again, so a raw-zero gate
+     * would park the exits forever over less than one base unit. Never more than a sub-unit
+     * remainder: a whole base unit or more stays owed.
      * @param remainderX18 The forgiven remainder (base units at WAD precision, below 1e18).
      */
     event LoanFeeRemainderForgiven(

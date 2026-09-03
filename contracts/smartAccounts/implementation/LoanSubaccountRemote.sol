@@ -681,11 +681,14 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
 
     /// @dev A sub-unit remainder on a debt-free position can never be transferred (ERC-20
     /// moves whole units) and never grows again - a raw-zero gate would park the exits
-    /// forever over dust, so it is forgiven when a gate passes.
+    /// forever over dust, so it is forgiven when a gate passes or a payment brings the fee
+    /// down to it. Never more than that: a whole unit or more stays owed.
     function _forgiveFeeDust()
         private
     {
-        if (feePrincipal == 0 && flareDebtX18 > 0) {
+        // only a sub-unit remainder, and only on a debt-free position: a whole unit or more is
+        // a collectible fee, which a partial payment must leave owed
+        if (feePrincipal == 0 && flareDebtX18 > 0 && flareDebtX18 < WAD) {
             emit LoanFeeRemainderForgiven(flareDebtX18);
             flareDebtX18 = 0;
         }

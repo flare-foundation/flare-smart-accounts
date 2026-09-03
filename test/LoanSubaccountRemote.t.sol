@@ -2504,6 +2504,76 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(rlusd.balanceOf(parent), 30e18);
     }
 
+    function testPayLoanFeePartialPaymentOnADebtFreeAccountKeepsTheRestOwed() public {
+        // the cap below the collectible, on a debt-free position: exactly the cap is paid, the
+        // whole-unit remainder stays owed (dust forgiveness is for sub-unit remainders only)
+        // and keeps the exit refused until the rest is paid
+        _configureSettings();
+        (address parent, address subaccount) = _borrowedPairWithFee("rPartialPayFeeOwner");
+        _externalRepay(subaccount, 1000e18);
+        rlusd.mint(parent, 70e18);
+        vm.startPrank(parent);
+        rlusd.approve(subaccount, 70e18);
+        assertEq(ILoanSubaccountRemote(subaccount).payLoanFee(1e18), 1e18);
+        vm.stopPrank();
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 1e18);
+        (uint256 principal, uint256 feeDebtX18, uint256 collectible, , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 0);
+        assertEq(feeDebtX18, 69e18 * 1e18);
+        assertEq(collectible, 69e18);
+
+        bytes memory stripping = _withdrawPayload(bytes32("op-w"), 100e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, stripping);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 69e18)
+        );
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+
+        vm.prank(parent);
+        assertEq(ILoanSubaccountRemote(subaccount).payLoanFee(69e18), 69e18);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        _deliverWithValue(subaccount, 2, 0, stripping, RETURN_MIN_VALUE);
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 100e6);
+    }
+
+    function testPayLoanFeeForgivesOnlySubUnitRemainders() public {
+        // the forgiveness boundary: one second past the year puts a sub-base-unit tail on
+        // top of the fee. Paying down to exactly one base unit leaves it owed (the remainder
+        // is >= 1e18 at WAD precision); paying that last unit leaves only the tail, which is
+        // forgiven with its exact amount
+        _configureSettings();
+        (address parent, address subaccount) = _borrowedPairWithFee("rDustBoundaryOwner");
+        vm.warp(vm.getBlockTimestamp() + 1);
+        _externalRepay(subaccount, 1000e18);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, uint256 collectible, , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        uint256 tail = feeDebtX18 - collectible * 1e18;
+        assertGt(tail, 0);
+        assertLt(tail, 1e18);
+
+        rlusd.mint(parent, collectible);
+        vm.startPrank(parent);
+        rlusd.approve(subaccount, collectible);
+        assertEq(ILoanSubaccountRemote(subaccount).payLoanFee(collectible - 1), collectible - 1);
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 1e18 + tail);
+
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanFeeRemainderForgiven(tail);
+        assertEq(ILoanSubaccountRemote(subaccount).payLoanFee(1), 1);
+        vm.stopPrank();
+        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), collectible);
+    }
+
     function testPayLoanFeeGuards() public {
         // only the parent; a non-zero cap; held while paused; an unapproved parent reverts
         // whole and retriable with the fee untouched
