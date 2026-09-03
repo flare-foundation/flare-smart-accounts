@@ -200,10 +200,11 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // the signed amount is the cap: never more than it, never more than is owed. The
         // parent's own balance and allowance fund the transfer straight to the recipient -
         // nothing lands here, so this account's loan tokens keep their one meaning; an
-        // under-approved, underfunded or frozen party reverts, retriable
+        // under-approved, underfunded or frozen party reverts, retriable. `msg.sender` IS the
+        // parent (onlyParent), spelled that way so the pull is visibly from the caller
         _paid = Math.min(_maxAmount, collectible);
         address recipient = ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient;
-        IERC20(market.marketParams.loanToken).safeTransferFrom(parentPersonalAccount, recipient, _paid);
+        IERC20(market.marketParams.loanToken).safeTransferFrom(msg.sender, recipient, _paid);
         flareDebtX18 -= _paid * WAD;
         _forgiveFeeDust();
         emit LoanFeeCollected(recipient, _paid);
