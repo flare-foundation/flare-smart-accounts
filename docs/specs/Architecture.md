@@ -121,7 +121,7 @@ interface IMasterAccountController is
     IDiamondCut, IDiamondLoupe, IERC165, IERC173,
     IAgentVaultsFacet, IExecutorsFacet, IInstructionFeesFacet,
     IInstructionsFacet, IComposeTransportFacet, ISubaccountsFacet,
-    ILoanMarketsFacet, ILoanBridgeSettingsFacet, IMemoInstructionsFacet,
+    ILoanMarketsFacet, IBridgeRoutesFacet, IMemoInstructionsFacet,
     IPauseFacet, IPaymentProofsFacet, IPersonalAccountsFacet,
     IReaderFacet, ITimelockFacet, IVaultsFacet, IXrplProviderWalletsFacet
 {}

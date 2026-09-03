@@ -326,7 +326,7 @@ The account's configuration lives in two facets, both cut **only on the remote d
   caller), the OFT on this chain (the only allowed compose sender, the authoritative identity of
   the bridged token, and the vehicle for the bridge-back sweep), and the pinned origin route back
   to Flare (`originEid`/`originPeer`). The timelocked `setComposeTransport(transport)` validates
-  the OFT the way the Flare-side `setLoanBridgeSettings` does — canonical `oftVersion`, decimals
+  the OFT the way the Flare-side `setFxrpOft` does — canonical `oftVersion`, decimals
   shared with its own token, live peer equal to the pinned one — plus, on this side, that the
   endpoint has code and is the OFT's own (the Flare validator instead requires the OFT to wrap
   FXRP itself, and its receiver reads the endpoint live from the OFT) — and never clears, since
@@ -345,10 +345,10 @@ The account's configuration lives in two facets, both cut **only on the remote d
   endpoint/OFT/peer tuple is never restored, because packets forged under it would pass
   authentication again the moment it is. The accepted cost is an owner-held availability lever
   stronger than the pause — the clear also stops `sweepToOrigin` — documented as the nuclear
-  action, with the owner trusted for liveness. The Flare route's clear (an all-zero
-  `setLoanBridgeSettings`) stays timelocked while this one is immediate; the asymmetry is
-  acceptable because on Flare the pause already gates every outbound move and the inbound
-  redeem-home is harmless in direction.
+  action, with the owner trusted for liveness. The Flare-side clears (a zero peer in
+  `setBridgeRoute`, a zero adapter in `setFxrpOft`) stay timelocked while this one is immediate;
+  the asymmetry is acceptable because on Flare the pause already gates every outbound move and
+  the inbound redeem-home is harmless in direction.
 - **The loan markets**
   ([`LoanMarketsFacet`](../../../contracts/smartAccounts/facets/LoanMarketsFacet.sol)), the
   per-type binding: the timelocked `registerLoanMarket(type, market)` binds a subaccount type to
@@ -357,13 +357,40 @@ The account's configuration lives in two facets, both cut **only on the remote d
   is RLUSD by governance policy per registration, not an on-chain check. The first registration
   permanently pins the collateral token on the transport: every later transport must wrap it
   (rotating to a different OFT adapter for the same token stays possible), so a transport
-  replacement can never strand the write-once bindings, and the pin survives a clear. One
-  selected loan chain at a time: the Flare side stores a single global destination route and this
-  side one global transport, so the deployment serves exactly one loan chain.
+  replacement can never strand the write-once bindings, and the pin survives a clear.
 
-Serving several loan chains simultaneously would need the transport bound per subaccount type
-(the type would then identify both the chain and the pool) and a per-type destination on the
-Flare side — a design change, not a configuration.
+### Multiple remote chains
+
+The topology is one origin (Flare) and any number of remote chains, described in the same units
+on both sides. Each remote diamond stores **one compose transport** with one origin — Flare — so
+a remote chain is self-contained. Flare stores, on the type-generic `BridgeRoutesFacet`: the one
+FXRP OFT adapter (`setFxrpOft`), **one pinned peer per remote chain** (`setBridgeRoute(eid,
+peer)`, the *route*), and **the remote chain each bridging subaccount type lives on**
+(`setSubaccountTypeRoute(type, eid)`). A subaccount type is therefore a (chain, product) pair —
+the loan type on Ethereum, a second Morpho pool on Base as its own type — while a Flare-local
+type (a vault subaccount) is simply never pointed at a route. The Personal Account's cross-chain
+user operation names its `destinationEid` explicitly, and the route registry is its allowlist
+(`UnknownBridgeRoute`). Every send re-checks the adapter's live peer for its destination against
+the pinned one, and an adapter rotation (`setFxrpOft`) re-validates every registered route
+against the new adapter's peers, so a route can never silently die in the field.
+
+Adding a remote chain is a deployment of existing bytecode plus governance, with nothing changing
+in what users sign or what clients build: bootstrap the diamond there from the pinned init code,
+cut the remote facet set, `setComposeTransport`, register the pool under a new type (the same
+`LoanSubaccountRemote` if it is Morpho; a new implementation otherwise), `setLoanFeeTerms`; then
+on Flare `setSubaccountImplementation(type, <the Flare LoanSubaccount>)`, `setBridgeRoute` and
+`setSubaccountTypeRoute` — the route last, once the remote side exists. Clearing a route (zero
+peer) fails every type pointed at it and every user operation naming it closed until it is set
+again, with the type assignments kept.
+
+Deliberately not built: **multiple accepted origins on a remote transport** (a remote Personal
+Account relaying a Flare-signed batch onward to a second remote chain). The base authenticates
+exactly one origin today. The extension is additive when it is ever wanted — append an
+`acceptedOrigins` mapping to the transport namespace, make the origin check a membership test
+with the peer chosen by the packet's `srcEid`, keep `originEid` as the distinguished home the
+fixed rails send to, and re-deploy the remote implementations behind the beacons — none of which
+changes an instruction a user signs; it widens the remote authentication root, so it is a
+decision to take on its own, with its own review.
 
 One race is accepted on this side: LayerZero credits the bridged tokens and executes the
 composed action in two separate steps, so a signed bridge-back sweep delivered in that window
@@ -630,7 +657,7 @@ time, so no snapshotted rate can overflow the accrual math — a bad snapshot co
 repaired by changing the global terms, since the account computes at its stored terms first)
 and a non-zero `feeRecipient`, set **as one unit** by the timelocked
 `setLoanFeeTerms(type, terms)` after market registration — the same one-call shape as
-`setLoanBridgeSettings` and `setComposeTransport`. The recipient is the permanent **activation
+`setComposeTransport`. The recipient is the permanent **activation
 marker**: borrowing reverts (`FeeTermsNotConfigured`, retriably, never consuming the packet)
 until the terms are set, and the setter never accepts a zero recipient, so the marker cannot
 return to unconfigured. That on-chain gate is what closes the fee-free window — without it,
@@ -942,8 +969,8 @@ transport first (market registration already requires it), then the verified rem
 implementation, then `registerLoanMarket`, then `setLoanFeeTerms` (the activation; borrowing
 reverts until it executes, so the market is registered but inert across the gap — verify all
 three fields before opening any route); on Flare, the
-verified sender implementation, and the forward route (`setLoanBridgeSettings`) enabled
-**last**, as the deployment gates already require. Borrowing is impossible without
+verified sender implementation, and the forward route (`setBridgeRoute` for the chain,
+`setSubaccountTypeRoute` for the type) enabled **last**, as the deployment gates already require. Borrowing is impossible without
 configured terms at every point in that order. Missing fee configuration never makes the
 pause-exempt repayment rail unusable (an unconfigured type cannot have debt to repay; zero
 terms accrue zero, and debt presupposes the borrow gate passed).
@@ -1061,14 +1088,15 @@ reentrancy guard; `receive()` and the views stay callable and are benign.
   NFT/1155 holders in v1 (a safe-transfer in without the receiver hooks would revert at the
   sender; add them the day a flow needs them — the batch can already move them out).
 
-**The Flare-side sender.** `PersonalAccount.sendCrossChainUserOp(calls, operationId,
+**The Flare-side sender.** `PersonalAccount.sendCrossChainUserOp(destinationEid, calls, operationId,
 deadline, extraOptions)` — the one instruction: builds the execute envelope on-chain (a
 malformed envelope cannot reach the bridge), validates the envelope before any fee is paid
 (`InvalidCrossChainUserOp`: zero id, passed deadline, empty batch — the batch itself is
 not interpreted; the wallet owns the correctness of targets and amounts, as it does for
-`executeUserOp`), and sends a message-only compose (amount zero) over the configured FXRP OFT
-to its own address — the validated path: configured bridge settings, live peer re-checked
-against the pinned one, exact quoted fee, pause-gated. It is callable **only by the account
+`executeUserOp`), and sends a message-only compose (amount zero) over the FXRP OFT adapter to
+its own address on the chain `destinationEid` names — the validated path: a registered bridge
+route for that endpoint (the route registry is the allowlist of chains; `UnknownBridgeRoute`
+otherwise), live peer re-checked against the pinned one, exact quoted fee, pause-gated. It is callable **only by the account
 itself**, which makes it reachable exclusively through an `executeUserOp` multicall — the XRPL
 signature covers every target, value and calldata end-to-end. The fee value rides from the
 account's own native balance through the multicall, and any excess simply remains on the
@@ -1096,12 +1124,12 @@ Account.
 ### Flare-side deployments
 
 - **Fresh deployments** (`pnpm deploy_contracts` → `DeploySmartAccounts`): the loan module is
-  part of the standard cut — `SubaccountsFacet` and `LoanBridgeSettingsFacet` are deployed with the other smart-accounts
+  part of the standard cut — `SubaccountsFacet` and `BridgeRoutesFacet` are deployed with the other smart-accounts
   facets, a `LoanSubaccount` implementation is deployed alongside the Personal Account
   implementation, and type `1` is registered with `setSubaccountImplementation` before
   `setTimelockDuration`, while the timelock is still zero.
 - **Existing deployments** (flare, songbird, coston2): the facet needs no dedicated deploy
-  step — naming `SubaccountsFacet`, `LoanBridgeSettingsFacet` and the replaced `PersonalAccountsFacet`
+  step — naming `SubaccountsFacet`, `BridgeRoutesFacet` and the replaced `PersonalAccountsFacet`
   (it gains `createPersonalAccount`) in a cut plan
   (`deployment/cuts/<network>/cuts-<date>.json`, verified with `pnpm check_cut`, executed with
   `pnpm diamond_cut`) deploys it from the artifact as part of the cut flow. The implementation
@@ -1232,22 +1260,24 @@ storage-lineage gate below is the third member of this family.
   receiver tests on both chains (the Flare redeem-home and the loan-chain withdraw), and the
   wire-level `lzReceive → sendCompose → lzCompose` path with delivered compose value, zero and
   non-zero, is exactly what the harness must add).
-- **`setLoanBridgeSettings` comes last, and only once the loan-chain side exists.** Its
-  validation reads the OFT's live peer for the destination endpoint, so it cannot be configured
-  before the destination route is wired; until then the forward moves revert with
-  `LoanBridgeNotConfigured` while creation and the backward sweep already work. The loan-chain-side account (same diamond address, same derivation) must be
-  deployed before the forward moves are enabled, since bridged FXRP lands on the subaccount's
-  own address there.
+- **Each route is enabled last, and only once its remote side exists.** `setBridgeRoute`
+  reads the adapter's live peer for the destination endpoint, so it cannot be set before the
+  adapter's peer is wired; until the type is pointed at a live route its forward moves revert
+  with `BridgeRouteNotConfigured` (a cross-chain user operation naming the chain with
+  `UnknownBridgeRoute`) while creation and the backward sweep already work. The remote account
+  (same diamond address, same derivation) must be deployed before the forward moves are
+  enabled, since bridged FXRP lands on the subaccount's own address there.
 
 ## Design decisions, resolved
 
 The asset-moving decisions below were taken with the methods they concern; each is
 incorporated in the sections above, and the note here records what was decided and what was
-deliberately not built. One leftover is still live: the `LoanBridgeSettingsFacet` naming.
+deliberately not built.
 
 - ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed — by `repay` itself or by a full external liquidation — the same `repay` call pushes the surplus to the parent Personal Account (the user's own loan-chain account), best-effort: a push the token refuses stays on the account for a later `repay` to retry, never rolling back the repayment. No generic `recoverToken`: stray tokens strand, as on the Flare side. Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
 - ~~Atomic withdraw-and-bridge action~~ — resolved, built as `ACTION_WITHDRAW` itself: the withdraw compose withdraws the collateral and bridges it home in the same execution (the withdraw/redeposit race is closed for withdrawals; it survives only for residue). Compose value is accepted for this one action and spent in the same call — the return leg's fee, prepaid from Flare as message-1 compose value, quoted against the signed `returnOptions`, excess to the parent; every delivery must carry the signed `minComposeValue` floor (delivery is permissionless, the value unauthenticated — below the floor nothing consumes the packet), and a short delivery reverts and stays retriable. Two accepted residuals: bad signed `returnOptions` park that withdrawal until a fresh instruction reusing the same operation id (the parked packet then terminal-skips as a duplicate), and the redeem-home packet residual above applies to the return leg as to any bridge-back — including its best-effort redemption fee.
 - ~~The Flare fee~~ — resolved, designed and built: checkpoint accounting of `max(feeFloor, market interest + feeSpread)` over the account's Morpho debt, per-type timelocked terms behind a recipient activation marker, collection in `repay` (debt first) and through the parent-signed `payLoanFee` (the fee alone, from the remote PA's own RLUSD, the signed amount as cap), with the exits gated as a secured claim (an under-secured withdraw or sweep is refused until the fee is paid). The gate's basis is gross collateral at factor 3: an equity basis would widen the Morpho-allows/gate-refuses band about fourfold, and a lower factor would trade recovery headroom for a rarer band; `payLoanFee` is the fee-only way through that band (see The exit gate). See The Flare fee.
-- ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`. Remaining leftover: `LoanBridgeSettingsFacet` is the Flare end of the same route under a loan name (its validation is FXRP-specific); revisit if a second route ever exists.
+- ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`.
+- ~~`LoanBridgeSettingsFacet`, one global destination~~ — resolved: the Flare end became the type-generic `BridgeRoutesFacet` — one FXRP adapter (`setFxrpOft`, re-validating every route on rotation), one pinned peer per remote chain (`setBridgeRoute`), and the chain each bridging subaccount type lives on (`setSubaccountTypeRoute`); the Personal Account's `sendCrossChainUserOp` names its `destinationEid`, allowlisted by the registry. A new remote chain is a deployment plus governance. Multiple accepted origins on a remote transport (relay hops) were deliberately left for a later, additive change — see Multiple remote chains.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.
 - ~~Native payability~~ — resolved the other way: no `receive()` and no native exit on the Flare subaccount (no protocol flow leaves native on it — the bridge refunds its caller, redemption outcomes land on the parent, and the compose value of its own bridge-back is forwarded within the same call); native landing without a call (pre-deployment funding of the predicted address, a force-send) strands — accepted; a beacon upgrade can add an exit if it ever matters.

@@ -52,7 +52,7 @@ import {
     SUBACCOUNT_TYPE_NONE
 } from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
 import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
-import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
+import {IBridgeRoutesFacet} from "../contracts/userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MockReentrantToken} from "../contracts/mock/MockReentrantToken.sol";
@@ -3665,7 +3665,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             value: 0.01 ether,
             data: abi.encodeCall(
                 IPersonalAccount.sendCrossChainUserOp,
-                (batch, bytes32("op-exit"), uint64(vm.getBlockTimestamp() + 1 hours), "")
+                (dstEid, batch, bytes32("op-exit"), uint64(vm.getBlockTimestamp() + 1 hours), "")
             )
         });
         vm.prank(address(controller));
@@ -4052,14 +4052,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(remotePa, parent);
         assertEq(rlusd.balanceOf(remotePa), 5e18);
 
-        // the Flare-only bridge settings are not routable on this diamond
+        // the Flare-only bridge routes are not routable on this diamond
         vm.expectRevert(
-            abi.encodeWithSelector(
-                FunctionNotFound.selector,
-                ILoanBridgeSettingsFacet.getLoanBridgeSettings.selector
-            )
+            abi.encodeWithSelector(FunctionNotFound.selector, IBridgeRoutesFacet.getFxrpOft.selector)
         );
-        ILoanBridgeSettingsFacet(address(minimal)).getLoanBridgeSettings();
+        IBridgeRoutesFacet(address(minimal)).getFxrpOft();
     }
 
     //
@@ -4222,8 +4219,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         bytes32 peer = bytes32(uint256(uint160(address(fxrpOft))));
         fxrpOft.setPeer(dstEid, peer);
-        vm.prank(governance);
-        controller.setLoanBridgeSettings(address(fxrpOft), dstEid, peer);
+        vm.startPrank(governance);
+        controller.setFxrpOft(address(fxrpOft));
+        controller.setBridgeRoute(dstEid, peer);
+        controller.setSubaccountTypeRoute(senderType, dstEid);
+        vm.stopPrank();
     }
 
     /// A Flare PersonalAccount behind this diamond's beacon (the Flare implementation is the
@@ -4243,7 +4243,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             target: flarePa,
             value: 0.01 ether,
             data: abi.encodeCall(
-                IPersonalAccount.sendCrossChainUserOp, (batch, bytes32("op-t"), _deadline, "")
+                IPersonalAccount.sendCrossChainUserOp, (dstEid, batch, bytes32("op-t"), _deadline, "")
             )
         });
         vm.prank(address(controller));

@@ -16,7 +16,7 @@ import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
-import {ILoanBridgeSettingsFacet} from "../../userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
+import {IBridgeRoutesFacet} from "../../userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 import {
@@ -281,6 +281,7 @@ contract PersonalAccount is
 
     /// @inheritdoc IPersonalAccount
     function sendCrossChainUserOp(
+        uint32 _destinationEid,
         IPersonalAccount.Call[] calldata _calls,
         bytes32 _operationId,
         uint64 _deadline,
@@ -296,9 +297,9 @@ contract PersonalAccount is
             _operationId != bytes32(0) && _deadline >= block.timestamp && _calls.length > 0,
             InvalidCrossChainUserOp()
         );
-        (uint32 destinationEid, bytes32 guid) =
-            _sendCrossChainUserOp(_calls, _operationId, _deadline, _extraOptions);
-        emit CrossChainUserOpSent(_operationId, _calls.length, destinationEid, guid);
+        bytes32 guid =
+            _sendCrossChainUserOp(_destinationEid, _calls, _operationId, _deadline, _extraOptions);
+        emit CrossChainUserOpSent(_operationId, _calls.length, _destinationEid, guid);
     }
 
     /// @inheritdoc IPersonalAccount
@@ -389,27 +390,30 @@ contract PersonalAccount is
     /// Requires an unpaused, configured route with the live peer still pinned; exactly the
     /// quoted fee is spent.
     function _sendCrossChainUserOp(
+        uint32 _destinationEid,
         IPersonalAccount.Call[] memory _calls,
         bytes32 _operationId,
         uint64 _deadline,
         bytes calldata _extraOptions
     )
         private
-        returns (uint32 _destinationEid, bytes32 _guid)
+        returns (bytes32 _guid)
     {
         // a forward move: pausing the controller stops cross-chain instructions immediately
         require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
 
-        (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
-            ILoanBridgeSettingsFacet(controllerAddress).getLoanBridgeSettings();
+        // the route registry is the allowlist of destinations: the adapter must be configured
+        // and governance must have pinned a peer for exactly this endpoint
+        address fxrpOft = IBridgeRoutesFacet(controllerAddress).getFxrpOft();
+        bytes32 destinationPeer = IBridgeRoutesFacet(controllerAddress).getBridgeRoute(_destinationEid);
         require(
-            fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
-            LoanBridgeNotConfigured()
+            fxrpOft != address(0) && destinationPeer != bytes32(0),
+            UnknownBridgeRoute(_destinationEid)
         );
         // a peer mutation on the OFT after configuration must fail closed, not deliver the
         // instruction to an unknown remote OApp
         require(
-            IOAppCore(fxrpOft).peers(destinationEid) == destinationPeer,
+            IOAppCore(fxrpOft).peers(_destinationEid) == destinationPeer,
             WrongDestinationPeer()
         );
 
@@ -421,7 +425,7 @@ contract PersonalAccount is
             abi.encode(_operationId, _deadline, _calls)
         );
         SendParam memory sendParam = SendParam({
-            dstEid: destinationEid,
+            dstEid: _destinationEid,
             to: bytes32(uint256(uint160(address(this)))),
             amountLD: 0,
             minAmountLD: 0,
@@ -444,7 +448,6 @@ contract PersonalAccount is
         );
         // slither-disable-end arbitrary-send-eth
 
-        _destinationEid = destinationEid;
         _guid = receipt.guid;
     }
 

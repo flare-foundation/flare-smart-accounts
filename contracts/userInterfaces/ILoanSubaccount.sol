@@ -190,13 +190,14 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
 
     /**
-     * @notice Reverts if the loan bridge settings have not been configured on the controller.
+     * @notice Reverts if this subaccount's type has no complete bridge route on the controller:
+     * no FXRP OFT adapter, a type not pointed at a remote chain, or a cleared route.
      */
-    error LoanBridgeNotConfigured();
+    error BridgeRouteNotConfigured();
 
     /**
      * @notice Reverts if the OFT's live peer for the destination chain no longer matches the
-     * peer pinned in the controller's bridge settings.
+     * peer pinned in the controller's bridge route for this subaccount's type.
      */
     error WrongDestinationPeer();
 

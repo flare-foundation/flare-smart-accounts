@@ -24,7 +24,7 @@ import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/Instruc
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
 import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
 import {SubaccountsFacet} from "../../contracts/smartAccounts/facets/SubaccountsFacet.sol";
-import {LoanBridgeSettingsFacet} from "../../contracts/smartAccounts/facets/LoanBridgeSettingsFacet.sol";
+import {BridgeRoutesFacet} from "../../contracts/smartAccounts/facets/BridgeRoutesFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
@@ -92,7 +92,7 @@ contract DeploySmartAccounts is Script {
     PauseFacet private pauseFacet;
     ReaderFacet private readerFacet;
     SubaccountsFacet private subaccountsFacet;
-    LoanBridgeSettingsFacet private loanBridgeSettingsFacet;
+    BridgeRoutesFacet private bridgeRoutesFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
@@ -419,7 +419,7 @@ contract DeploySmartAccounts is Script {
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
         subaccountsFacet = new SubaccountsFacet();
-        loanBridgeSettingsFacet = new LoanBridgeSettingsFacet();
+        bridgeRoutesFacet = new BridgeRoutesFacet();
 
         smartAccountsFacets = new IDiamond.FacetCut[](14);
         // v1.0.0 facets (keep original order)
@@ -437,7 +437,7 @@ contract DeploySmartAccounts is Script {
         smartAccountsFacets[10] = _addFacet(address(pauseFacet), "PauseFacet");
         smartAccountsFacets[11] = _addFacet(address(readerFacet), "ReaderFacet");
         smartAccountsFacets[12] = _addFacet(address(subaccountsFacet), "SubaccountsFacet");
-        smartAccountsFacets[13] = _addFacet(address(loanBridgeSettingsFacet), "LoanBridgeSettingsFacet");
+        smartAccountsFacets[13] = _addFacet(address(bridgeRoutesFacet), "BridgeRoutesFacet");
     }
 
     function _logSmartAccountsFacetAddresses() internal view {
@@ -514,9 +514,9 @@ contract DeploySmartAccounts is Script {
         );
         console2.log(
             string.concat(
-                "DEPLOYED: LoanBridgeSettingsFacet, ",
-                "LoanBridgeSettingsFacet.sol: ",
-                vm.toString(address(loanBridgeSettingsFacet))
+                "DEPLOYED: BridgeRoutesFacet, ",
+                "BridgeRoutesFacet.sol: ",
+                vm.toString(address(bridgeRoutesFacet))
             )
         );
     }

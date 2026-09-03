@@ -22,7 +22,7 @@ import {
     ISubaccountsFacet,
     SUBACCOUNT_TYPE_NONE
 } from "../../userInterfaces/facets/ISubaccountsFacet.sol";
-import {ILoanBridgeSettingsFacet} from "../../userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
+import {IBridgeRoutesFacet} from "../../userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {IExecutorsFacet} from "../../userInterfaces/facets/IExecutorsFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
@@ -33,7 +33,7 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * @notice Flare-side deterministic staging account for loan-related assets owned by a Personal
  * Account. Its parent sends the typed loan instructions; anyone may sweep idle FXRP home, and
  * authenticated bridge-back FXRP from its loan-chain twin is redeemed on arrival
- * ({ComposeReceiverAccountBase}, with the transport read from the bridge settings).
+ * ({ComposeReceiverAccountBase}, with the transport read from its type's bridge route).
  * @dev No native rail: no `receive()` and no native exit. The one protocol-delivered native is
  * the compose value of its own twin's bridge-back, forwarded whole within the same call (a
  * revert unwinds it), so a plain send reverts at the sender. Native landing without a call
@@ -242,7 +242,7 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         }
     }
 
-    /// @dev Derives the inbound bridge-back transport by reversing the configured Flare route:
+    /// @dev Derives the inbound bridge-back transport by reversing its type's bridge route:
     /// the same OFT adapter, endpoint and pinned peer the forward moves send with, read as
     /// origin instead of destination.
     function _getTransport()
@@ -250,10 +250,10 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         returns (IComposeTransportFacet.Transport memory _transport)
     {
         (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
-            ILoanBridgeSettingsFacet(controller).getLoanBridgeSettings();
+            IBridgeRoutesFacet(controller).getSubaccountTypeRoute(subaccountType);
         require(
             fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
-            LoanBridgeNotConfigured()
+            BridgeRouteNotConfigured()
         );
         _transport = IComposeTransportFacet.Transport({
             lzEndpoint: address(IOAppCore(fxrpOft).endpoint()),
@@ -370,10 +370,10 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
         require(!IPauseFacet(controller).isPaused(), IPauseFacet.IsPaused());
 
         (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
-            ILoanBridgeSettingsFacet(controller).getLoanBridgeSettings();
+            IBridgeRoutesFacet(controller).getSubaccountTypeRoute(subaccountType);
         require(
             fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
-            LoanBridgeNotConfigured()
+            BridgeRouteNotConfigured()
         );
         // a peer mutation on the OFT after configuration must fail closed, not deliver the
         // locked FXRP to an unknown remote OApp

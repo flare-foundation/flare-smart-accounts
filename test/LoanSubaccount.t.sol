@@ -39,7 +39,7 @@ import {
     SUBACCOUNT_TYPE_LOAN,
     SUBACCOUNT_TYPE_NONE
 } from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
-import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
+import {IBridgeRoutesFacet} from "../contracts/userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {
@@ -1353,7 +1353,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // no bridge settings, no transport to authenticate against
         (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, _redeemHomePayload());
         vm.prank(lzEndpoint);
-        vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
+        vm.expectRevert(ILoanSubaccount.BridgeRouteNotConfigured.selector);
         ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
         _configureLoanBridge();
 
@@ -1453,7 +1453,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             target: personalAccount,
             value: messagingFee,
             data: abi.encodeCall(
-                IPersonalAccount.sendCrossChainUserOp, (batch, bytes32("op-x"), deadline, "")
+                IPersonalAccount.sendCrossChainUserOp, (destinationEid, batch, bytes32("op-x"), deadline, "")
             )
         });
         vm.expectEmit();
@@ -1481,24 +1481,26 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         // self-call only
         vm.expectRevert(IPersonalAccount.OnlySelf.selector);
-        IPersonalAccount(personalAccount).sendCrossChainUserOp(batch, bytes32("op-x"), deadline, "");
+        IPersonalAccount(personalAccount).sendCrossChainUserOp(destinationEid, batch, bytes32("op-x"), deadline, "");
 
         // envelope checks, before any fee is paid: zero id, passed deadline, empty batch
         vm.startPrank(personalAccount);
         vm.expectRevert(IPersonalAccount.InvalidCrossChainUserOp.selector);
-        IPersonalAccount(personalAccount).sendCrossChainUserOp(batch, bytes32(0), deadline, "");
+        IPersonalAccount(personalAccount).sendCrossChainUserOp(destinationEid, batch, bytes32(0), deadline, "");
         vm.expectRevert(IPersonalAccount.InvalidCrossChainUserOp.selector);
         IPersonalAccount(personalAccount).sendCrossChainUserOp(
+            destinationEid,
             batch, bytes32("op-x"), uint64(block.timestamp - 1), ""
         );
         vm.expectRevert(IPersonalAccount.InvalidCrossChainUserOp.selector);
         IPersonalAccount(personalAccount).sendCrossChainUserOp(
+            destinationEid,
             new IPersonalAccount.Call[](0), bytes32("op-x"), deadline, ""
         );
 
         // bridge not configured yet
-        vm.expectRevert(IPersonalAccount.LoanBridgeNotConfigured.selector);
-        IPersonalAccount(personalAccount).sendCrossChainUserOp(batch, bytes32("op-x"), deadline, "");
+        vm.expectRevert(abi.encodeWithSelector(IPersonalAccount.UnknownBridgeRoute.selector, destinationEid));
+        IPersonalAccount(personalAccount).sendCrossChainUserOp(destinationEid, batch, bytes32("op-x"), deadline, "");
         vm.stopPrank();
 
         _configureLoanBridge();
@@ -1511,6 +1513,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             )
         );
         IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee - 1}(
+            destinationEid,
             batch, bytes32("op-x"), deadline, ""
         );
 
@@ -1519,6 +1522,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(personalAccount);
         vm.expectRevert(IPersonalAccount.WrongDestinationPeer.selector);
         IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
+            destinationEid,
             batch, bytes32("op-x"), deadline, ""
         );
         fxrpOft.setPeer(destinationEid, destinationPeer);
@@ -1534,6 +1538,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(personalAccount);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
         IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
+            destinationEid,
             batch, bytes32("op-x"), deadline, ""
         );
     }
@@ -1553,6 +1558,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             data: abi.encodeCall(
                 IPersonalAccount.sendCrossChainUserOp,
                 (
+                    destinationEid,
                     _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18), bytes32("op-x"),
                     uint64(block.timestamp + 1 hours), options
                 )
@@ -1580,6 +1586,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             data: abi.encodeCall(
                 IPersonalAccount.sendCrossChainUserOp,
                 (
+                    destinationEid,
                     _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18), bytes32("op-x"),
                     uint64(block.timestamp + 1 hours), ""
                 )
@@ -1604,6 +1611,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(personalAccount);
         IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
+            destinationEid,
             batch, bytes32("op-x"), deadline, ""
         );
         (,,,,, bytes memory composeMsg,) = fxrpOft.lastSendParam();
@@ -1613,119 +1621,364 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testSetLoanBridgeSettingsRevertNotOwner() public {
+    //
+    // bridge routes
+    //
+
+    function testBridgeRoutesRevertNotOwner() public {
         address notOwner = makeAddr("notOwner");
-        vm.prank(notOwner);
-        vm.expectRevert(
-            abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
-        );
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+        vm.startPrank(notOwner);
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance));
+        controller.setFxrpOft(address(fxrpOft));
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance));
+        controller.setBridgeRoute(destinationEid, destinationPeer);
+        vm.expectRevert(abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance));
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, destinationEid);
+        vm.stopPrank();
     }
 
-    function testSetLoanBridgeSettingsRevertInvalidValues() public {
+    function testSetFxrpOftRevertInvalidValues() public {
         vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
-        controller.setLoanBridgeSettings(makeAddr("notAContract"), destinationEid, destinationPeer);
-
-        vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationEid.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), 0, destinationPeer);
+        vm.expectRevert(IBridgeRoutesFacet.InvalidFxrpOft.selector);
+        controller.setFxrpOft(makeAddr("notAContract"));
     }
 
-    function testSetLoanBridgeSettingsRevertWrongToken() public {
-        // an OFT wrapping some other token must be rejected, even with a peer wired
+    function testSetFxrpOftRevertWrongToken() public {
+        // an OFT wrapping some other token must be rejected
         MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
         MockOft otherOft = new MockOft(otherToken, messagingFee);
-        otherOft.setPeer(destinationEid, bytes32(uint256(1)));
 
         vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
-        controller.setLoanBridgeSettings(address(otherOft), destinationEid, bytes32(uint256(1)));
+        vm.expectRevert(IBridgeRoutesFacet.InvalidFxrpOft.selector);
+        controller.setFxrpOft(address(otherOft));
     }
 
-    function testSetLoanBridgeSettingsRevertWrongSharedDecimals() public {
+    function testSetFxrpOftRevertWrongSharedDecimals() public {
         // shared decimals below the token's would truncate to dust; the token-bearing signed
         // instructions send with minAmountLD == amountLD, so such an OFT must be rejected up front
-        fxrpOft.setPeer(destinationEid, destinationPeer);
         fxrpOft.setSharedDecimals(4);
 
         vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+        vm.expectRevert(IBridgeRoutesFacet.InvalidFxrpOft.selector);
+        controller.setFxrpOft(address(fxrpOft));
     }
 
-    function testSetLoanBridgeSettingsRevertWrongOftVersion() public {
-        fxrpOft.setPeer(destinationEid, destinationPeer);
-
+    function testSetFxrpOftRevertWrongOftVersion() public {
         // wrong message-codec version: the destination-side compose authentication depends on
         // the canonical codec, so only version 1 is accepted
         fxrpOft.setOftVersion(0x02e49c2c, 2);
         vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+        vm.expectRevert(IBridgeRoutesFacet.InvalidFxrpOft.selector);
+        controller.setFxrpOft(address(fxrpOft));
 
         // wrong interface id
         fxrpOft.setOftVersion(0xdeadbeef, 1);
         vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidFxrpOft.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+        vm.expectRevert(IBridgeRoutesFacet.InvalidFxrpOft.selector);
+        controller.setFxrpOft(address(fxrpOft));
 
         // the canonical pair is accepted
         fxrpOft.setOftVersion(0x02e49c2c, 1);
         vm.prank(governance);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+        vm.expectEmit();
+        emit IBridgeRoutesFacet.FxrpOftSet(address(fxrpOft));
+        controller.setFxrpOft(address(fxrpOft));
+        assertEq(controller.getFxrpOft(), address(fxrpOft));
     }
 
-    function testSetLoanBridgeSettingsRevertNoPeerForDestination() public {
-        // no peer wired for the destination endpoint: the route does not exist
-        vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationPeer.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
-    }
-
-    function testSetLoanBridgeSettingsRevertPeerMismatch() public {
-        // the live peer must equal the intended remote OApp exactly; existence is not identity
-        fxrpOft.setPeer(destinationEid, bytes32(uint256(0xbad)));
-
-        vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationPeer.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
-
-        // a zero expected peer is never valid
+    function testSetBridgeRouteRevertWithoutFxrpOft() public {
+        // a route is pinned against the adapter's live peer, so the adapter comes first
         fxrpOft.setPeer(destinationEid, destinationPeer);
         vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationPeer.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, bytes32(0));
+        vm.expectRevert(IBridgeRoutesFacet.FxrpOftNotConfigured.selector);
+        controller.setBridgeRoute(destinationEid, destinationPeer);
+    }
+
+    function testSetBridgeRouteRevertInvalidEid() public {
+        vm.startPrank(governance);
+        controller.setFxrpOft(address(fxrpOft));
+        vm.expectRevert(IBridgeRoutesFacet.InvalidDestinationEid.selector);
+        controller.setBridgeRoute(0, destinationPeer);
+        vm.stopPrank();
+    }
+
+    function testSetBridgeRouteRevertNoPeerForDestination() public {
+        // no peer wired for the destination endpoint: the route does not exist on the adapter
+        vm.startPrank(governance);
+        controller.setFxrpOft(address(fxrpOft));
+        vm.expectRevert(IBridgeRoutesFacet.InvalidDestinationPeer.selector);
+        controller.setBridgeRoute(destinationEid, destinationPeer);
+        vm.stopPrank();
+    }
+
+    function testSetBridgeRouteRevertPeerMismatch() public {
+        vm.prank(governance);
+        controller.setFxrpOft(address(fxrpOft));
+
+        // the live peer must equal the intended remote OApp exactly; existence is not identity
+        fxrpOft.setPeer(destinationEid, bytes32(uint256(0xbad)));
+        vm.prank(governance);
+        vm.expectRevert(IBridgeRoutesFacet.InvalidDestinationPeer.selector);
+        controller.setBridgeRoute(destinationEid, destinationPeer);
 
         // a peer with dirty upper bits would route to the same EVM address but change the
         // source-computed GUID, failing the destination-side compose authentication
         bytes32 dirtyPeer = bytes32(uint256(destinationPeer) | (uint256(1) << 200));
         fxrpOft.setPeer(destinationEid, dirtyPeer);
         vm.prank(governance);
-        vm.expectRevert(ILoanBridgeSettingsFacet.InvalidDestinationPeer.selector);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, dirtyPeer);
+        vm.expectRevert(IBridgeRoutesFacet.InvalidDestinationPeer.selector);
+        controller.setBridgeRoute(destinationEid, dirtyPeer);
     }
 
-    function testClearLoanBridgeSettingsDisablesForwardMoves() public {
+    function testSetSubaccountTypeRouteReverts() public {
+        vm.startPrank(governance);
+        controller.setFxrpOft(address(fxrpOft));
+        // the route must exist before a type can point at it
+        vm.expectRevert(
+            abi.encodeWithSelector(IBridgeRoutesFacet.UnknownBridgeRoute.selector, destinationEid)
+        );
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, destinationEid);
+        // the reserved type is never routable
+        vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
+        controller.setSubaccountTypeRoute(0, 0);
+        vm.stopPrank();
+    }
+
+    function testBridgeRoutesViews() public {
+        _configureLoanBridge();
+        (address oft, uint32 eid, bytes32 peer) = controller.getSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN);
+        assertEq(oft, address(fxrpOft));
+        assertEq(eid, destinationEid);
+        assertEq(peer, destinationPeer);
+        assertEq(controller.getBridgeRoute(destinationEid), destinationPeer);
+        assertEq(controller.getBridgeRoute(30184), bytes32(0));
+        (uint32[] memory eids, bytes32[] memory peers) = controller.getBridgeRoutes();
+        assertEq(eids.length, 1);
+        assertEq(eids[0], destinationEid);
+        assertEq(peers[0], destinationPeer);
+        // a type pointed nowhere resolves to no route at all
+        (oft, eid, peer) = controller.getSubaccountTypeRoute(2);
+        assertEq(oft, address(fxrpOft));
+        assertEq(eid, 0);
+        assertEq(peer, bytes32(0));
+    }
+
+    function testClearBridgeRouteDisablesForwardMovesOnIt() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
         _configureLoanBridge();
 
-        // clearing with explicit zeros disables the forward moves until reconfigured
+        // a zero peer clears the route: the type pointed at it and the cross-chain user
+        // operations naming it fail closed until it is set again; the type stays pointed
         vm.prank(governance);
-        controller.setLoanBridgeSettings(address(0), 0, bytes32(0));
-
-        (address oft, uint32 eid, bytes32 peer) = controller.getLoanBridgeSettings();
-        assertEq(oft, address(0));
-        assertEq(eid, 0);
+        vm.expectEmit();
+        emit IBridgeRoutesFacet.BridgeRouteSet(destinationEid, bytes32(0));
+        controller.setBridgeRoute(destinationEid, bytes32(0));
+        assertEq(controller.getBridgeRoute(destinationEid), bytes32(0));
+        (uint32[] memory eids, ) = controller.getBridgeRoutes();
+        assertEq(eids.length, 0);
+        (, uint32 eid, bytes32 peer) = controller.getSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN);
+        assertEq(eid, destinationEid);
         assertEq(peer, bytes32(0));
+
+        vm.deal(personalAccount, 2 * messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(ILoanSubaccount.BridgeRouteNotConfigured.selector);
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        );
+        vm.prank(personalAccount);
+        vm.expectRevert(
+            abi.encodeWithSelector(IPersonalAccount.UnknownBridgeRoute.selector, destinationEid)
+        );
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
+            destinationEid, _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18),
+            bytes32("op-x"), uint64(block.timestamp + 1 hours), ""
+        );
+
+        // re-pinning the same route restores both without touching the type
+        vm.prank(governance);
+        controller.setBridgeRoute(destinationEid, destinationPeer);
+        vm.prank(personalAccount);
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        );
+    }
+
+    function testClearFxrpOftDisablesEveryForwardMove() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        // clearing the adapter blocks every send while routes and type assignments stay recorded
+        vm.prank(governance);
+        controller.setFxrpOft(address(0));
+        assertEq(controller.getFxrpOft(), address(0));
+        assertEq(controller.getBridgeRoute(destinationEid), destinationPeer);
 
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
-        vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
+        vm.expectRevert(ILoanSubaccount.BridgeRouteNotConfigured.selector);
         ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
             100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        );
+        vm.prank(personalAccount);
+        vm.expectRevert(
+            abi.encodeWithSelector(IPersonalAccount.UnknownBridgeRoute.selector, destinationEid)
+        );
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
+            destinationEid, _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18),
+            bytes32("op-x"), uint64(block.timestamp + 1 hours), ""
+        );
+    }
+
+    function testClearSubaccountTypeRouteBlocksOnlyThatType() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+
+        vm.prank(governance);
+        vm.expectEmit();
+        emit IBridgeRoutesFacet.SubaccountTypeRouteSet(SUBACCOUNT_TYPE_LOAN, 0);
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, 0);
+
+        // the type's forward moves stop; the route itself, and the Personal Account's
+        // cross-chain user operations over it, are untouched
+        vm.deal(personalAccount, 2 * messagingFee);
+        vm.prank(personalAccount);
+        vm.expectRevert(ILoanSubaccount.BridgeRouteNotConfigured.selector);
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        );
+        vm.prank(personalAccount);
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
+            destinationEid, _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18),
+            bytes32("op-x"), uint64(block.timestamp + 1 hours), ""
+        );
+    }
+
+    function testSetFxrpOftRotationRevalidatesRoutes() public {
+        _configureLoanBridge();
+
+        // a replacement adapter must carry every registered route, or the rotation fails at the
+        // timelocked call instead of stranding the route in the field
+        MockOft rotated = new MockOft(fxrp, messagingFee);
+        rotated.setEndpoint(lzEndpoint);
+        vm.prank(governance);
+        vm.expectRevert(IBridgeRoutesFacet.InvalidDestinationPeer.selector);
+        controller.setFxrpOft(address(rotated));
+
+        rotated.setPeer(destinationEid, destinationPeer);
+        vm.prank(governance);
+        controller.setFxrpOft(address(rotated));
+        assertEq(controller.getFxrpOft(), address(rotated));
+        (address oft, , ) = controller.getSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN);
+        assertEq(oft, address(rotated));
+    }
+
+    function testInboundComposeIsBoundToTheTypesOwnRoute() public {
+        // the bridge-back of a type is authenticated against that type's route: a redeem-home
+        // packet from the other type's chain is rejected, one from its own chain redeems
+        uint32 baseEid = 30184;
+        bytes32 basePeer = bytes32(uint256(uint160(makeAddr("baseFxrpOft"))));
+        uint256 baseType = 2;
+        _configureLoanBridge();
+        fxrpOft.setPeer(baseEid, basePeer);
+        vm.startPrank(governance);
+        controller.setBridgeRoute(baseEid, basePeer);
+        controller.setSubaccountImplementation(baseType, address(new LoanSubaccount()));
+        controller.setSubaccountTypeRoute(baseType, baseEid);
+        vm.stopPrank();
+        _createSubaccountFor(xrplOwner);
+        address baseSubaccount = controller.createSubaccount(xrplOwner, baseType);
+        fxrp.mint(baseSubaccount, 100e6);
+        bytes memory payload = _redeemHomePayloadAt(uint64(block.timestamp + 1 hours));
+        bytes memory composeFrom = abi.encodePacked(bytes32(uint256(uint160(baseSubaccount))), payload);
+
+        // from Ethereum (the loan type's chain): wrong source for a Base-typed account
+        (bytes memory fromEthereum, bytes32 ethereumGuid) = _composeFromLoanChain(baseSubaccount, 1, 100e6, payload);
+        vm.deal(lzEndpoint, 2 * executorFee);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongSourceEid.selector, destinationEid)
+        );
+        ILoanSubaccount(baseSubaccount).lzCompose{value: executorFee}(
+            address(fxrpOft), ethereumGuid, fromEthereum, executor, ""
+        );
+
+        // from Base, sent by the pinned Base peer: authenticated and redeemed
+        bytes memory fromBase = OFTComposeMsgCodec.encode(1, baseEid, 100e6, composeFrom);
+        bytes32 baseGuid = GUID.generate(
+            1, baseEid, address(uint160(uint256(basePeer))), flareEid,
+            bytes32(uint256(uint160(address(fxrpOft))))
+        );
+        vm.prank(lzEndpoint);
+        ILoanSubaccount(baseSubaccount).lzCompose{value: executorFee}(
+            address(fxrpOft), baseGuid, fromBase, executor, ""
+        );
+        assertEq(fxrp.balanceOf(baseSubaccount), 0);
+    }
+
+    function testSubaccountTypesBridgeToTheirOwnChains() public {
+        // two types on two remote chains behind one adapter: each type sends to its own route,
+        // and the Personal Account may name either
+        uint32 baseEid = 30184;
+        bytes32 basePeer = bytes32(uint256(uint160(makeAddr("baseFxrpOft"))));
+        uint256 baseType = 2;
+        _configureLoanBridge();
+        fxrpOft.setPeer(baseEid, basePeer);
+        vm.startPrank(governance);
+        controller.setBridgeRoute(baseEid, basePeer);
+        controller.setSubaccountImplementation(baseType, address(new LoanSubaccount()));
+        controller.setSubaccountTypeRoute(baseType, baseEid);
+        vm.stopPrank();
+        (uint32[] memory eids, ) = controller.getBridgeRoutes();
+        assertEq(eids.length, 2);
+
+        address loanSubaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        address baseSubaccount = controller.createSubaccount(xrplOwner, baseType);
+        assertTrue(baseSubaccount != loanSubaccount);
+        fxrp.mint(loanSubaccount, 100e6);
+        fxrp.mint(baseSubaccount, 40e6);
+        vm.deal(personalAccount, 4 * messagingFee);
+
+        vm.prank(personalAccount);
+        ILoanSubaccount(loanSubaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        );
+        (uint32 sentDstEid, bytes32 to, uint256 amountLD,,,,) = fxrpOft.lastSendParam();
+        assertEq(sentDstEid, destinationEid);
+        assertEq(to, bytes32(uint256(uint160(loanSubaccount))));
+        assertEq(amountLD, 100e6);
+
+        vm.prank(personalAccount);
+        ILoanSubaccount(baseSubaccount).depositCollateral{value: messagingFee}(
+            40e6, bytes32("op-2"), uint64(block.timestamp + 1 hours), ""
+        );
+        (sentDstEid, to, amountLD,,,,) = fxrpOft.lastSendParam();
+        assertEq(sentDstEid, baseEid);
+        assertEq(to, bytes32(uint256(uint160(baseSubaccount))));
+        assertEq(amountLD, 40e6);
+
+        // the Personal Account picks the chain per instruction
+        IPersonalAccount.Call[] memory batch = _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18);
+        vm.prank(personalAccount);
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
+            baseEid, batch, bytes32("op-x"), uint64(block.timestamp + 1 hours), ""
+        );
+        (sentDstEid, to,,,,,) = fxrpOft.lastSendParam();
+        assertEq(sentDstEid, baseEid);
+        assertEq(to, bytes32(uint256(uint160(personalAccount))));
+
+        // an unregistered chain is refused before any fee is paid
+        vm.prank(personalAccount);
+        vm.expectRevert(abi.encodeWithSelector(IPersonalAccount.UnknownBridgeRoute.selector, uint32(30110)));
+        IPersonalAccount(personalAccount).sendCrossChainUserOp{value: messagingFee}(
+            30110, batch, bytes32("op-y"), uint64(block.timestamp + 1 hours), ""
         );
     }
 
@@ -2258,14 +2511,14 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testForwardMoveRevertLoanBridgeNotConfigured() public {
+    function testForwardMoveRevertBridgeRouteNotConfigured() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
 
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
-        vm.expectRevert(ILoanSubaccount.LoanBridgeNotConfigured.selector);
+        vm.expectRevert(ILoanSubaccount.BridgeRouteNotConfigured.selector);
         ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
             100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
@@ -2511,8 +2764,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function _configureLoanBridge() private {
         fxrpOft.setPeer(destinationEid, destinationPeer);
-        vm.prank(governance);
-        controller.setLoanBridgeSettings(address(fxrpOft), destinationEid, destinationPeer);
+        vm.startPrank(governance);
+        controller.setFxrpOft(address(fxrpOft));
+        controller.setBridgeRoute(destinationEid, destinationPeer);
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, destinationEid);
+        vm.stopPrank();
     }
 
     function _deploySubaccount() private returns (LoanSubaccount) {

@@ -15,7 +15,7 @@ import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFace
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
 import {SubaccountsFacet} from "../../contracts/smartAccounts/facets/SubaccountsFacet.sol";
-import {LoanBridgeSettingsFacet} from "../../contracts/smartAccounts/facets/LoanBridgeSettingsFacet.sol";
+import {BridgeRoutesFacet} from "../../contracts/smartAccounts/facets/BridgeRoutesFacet.sol";
 import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
@@ -102,7 +102,7 @@ contract FacetsDeploy is Test {
             address(new SubaccountsFacet()), "SubaccountsFacet", IDiamond.FacetCutAction.Add
         );
         diamondCuts[13] = _buildFacetCut(
-            address(new LoanBridgeSettingsFacet()), "LoanBridgeSettingsFacet", IDiamond.FacetCutAction.Add
+            address(new BridgeRoutesFacet()), "BridgeRoutesFacet", IDiamond.FacetCutAction.Add
         );
         return diamondCuts;
     }

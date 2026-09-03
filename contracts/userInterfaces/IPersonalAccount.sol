@@ -141,7 +141,7 @@ interface IPersonalAccount {
 
     /**
      * @notice Emitted when a signed batch of calls is sent to this account's remote twin on
-     * the destination chain (the loan chain today) for execution.
+     * the destination chain for execution.
      * @param operationId The user-chosen operation id.
      * @param callCount The number of calls in the batch.
      * @param destinationEid The destination chain's LayerZero endpoint id.
@@ -247,12 +247,17 @@ interface IPersonalAccount {
     error OnlySubaccount();
 
     /**
-     * @notice Reverts if the loan bridge settings are not configured yet.
+     * @notice Reverts if a cross-chain user operation names a destination endpoint with no bridge
+     * route on the controller (or the FXRP OFT adapter is not configured): the route registry is
+     * the allowlist of chains this account may send to.
+     * @param destinationEid The unregistered endpoint id.
      */
-    error LoanBridgeNotConfigured();
+    error UnknownBridgeRoute(
+        uint32 destinationEid
+    );
 
     /**
-     * @notice Reverts if the OFT's live peer for the loan chain no longer matches the pinned
+     * @notice Reverts if the OFT's live peer for the destination chain no longer matches the pinned
      * one; the send fails closed instead of messaging an unknown remote OApp.
      */
     error WrongDestinationPeer();
@@ -267,26 +272,30 @@ interface IPersonalAccount {
 
     /**
      * @notice Sends a signed batch of calls to this account's remote twin (the remote Personal
-     * Account at this same address on the other chain; the loan chain today) for atomic
-     * execution there - the remote `executeUserOp`, carried by the authenticated compose
-     * instead of the controller.
+     * Account at this same address on the chain `_destinationEid` names) for atomic execution
+     * there - the remote `executeUserOp`, carried by the authenticated compose instead of the
+     * controller.
      * @dev Callable only by this account itself, so it is reached through an {executeUserOp}
      * multicall and the XRPL signature covers every target, value and calldata end-to-end;
      * deliberately not reentrancy-guarded, since it runs inside that call's guard. The batch is
      * not interpreted here (the remote account runs it all or nothing, and a failed call leaves
      * the delivery retriable with the id unconsumed); only the envelope is validated before any
      * fee is paid (`InvalidCrossChainUserOp`: zero operation id, passed deadline, empty batch).
-     * It validates the pause, the settings and the pinned peer, then sends a message-only
-     * compose to the same address: exactly the quoted fee is paid from this account and any
-     * excess remains here. `_extraOptions` must carry the `lzCompose` gas the batch needs and,
-     * when the batch sends more native than the remote account holds, a native drop. The
-     * message id is recorded in {CrossChainUserOpSent}.
+     * It validates the pause, the route (`UnknownBridgeRoute`: the destination must be a
+     * registered bridge route - the registry is the allowlist of chains) and the pinned peer,
+     * then sends a message-only compose to the same address: exactly the quoted fee is paid
+     * from this account and any excess remains here. `_extraOptions` must carry the
+     * `lzCompose` gas the batch needs and, when the batch sends more native than the remote
+     * account holds, a native drop. The message id is recorded in {CrossChainUserOpSent}.
+     * @param _destinationEid The LayerZero endpoint id of the remote chain; must be a
+     * registered bridge route.
      * @param _calls The calls to execute from the remote account, in order.
      * @param _operationId The user-chosen operation id (non-zero, unique per account).
      * @param _deadline Unix time after which the remote account skips the instruction unexecuted.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
     function sendCrossChainUserOp(
+        uint32 _destinationEid,
         Call[] calldata _calls,
         bytes32 _operationId,
         uint64 _deadline,
