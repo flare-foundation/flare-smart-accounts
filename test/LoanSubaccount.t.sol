@@ -1737,9 +1737,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             abi.encodeWithSelector(IBridgeRoutesFacet.UnknownBridgeRoute.selector, destinationEid)
         );
         controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, destinationEid);
-        // the reserved type is never routable
+        // the reserved type is never routable, and a zero endpoint id is not a way to clear
         vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
-        controller.setSubaccountTypeRoute(0, 0);
+        controller.setSubaccountTypeRoute(0, destinationEid);
+        vm.expectRevert(IBridgeRoutesFacet.InvalidDestinationEid.selector);
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, 0);
         vm.stopPrank();
     }
 
@@ -1833,7 +1835,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testClearSubaccountTypeRouteBlocksOnlyThatType() public {
+    function testSuspendingSubaccountTypeRouteBlocksOnlyThatType() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -1841,11 +1843,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(governance);
         vm.expectEmit();
-        emit IBridgeRoutesFacet.SubaccountTypeRouteSet(SUBACCOUNT_TYPE_LOAN, 0);
-        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, 0);
+        emit IBridgeRoutesFacet.SubaccountTypeRouteSuspended(SUBACCOUNT_TYPE_LOAN, true);
+        controller.setSubaccountTypeRouteSuspended(SUBACCOUNT_TYPE_LOAN, true);
 
-        // the type's forward moves stop; the route itself, and the Personal Account's
-        // cross-chain user operations over it, are untouched
+        // the type's forward moves stop; the chain pin, the route itself, and the Personal
+        // Account's cross-chain user operations over it, are untouched
         vm.deal(personalAccount, 2 * messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(IBridgingSubaccount.BridgeRouteNotConfigured.selector);
@@ -1857,6 +1859,72 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             destinationEid, _transferBatch(makeAddr("token"), makeAddr("dest"), 1e18),
             bytes32("op-x"), uint64(block.timestamp + 1 hours), ""
         );
+
+        // the pin survives the suspension, and resuming needs no re-pinning
+        (uint32 pinnedEid, bool suspended) =
+            controller.getSubaccountTypeRoutePin(SUBACCOUNT_TYPE_LOAN);
+        assertEq(pinnedEid, destinationEid);
+        assertTrue(suspended);
+        vm.prank(governance);
+        controller.setSubaccountTypeRouteSuspended(SUBACCOUNT_TYPE_LOAN, false);
+        vm.prank(personalAccount);
+        ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
+            100e6, bytes32("op-2"), uint64(block.timestamp + 1 hours), ""
+        );
+    }
+
+    function testSubaccountTypeRouteIsWriteOnce() public {
+        // a type's signed instructions carry no destination, so its chain must never move
+        // under them: a second chain is a second type
+        _configureLoanBridge();
+        uint32 baseEid = 30184;
+        bytes32 basePeer = bytes32(uint256(uint160(makeAddr("baseAdapter"))));
+        fxrpOft.setPeer(baseEid, basePeer);
+        vm.startPrank(governance);
+        controller.setBridgeRoute(baseEid, basePeer);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IBridgeRoutesFacet.SubaccountTypeRoutePinned.selector,
+                SUBACCOUNT_TYPE_LOAN,
+                destinationEid
+            )
+        );
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, baseEid);
+
+        // re-pinning the same route is a no-op, so a retried timelocked call is harmless - even
+        // while that route is cleared, since the pin is checked before the route
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, destinationEid);
+        controller.setBridgeRoute(destinationEid, bytes32(0));
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, destinationEid);
+        controller.setBridgeRoute(destinationEid, destinationPeer);
+        // and an unregistered endpoint id is refused as a re-point, not as an unknown route
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IBridgeRoutesFacet.SubaccountTypeRoutePinned.selector,
+                SUBACCOUNT_TYPE_LOAN,
+                destinationEid
+            )
+        );
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, 40999);
+        // a suspension is not a way around it either
+        controller.setSubaccountTypeRouteSuspended(SUBACCOUNT_TYPE_LOAN, true);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IBridgeRoutesFacet.SubaccountTypeRoutePinned.selector,
+                SUBACCOUNT_TYPE_LOAN,
+                destinationEid
+            )
+        );
+        controller.setSubaccountTypeRoute(SUBACCOUNT_TYPE_LOAN, baseEid);
+        // and an unpinned type cannot be suspended at all
+        vm.expectRevert(
+            abi.encodeWithSelector(IBridgeRoutesFacet.UnknownBridgeRoute.selector, uint32(0))
+        );
+        controller.setSubaccountTypeRouteSuspended(9, true);
+        vm.stopPrank();
+        (uint32 pinnedEid, ) = controller.getSubaccountTypeRoutePin(SUBACCOUNT_TYPE_LOAN);
+        assertEq(pinnedEid, destinationEid);
     }
 
     function testSetFxrpOftRotationRevalidatesRoutes() public {

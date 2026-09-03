@@ -43,19 +43,37 @@ interface IIBridgeRoutesFacet is IBridgeRoutesFacet {
         external;
 
     /**
-     * @notice Points a subaccount type at the remote chain it lives on, or clears that
-     * assignment.
+     * @notice Pins a subaccount type to the remote chain it lives on, write-once.
      * @dev Only for the types that bridge (a Flare-local type, such as a vault subaccount, is
-     * never pointed anywhere). The route must exist (`UnknownBridgeRoute`); the reserved type
-     * zero is refused (`ISubaccountsFacet.InvalidSubaccountType`). Zero clears the assignment,
-     * which blocks the type's forward moves until it is pointed again.
+     * never pinned). The route must exist (`UnknownBridgeRoute`); the reserved type zero and a
+     * zero endpoint id are refused (`ISubaccountsFacet.InvalidSubaccountType`,
+     * `InvalidDestinationEid`). Re-pinning the same route is a no-op, so a retried timelocked
+     * call is harmless; a different one reverts (`SubaccountTypeRoutePinned`) - a type's signed
+     * instructions carry no destination, so its chain must not move under them. Use
+     * {setSubaccountTypeRouteSuspended} to stop a pinned type.
      * @param _subaccountType The subaccount type (non-zero).
-     * @param _destinationEid The endpoint id of a registered route, or zero to clear.
+     * @param _destinationEid The endpoint id of a registered route (non-zero).
      * Can only be called by the owner (timelocked).
      */
     function setSubaccountTypeRoute(
         uint256 _subaccountType,
         uint32 _destinationEid
+    )
+        external;
+
+    /**
+     * @notice Suspends or resumes a pinned subaccount type's forward moves.
+     * @dev Per-type containment that keeps the chain pin: while suspended the type reads as
+     * unroutable, so its forward moves and its bridge-back authentication fail closed exactly
+     * as an unconfigured route does, and the positions' chain is still recorded. The type must
+     * be pinned first (`UnknownBridgeRoute(0)`).
+     * @param _subaccountType The subaccount type.
+     * @param _suspended Whether to suspend the type.
+     * Can only be called by the owner (timelocked).
+     */
+    function setSubaccountTypeRouteSuspended(
+        uint256 _subaccountType,
+        bool _suspended
     )
         external;
 }

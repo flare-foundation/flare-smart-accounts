@@ -90,7 +90,8 @@ interface IBridgingSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Reverts if this subaccount's type has no complete bridge route on the controller:
-     * no FXRP OFT adapter, a type not pointed at a remote chain, or a cleared route.
+     * no FXRP OFT adapter, a type never pinned to a remote chain, a suspended type, or a
+     * cleared route.
      */
     error BridgeRouteNotConfigured();
 

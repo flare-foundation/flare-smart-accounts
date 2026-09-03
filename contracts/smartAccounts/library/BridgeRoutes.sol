@@ -23,8 +23,13 @@ library BridgeRoutes {
         /// @notice The registered endpoint ids, so an adapter rotation can re-validate every route.
         EnumerableSet.UintSet destinationEids;
         /// @notice The remote chain each bridging subaccount type lives on; a Flare-local type
-        /// (a vault subaccount, say) has no entry.
+        /// (a vault subaccount, say) has no entry. Write-once per type: the type IS the
+        /// (chain, product) identity its positions live under, and its instructions carry no
+        /// destination of their own.
         mapping(uint256 subaccountType => uint32 destinationEid) typeRoutes;
+        /// @notice Per-type suspension of an already pinned route: containment without
+        /// forgetting where the type's positions are.
+        mapping(uint256 subaccountType => bool suspended) typeRouteSuspended;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -120,14 +125,39 @@ library BridgeRoutes {
     {
         State storage state = getState();
         require(_subaccountType != 0, ISubaccountsFacet.InvalidSubaccountType());
-        if (_destinationEid != 0) {
-            require(
-                state.routes[_destinationEid] != bytes32(0),
-                IBridgeRoutesFacet.UnknownBridgeRoute(_destinationEid)
-            );
-        }
+        require(_destinationEid != 0, IBridgeRoutesFacet.InvalidDestinationEid());
+        // write-once, because a type's instructions carry no destination: the Flare subaccount
+        // resolves this pin when the signed instruction executes, so re-pointing a live type
+        // would send an already-signed borrow, deposit or withdraw to another chain, strand the
+        // positions on the old one, and let the same operation ids run again on the new chain,
+        // whose replay state is independent. A second chain is a second type. The pin is
+        // checked before the route, so re-pinning the same route is a no-op even while that
+        // route is cleared (a retried timelocked call is harmless), and a different endpoint id
+        // is refused as a re-point whether or not it is registered
+        uint32 pinned = state.typeRoutes[_subaccountType];
+        if (pinned == _destinationEid) return;
+        require(pinned == 0, IBridgeRoutesFacet.SubaccountTypeRoutePinned(_subaccountType, pinned));
+        require(
+            state.routes[_destinationEid] != bytes32(0),
+            IBridgeRoutesFacet.UnknownBridgeRoute(_destinationEid)
+        );
         state.typeRoutes[_subaccountType] = _destinationEid;
         emit IBridgeRoutesFacet.SubaccountTypeRouteSet(_subaccountType, _destinationEid);
+    }
+
+    function setSubaccountTypeRouteSuspended(
+        uint256 _subaccountType,
+        bool _suspended
+    )
+        internal
+    {
+        State storage state = getState();
+        require(
+            state.typeRoutes[_subaccountType] != 0,
+            IBridgeRoutesFacet.UnknownBridgeRoute(0)
+        );
+        state.typeRouteSuspended[_subaccountType] = _suspended;
+        emit IBridgeRoutesFacet.SubaccountTypeRouteSuspended(_subaccountType, _suspended);
     }
 
     function getFxrpOft()
@@ -169,8 +199,23 @@ library BridgeRoutes {
     {
         State storage state = getState();
         _fxrpOft = state.fxrpOft;
-        _destinationEid = state.typeRoutes[_subaccountType];
+        // a suspended type answers as unroutable, so every consumer fails closed on the zero
+        // it already checks for; the pin itself is kept (see getSubaccountTypeRoutePin)
+        _destinationEid = state.typeRouteSuspended[_subaccountType]
+            ? 0
+            : state.typeRoutes[_subaccountType];
         _destinationPeer = state.routes[_destinationEid];
+    }
+
+    function getSubaccountTypeRoutePin(
+        uint256 _subaccountType
+    )
+        internal view
+        returns (uint32 _destinationEid, bool _suspended)
+    {
+        State storage state = getState();
+        _destinationEid = state.typeRoutes[_subaccountType];
+        _suspended = state.typeRouteSuspended[_subaccountType];
     }
 
     function getState()

@@ -50,6 +50,17 @@ contract BridgeRoutesFacet is IIBridgeRoutesFacet, FacetBase {
         BridgeRoutes.setSubaccountTypeRoute(_subaccountType, _destinationEid);
     }
 
+    /// @inheritdoc IIBridgeRoutesFacet
+    function setSubaccountTypeRouteSuspended(
+        uint256 _subaccountType,
+        bool _suspended
+    )
+        external
+        onlyOwnerWithTimelock
+    {
+        BridgeRoutes.setSubaccountTypeRouteSuspended(_subaccountType, _suspended);
+    }
+
     /// @inheritdoc IBridgeRoutesFacet
     function getFxrpOft()
         external view
@@ -84,5 +95,15 @@ contract BridgeRoutesFacet is IIBridgeRoutesFacet, FacetBase {
         returns (address _fxrpOft, uint32 _destinationEid, bytes32 _destinationPeer)
     {
         return BridgeRoutes.getSubaccountTypeRoute(_subaccountType);
+    }
+
+    /// @inheritdoc IBridgeRoutesFacet
+    function getSubaccountTypeRoutePin(
+        uint256 _subaccountType
+    )
+        external view
+        returns (uint32, bool)
+    {
+        return BridgeRoutes.getSubaccountTypeRoutePin(_subaccountType);
     }
 }

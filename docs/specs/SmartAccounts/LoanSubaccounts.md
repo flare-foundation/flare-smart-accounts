@@ -366,9 +366,19 @@ on both sides. Each remote diamond stores **one compose transport** with one ori
 a remote chain is self-contained. Flare stores, on the type-generic `BridgeRoutesFacet`: the one
 FXRP OFT adapter (`setFxrpOft`), **one pinned peer per remote chain** (`setBridgeRoute(eid,
 peer)`, the *route*), and **the remote chain each bridging subaccount type lives on**
-(`setSubaccountTypeRoute(type, eid)`). A subaccount type is therefore a (chain, product) pair —
-the loan type on Ethereum, a second Morpho pool on Base as its own type — while a Flare-local
-type (a vault subaccount) is simply never pointed at a route. The Personal Account's cross-chain
+(`setSubaccountTypeRoute(type, eid)`, **write-once**). A subaccount type is therefore a
+(chain, product) pair — the loan type on Ethereum, a second Morpho pool on Base as its own
+type — while a Flare-local type (a vault subaccount) is simply never pointed at a route. The pin
+is write-once because a type's instructions carry no destination of their own: the Flare
+subaccount resolves the type's chain when the signed instruction executes, so re-pointing a live
+type would send an already-signed borrow, deposit or withdraw to another chain, strand the
+positions on the old one, and let the same operation ids run again on the new chain, whose
+replay state is independent. Re-pinning the same route is a no-op (a
+retried timelocked call is harmless); a different one reverts (`SubaccountTypeRoutePinned`). A
+second chain is a second type. Stopping one pinned type is a separate, reversible lever —
+`setSubaccountTypeRouteSuspended(type, true)` makes it read as unroutable, so its forward moves
+and its bridge-back authentication fail closed exactly as an unconfigured route does, while
+`getSubaccountTypeRoutePin` still shows where its positions live. The Personal Account's cross-chain
 user operation names its `destinationEid` explicitly, and the route registry is its allowlist
 (`UnknownBridgeRoute`). Every send re-checks the adapter's live peer for its destination against
 the pinned one, and an adapter rotation (`setFxrpOft`) re-validates every registered route
@@ -381,7 +391,7 @@ cut the remote facet set, `setComposeTransport`, register the pool under a new t
 on Flare `setSubaccountImplementation(type, <the Flare LoanSubaccount>)`, `setBridgeRoute` and
 `setSubaccountTypeRoute` — the route last, once the remote side exists. Clearing a route (zero
 peer) fails every type pointed at it and every user operation naming it closed until it is set
-again, with the type assignments kept.
+again, with the type pins kept; suspending one type stops only that type.
 
 Deliberately not built: **multiple accepted origins on a remote transport** (a remote Personal
 Account relaying a Flare-signed batch onward to a second remote chain). The base authenticates
@@ -1307,6 +1317,6 @@ deliberately not built.
 - ~~Atomic withdraw-and-bridge action~~ — resolved, built as `ACTION_WITHDRAW` itself: the withdraw compose withdraws the collateral and bridges it home in the same execution (the withdraw/redeposit race is closed for withdrawals; it survives only for residue). Compose value is accepted for this one action and spent in the same call — the return leg's fee, prepaid from Flare as message-1 compose value, quoted against the signed `returnOptions`, excess to the parent; every delivery must carry the signed `minComposeValue` floor (delivery is permissionless, the value unauthenticated — below the floor nothing consumes the packet), and a short delivery reverts and stays retriable. Two accepted residuals: bad signed `returnOptions` park that withdrawal until a fresh instruction reusing the same operation id (the parked packet then terminal-skips as a duplicate), and the redeem-home packet residual above applies to the return leg as to any bridge-back — including its best-effort redemption fee.
 - ~~The Flare fee~~ — resolved, designed and built: checkpoint accounting of `max(feeFloor, market interest + feeSpread)` over the account's Morpho debt, per-type timelocked terms behind a recipient activation marker, collection in `repay` (debt first) and through the parent-signed `payLoanFee` (the fee alone, from the remote PA's own RLUSD, the signed amount as cap), with the exits gated as a secured claim (an under-secured withdraw or sweep is refused until the fee is paid). The gate's basis is gross collateral at factor 3: an equity basis would widen the Morpho-allows/gate-refuses band about fourfold, and a lower factor would trade recovery headroom for a rarer band; `payLoanFee` is the fee-only way through that band (see The exit gate). See The Flare fee.
 - ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`.
-- ~~`LoanBridgeSettingsFacet`, one global destination~~ — resolved: the Flare end became the type-generic `BridgeRoutesFacet` — one FXRP adapter (`setFxrpOft`, re-validating every route on rotation), one pinned peer per remote chain (`setBridgeRoute`), and the chain each bridging subaccount type lives on (`setSubaccountTypeRoute`); the Personal Account's `sendCrossChainUserOp` names its `destinationEid`, allowlisted by the registry. A new remote chain is a deployment plus governance. Multiple accepted origins on a remote transport (relay hops) were deliberately left for a later, additive change — see Multiple remote chains.
+- ~~`LoanBridgeSettingsFacet`, one global destination~~ — resolved: the Flare end became the type-generic `BridgeRoutesFacet` — one FXRP adapter (`setFxrpOft`, re-validating every route on rotation), one pinned peer per remote chain (`setBridgeRoute`), and the chain each bridging subaccount type lives on (`setSubaccountTypeRoute`, write-once — the type IS that identity, and its instructions carry no destination; `setSubaccountTypeRouteSuspended` is the reversible per-type stop); the Personal Account's `sendCrossChainUserOp` names its `destinationEid`, allowlisted by the registry. A new remote chain is a deployment plus governance. Multiple accepted origins on a remote transport (relay hops) were deliberately left for a later, additive change — see Multiple remote chains.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.
 - ~~Native payability~~ — resolved the other way: no `receive()` and no native exit on the Flare subaccount (no protocol flow leaves native on it — the bridge refunds its caller, redemption outcomes land on the parent, and the compose value of its own bridge-back is forwarded within the same call); native landing without a call (pre-deployment funding of the predicted address, a force-send) strands — accepted; a beacon upgrade can add an exit if it ever matters.

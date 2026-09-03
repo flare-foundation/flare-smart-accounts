@@ -38,15 +38,25 @@ interface IBridgeRoutesFacet {
     );
 
     /**
-     * @notice Emitted when a subaccount type is pointed at a route or its assignment is cleared.
-     * Only the types that bridge have a route; a Flare-local type (a vault subaccount, say)
-     * never gets one.
+     * @notice Emitted when a subaccount type is pinned to the remote chain it lives on. Once,
+     * per type: the pin is write-once. Only the types that bridge get one; a Flare-local type
+     * (a vault subaccount, say) never does.
      * @param subaccountType The subaccount type.
-     * @param destinationEid The route's endpoint id; zero when the assignment is cleared.
+     * @param destinationEid The route's endpoint id.
      */
     event SubaccountTypeRouteSet(
         uint256 subaccountType,
         uint32 destinationEid
+    );
+
+    /**
+     * @notice Emitted when a pinned type's route is suspended or resumed.
+     * @param subaccountType The subaccount type.
+     * @param suspended Whether the type's forward moves are now blocked.
+     */
+    event SubaccountTypeRouteSuspended(
+        uint256 subaccountType,
+        bool suspended
     );
 
     /**
@@ -72,7 +82,22 @@ interface IBridgeRoutesFacet {
     error InvalidDestinationPeer();
 
     /**
-     * @notice Reverts if a subaccount type is pointed at an endpoint id that has no route.
+     * @notice Reverts an attempt to re-point a subaccount type at a different chain. The pin is
+     * write-once: the type is the (chain, product) identity its positions live under, and its
+     * signed instructions carry no destination, so re-pointing would route an already-signed
+     * action to another chain. A second chain is a second type; to stop a pinned type's
+     * forward moves, suspend it.
+     * @param subaccountType The subaccount type.
+     * @param destinationEid The endpoint id it is already pinned to.
+     */
+    error SubaccountTypeRoutePinned(
+        uint256 subaccountType,
+        uint32 destinationEid
+    );
+
+    /**
+     * @notice Reverts if a subaccount type is first pinned to an endpoint id that has no route,
+     * or (with a zero id) if an unpinned type is suspended.
      * @param destinationEid The unregistered endpoint id.
      */
     error UnknownBridgeRoute(
@@ -110,9 +135,10 @@ interface IBridgeRoutesFacet {
     /**
      * @notice Returns the route a subaccount type bridges over, if it bridges at all.
      * @dev The tuple a subaccount needs to send and to authenticate its own bridge-back: the
-     * adapter, the endpoint id its type is pointed at, and that route's pinned peer. Any zero
-     * member means the type is not routable (no adapter, a type pointed nowhere, or a cleared
-     * route).
+     * adapter, the endpoint id its type is pinned to, and that route's pinned peer. Any zero
+     * member means the type is not routable right now (no adapter, a type never pinned, a
+     * cleared route, or a suspended type - a suspension answers as a zero endpoint id, while
+     * the pin itself survives in {getSubaccountTypeRoutePin}).
      * @param _subaccountType The subaccount type.
      * @return _fxrpOft The FXRP OFT adapter.
      * @return _destinationEid The endpoint id of the type's remote chain.
@@ -123,4 +149,19 @@ interface IBridgeRoutesFacet {
     )
         external view
         returns (address _fxrpOft, uint32 _destinationEid, bytes32 _destinationPeer);
+
+    /**
+     * @notice Returns a subaccount type's write-once chain pin and whether it is suspended.
+     * @dev For governance and tooling: {getSubaccountTypeRoute} answers "can this type send
+     * now", which a suspension turns to zero; this one still shows where the type's positions
+     * live. A zero endpoint id means the type was never pinned.
+     * @param _subaccountType The subaccount type.
+     * @return _destinationEid The endpoint id the type is pinned to, or zero.
+     * @return _suspended Whether the type's forward moves are suspended.
+     */
+    function getSubaccountTypeRoutePin(
+        uint256 _subaccountType
+    )
+        external view
+        returns (uint32 _destinationEid, bool _suspended);
 }
