@@ -20,7 +20,7 @@ It is independent from Flare Smart Accounts, but shares the repository, governan
 
 ## Tech Stack
 
-- Solidity `^0.8.27`, compiled with solc 0.8.30
+- Solidity `^0.8.27`, compiled with solc 0.8.35
 - Foundry (`forge`) for build, test, and coverage
 - EVM target: Cancun (EIP-1153 transient storage supported)
 - Optimizer enabled with 200 runs and `via_ir = true`
@@ -283,10 +283,17 @@ Dependencies are managed through Soldeer (`foundry.toml [dependencies]`).
 
 - `@openzeppelin-contracts` 5.5.0: standard OpenZeppelin contracts
 - `@openzeppelin-contracts-upgradeable` 5.5.0: upgradeable variants used by composer UUPS
-- `flare-periphery` 0.1.44-alpha.6: Flare chain contract registry, FDC, and FAsset interfaces
+- `flare-periphery` 0.1.52: Flare chain contract registry, FDC, and FAsset interfaces
 - `@layerzerolabs-oft-evm` 4.0.1: LayerZero OFT used by `FAssetRedeemComposer`
 - `@layerzerolabs-lz-evm-protocol-v2` 3.0.159: LayerZero V2 protocol primitives
+- `@layerzerolabs-oapp-evm` 0.4.1: LayerZero OApp primitives (the canonical `IOFT`)
 - `forge-std` 1.10.0: Foundry test utilities
+
+`morpho-blue` is deliberately **not** a dependency: its interfaces and libraries are GPL-2.0-or-later and this
+repository is MIT. The Morpho surface the accounts use is our own code (`contracts/smartAccounts/interface/IMorpho.sol`,
+`contracts/smartAccounts/interface/IOracle.sol`, `contracts/smartAccounts/library/MorphoMath.sol`), pinned to upstream
+v1.0.0 by `test/MorphoConformance.t.sol` (selectors, return schemas, the live market id, share-math vectors). Do not add
+a Morpho import anywhere.
 
 ## Commits
 

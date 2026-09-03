@@ -6,6 +6,7 @@ import {ILoanMarketsFacet, MAX_FEE_RATE} from "../../userInterfaces/facets/ILoan
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 import {SUBACCOUNT_TYPE_NONE, ISubaccountsFacet} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
+import {MorphoMath} from "./MorphoMath.sol";
 import {ComposeTransport} from "./ComposeTransport.sol";
 
 library LoanMarkets {
@@ -67,7 +68,7 @@ library LoanMarkets {
         );
         // the market must actually exist on the Morpho contract, or every credited compose
         // action against it would revert
-        bytes32 marketId = keccak256(abi.encode(marketParams));
+        bytes32 marketId = MorphoMath.marketId(marketParams);
         (, , , , uint128 lastUpdate, ) = IMorpho(_market.morpho).market(marketId);
         require(lastUpdate != 0, ILoanMarketsFacet.InvalidMarketParams());
 

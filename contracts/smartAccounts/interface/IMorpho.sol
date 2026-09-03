@@ -5,7 +5,8 @@ pragma solidity >=0.8.4 <0.9;
  * @title IMorpho
  * @notice Minimal Morpho Blue interface: only the entry points the loan-chain-side
  * subaccount uses. Signatures and the `MarketParams` layout match the canonical
- * `morpho-org/morpho-blue` `IMorpho`; replace with the canonical package if it gets vendored.
+ * `morpho-org/morpho-blue` `IMorpho` v1.0.0. Kept as our own MIT code because the upstream
+ * files are GPL-2.0-or-later; conformance is pinned by `test/MorphoConformance.t.sol`.
  */
 interface IMorpho {
 

@@ -26,6 +26,7 @@ import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBas
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
 import {IOracle} from "../interface/IOracle.sol";
+import {MorphoMath} from "../library/MorphoMath.sol";
 import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
@@ -52,9 +53,6 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
 
-    /// @dev Morpho's virtual-share offsets for share/asset conversion.
-    uint256 private constant VIRTUAL_SHARES = 1e6;
-    uint256 private constant VIRTUAL_ASSETS = 1;
     /// @dev Fee arithmetic: annual WAD rates over a fixed 365-day year.
     uint256 private constant WAD = 1e18;
     uint256 private constant YEAR = 365 days;
@@ -755,7 +753,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
 
     /// @dev The account's one market, bound write-once to its type. If its Morpho stops
     /// answering, this account's debt-gated paths block - inherent to where the position
-    /// lives; hence the operational policy of only canonical immutable Morpho Blue deployments.
+    /// lives; hence the operational policy of only canonical immutable Morpho Blue deployments
+    /// of the pinned v1.0.0 implementation (any other needs the conformance verification repeated).
     function _myMarket()
         private view
         returns (ILoanMarketsFacet.Market memory _market)
@@ -775,7 +774,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         returns (uint128 _collateral)
     {
         (, , _collateral) = IMorpho(_market.morpho).position(
-            keccak256(abi.encode(_market.marketParams)), address(this)
+            MorphoMath.marketId(_market.marketParams), address(this)
         );
     }
 
@@ -788,40 +787,23 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         returns (uint128 _borrowShares)
     {
         (, _borrowShares, ) = IMorpho(_market.morpho).position(
-            keccak256(abi.encode(_market.marketParams)), address(this)
+            MorphoMath.marketId(_market.marketParams), address(this)
         );
     }
 
     /// @dev The account's live borrow shares and the assets needed to close them, using
-    /// Morpho's canonical rounded-up share conversion with virtual offsets.
+    /// Morpho's rounded-up share conversion with virtual offsets ({MorphoMath}, pinned to
+    /// upstream `SharesMathLib`).
     function _debtOf(
         ILoanMarketsFacet.Market memory _market
     )
         private view
         returns (uint128 _borrowShares, uint256 _fullDebt)
     {
-        bytes32 marketId = keccak256(abi.encode(_market.marketParams));
+        bytes32 marketId = MorphoMath.marketId(_market.marketParams);
         (, _borrowShares, ) = IMorpho(_market.morpho).position(marketId, address(this));
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
             IMorpho(_market.morpho).market(marketId);
-        _fullDebt = _toAssetsUp(_borrowShares, totalBorrowAssets, totalBorrowShares);
-    }
-
-    function _toAssetsUp(
-        uint256 _shares,
-        uint256 _totalAssets,
-        uint256 _totalShares
-    )
-        private pure
-        returns (uint256)
-    {
-        // Morpho's SharesMathLib.toAssetsUp: full-precision mulDiv with the virtual offsets,
-        // so the intermediate product cannot overflow at uint128 extremes
-        return Math.mulDiv(
-            _shares,
-            _totalAssets + VIRTUAL_ASSETS,
-            _totalShares + VIRTUAL_SHARES,
-            Math.Rounding.Ceil
-        );
+        _fullDebt = MorphoMath.toAssetsUp(_borrowShares, totalBorrowAssets, totalBorrowShares);
     }
 }

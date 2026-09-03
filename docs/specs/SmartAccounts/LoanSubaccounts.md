@@ -477,9 +477,17 @@ contract, both tokens carry code, and the collateral token is exactly the transp
 token; the first registration also pins the collateral token for every later transport and —
 transitively — every later market (see the configuration section). The loan token is
 deliberately not pinned: RLUSD is governance policy per registration, not an on-chain
-invariant. Registration policy: **only canonical immutable Morpho Blue deployments**. This is a
-pre-registration governance trust assumption enforced by review at the timelocked call — the
-contract itself checks only code-presence and market existence. It matters because the
+invariant. Registration policy: **only canonical immutable Morpho Blue deployments of the v1.0.0
+implementation this mirror is pinned to** — any other implementation needs the conformance
+verification below repeated before it may be registered. This is a pre-registration governance
+trust assumption enforced by review at the timelocked call — the contract itself checks only
+code-presence and market existence. The Morpho surface the account
+compiles against — the `IMorpho` and `IOracle` mirrors and the `MorphoMath` id and share
+arithmetic — is our own MIT code: the upstream `morpho-blue` files are GPL-2.0-or-later and
+deliberately not a dependency. It was verified once against v1.0.0 (commit `55d2d99`, 2026-09-03:
+the canonical selectors, the `position`/`market`/`price` return schemas, the live FXRP/RLUSD
+market id, `SharesMathLib` vectors) and is pinned by
+`test/MorphoConformance.t.sol`; Morpho Blue is immutable, so the target never moves. It matters because the
 binding is permanent and the account's debt checks must be able to read its live position: a
 Morpho that could later change behavior or start reverting would block that account's
 debt-gated paths (borrowing, defensive deposits, repayment and its surplus push) — inherent to where the
@@ -1194,7 +1202,7 @@ storage-lineage gate below is the third member of this family.
   canonical Morpho's `withdrawCollateral` accrues interest and oracle-checks position
   health, so a dead oracle blocks live-debt withdrawals at Morpho itself — which is why
   the gate's dead-oracle parked case is effectively the debt-free one, settleable through
-  `repay` (see The Flare fee). `MockMorpho` models this check behind a switch (the fee
+  `repay` or `payLoanFee` (see The Flare fee). `MockMorpho` models this check behind a switch (the fee
   fixtures run over-leveraged with it off; dedicated tests run with it on), so the
   interplay is pinned at the unit level; what remains is verifying the premise against the
   canonical Morpho source and the real market in the integration harness before launch;

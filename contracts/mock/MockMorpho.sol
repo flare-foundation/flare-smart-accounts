@@ -7,6 +7,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IMorpho} from "../smartAccounts/interface/IMorpho.sol";
 import {IOracle} from "../smartAccounts/interface/IOracle.sol";
+import {MorphoMath} from "../smartAccounts/library/MorphoMath.sol";
 import {MintableERC20} from "./MintableERC20.sol";
 
 /**
@@ -18,7 +19,8 @@ import {MintableERC20} from "./MintableERC20.sol";
  * oracle, require `collateral · price / 1e36 · lltv >= debt` while borrow shares are live - so a
  * dead oracle or an under-collateralized position reverts here as it does in Morpho; the check
  * is switchable for tests that exercise the account's arithmetic under leverage a real market
- * would not allow. Liquidation eligibility is intentionally not modeled.
+ * would not allow. Liquidation eligibility is intentionally not modeled. Ids and share
+ * conversions come from {MorphoMath}, the same code the accounts run.
  */
 contract MockMorpho is IMorpho {
     using SafeERC20 for IERC20;
@@ -34,8 +36,6 @@ contract MockMorpho is IMorpho {
         uint128 collateral;
     }
 
-    uint256 private constant VIRTUAL_SHARES = 1e6;
-    uint256 private constant VIRTUAL_ASSETS = 1;
     uint256 private constant ORACLE_PRICE_SCALE = 1e36;
     uint256 private constant WAD = 1e18;
 
@@ -154,7 +154,7 @@ contract MockMorpho is IMorpho {
         // canonical Morpho accrues before converting, so the exchange rate is never stale
         _accrue(id);
 
-        uint256 sharesUp = _toSharesUp(assets, m.totalBorrowAssets, m.totalBorrowShares);
+        uint256 sharesUp = MorphoMath.toSharesUp(assets, m.totalBorrowAssets, m.totalBorrowShares);
         m.totalBorrowAssets += uint128(assets);
         m.totalBorrowShares += uint128(sharesUp);
         _positions[id][onBehalf].borrowShares += uint128(sharesUp);
@@ -183,9 +183,9 @@ contract MockMorpho is IMorpho {
         _accrue(id);
 
         if (shares == 0) {
-            shares = _toSharesDown(assets, m.totalBorrowAssets, m.totalBorrowShares);
+            shares = MorphoMath.toSharesDown(assets, m.totalBorrowAssets, m.totalBorrowShares);
         } else {
-            assets = _toAssetsUp(shares, m.totalBorrowAssets, m.totalBorrowShares);
+            assets = MorphoMath.toAssetsUp(shares, m.totalBorrowAssets, m.totalBorrowShares);
         }
         // real Morpho underflows here when repaying more shares than the position owes
         require(
@@ -241,7 +241,7 @@ contract MockMorpho is IMorpho {
         MarketState storage m = _markets[marketId];
         require(shares > 0 && shares <= p.borrowShares, "no debt to liquidate");
         _accrue(marketId);
-        uint256 assets = _toAssetsUp(shares, m.totalBorrowAssets, m.totalBorrowShares);
+        uint256 assets = MorphoMath.toAssetsUp(shares, m.totalBorrowAssets, m.totalBorrowShares);
         uint128 seized = shares == p.borrowShares
             ? p.collateral
             : uint128(Math.mulDiv(p.collateral, shares, p.borrowShares));
@@ -280,7 +280,7 @@ contract MockMorpho is IMorpho {
         PositionState storage p = _positions[id][account];
         MarketState storage m = _markets[id];
         uint256 price = IOracle(marketParams.oracle).price();
-        uint256 borrowed = _toAssetsUp(p.borrowShares, m.totalBorrowAssets, m.totalBorrowShares);
+        uint256 borrowed = MorphoMath.toAssetsUp(p.borrowShares, m.totalBorrowAssets, m.totalBorrowShares);
         uint256 maxBorrow = Math.mulDiv(
             Math.mulDiv(p.collateral, price, ORACLE_PRICE_SCALE), marketParams.lltv, WAD
         );
@@ -288,45 +288,6 @@ contract MockMorpho is IMorpho {
     }
 
     function _id(MarketParams calldata marketParams) private pure returns (bytes32) {
-        return keccak256(abi.encode(marketParams));
-    }
-
-    function _toSharesUp(
-        uint256 _assets,
-        uint256 _totalAssets,
-        uint256 _totalShares
-    )
-        private pure
-        returns (uint256)
-    {
-        return Math.mulDiv(
-            _assets, _totalShares + VIRTUAL_SHARES, _totalAssets + VIRTUAL_ASSETS,
-            Math.Rounding.Ceil
-        );
-    }
-
-    function _toSharesDown(
-        uint256 _assets,
-        uint256 _totalAssets,
-        uint256 _totalShares
-    )
-        private pure
-        returns (uint256)
-    {
-        return Math.mulDiv(_assets, _totalShares + VIRTUAL_SHARES, _totalAssets + VIRTUAL_ASSETS);
-    }
-
-    function _toAssetsUp(
-        uint256 _shares,
-        uint256 _totalAssets,
-        uint256 _totalShares
-    )
-        private pure
-        returns (uint256)
-    {
-        return Math.mulDiv(
-            _shares, _totalAssets + VIRTUAL_ASSETS, _totalShares + VIRTUAL_SHARES,
-            Math.Rounding.Ceil
-        );
+        return MorphoMath.marketId(marketParams);
     }
 }

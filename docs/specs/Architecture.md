@@ -29,7 +29,7 @@ This document describes how the two modules in this repo are wired together on c
 
 The two modules share:
 
-- The Solidity toolchain (`^0.8.27`, solc `0.8.30`, optimizer 200, `via_ir`, Cancun).
+- The Solidity toolchain (`^0.8.27`, solc `0.8.35`, optimizer 200, `via_ir`, Cancun).
 - The [`OwnableWithTimelock`](../../contracts/utils/implementation/OwnableWithTimelock.sol) governance utility — timelocked owner operations with `executeTimelockedCall`, identical semantics in [`TimelockFacet`](../../contracts/smartAccounts/facets/TimelockFacet.sol) and `OwnableWithTimelock`.
 - The FAsset and FDC interfaces from `flare-periphery`.
 
