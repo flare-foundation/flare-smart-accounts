@@ -1917,7 +1917,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ACTION_WITHDRAW,
                 abi.encode(
                     bytes32("op-w"), deadline, uint256(30e6), _withdrawOptions().minComposeValue,
-                    _withdrawOptions().maxFeeFxrp, _withdrawOptions().returnOptions
+                    _withdrawOptions().returnOptions
                 )
             )
         );
@@ -1948,7 +1948,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ACTION_WITHDRAW,
                 abi.encode(
                     bytes32("op-w"), deadline, uint256(30e6), _withdrawOptions().minComposeValue,
-                    _withdrawOptions().maxFeeFxrp, _withdrawOptions().returnOptions
+                    _withdrawOptions().returnOptions
                 )
             )
         );
@@ -2055,8 +2055,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             ILoanSubaccount.WithdrawOptions({
                 destinationOptions: "",
                 returnOptions: hex"0003",
-                minComposeValue: 0,
-                maxFeeFxrp: 0
+                minComposeValue: 0
             })
         );
         vm.stopPrank();
@@ -2615,8 +2614,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         return ILoanSubaccount.WithdrawOptions({
             destinationOptions: "",
             returnOptions: "",
-            minComposeValue: 0.01 ether,
-            maxFeeFxrp: 0
+            minComposeValue: 0.01 ether
         });
     }
 }

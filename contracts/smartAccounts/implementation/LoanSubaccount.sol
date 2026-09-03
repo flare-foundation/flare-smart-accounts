@@ -198,7 +198,6 @@ contract LoanSubaccount is ILoanSubaccount, ComposeReceiverAccountBase {
                 _deadline,
                 _amount,
                 _options.minComposeValue,
-                _options.maxFeeFxrp,
                 _options.returnOptions
             )
         );

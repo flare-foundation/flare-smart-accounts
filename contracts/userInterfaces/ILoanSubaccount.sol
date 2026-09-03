@@ -29,7 +29,7 @@ uint64 constant REDEEM_HOME_TTL = 1 hours;
  */
 interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
-    /// @notice The signed LayerZero options and safety bounds of the two-leg withdrawal. The
+    /// @notice The signed LayerZero options and delivery floor of the two-leg withdrawal. The
     /// operator quotes the return leg first, puts that fee (plus headroom; the excess lands on
     /// the parent) into `destinationOptions` as compose value, then quotes and sends the first
     /// message.
@@ -52,15 +52,6 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
         /// finalizes (no funds at risk - the value was never delivered, and a reissue on the
         /// same operation id executes normally - but the orphan stays queued at the endpoint).
         uint256 minComposeValue;
-        /// @notice The signed cap on the loan fee this withdrawal may settle, in FXRP
-        /// deducted from the withdrawn collateral at the market oracle's price. Binds only
-        /// when the withdrawal would leave the fee under-secured (the secured-claim rule;
-        /// most mid-loan withdrawals collect nothing). The cap is the user's price
-        /// protection: a worse price parks the delivery retriably (reissue with a higher
-        /// cap on the same operation id), and a dead oracle is escaped by settling through
-        /// the subaccount's repay first. Quote the converted fee plus headroom; zero when
-        /// no collection is expected.
-        uint256 maxFeeFxrp;
     }
 
     /**
@@ -339,19 +330,21 @@ interface ILoanSubaccount is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice The withdraw instruction: a typed, message-only send that atomically withdraws
-     * `_amount` of collateral on the loan chain and bridges the net amount home for redemption
-     * — no idle window there, so nothing can be redeposited from under it.
+     * `_amount` of collateral on the loan chain and bridges it home for redemption — no idle
+     * window there, so nothing can be redeposited from under it.
      * @dev Restricted to the parent Personal Account; same validation, guards, and fee
      * handling as {borrow}. No FXRP travels with it, but `_options.destinationOptions` must
      * carry, as compose value, the native that prepays the return leg's LayerZero fee (quoted
      * against `_options.returnOptions` on the loan chain; the excess lands on the parent, and
      * too little parks the delivery as retriable). See {WithdrawOptions} for the signed
-     * delivery-value floor and the FXRP fee cap.
+     * delivery-value floor. A withdrawal that would leave the Flare fee under-secured reverts
+     * on the loan chain (`OutstandingLoanFee`, retriable) until the fee is paid in loan tokens
+     * through the subaccount's `repay`.
      * @param _amount Collateral to withdraw on the loan chain and bridge home; non-zero.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
-     * @param _options The two option blobs, the delivery-value floor and the signed FXRP fee
-     * cap ({WithdrawOptions}); `minComposeValue` must be non-zero.
+     * @param _options The two option blobs and the delivery-value floor ({WithdrawOptions});
+     * `minComposeValue` must be non-zero.
      */
     function withdraw(
         uint256 _amount,

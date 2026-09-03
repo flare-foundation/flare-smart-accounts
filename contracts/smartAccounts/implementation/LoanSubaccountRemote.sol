@@ -193,7 +193,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // every exit from this chain rides the OFT itself, so an OFT incident must stop it
         _checkNotPaused();
         // check the fee claim against the full position (the sweep moves idle FXRP, not the
-        // position): under-secured blocks - settle through repay or a withdraw first. A live
+        // position): under-secured blocks - settle through repay first. A live
         // principal checkpoints first; zero principal and zero collectible need no
         // Morpho/oracle read, and debt-free dust is forgiven rather than blocking
         if (feePrincipal != 0) {
@@ -410,8 +410,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         }
     }
 
-    /// @dev The atomic withdrawal: withdraws collateral and bridges the net amount home with
-    /// the redeem-home compose in the same execution - no idle window, so the redeposit race
+    /// @dev The atomic withdrawal: withdraws collateral and bridges the withdrawn amount home
+    /// with the redeem-home compose in the same execution - no idle window, so the redeposit race
     /// cannot touch a withdrawal. The delivered compose value pays the return leg's live quote
     /// against the signed `returnOptions`, with the excess to the parent; too little value or
     /// any other failure reverts and leaves the delivery retriable. Morpho enforces position
@@ -427,9 +427,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             uint64 deadline,
             uint256 amount,
             uint256 minComposeValue,
-            uint256 maxFeeFxrp,
             bytes memory returnOptions
-        ) = abi.decode(_actionData, (bytes32, uint64, uint256, uint256, uint256, bytes));
+        ) = abi.decode(_actionData, (bytes32, uint64, uint256, uint256, bytes));
         require(amount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
         // the signed delivery floor comes before every consuming branch: delivery is
@@ -448,29 +447,21 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // pause); the exit itself waits - it rides the OFT
         _checkNotPaused();
         ILoanMarketsFacet.Market memory market = _myMarket();
-        // the secured-claim gate: checkpoint, then collect only when this withdrawal would
-        // leave the fee under-secured - FXRP deducted from the withdrawal itself, under the
-        // signed cap
+        // the secured-claim gate: checkpoint, then refuse the withdrawal (retriably) if it
+        // would leave the fee under-secured - the fee is paid in loan tokens through repay,
+        // never taken from the collateral
         _checkpointFee(market);
-        uint256 fxrpFee = 0;
-        address feeRecipient = address(0);
-        if (!_exitLeavesFeeSecured(market, amount)) {
-            (fxrpFee, feeRecipient) = _settleFeeInFxrp(market, maxFeeFxrp, amount);
-        }
+        require(_exitLeavesFeeSecured(market, amount), OutstandingLoanFee(flareDebtX18 / WAD));
         usedOperations[operationId] = true;
 
         IMorpho(market.morpho).withdrawCollateral(
             market.marketParams, amount, address(this), address(this)
         );
-        if (fxrpFee > 0) {
-            IERC20(market.marketParams.collateralToken).safeTransfer(feeRecipient, fxrpFee);
-        }
         emit CollateralWithdrawn(parentPersonalAccount, operationId, amount, _guid);
 
-        // the return leg (net of an FXRP-mode fee), in the same execution; the LayerZero fee
-        // rode in as compose value
+        // the return leg, in the same execution; the LayerZero fee rode in as compose value
         uint256 excess = _bridgeHome(
-            _getTransport(), amount - fxrpFee, returnOptions, msg.value, parentPersonalAccount
+            _getTransport(), amount, returnOptions, msg.value, parentPersonalAccount
         );
         if (excess > 0) {
             emit NativeSweptToParent(parentPersonalAccount, excess);
@@ -628,8 +619,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// @dev The secured-claim rule: the exit passes uncollected while the collateral that
     /// would remain, valued at the market oracle's price, covers FEE_SECURITY_FACTOR times
     /// the collectible fee. Zero collectible needs no reads at all (and forgives debt-free
-    /// dust); a zero, dead or reverting oracle values the security at nothing and falls
-    /// through to the settlement branch (a parked exit is settled through repay, oracle-free).
+    /// dust); a zero, dead or reverting oracle values the security at nothing, so the exit is
+    /// refused (the fee is settled through repay, oracle-free, and the exit retried).
     function _exitLeavesFeeSecured(
         ILoanMarketsFacet.Market memory _market,
         uint256 _withdrawAmount
@@ -654,43 +645,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         if (price == 0) return false;
         return Math.mulDiv(remaining, price, ORACLE_PRICE_SCALE)
             >= FEE_SECURITY_FACTOR * collectible;
-    }
-
-    /// @dev The withdraw gate's settlement: the collectible fee converts at the market
-    /// oracle's price - the same write-once oracle the market's liquidations price by,
-    /// rounded up so the overcollection stays below one FXRP base unit - and the caller
-    /// deducts the returned amount from the withdrawn collateral before the bridge-back.
-    /// The signed cap is the user's price protection (a worse price reverts, retriable); a
-    /// dead or zero-priced oracle parks the exit - settle through repay (send loan tokens to
-    /// the account, the free direction), then retry. The fee clears for every whole collectible unit - no partial
-    /// settlement; a sub-unit X18 remainder can survive while principal lives (debt-free
-    /// exits forgive it).
-    function _settleFeeInFxrp(
-        ILoanMarketsFacet.Market memory _market,
-        uint256 _maxFeeFxrp,
-        uint256 _withdrawAmount
-    )
-        private
-        returns (uint256 _fxrpFee, address _feeRecipient)
-    {
-        uint256 collectible = flareDebtX18 / WAD;
-        if (collectible > 0) {
-            uint256 price = 0;
-            try IOracle(_market.marketParams.oracle).price() returns (uint256 _price) {
-                price = _price;
-            } catch {
-                revert OracleUnavailable();
-            }
-            require(price > 0, InvalidOraclePrice());
-            _fxrpFee = Math.mulDiv(collectible, ORACLE_PRICE_SCALE, price, Math.Rounding.Ceil);
-            require(_fxrpFee <= _maxFeeFxrp, FxrpFeeAboveSignedCap(_fxrpFee, _maxFeeFxrp));
-            require(_fxrpFee < _withdrawAmount, FxrpFeeExceedsWithdrawal(_fxrpFee, _withdrawAmount));
-            flareDebtX18 -= collectible * WAD;
-            _feeRecipient =
-                ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient;
-            emit LoanFeeCollectedFxrp(_feeRecipient, _fxrpFee, collectible, price);
-        }
-        _forgiveFeeDust();
     }
 
     /// @dev A sub-unit remainder on a debt-free position can never be transferred (ERC-20

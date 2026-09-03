@@ -20,15 +20,14 @@ import {ISubaccount} from "./ISubaccount.sol";
 uint8 constant ACTION_BORROW = 1;
 
 /// @dev Withdraw action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// uint256 withdrawAmount, uint256 minComposeValue, uint256 maxFeeFxrp,
-/// bytes returnOptions)`. The atomic withdrawal: withdraws collateral from the account's one
-/// position and bridges the net amount back to the account's own Flare address in the same
-/// execution, with the redeem-home compose - no idle window, so the redeposit ordering race
-/// cannot touch a withdrawal. **The fee is a secured claim**: the withdrawal collects nothing
-/// while the collateral remaining after it, valued at the market oracle's price, covers three
-/// times the collectible fee; an exit that would leave the fee under-secured settles it in
-/// FXRP at that same oracle (`ceil(collectible · 1e36 / price)`), deducted from the withdrawn
-/// collateral under the signed `maxFeeFxrp` cap. `minComposeValue` is the delivery floor:
+/// uint256 withdrawAmount, uint256 minComposeValue, bytes returnOptions)`. The atomic
+/// withdrawal: withdraws collateral from the account's one position and bridges it back to the
+/// account's own Flare address in the same execution, with the redeem-home compose - no idle
+/// window, so the redeposit ordering race cannot touch a withdrawal. **The fee is a secured
+/// claim**: the withdrawal passes while the collateral remaining after it, valued at the market
+/// oracle's price, covers three times the collectible fee, and otherwise reverts retriably
+/// (`OutstandingLoanFee`) - the fee is paid in loan tokens through {repay}, never taken from
+/// the collateral, so no price ever moves funds here. `minComposeValue` is the delivery floor:
 /// compose delivery is permissionless and LayerZero does not authenticate the delivered value,
 /// so a delivery carrying less - execution and terminal skip alike - reverts
 /// (`InsufficientDeliveryValue`), which is what stops a zero-value front-run from consuming
@@ -36,17 +35,18 @@ uint8 constant ACTION_BORROW = 1;
 /// options (Flare-side gas and, optionally, the redemption's executor fee as compose value,
 /// best-effort on that leg - the Flare redeem-home accepts zero value by design); the return
 /// fee is paid from the compose value delivered with this action - the only action that
-/// accepts value - and the excess goes to the parent. Oracle, cap, quote and return-send
-/// failures all revert and leave the delivery retriable; what recovers them differs by cause,
-/// and this is the one place it is written out. A quote shortfall: retry the SAME packet with
-/// more value. Another transient return-send failure: retry the same packet once its cause
-/// clears - more value cannot help, since exactly the newly quoted fee is forwarded. A dead or
-/// zero-priced oracle: settle through {repay} first (loan tokens to the account, the free
-/// direction), after which the retried delivery passes with nothing collectible, oracle-free.
-/// A fee above the cap, or bad `returnOptions` frozen into the signed packet (the accepted
-/// residual - no retry can fix the blob itself): issue a corrected instruction reusing the SAME
-/// operation id, whereupon the parked packet later duplicate-skips. Position health is enforced
-/// by Morpho.
+/// accepts value - and the excess goes to the parent. Every failure reverts and leaves the
+/// delivery retriable; what recovers it differs by cause, and this is the one place it is
+/// written out. A quote shortfall: retry the SAME packet with more value. Another transient
+/// return-send failure: retry the same packet once its cause clears - more value cannot help,
+/// since exactly the newly quoted fee is forwarded. An under-secured fee (`OutstandingLoanFee`,
+/// which a dead or zero-priced oracle also produces, since it values the security at
+/// nothing): send loan tokens to the account and let {repay} collect (live debt is repaid
+/// first, so with debt outstanding the tokens must cover it before any reach the fee), after
+/// which the retried delivery passes with nothing collectible, oracle-free. Bad `returnOptions` frozen into the
+/// signed packet (the accepted residual - no retry can fix the blob itself): issue a corrected
+/// instruction reusing the SAME operation id, whereupon the parked packet later
+/// duplicate-skips. Position health is enforced by Morpho.
 uint8 constant ACTION_WITHDRAW = 2;
 
 /// @dev Deposit-collateral action: `actionData` is `abi.encode(bytes32 operationId,
@@ -131,12 +131,11 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
 
     /**
-     * @notice Emitted when a withdraw action executes; the withdrawn collateral, net of an
-     * FXRP fee settlement, is bridged home in the same execution ({FXrpSweptToOrigin}
-     * follows and carries the net amount).
+     * @notice Emitted when a withdraw action executes; the withdrawn collateral is bridged
+     * home in the same execution ({FXrpSweptToOrigin} follows).
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
-     * @param amount Collateral withdrawn from the position (gross, before the fee).
+     * @param amount Collateral withdrawn from the position and bridged.
      * @param guid The LayerZero message id the action arrived with.
      */
     event CollateralWithdrawn(
@@ -231,24 +230,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     event LoanFeeCollected(
         address indexed feeRecipient,
         uint256 amount
-    );
-
-    /**
-     * @notice Emitted when a withdraw action settles the fee in FXRP, deducted from the
-     * withdrawn collateral at the market oracle's price.
-     * @param feeRecipient The collector paid.
-     * @param fxrpAmount The FXRP deducted (rounded up, so the overcollection is below one
-     * FXRP base unit).
-     * @param collectible The loan-token fee it settled - every whole collectible unit; a
-     * sub-unit X18 remainder can survive while principal lives (debt-free exits forgive
-     * it).
-     * @param price The oracle price used (1e36-scaled collateral price in loan tokens).
-     */
-    event LoanFeeCollectedFxrp(
-        address indexed feeRecipient,
-        uint256 fxrpAmount,
-        uint256 collectible,
-        uint256 price
     );
 
     /**
@@ -389,50 +370,15 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts a {sweepToOrigin} while the collectible fee is under-secured - the
-     * position's collateral, at the market oracle's price, is worth less than three times the
-     * fee. Settle through {repay} or a withdraw first, then sweep.
+     * @notice Reverts an exit - a withdraw action or {sweepToOrigin} - that would leave the
+     * collectible fee under-secured: the collateral remaining after it, at the market oracle's
+     * price, would be worth less than three times the fee (a dead or zero-priced oracle values
+     * it at nothing). Retriable: send loan tokens to the account, let {repay} collect, retry.
      * @param collectible The fee currently payable.
      */
     error OutstandingLoanFee(
         uint256 collectible
     );
-
-    /**
-     * @notice Reverts when the current FXRP fee exceeds the signed cap - the user's price
-     * protection. Retriable: reissue with a higher cap on the same operation id.
-     * @param requiredFxrp The FXRP the fee converts to at the current price.
-     * @param cap The signed cap.
-     */
-    error FxrpFeeAboveSignedCap(
-        uint256 requiredFxrp,
-        uint256 cap
-    );
-
-    /**
-     * @notice Reverts when the converted fee would consume the whole withdrawal. Retriable:
-     * withdraw more, or settle through {repay} first.
-     * @param requiredFxrp The FXRP the fee converts to at the current price.
-     * @param withdrawAmount The collateral being withdrawn.
-     */
-    error FxrpFeeExceedsWithdrawal(
-        uint256 requiredFxrp,
-        uint256 withdrawAmount
-    );
-
-    /**
-     * @notice Reverts an under-secured withdraw when the market oracle returns a zero price.
-     * Retriable: settle through {repay} first.
-     */
-    error InvalidOraclePrice();
-
-    /**
-     * @notice Reverts an under-secured withdraw when the market oracle reverts (a dead
-     * oracle - the write-once market can never rotate it). Retriable: settle through {repay}
-     * first.
-     */
-    error OracleUnavailable();
-
 
 
     /**
@@ -532,8 +478,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * past the deadline it skips. Waiting while the Flare side is paused or its route
      * unconfigured is accepted - custody is unaffected. The secured-claim exit gate applies: a
      * live fee principal checkpoints first, an under-secured collectible fee blocks the sweep
-     * ({OutstandingLoanFee} - settle through {repay} or a withdraw first), and a fee still
-     * covered three times over by the position's collateral rides along uncollected. With zero
+     * ({OutstandingLoanFee} - settle through {repay} first), and a fee the position's
+     * collateral still covers to the gate's threshold rides along uncollected. With zero
      * principal and nothing collectible the gate avoids Morpho and the oracle entirely and
      * forgives sub-unit dust, never blocking.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
