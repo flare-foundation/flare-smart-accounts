@@ -30,10 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
   - `PersonalAccountsFacet` gains the permissionless, pause-gated `createPersonalAccount(xrplOwner)` (facet replacement on existing deployments); the `PersonalAccounts` library returns `address`.
-  - `removeUnpausers` is immediate (`onlyOwner`) instead of timelocked; pauser removal stays timelocked. Mirrors `flare-dvn-contracts`.
-
-### Fixed
-  - Misspelled `newWallet` variable name in `MasterAccountControllerTest`.
+  - `removeUnpausers` is immediate (`onlyOwner`) instead of timelocked; pauser removal stays timelocked.
 
 ## [[v2.0.0](https://github.com/flare-foundation/flare-smart-accounts/releases/tag/v2.0.0)] - 2026-07-07
 
