@@ -44,7 +44,8 @@ if (!isValidNetwork) {
 // the four pinned Ethereum records are chain-recovered facts, not build outputs: on ethereum
 // a protected name (in any casing - development filesystems can be case-insensitive) may only
 // ever be recorded with its canonical spelling and canonical pinned address, whether or not a
-// record already exists (the bootstrap never routes through this recorder)
+// record already exists - the pinned bootstrap records through here too, so this is what keeps
+// it from ever writing anything but the pins
 function checkProtectedEthereumRecord(record: ContractInfo): void {
   const canonical = PROTECTED_ETHEREUM_NAMES.find(
     (protectedName) => protectedName.toLowerCase() === record.name.toLowerCase()

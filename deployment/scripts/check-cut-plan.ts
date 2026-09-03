@@ -101,7 +101,7 @@ async function main() {
       if (!record) {
         throw new Error(
           `${pinnedName}: pinned base facet missing from deployment/deploys/ethereum.json — ` +
-            `restore the pinned record before planning a cut`
+            `run the pinned bootstrap (DeployEthereumController) before planning a cut`
         );
       }
       if (record.address.toLowerCase() !== pin.address) {

@@ -19,10 +19,17 @@ import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
  * PersonalAccountsFacet, ComposeTransportFacet, LoanMarketsFacet) is owner-gated: the fresh
  * diamond is owned by the historical
  * `DiamondArgs.owner` EOA. Confirm that key is still controlled before deploying here.
+ *
+ * Ethereum only (chain id 1; a mainnet fork for rehearsals). It prints the recorder's
+ * `NETWORK:`/`DEPLOYED:` lines so the wrapper records the four contracts in
+ * `deployment/deploys/ethereum.json` when - and only when - they exist there.
  */
 // solhint-disable no-console
 contract DeployEthereumController is Script {
     function run() external {
+        require(block.chainid == 1, "the pinned bootstrap runs on Ethereum (chain id 1) only");
+        console2.log("NETWORK: ethereum");
+
         vm.startBroadcast();
         // base facets first: the diamond constructor cuts them and requires their code
         _deployPinned(

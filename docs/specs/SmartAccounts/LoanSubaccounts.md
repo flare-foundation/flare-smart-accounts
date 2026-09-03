@@ -1120,7 +1120,8 @@ before relying on an Ethereum deployment. The Ethereum cut installs `Subaccounts
 `TimelockFacet`, `PauseFacet`, `PersonalAccountsFacet` (the PA beacon and creation surface for the
 remote Personal Accounts), `ComposeTransportFacet` and `LoanMarketsFacet` through the standard cut flow
 (the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
-`deployment/deploys/ethereum.json` is seeded with the pinned contracts), and both
+`deployment/deploys/ethereum.json` is written by the bootstrap when it runs — the record exists
+only once the contracts do, and the cut planner refuses to plan without it), and both
 implementations ship with `pnpm deploy_remote_account_implementations ethereum` (the script
 refuses the Flare-family chain ids: a remote implementation recorded on Flare would look like a
 legitimate artifact and, registered there, corrupt every Personal Account's storage). There is
@@ -1132,8 +1133,9 @@ not run against Ethereum — operators go through the pinned bootstrap and the s
 One ordering constraint is absolute: the pool-per-type settings scheme redefined payload
 version 1 relative to the earlier route-registry draft, which is safe **only** while no
 loan-chain settings facet has ever been cut, no old-V1 packet is queued or in flight anywhere
-in LayerZero, and no client or tooling holds prebuilt old-schema payloads — all true today,
-`deployment/deploys/ethereum.json` holds only the pinned bootstrap contracts. The same condition
+in LayerZero, and no client or tooling holds prebuilt old-schema payloads — all true today:
+nothing has been deployed to Ethereum, so `deployment/deploys/ethereum.json` does not exist
+yet. The same condition
 covers every later in-place V1 change, most recently the withdraw action's `actionData`
 gaining `minComposeValue` and `returnOptions` (the fee's signed bounds — borrow rate maxima and
 a withdraw FXRP cap — were added and removed again inside the same pre-cut window), and the
