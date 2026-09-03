@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
+import {IControlledAccount} from "./IControlledAccount.sol";
+
 /**
  * @title ISubaccount
  * @notice The type-generic subaccount surface every implementation must expose. The frozen
@@ -9,7 +11,32 @@ pragma solidity >=0.8.4 <0.9;
  * registered implementation": its implementation must implement this interface. The ABI is
  * frozen with the proxy — changing it shifts every predicted subaccount address.
  */
-interface ISubaccount {
+interface ISubaccount is IControlledAccount {
+
+    /**
+     * @notice Emitted when a subaccount is initialized.
+     * @param controllerAddress The controller address.
+     * @param parentPersonalAccount The parent Personal Account address (the same address on
+     * every chain; codeless on a remote chain until its remote Personal Account is created).
+     * @param subaccountType The subaccount type.
+     */
+    event SubaccountInitialized(
+        address indexed controllerAddress,
+        address indexed parentPersonalAccount,
+        uint256 indexed subaccountType
+    );
+
+    /**
+     * @notice Reverts if the parent Personal Account address is invalid (zero).
+     */
+    error InvalidParentPersonalAccount();
+
+    /**
+     * @notice Reverts if a parent-driven method is called by anything other than the parent
+     * Personal Account (on a remote chain, the remote Personal Account executing the user's
+     * signed cross-chain user operation).
+     */
+    error OnlyParent();
 
     /**
      * @notice Initializes the subaccount. Delegate-called by the subaccount proxy's
@@ -25,14 +52,6 @@ interface ISubaccount {
         uint256 _subaccountType
     )
         external;
-
-    /**
-     * @notice Returns the controller address associated with this subaccount.
-     * @return The controller address.
-     */
-    function controllerAddress()
-        external view
-        returns (address);
 
     /**
      * @notice Returns the parent Personal Account address for this subaccount.

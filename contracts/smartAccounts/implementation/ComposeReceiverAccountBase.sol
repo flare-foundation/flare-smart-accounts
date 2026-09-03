@@ -16,6 +16,7 @@ import {
 } from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
+import {ControlledAccountBase} from "./ControlledAccountBase.sol";
 
 /**
  * @title ComposeReceiverAccountBase contract
@@ -25,32 +26,23 @@ import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
  * whether compose value is accepted ({_acceptsComposeValue}) and their identity; their
  * parent-driven and public rails stay outside this base. The authentication is deliberately in
  * one place: it is the security root of every action that arrives without a local signature.
+ * @dev STORAGE: the consumed operation ids live in the
+ * `smartAccounts.ComposeReceiverAccountBase.State` namespace (see the storage rule on
+ * {ControlledAccountBase}), so this base can grow without shifting any lineage that
+ * inherits it.
  */
-abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, ReentrancyGuardTransient {
+abstract contract ComposeReceiverAccountBase is
+    IComposeReceiverAccountBase, ControlledAccountBase, ReentrancyGuardTransient
+{
     using OFTComposeMsgCodec for bytes;
 
-    address internal constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
-
-    // STORAGE PREFIX: slots 0-1 of every derived proxy lineage - the subaccounts on both
-    // chains and the remote Personal Account alike. Once the first proxy is deployed, never
-    // insert, remove or reorder them; add new state to each derived lineage, not to the base.
-
-    /// @dev MasterAccountController address; exposed through {controllerAddress}. Internal
-    /// storage rather than a public variable so derived contracts can disambiguate the
-    /// getter against interface declarations.
-    address internal controller;
-    // false positive (uninitialized-state): a mapping has no initializer; derived accounts with
-    // signed, id-carrying actions write it, and a receiver whose actions carry no id (the Flare
-    // redeem-on-arrival) leaves it empty by design
-    // slither-disable-start uninitialized-state
-    /// @inheritdoc IComposeReceiverAccountBase
-    mapping(bytes32 operationId => bool used) public usedOperations;
-    // slither-disable-end uninitialized-state
-
-    constructor() {
-        // ensure the implementation contract itself cannot be initialized/used
-        controller = EMPTY_ADDRESS;
+    /// @custom:storage-location erc7201:smartAccounts.ComposeReceiverAccountBase.State
+    struct ComposeReceiverState {
+        mapping(bytes32 operationId => bool used) usedOperations;
     }
+
+    bytes32 private constant COMPOSE_RECEIVER_STATE_POSITION =
+        bytes32(erc7201("smartAccounts.ComposeReceiverAccountBase.State"));
 
     /// @inheritdoc ILayerZeroComposer
     /// @dev The authenticated entry point; {_authenticate} holds the full checklist. The
@@ -82,11 +74,13 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
     }
 
     /// @inheritdoc IComposeReceiverAccountBase
-    function controllerAddress()
-        external view virtual
-        returns (address)
+    function usedOperations(
+        bytes32 _operationId
+    )
+        external view
+        returns (bool)
     {
-        return controller;
+        return _getComposeReceiverState().usedOperations[_operationId];
     }
 
     /// @dev The account's action set: executes `_action` or reverts `UnsupportedAction`.
@@ -98,17 +92,6 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
         uint256 _amountLD
     )
         internal virtual;
-
-    /// @dev One-time controller assignment for the derived account's `initialize`.
-    function _setController(
-        address _controllerAddress
-    )
-        internal
-    {
-        require(controller == address(0), AlreadyInitialized());
-        require(_controllerAddress != address(0), InvalidControllerAddress());
-        controller = _controllerAddress;
-    }
 
     /// @dev The full authentication checklist: the caller must be the endpoint, the sender
     /// the configured OFT, the source chain the origin, the source-chain sender this
@@ -157,7 +140,7 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
         internal view
         returns (uint8 _reason)
     {
-        if (usedOperations[_operationId]) {
+        if (_getComposeReceiverState().usedOperations[_operationId]) {
             return SKIP_REASON_DUPLICATE;
         }
         if (block.timestamp > _deadline) {
@@ -166,12 +149,32 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
         return 0;
     }
 
+    /// @dev Consumes an operation id: the signed action it carried has executed.
+    function _markOperationUsed(
+        bytes32 _operationId
+    )
+        internal
+    {
+        _getComposeReceiverState().usedOperations[_operationId] = true;
+    }
+
+    function _getComposeReceiverState()
+        private pure
+        returns (ComposeReceiverState storage _state)
+    {
+        bytes32 position = COMPOSE_RECEIVER_STATE_POSITION;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            _state.slot := position
+        }
+    }
+
     function _checkNotPaused()
         internal view
     {
         // outward and exposure-increasing moves stop while paused; defensive moves never
         // route through this gate
-        require(!IPauseFacet(controller).isPaused(), IPauseFacet.IsPaused());
+        require(!IPauseFacet(controllerAddress).isPaused(), IPauseFacet.IsPaused());
     }
 
     /// @dev The transport this receiver authenticates against: the endpoint that may call, the
@@ -182,7 +185,7 @@ abstract contract ComposeReceiverAccountBase is IComposeReceiverAccountBase, Ree
         internal view virtual
         returns (IComposeTransportFacet.Transport memory _transport)
     {
-        _transport = IComposeTransportFacet(controller).getComposeTransport();
+        _transport = IComposeTransportFacet(controllerAddress).getComposeTransport();
         require(
             _transport.lzEndpoint != address(0),
             IComposeTransportFacet.ComposeTransportNotConfigured()

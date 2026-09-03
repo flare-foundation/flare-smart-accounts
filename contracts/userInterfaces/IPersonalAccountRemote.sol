@@ -2,6 +2,7 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
+import {IPersonalAccountBase} from "./IPersonalAccountBase.sol";
 
 /// @dev Execute action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
 /// Call[] calls)`. Executes the signed calls from this account in order and atomically for
@@ -35,7 +36,7 @@ uint8 constant PA_ACTION_EXECUTE = 1;
  * recovered loan-token surplus, strays, native delivered with a message to fund
  * value-carrying calls) moves only by the user's signature.
  */
-interface IPersonalAccountRemote is IComposeReceiverAccountBase {
+interface IPersonalAccountRemote is IPersonalAccountBase, IComposeReceiverAccountBase {
     /// @notice One call of a signed batch. Field-identical to the Flare `IPersonalAccount.Call`
     /// (the sender encodes that struct, this account decodes this one - the same ABI layout).
     struct Call {
@@ -46,16 +47,6 @@ interface IPersonalAccountRemote is IComposeReceiverAccountBase {
         /// @notice Call data; empty for a plain native transfer.
         bytes data;
     }
-
-    /**
-     * @notice Emitted when a remote Personal Account is initialized.
-     * @param controllerAddress The controller address.
-     * @param xrplOwner The XRPL owner.
-     */
-    event PersonalAccountRemoteInitialized(
-        address indexed controllerAddress,
-        string xrplOwner
-    );
 
     /**
      * @notice Emitted when a signed batch of calls executed.
@@ -83,11 +74,6 @@ interface IPersonalAccountRemote is IComposeReceiverAccountBase {
     );
 
     /**
-     * @notice Reverts if the XRPL owner is invalid (empty).
-     */
-    error InvalidXrplOwner();
-
-    /**
      * @notice Reverts on an empty batch, which would only consume the operation id.
      */
     error EmptyUserOp();
@@ -108,21 +94,4 @@ interface IPersonalAccountRemote is IComposeReceiverAccountBase {
      * must not accept native, since nothing could ever move it out again.
      */
     error NotInitialized();
-
-    /**
-     * @notice The XRPL owner this account belongs to.
-     * @return The XRPL owner.
-     */
-    function xrplOwner()
-        external view
-        returns (string memory);
-
-    /**
-     * @notice The implementation this account currently runs, resolved through the
-     * controller-as-beacon.
-     * @return The implementation address.
-     */
-    function implementation()
-        external view
-        returns (address);
 }

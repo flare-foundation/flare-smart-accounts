@@ -2,6 +2,9 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
+import {IControlledAccount} from "../contracts/userInterfaces/IControlledAccount.sol";
+import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
+import {IBridgingSubaccount} from "../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
 import {IDiamond} from "../contracts/diamond/interfaces/IDiamond.sol";
 import {DiamondArgs, FunctionNotFound} from "../contracts/diamond/implementation/Diamond.sol";
@@ -27,11 +30,8 @@ import {
 import {TimelockFacet} from "../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {PauseFacet} from "../contracts/smartAccounts/facets/PauseFacet.sol";
 import {ILoanSubaccountRemote} from "../contracts/userInterfaces/ILoanSubaccountRemote.sol";
-import {
-    ILoanSubaccount,
-    ACTION_REDEEM_HOME,
-    REDEEM_HOME_TTL
-} from "../contracts/userInterfaces/ILoanSubaccount.sol";
+import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
+import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {
     IPersonalAccountRemote,
@@ -193,7 +193,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testInitializeRevertAlreadyInitialized() public {
         LoanSubaccountRemote subaccount = _deploySubaccount();
 
-        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IControlledAccount.AlreadyInitialized.selector);
         subaccount.initialize(
             address(controller),
             parentPersonalAccount,
@@ -203,7 +203,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
         // the implementation contract locks itself in its own constructor
-        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IControlledAccount.AlreadyInitialized.selector);
         loanChainImpl.initialize(
             address(controller),
             parentPersonalAccount,
@@ -2585,7 +2585,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ILoanSubaccountRemote(subaccount).checkpointFee();
         rlusd.mint(parent, 70e18);
 
-        vm.expectRevert(ILoanSubaccountRemote.OnlyParent.selector);
+        vm.expectRevert(ISubaccount.OnlyParent.selector);
         ILoanSubaccountRemote(subaccount).payLoanFee(70e18);
 
         vm.prank(parent);
@@ -2792,7 +2792,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         evil.setCallback(
             subaccount, abi.encodeCall(ILoanSubaccountRemote.payLoanFee, (70e18))
         );
-        vm.expectRevert(ILoanSubaccountRemote.OnlyParent.selector);
+        vm.expectRevert(ISubaccount.OnlyParent.selector);
         ILoanSubaccountRemote(subaccount).payLoanFee(70e18);
         vm.stopPrank();
         (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
@@ -2808,10 +2808,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = address(_deploySubaccount());
         vm.store(subaccount, bytes32(0), bytes32(0));
 
-        vm.expectRevert(IComposeReceiverAccountBase.InvalidControllerAddress.selector);
+        vm.expectRevert(IControlledAccount.InvalidControllerAddress.selector);
         ISubaccount(subaccount).initialize(address(0), parentPersonalAccount, SUBACCOUNT_TYPE_LOAN);
 
-        vm.expectRevert(ILoanSubaccountRemote.InvalidParentPersonalAccount.selector);
+        vm.expectRevert(ISubaccount.InvalidParentPersonalAccount.selector);
         ISubaccount(subaccount).initialize(address(controller), address(0), SUBACCOUNT_TYPE_LOAN);
 
         vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
@@ -3590,7 +3590,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // the exit is a signed action: anyone else is rejected before anything is read
         fxrp.mint(subaccount, 100e6);
-        vm.expectRevert(ILoanSubaccountRemote.OnlyParent.selector);
+        vm.expectRevert(ISubaccount.OnlyParent.selector);
         ILoanSubaccountRemote(subaccount).sweepToOrigin{value: messagingFee}("");
 
         // nothing to sweep

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
+import {IControlledAccount} from "../contracts/userInterfaces/IControlledAccount.sol";
 import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
 import {IDiamond} from "../contracts/diamond/interfaces/IDiamond.sol";
 import {DiamondArgs} from "../contracts/diamond/implementation/Diamond.sol";
@@ -170,13 +171,13 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
 
     function testInitializeRevertAlreadyInitialized() public {
         PersonalAccountRemote remotePa = _createRemotePa();
-        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IControlledAccount.AlreadyInitialized.selector);
         remotePa.initialize(address(controller), xrplOwner);
     }
 
     function testImplementationInitializeRevertAlreadyInitialized() public {
         // the implementation locks itself in its constructor
-        vm.expectRevert(IComposeReceiverAccountBase.AlreadyInitialized.selector);
+        vm.expectRevert(IControlledAccount.AlreadyInitialized.selector);
         remotePaImpl.initialize(address(controller), xrplOwner);
     }
 

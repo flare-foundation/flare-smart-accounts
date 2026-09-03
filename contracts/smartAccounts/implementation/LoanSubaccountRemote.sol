@@ -16,17 +16,13 @@ import {
 } from "../../userInterfaces/ILoanSubaccountRemote.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 import {ILoanMarketsFacet} from "../../userInterfaces/facets/ILoanMarketsFacet.sol";
-import {
-    ISubaccountsFacet,
-    SUBACCOUNT_TYPE_NONE
-} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
-import {ISubaccount} from "../../userInterfaces/ISubaccount.sol";
-import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/ILoanSubaccount.sol";
+import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/IBridgingSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
 import {IOracle} from "../interface/IOracle.sol";
 import {MorphoMath} from "../library/MorphoMath.sol";
+import {SubaccountBase} from "./SubaccountBase.sol";
 import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
@@ -50,7 +46,7 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * plain send reverts; native landing without a call (pre-deployment funding, an LZ native
  * drop, a force-send) strands until a beacon upgrade adds a rail - accepted.
  */
-contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBase {
+contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
 
     /// @dev Fee arithmetic: annual WAD rates over a fixed 365-day year.
@@ -64,15 +60,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// liquidation-proof (the accepted junior-claim risk).
     uint256 private constant FEE_SECURITY_FACTOR = 3;
 
-    /// @notice Parent Personal Account address (the same address on every chain; on this
-    /// chain it carries no code until its remote Personal Account is created).
-    address public parentPersonalAccount;
-    /// @notice Subaccount type.
-    uint256 public subaccountType;
-
-    // fee state, appended after the existing fields (layout-safe): the canonical principal at
-    // the last checkpoint, the WAD fee carry, and the checkpoint clock and rate snapshot the
-    // next period is priced at
+    // this lineage's own linear state starts right after ControlledAccountBase's slot 0 (the
+    // bases' other state is namespaced): the canonical principal at the last checkpoint, the
+    // WAD fee carry, and the checkpoint clock and rate snapshot the next period is priced at
     uint256 private feePrincipal;
     uint256 private flareDebtX18;
     uint64 private feeLastCheckpoint;
@@ -81,31 +71,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
 
     // deliberately no receive() and no native exit: a withdraw delivery's compose value is
     // spent or forwarded in-call; pre-deployment, dropped or force-sent native strands
-
-    modifier onlyParent() {
-        // the parent is the remote Personal Account: this method is reached only through a
-        // user-signed cross-chain user operation executed by the parent
-        require(msg.sender == parentPersonalAccount, OnlyParent());
-        _;
-    }
-
-    /// @inheritdoc ISubaccount
-    function initialize(
-        address _controllerAddress,
-        address _parentPersonalAccount,
-        uint256 _subaccountType
-    )
-        external
-    {
-        _setController(_controllerAddress);
-        require(_parentPersonalAccount != address(0), InvalidParentPersonalAccount());
-        require(_subaccountType != SUBACCOUNT_TYPE_NONE, ISubaccountsFacet.InvalidSubaccountType());
-
-        parentPersonalAccount = _parentPersonalAccount;
-        subaccountType = _subaccountType;
-
-        emit LoanSubaccountInitialized(_controllerAddress, _parentPersonalAccount, _subaccountType);
-    }
 
     /// @inheritdoc ILoanSubaccountRemote
     function repay()
@@ -142,7 +107,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             }
             loanToken.forceApprove(market.morpho, 0);
             _syncFeePrincipal(market);
-            emit LoanRepaid(parentPersonalAccount, _assets);
+            emit LoanRepaid(_parentAccount(), _assets);
         }
 
         _collectFeeAndPushSurplus(market, loanToken);
@@ -177,7 +142,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
 
         fxrp.forceApprove(market.morpho, _amount);
         IMorpho(market.morpho).supplyCollateral(market.marketParams, _amount, address(this), "");
-        emit IdleFxrpDeposited(parentPersonalAccount, _amount);
+        emit IdleFxrpDeposited(_parentAccount(), _amount);
     }
 
     /// @inheritdoc ILoanSubaccountRemote
@@ -203,7 +168,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // under-approved, underfunded or frozen party reverts, retriable. `msg.sender` IS the
         // parent (onlyParent), spelled that way so the pull is visibly from the caller
         _paid = Math.min(_maxAmount, collectible);
-        address recipient = ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient;
+        address recipient = ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient;
         IERC20(market.marketParams.loanToken).safeTransferFrom(msg.sender, recipient, _paid);
         flareDebtX18 -= _paid * WAD;
         _forgiveFeeDust();
@@ -270,24 +235,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         );
     }
 
-    /// @inheritdoc ISubaccount
-    function controllerAddress()
-        external view
-        override(ILoanSubaccountRemote, ComposeReceiverAccountBase)
-        returns (address)
-    {
-        return controller;
-    }
-
-    /// @inheritdoc ISubaccount
-    function implementation()
-        external view
-        returns (address)
-    {
-        // controller is the beacon; it resolves the implementation for this subaccount type
-        return ISubaccountsFacet(controller).implementationForType(subaccountType);
-    }
-
     /// @dev The subaccount's action set (see {ComposeReceiverAccountBase._dispatch}).
     function _dispatch(
         uint8 _action,
@@ -345,18 +292,18 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         if (_skipped(operationId, deadline, _guid)) return;
         // a debt increase respects the pause and the per-type borrow switch
         _checkNotPaused();
-        require(!ILoanMarketsFacet(controller).isLoanBorrowingDisabled(subaccountType), BorrowingDisabled());
+        require(!ILoanMarketsFacet(controllerAddress).isLoanBorrowingDisabled(_accountType()), BorrowingDisabled());
         // and configured fee terms (the recipient is the activation marker); a revert, not
         // a skip, so the packet stays retriable
         require(
-            ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient != address(0),
+            ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient != address(0),
             FeeTermsNotConfigured()
         );
-        usedOperations[operationId] = true;
+        _markOperationUsed(operationId);
 
         _supplyAndBorrow(_bridgedAmount, destinationKind, destination, borrowAmount);
         emit LoanOpened(
-            parentPersonalAccount,
+            _parentAccount(),
             operationId,
             _bridgedAmount,
             borrowAmount,
@@ -381,13 +328,13 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         require(_bridgedAmount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
         if (_skipped(operationId, deadline, _guid)) return;
-        if (IPauseFacet(controller).isPaused()) {
+        if (IPauseFacet(controllerAddress).isPaused()) {
             require(_borrowSharesOf(_myMarket()) > 0, IPauseFacet.IsPaused());
         }
-        usedOperations[operationId] = true;
+        _markOperationUsed(operationId);
 
         _supplyAndBorrow(_bridgedAmount, 0, bytes32(0), 0);
-        emit CollateralDeposited(parentPersonalAccount, operationId, _bridgedAmount, _guid);
+        emit CollateralDeposited(_parentAccount(), operationId, _bridgedAmount, _guid);
     }
 
     /// @dev The asset moves of the borrow and deposit actions, separated from the decodes to
@@ -482,19 +429,19 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // payLoanFee, never taken from the collateral
         _checkpointFee(market);
         require(_exitLeavesFeeSecured(market, amount), OutstandingLoanFee(flareDebtX18 / WAD));
-        usedOperations[operationId] = true;
+        _markOperationUsed(operationId);
 
         IMorpho(market.morpho).withdrawCollateral(
             market.marketParams, amount, address(this), address(this)
         );
-        emit CollateralWithdrawn(parentPersonalAccount, operationId, amount, _guid);
+        emit CollateralWithdrawn(_parentAccount(), operationId, amount, _guid);
 
         // the return leg, in the same execution; the LayerZero fee rode in as compose value
         uint256 excess = _bridgeHome(
-            _getTransport(), amount, returnOptions, msg.value, parentPersonalAccount
+            _getTransport(), amount, returnOptions, msg.value, _parentAccount()
         );
         if (excess > 0) {
-            emit NativeSweptToParent(parentPersonalAccount, excess);
+            emit NativeSweptToParent(_parentAccount(), excess);
         }
     }
 
@@ -513,7 +460,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         if (reason == 0) {
             return false;
         }
-        emit LoanActionSkipped(parentPersonalAccount, _operationId, reason, _guid);
+        emit LoanActionSkipped(_parentAccount(), _operationId, reason, _guid);
         return true;
     }
 
@@ -583,7 +530,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             require(success, RefundFailed());
         }
 
-        emit FXrpSweptToOrigin(parentPersonalAccount, _amount, _transport.originEid, receipt.guid);
+        emit FXrpSweptToOrigin(_parentAccount(), _amount, _transport.originEid, receipt.guid);
     }
 
     /// @dev Forwards a skipped withdraw's compose value to the parent: the endpoint is not a
@@ -596,10 +543,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         if (_value == 0) return;
         // slither-disable-start arbitrary-send-eth
         // solhint-disable-next-line avoid-low-level-calls
-        (bool success, ) = parentPersonalAccount.call{value: _value}("");
+        (bool success, ) = _parentAccount().call{value: _value}("");
         // slither-disable-end arbitrary-send-eth
         require(success, RefundFailed());
-        emit NativeSweptToParent(parentPersonalAccount, _value);
+        emit NativeSweptToParent(_parentAccount(), _value);
     }
 
     /// @dev Prices the elapsed period at the SNAPSHOTTED terms - `owed = max(floor·P·T,
@@ -639,11 +586,11 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
             }
         }
         ILoanMarketsFacet.FeeTerms memory terms =
-            ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType);
+            ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType());
         feeLastCheckpoint = uint64(block.timestamp);
         feeSnapshotFloor = terms.feeFloor;
         feeSnapshotSpread = terms.feeSpread;
-        emit LoanFeeCheckpointed(parentPersonalAccount, feePrincipal, feeDeltaX18);
+        emit LoanFeeCheckpointed(_parentAccount(), feePrincipal, feeDeltaX18);
     }
 
     /// @dev The secured-claim rule: the exit passes uncollected while the collateral that
@@ -702,7 +649,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         private
     {
         (, feePrincipal) = _debtOf(_market);
-        emit LoanFeePrincipalSynced(parentPersonalAccount, feePrincipal);
+        emit LoanFeePrincipalSynced(_parentAccount(), feePrincipal);
     }
 
     /// @dev The tail of {repay}: pay `min(collectible, balance)` to the fee recipient -
@@ -724,8 +671,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         uint256 collectible = flareDebtX18 / WAD;
         if (collectible > 0) {
             address recipient =
-                ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient;
-            if (!IPauseFacet(controller).isPaused()) {
+                ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient;
+            if (!IPauseFacet(controllerAddress).isPaused()) {
                 uint256 payment = Math.min(collectible, balance);
                 if (_loanToken.trySafeTransfer(recipient, payment)) {
                     flareDebtX18 -= payment * WAD;
@@ -744,10 +691,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // best-effort: a parent the token refuses (RLUSD can freeze addresses) must never
         // roll back the repayment - a failed push waits here for a later repay
         if (balance > 0 && _borrowSharesOf(_market) == 0) {
-            if (_loanToken.trySafeTransfer(parentPersonalAccount, balance)) {
-                emit LoanSurplusRecovered(parentPersonalAccount, balance);
+            if (_loanToken.trySafeTransfer(_parentAccount(), balance)) {
+                emit LoanSurplusRecovered(_parentAccount(), balance);
             } else {
-                emit LoanSurplusRetained(parentPersonalAccount, balance);
+                emit LoanSurplusRetained(_parentAccount(), balance);
             }
         }
     }
@@ -760,10 +707,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         private view
         returns (ILoanMarketsFacet.Market memory _market)
     {
-        _market = ILoanMarketsFacet(controller).getLoanMarket(subaccountType);
+        _market = ILoanMarketsFacet(controllerAddress).getLoanMarket(_accountType());
         require(
             _market.morpho != address(0),
-            ILoanMarketsFacet.MarketNotRegistered(subaccountType)
+            ILoanMarketsFacet.MarketNotRegistered(_accountType())
         );
     }
 

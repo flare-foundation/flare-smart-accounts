@@ -2,6 +2,7 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {ILayerZeroComposer} from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroComposer.sol";
+import {IControlledAccount} from "./IControlledAccount.sol";
 
 /// @dev Compose payload schema version 1, shared by every compose receiver on either
 /// chain. The payload is `abi.encode(uint8 version, uint8 action, bytes actionData)`; the
@@ -30,7 +31,7 @@ uint8 constant SKIP_REASON_EXPIRED = 2;
  * this same address on the other chain — the account's own twin. Account-specific
  * parent-driven and public rails live outside this interface.
  */
-interface IComposeReceiverAccountBase is ILayerZeroComposer {
+interface IComposeReceiverAccountBase is ILayerZeroComposer, IControlledAccount {
 
     /**
      * @notice Reverts if `lzCompose` is called by anything other than the LayerZero endpoint.
@@ -100,24 +101,6 @@ interface IComposeReceiverAccountBase is ILayerZeroComposer {
      * @notice Reverts on a payload whose operation id is zero.
      */
     error InvalidOperationId();
-
-    /**
-     * @notice Reverts if the contract is already initialized.
-     */
-    error AlreadyInitialized();
-
-    /**
-     * @notice Reverts if the controller address is invalid.
-     */
-    error InvalidControllerAddress();
-
-    /**
-     * @notice The MasterAccountController (diamond) address on this chain.
-     * @return The controller address.
-     */
-    function controllerAddress()
-        external view
-        returns (address);
 
     /**
      * @notice Returns whether an operation id has been consumed. An id is consumed on

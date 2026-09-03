@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
+import {IPersonalAccountBase} from "./IPersonalAccountBase.sol";
+
 /**
  * @title IPersonalAccount
  * @notice Interface for PersonalAccount contract.
  */
-interface IPersonalAccount {
+interface IPersonalAccount is IPersonalAccountBase {
     /// @notice Struct containing call information for executeUserOp
     struct Call {
         /// @notice Target contract address
@@ -195,21 +197,6 @@ interface IPersonalAccount {
     error OnlyController();
 
     /**
-     * @notice Reverts if the contract is already initialized.
-     */
-    error AlreadyInitialized();
-
-    /**
-     * @notice Reverts if the controller address is invalid.
-     */
-    error InvalidControllerAddress();
-
-    /**
-     * @notice Reverts if the XRPL owner address is invalid.
-     */
-    error InvalidXrplOwner();
-
-    /**
      * @notice Reverts if the agent is not available.
      */
     error AgentNotAvailable();
@@ -334,22 +321,4 @@ interface IPersonalAccount {
         Call[] calldata _calls
     )
         external payable;
-
-    /**
-     * @notice Returns the XRPL owner address associated with this personal account.
-     * @return The XRPL owner address
-     */
-    function xrplOwner() external view returns (string memory);
-
-    /**
-     * @notice Returns the controller address that manages this personal account.
-     * @return The controller address
-     */
-    function controllerAddress() external view returns (address);
-
-    /**
-     * @notice Returns implementation address of the personal account.
-     * @return The implementation address
-     */
-    function implementation() external view returns (address);
 }

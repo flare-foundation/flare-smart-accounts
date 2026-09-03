@@ -84,19 +84,6 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
 interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
-     * @notice Emitted when a loan subaccount is initialized.
-     * @param controllerAddress The controller address.
-     * @param parentPersonalAccount The parent Personal Account address (the same address on
-     * every chain; codeless here until its remote Personal Account is created).
-     * @param subaccountType The subaccount type.
-     */
-    event LoanSubaccountInitialized(
-        address indexed controllerAddress,
-        address indexed parentPersonalAccount,
-        uint256 indexed subaccountType
-    );
-
-    /**
      * @notice Emitted when a borrow action executes.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
@@ -301,11 +288,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts if the parent Personal Account address is invalid.
-     */
-    error InvalidParentPersonalAccount();
-
-    /**
      * @notice Reverts on a debt increase while new borrowing is disabled for this account's
      * subaccount type — the routine way a pool is sunset. Deliberately a revert, not a skip:
      * the condition is temporary-by-policy and a permissionless delivery must not consume
@@ -361,14 +343,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * caller's refund, or the parent on the withdraw action.
      */
     error RefundFailed();
-
-    /**
-     * @notice Reverts if {sweepToOrigin} or {payLoanFee} is called by anything other than the
-     * parent Personal Account (the remote implementation): by policy the exit direction and a
-     * payment from the parent's balance require the user's signature, carried by the parent's
-     * cross-chain user operation.
-     */
-    error OnlyParent();
 
     /**
      * @notice Reverts a withdraw delivered below its signed compose-value floor, so that an
@@ -554,10 +528,4 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
             uint64 _feeFloor,
             uint64 _feeSpread
         );
-
-    /// @inheritdoc ISubaccount
-    function controllerAddress()
-        external view
-        override(IComposeReceiverAccountBase, ISubaccount)
-        returns (address);
 }

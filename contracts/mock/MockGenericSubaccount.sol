@@ -2,6 +2,9 @@
 pragma solidity ^0.8.27;
 
 import {ISubaccount} from "../userInterfaces/ISubaccount.sol";
+// import is needed for @inheritdoc
+// solhint-disable-next-line no-unused-import
+import {IControlledAccount} from "../userInterfaces/IControlledAccount.sol";
 import {ISubaccountsFacet} from "../userInterfaces/facets/ISubaccountsFacet.sol";
 
 /**
@@ -15,14 +18,12 @@ contract MockGenericSubaccount is ISubaccount {
 
     address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
 
-    /// @inheritdoc ISubaccount
+    /// @inheritdoc IControlledAccount
     address public controllerAddress;
     /// @inheritdoc ISubaccount
     address public parentPersonalAccount;
     /// @inheritdoc ISubaccount
     uint256 public subaccountType;
-
-    error AlreadyInitialized();
 
     constructor() {
         // ensure the implementation contract itself cannot be initialized/used

@@ -12,7 +12,6 @@ import {ERC1155Holder} from "@openzeppelin/contracts/token/ERC1155/utils/ERC1155
 import {IERC1363Receiver} from "@openzeppelin/contracts/interfaces/IERC1363Receiver.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {TransientSlot} from "@openzeppelin/contracts/utils/TransientSlot.sol";
-import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
@@ -30,6 +29,7 @@ import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IVaultsFacet} from "../../userInterfaces/facets/IVaultsFacet.sol";
 import {IIVault} from "../interface/IIVault.sol";
 import {IPersonalAccount} from "../../userInterfaces/IPersonalAccount.sol";
+import {PersonalAccountBase} from "./PersonalAccountBase.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
@@ -38,22 +38,16 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
  * Supports account abstraction for XRPL-integrated user operations.
  */
 contract PersonalAccount is
-    IIPersonalAccount, ReentrancyGuardTransient,
+    IIPersonalAccount, PersonalAccountBase, ReentrancyGuardTransient,
     ERC721Holder, ERC1155Holder, IERC1363Receiver
 {
     using SafeERC20 for IERC20;
     using TransientSlot for *;
 
-    address private constant EMPTY_ADDRESS = 0x0000000000000000000000000000000000001111;
     /// @dev Transient guard slot of {redeemFromSubaccount}, separate from the shared guard. Keep
     /// the identifier stable across implementations: a proxy's guards must agree across upgrades.
     bytes32 private constant SUBACCOUNT_REDEMPTION_GUARD_SLOT =
         keccak256("flare.smartAccounts.PersonalAccount.subaccountRedemptionGuard");
-
-    /// @notice MasterAccountController contract address
-    address public controllerAddress;
-    /// @notice XRPL address
-    string public xrplOwner;
 
     modifier onlyController() {
         require(msg.sender == controllerAddress, OnlyController());
@@ -85,30 +79,7 @@ contract PersonalAccount is
         SUBACCOUNT_REDEMPTION_GUARD_SLOT.asBoolean().tstore(false);
     }
 
-    constructor() {
-        // ensure the implementation contract itself cannot be initialized/used
-        controllerAddress = EMPTY_ADDRESS;
-    }
-
     receive() external payable {}
-
-    /**
-     * Proxyable initialization method. Can be called only once, from the proxy constructor
-     * @param _controllerAddress MasterAccountController contract address
-     * @param _xrplOwner XRPL address owner
-     * @dev initialize is callable once by anyone (proxy constructor in practice)
-     */
-    function initialize(
-        address _controllerAddress,
-        string calldata _xrplOwner
-    ) external {
-        require(controllerAddress == address(0), AlreadyInitialized());
-        require(_controllerAddress != address(0), InvalidControllerAddress());
-        require(bytes(_xrplOwner).length > 0, InvalidXrplOwner());
-
-        controllerAddress = _controllerAddress;
-        xrplOwner = _xrplOwner;
-    }
 
     /// @inheritdoc IIPersonalAccount
     function reserveCollateral(
@@ -350,12 +321,6 @@ contract PersonalAccount is
                 revert CallFailed(i, result);
             }
         }
-    }
-
-    /// @inheritdoc IPersonalAccount
-    function implementation() external view returns (address) {
-        // controller is the beacon
-        return IBeacon(controllerAddress).implementation();
     }
 
     /// @inheritdoc IERC1363Receiver

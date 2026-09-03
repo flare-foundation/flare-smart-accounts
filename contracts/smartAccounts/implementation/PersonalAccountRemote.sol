@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {
     IPersonalAccountRemote,
     PA_ACTION_EXECUTE
 } from "../../userInterfaces/IPersonalAccountRemote.sol";
+import {PersonalAccountBase} from "./PersonalAccountBase.sol";
 import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
@@ -20,43 +20,13 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * uses them. Native is accepted (a LayerZero native drop delivered with a message funds
  * value-carrying calls) and leaves the same way, as a value-carrying call.
  */
-contract PersonalAccountRemote is IPersonalAccountRemote, ComposeReceiverAccountBase {
-
-    /// @notice XRPL owner (the same string the Flare Personal Account is derived from).
-    string public xrplOwner;
+contract PersonalAccountRemote is IPersonalAccountRemote, PersonalAccountBase, ComposeReceiverAccountBase {
 
     /// @dev Native funds value-carrying calls (a LayerZero native drop, a plain send) and
     /// leaves as one; the implementation contract itself (never initialized) rejects it, since
     /// nothing could ever move it out of there.
     receive() external payable {
         require(bytes(xrplOwner).length != 0, NotInitialized());
-    }
-
-    /**
-     * @notice Proxyable initialization method, called once from the frozen PA proxy's
-     * constructor (`initialize(address,string)` — the selector the proxy commits to).
-     * @param _controllerAddress MasterAccountController contract address.
-     * @param _xrplOwner The XRPL owner.
-     */
-    function initialize(
-        address _controllerAddress,
-        string calldata _xrplOwner
-    )
-        external
-    {
-        _setController(_controllerAddress);
-        require(bytes(_xrplOwner).length > 0, InvalidXrplOwner());
-        xrplOwner = _xrplOwner;
-        emit PersonalAccountRemoteInitialized(_controllerAddress, _xrplOwner);
-    }
-
-    /// @inheritdoc IPersonalAccountRemote
-    function implementation()
-        external view
-        returns (address)
-    {
-        // controller is the beacon, exactly as for the Flare Personal Account
-        return IBeacon(controller).implementation();
     }
 
     /// @dev The account's action set (see {ComposeReceiverAccountBase._dispatch}): one action, the
@@ -98,7 +68,7 @@ contract PersonalAccountRemote is IPersonalAccountRemote, ComposeReceiverAccount
         // signed traffic stops while paused; the compose stays queued at the endpoint and
         // re-delivers after unpausing
         _checkNotPaused();
-        usedOperations[operationId] = true;
+        _markOperationUsed(operationId);
 
         for (uint256 i = 0; i < calls.length; i++) {
             // targets, values and calldata are the user's signed instruction, exactly as in

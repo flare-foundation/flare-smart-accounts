@@ -2,6 +2,8 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
+import {IPersonalAccountBase} from "../contracts/userInterfaces/IPersonalAccountBase.sol";
+import {IControlledAccount} from "../contracts/userInterfaces/IControlledAccount.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
 import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
@@ -61,7 +63,7 @@ contract PersonalAccountTest is Test {
     }
 
     function testInitializeRevertAlreadyInitialized() public {
-        vm.expectRevert(IPersonalAccount.AlreadyInitialized.selector);
+        vm.expectRevert(IControlledAccount.AlreadyInitialized.selector);
         personalAccount.initialize(
             makeAddr("controller"),
             xrplOwner
@@ -75,7 +77,7 @@ contract PersonalAccountTest is Test {
                 address(0)
             )
         );
-        // vm.expectRevert(IPersonalAccount.InvalidControllerAddress.selector);
+        // vm.expectRevert(IControlledAccount.InvalidControllerAddress.selector);
         // it will not reach the InvalidControllerAddress check because of invalid beacon
         new PersonalAccountProxy(
             address(0),
@@ -85,7 +87,7 @@ contract PersonalAccountTest is Test {
     }
 
     function testInitializeRevertInvalidXrplOwner() public {
-        vm.expectRevert(IPersonalAccount.InvalidXrplOwner.selector);
+        vm.expectRevert(IPersonalAccountBase.InvalidXrplOwner.selector);
         new PersonalAccountProxy(
             controller,
             ""
@@ -98,7 +100,7 @@ contract PersonalAccountTest is Test {
         // the `_controllerAddress != address(0)` check.
         PersonalAccount fresh = new PersonalAccount();
         vm.store(address(fresh), bytes32(uint256(0)), bytes32(0));
-        vm.expectRevert(IPersonalAccount.InvalidControllerAddress.selector);
+        vm.expectRevert(IControlledAccount.InvalidControllerAddress.selector);
         fresh.initialize(address(0), xrplOwner);
     }
 

@@ -957,8 +957,9 @@ emptied account simply stays outstanding.
 
 ### Storage, activation and ABI
 
-Fee state appends to the remote implementation's storage after the existing slots 0–3
-(append-only; the frozen proxy and CREATE2 addresses are untouched). The loan chain is not
+Fee state is the remote implementation's own linear state, starting right after the one
+linear base field (slot 0, `controllerAddress`; every other base field is namespaced — see the
+storage rule below), append-only; the frozen proxy and CREATE2 addresses are untouched. The loan chain is not
 deployed, so the fee **ships before the first live position** — no lazy-migration semantics
 needed. The fee touches **three coordinated surfaces**, and activation verifies the
 reviewed version of every one before any route opens: the remote `LoanSubaccountRemote`
@@ -1020,7 +1021,8 @@ exists for the loan (`LoanSubaccount`, `LoanSubaccountRemote`, the settings face
 is location seen from Flare, the non-Flare implementation at the same address
 (`PersonalAccountRemote`, `LoanSubaccountRemote`); *Compose* is the ingress authentication
 mechanism (`ComposeReceiverAccountBase` — and only that ingress, since the subaccounts also
-have parent-driven and public rails); *CrossChain* is the Flare-side send
+have parent-driven and public rails); *Bridging* is the Flare-side surface every type that
+bridges FXRP to its remote twin shares (`BridgingSubaccountBase`); *CrossChain* is the Flare-side send
 (`sendCrossChainUserOp`, which sends a user operation to another chain and executes nothing
 itself). "Cross-chain" is general in name only while one configured destination exists: the
 sender rides the loan bridge's FXRP OFT and a remote PA exists only on the loan chain, so a
@@ -1044,6 +1046,31 @@ accepted (per action; the Flare redeem-on-arrival and the loan-chain atomic with
 spending or forwarding it in the same call) and their identity.
 Deliberately one implementation:
 this block is the security root of every account with no local owner.
+
+**The account bases.** Above the compose ingress, the identity every account shares is
+written once as well, in a small hierarchy the frozen proxies dictate:
+[`ControlledAccountBase`](../../../contracts/smartAccounts/implementation/ControlledAccountBase.sol)
+(the controller, set once — the root of every account;
+[`IControlledAccount`](../../../contracts/userInterfaces/IControlledAccount.sol) is the one
+declaration of `controllerAddress()` every account interface extends);
+[`SubaccountBase`](../../../contracts/smartAccounts/implementation/SubaccountBase.sol) (what the
+frozen `SubaccountProxy` dictates for every subaccount type on every chain: the parent and the
+type, `initialize(controller, parent, type)`, `onlyParent`, the type-aware beacon lookup —
+[`ISubaccount`](../../../contracts/userInterfaces/ISubaccount.sol));
+[`PersonalAccountBase`](../../../contracts/smartAccounts/implementation/PersonalAccountBase.sol)
+(what the frozen `PersonalAccountProxy` dictates for both Personal Account implementations: the
+XRPL owner, `initialize(controller, xrplOwner)`, the beacon lookup —
+[`IPersonalAccountBase`](../../../contracts/userInterfaces/IPersonalAccountBase.sol)); and, on
+Flare only,
+[`BridgingSubaccountBase`](../../../contracts/smartAccounts/implementation/BridgingSubaccountBase.sol)
+(what every subaccount type that bridges FXRP to its own remote address shares: the forward-move
+core over its type's route, the permissionless `sweepRedeem`, the redeem-home compose —
+[`IBridgingSubaccount`](../../../contracts/userInterfaces/IBridgingSubaccount.sol)). The four
+implementations then hold only what is theirs: `PersonalAccount` its controller-driven methods,
+`PersonalAccountRemote` the signed batch execution, `LoanSubaccount` the three typed loan
+instruction encoders, `LoanSubaccountRemote` the Morpho actions and the fee engine. A Flare-local
+subaccount type (a vault subaccount) would extend `SubaccountBase` alone; a new bridging type,
+`BridgingSubaccountBase`. The storage rule the bases follow is in the pre-first-cut invariants.
 
 **The action set is one action: execute.** The remote PA does what the Flare account does —
 run the batch of calls the user signed — with the authenticated compose in the role the
@@ -1197,18 +1224,20 @@ storage-lineage gate below is the third member of this family.
   cannot be replayed;
 - **the chain-local storage-lineage gate**: every implementation in a proxy's chain-local
   upgrade lineage must preserve that proxy's storage layout (cross-chain layouts may
-  differ — the chains share only the address — but a chain's lineage may not). The
-  loan-chain subaccount layout was reordered when the shared base was extracted, which is
-  safe only because no loan-chain subaccount proxy exists yet; verify that before the first
-  cut, and freeze a storage-layout baseline for both loan-chain implementations once the
-  first proxy is deployed. The shared base's two fields (`controller`, `usedOperations`)
-  are the storage prefix of **all three** lineages — loan-chain subaccounts, remote PAs and Flare
-  subaccounts (the Flare subaccount adopted the same layout when it became a compose receiver, safe
-  only pre-deployment) — so a base-field
-  insertion or reorder would corrupt every account of all three kinds at once; and before the
-  first deployment of an implementation with a re-laid layout on ANY network of that lineage,
-  verify on chain that no proxy of the lineage exists there yet; base state is
-  effectively frozen at those two fields from the first proxy on;
+  differ — the chains share only the address — but a chain's lineage may not). The account
+  bases follow one **storage rule**, forced by the production Flare Personal Account (slot 0
+  `controllerAddress`, slot 1 `xrplOwner`, live behind thousands of proxies): the controller
+  is slot 0, linear, in every lineage (`ControlledAccountBase`), `xrplOwner` is slot 1, linear,
+  in every Personal Account lineage (`PersonalAccountBase`), and **every other base field is
+  namespaced** (ERC-7201: `smartAccounts.ComposeReceiverAccountBase.State` for the consumed
+  operation ids, `smartAccounts.SubaccountBase.State` for the parent and the type), so a base can
+  gain fields without shifting any derived lineage's own linear state, which starts right after
+  the linear base fields. `test/AccountStorageLayout.t.sol` pins the rule. Adopting it moved
+  the not-yet-deployed lineages' fields (the remote subaccount's fee state from slot 4 to
+  slot 1, the remote PA's `xrplOwner` to slot 1, `usedOperations` into its namespace) — safe
+  only because no subaccount or remote Personal Account proxy exists yet; before the first
+  deployment of any of those implementations on ANY network, verify on chain that no proxy of
+  the lineage exists there. The Flare Personal Account's layout is unchanged by construction;
 
 - a minimal Ethereum-side init contract for the cut: `MasterAccountControllerInit` is
   Flare-specific and is skipped, so ERC-165 interface flags (and nothing else) must be set
