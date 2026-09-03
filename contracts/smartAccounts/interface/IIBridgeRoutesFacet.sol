@@ -13,9 +13,16 @@ interface IIBridgeRoutesFacet is IBridgeRoutesFacet {
      * @dev Validates that the OFT wraps the FXRP token, shares its decimals and reports the
      * canonical interface/codec version, and re-validates every registered route's pinned peer
      * against the new adapter's live peers, so a rotation cannot leave a route pointing at a
-     * peer the new adapter does not have. Zero clears the adapter, which blocks every outbound
-     * send and fails the subaccounts' bridge-back compose authentication closed until
-     * reconfigured; the routes and type assignments stay recorded.
+     * peer the new adapter does not have - so the new adapter's own peer for every registered
+     * route must be wired to that route's stored remote peer before this call. That is the Flare
+     * half of a rotation only, and by operational rule it comes LAST: before it, every remote
+     * OFT's live Flare peer and then every remote transport's `originPeer` must already name the
+     * new adapter (the remote transport validates against its OFT's live peer) - see the spec's
+     * rotation runbook. Zero clears the
+     * adapter, which blocks every outbound send and fails the subaccounts' bridge-back compose
+     * authentication closed until reconfigured; the routes and type pins stay recorded. A clear
+     * does not cancel a queued conflicting `setFxrpOft` - it survives and matures - so cancel it
+     * first, or anyone may execute it and undo the clear.
      * @param _fxrpOft The FXRP OFT adapter, or zero to clear.
      * Can only be called by the owner (timelocked).
      */
@@ -28,9 +35,10 @@ interface IIBridgeRoutesFacet is IBridgeRoutesFacet {
      * @notice Sets or clears the route to a remote chain: the peer pinned for its endpoint id.
      * @dev Requires a configured adapter whose live peer for `_destinationEid` equals
      * `_destinationPeer` exactly - existence alone would accept a wrong route. A zero peer
-     * clears the route: every subaccount type pointed at it and every cross-chain user
-     * operation naming it fail closed until the route is set again; the type assignments stay
-     * recorded.
+     * clears the route: every subaccount type pinned to it and every cross-chain user
+     * operation naming it fail closed until the route is set again; the type pins stay
+     * recorded. A clear does not cancel a queued conflicting `setBridgeRoute` for the same
+     * endpoint - it survives and matures - so cancel it first.
      * @param _destinationEid The LayerZero endpoint id of the remote chain.
      * @param _destinationPeer The pinned peer on that chain (a clean zero-padded EVM address),
      * or zero to clear the route.
@@ -66,7 +74,8 @@ interface IIBridgeRoutesFacet is IBridgeRoutesFacet {
      * @dev Per-type containment that keeps the chain pin: while suspended the type reads as
      * unroutable, so its forward moves and its bridge-back authentication fail closed exactly
      * as an unconfigured route does, and the positions' chain is still recorded. The type must
-     * be pinned first (`UnknownBridgeRoute(0)`).
+     * be pinned first (`UnknownBridgeRoute(0)`). Suspending does not cancel a queued conflicting
+     * resume - it survives and matures - so cancel it first.
      * @param _subaccountType The subaccount type.
      * @param _suspended Whether to suspend the type.
      * Can only be called by the owner (timelocked).

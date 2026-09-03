@@ -157,6 +157,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     //
 
     function testDeployAndInitialize() public {
+        vm.expectEmit();
+        emit ISubaccount.SubaccountInitialized(
+            address(controller), parentPersonalAccount, SUBACCOUNT_TYPE_LOAN
+        );
         LoanSubaccount subaccount = _deploySubaccount();
 
         assertEq(subaccount.controllerAddress(), address(controller));
@@ -412,7 +416,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testCreateSubaccountOfNonLoanType() public {
         // the generic boundary holds without the loan contracts: an implementation carrying
-        // only the ISubaccount surface (the ABI frozen into the proxy) registers, deploys
+        // only the ISubaccount surface (of which the frozen proxy dictates just
+        // `initialize(address,address,uint256)`) registers, deploys
         // through the frozen proxy, and initializes - a future type needs nothing more
         uint256 genericType = 2;
         address genericImpl = address(new MockGenericSubaccount());
@@ -1192,7 +1197,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testRedeemHomeComposeRedeemsThroughTheParent() public {
         // the loan-chain twin's sweepToOrigin bridges FXRP here with the redeem-home compose (a
-        // deadline and nothing else); this account authenticates it against the bridge settings
+        // deadline and nothing else); this account authenticates it against its bridge route
         // (the adapter, its endpoint,
         // the loan chain, the pinned peer) and runs the sweep-redeem logic with the compose
         // value as the executor fee - no public-entry fee check, the packet already cost its
@@ -1349,7 +1354,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createSubaccountFor(xrplOwner);
         fxrp.mint(subaccount, 100e6);
 
-        // no bridge settings, no transport to authenticate against
+        // no bridge route, no transport to authenticate against
         (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, _redeemHomePayload());
         vm.prank(lzEndpoint);
         vm.expectRevert(IBridgingSubaccount.BridgeRouteNotConfigured.selector);

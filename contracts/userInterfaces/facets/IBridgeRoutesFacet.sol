@@ -125,7 +125,9 @@ interface IBridgeRoutesFacet {
 
     /**
      * @notice Returns every registered route.
-     * @return _destinationEids The endpoint ids, in registration order.
+     * @dev The order is unspecified (clearing a route swaps the last one into its place); the
+     * two arrays are index-aligned.
+     * @return _destinationEids The endpoint ids.
      * @return _destinationPeers The pinned peers, aligned with `_destinationEids`.
      */
     function getBridgeRoutes()

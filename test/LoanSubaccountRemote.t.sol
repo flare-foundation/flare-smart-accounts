@@ -4,7 +4,6 @@ pragma solidity ^0.8.27;
 import {Test} from "forge-std/Test.sol";
 import {IControlledAccount} from "../contracts/userInterfaces/IControlledAccount.sol";
 import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
-import {IBridgingSubaccount} from "../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
 import {IDiamond} from "../contracts/diamond/interfaces/IDiamond.sol";
 import {DiamondArgs, FunctionNotFound} from "../contracts/diamond/implementation/Diamond.sol";
@@ -51,7 +50,6 @@ import {
     SUBACCOUNT_TYPE_LOAN,
     SUBACCOUNT_TYPE_NONE
 } from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
-import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
 import {IBridgeRoutesFacet} from "../contracts/userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
@@ -182,6 +180,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testDeployAndInitialize() public {
+        vm.expectEmit();
+        emit ISubaccount.SubaccountInitialized(
+            address(controller), parentPersonalAccount, SUBACCOUNT_TYPE_LOAN
+        );
         LoanSubaccountRemote subaccount = _deploySubaccount();
 
         assertEq(subaccount.controllerAddress(), address(controller));
@@ -3648,7 +3650,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         string memory exitOwner = "rSignedExitOwner";
         address subaccount = controller.createSubaccount(exitOwner, SUBACCOUNT_TYPE_LOAN);
         fxrp.mint(subaccount, 9e6);
-        _flareSenderOnThisDiamond(); // wires the Flare bridge settings on this diamond
+        _flareSenderOnThisDiamond(); // wires the Flare bridge route on this diamond
 
         address pa = controller.createPersonalAccount(exitOwner);
         assertEq(LoanSubaccountRemote(payable(subaccount)).parentPersonalAccount(), pa);
@@ -3677,15 +3679,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(to, bytes32(uint256(uint160(pa))));
 
         // real chains initialize separate same-address proxies; this one-diamond harness
-        // switches an initialized Flare proxy, so seed slot 2 with the remote layout's
-        // xrplOwner value (short-string encoding)
+        // switches an initialized Flare proxy to the remote implementation, which reads the
+        // very same slots (controller at 0, xrplOwner at 1), so nothing needs seeding
         vm.prank(governance);
         controller.setPersonalAccountImplementation(address(new PersonalAccountRemote()));
-        vm.store(
-            pa,
-            bytes32(uint256(2)),
-            bytes32(bytes(exitOwner)) | bytes32(uint256(bytes(exitOwner).length * 2))
-        );
 
         // underfunded parent: the batch's 0.05 call value exceeds the balance, the whole
         // delivery reverts and the exact packet stays retriable
@@ -3932,7 +3929,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(subaccount), 0);
 
         // the withdraw's return leg is a real bridge-back: deliver it to the Flare twin on
-        // this same diamond, which authenticates it against the bridge settings and runs the
+        // this same diamond, which authenticates it against its bridge route and runs the
         // sweep-redeem logic on arrival - here its dust branch, since the parent has no code
         // on this diamond (the redemption itself is covered in the Flare suite)
         (amountLD, payload) = _lastSentCompose();
@@ -3973,7 +3970,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testMinimalLoanChainDiamondTopology() public {
         // the intended loan-chain cut: the generic subaccount surface, the PA beacon
         // surface, the compose transport and the loan markets - never the Flare-only
-        // LoanBridgeSettingsFacet. The full-suite diamond could hide an accidental
+        // BridgeRoutesFacet. The full-suite diamond could hide an accidental
         // dependency; this minimal one proves there is none (base facets reused from
         // setUp - their fixed CREATE2 salts would collide again)
         DiamondArgs memory args = DiamondArgs({
@@ -4201,7 +4198,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     /// A Flare-side LoanSubaccount sender wired on this diamond as a second type, with the
-    /// Flare bridge settings pointing at this chain and the FAssets registry it reads FXRP from.
+    /// Flare bridge route pointing at this chain and the FAssets registry it reads FXRP from.
     function _flareSenderOnThisDiamond() private returns (address _sender) {
         flareAssetManager = new MockAssetManager(fxrp);
         uint256 senderType = 7;
@@ -4289,7 +4286,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     /// Delivers a loan-chain-built compose to a Flare-side receiver on this diamond: srcEid is
-    /// this (loan) chain, the pinned peer is the bridge settings' one (this OFT), the guid the
+    /// this (loan) chain, the pinned peer is the bridge route's one (this OFT), the guid the
     /// endpoint here would compute.
     function _deliverToFlareReceiver(
         address _receiver,

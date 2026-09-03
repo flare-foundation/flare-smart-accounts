@@ -12,7 +12,8 @@ uint256 constant SUBACCOUNT_TYPE_LOAN = 1;
  * shared by every subaccount type. The controller (Diamond) is the beacon for subaccounts; a
  * proxy resolves its implementation through {implementationForType} using its fixed type.
  * @dev The subaccount type is a raw `uint256` rather than an enum on purpose: the proxy creation
- * code (and with it this ABI) is frozen for deterministic CREATE2 addresses, and a compiled enum
+ * code - and with it the type's encoding in the constructor arguments and the initializer call -
+ * is frozen for deterministic CREATE2 addresses, and a compiled enum
  * decoder rejects values outside the range it was compiled with, which would make future type
  * values undeployable through the frozen artifact. Type `0` is reserved and invalid; any other
  * value is usable once governance registers an implementation for it.

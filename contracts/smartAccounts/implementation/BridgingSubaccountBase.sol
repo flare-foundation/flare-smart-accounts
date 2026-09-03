@@ -64,38 +64,6 @@ abstract contract BridgingSubaccountBase is IBridgingSubaccount, SubaccountBase,
         }
     }
 
-    /// @dev Derives the inbound bridge-back transport by reversing its type's bridge route:
-    /// the same OFT adapter, endpoint and pinned peer the forward moves send with, read as
-    /// origin instead of destination.
-    function _getTransport()
-        internal view override
-        returns (IComposeTransportFacet.Transport memory _transport)
-    {
-        (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
-            IBridgeRoutesFacet(controllerAddress).getSubaccountTypeRoute(_accountType());
-        require(
-            fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
-            BridgeRouteNotConfigured()
-        );
-        _transport = IComposeTransportFacet.Transport({
-            lzEndpoint: address(IOAppCore(fxrpOft).endpoint()),
-            oft: fxrpOft,
-            originEid: destinationEid,
-            originPeer: destinationPeer
-        });
-    }
-
-    /// @dev The redeem-home compose carries the executor fee as compose value and spends it in
-    /// the same call; no other action here may carry value.
-    function _acceptsComposeValue(
-        uint8 _action
-    )
-        internal pure virtual override
-        returns (bool)
-    {
-        return _action == ACTION_REDEEM_HOME;
-    }
-
     /// @dev Shared forward-move core of the type's instructions: bridges exactly `_amount` FXRP
     /// over LayerZero to this account's own address on its type's remote chain, so every entry
     /// point shares the same guards by construction. A zero amount is a message-only send; the
@@ -178,6 +146,38 @@ abstract contract BridgingSubaccountBase is IBridgingSubaccount, SubaccountBase,
         _guid = receipt.guid;
     }
 
+    /// @dev Derives the inbound bridge-back transport by reversing its type's bridge route:
+    /// the same OFT adapter, endpoint and pinned peer the forward moves send with, read as
+    /// origin instead of destination.
+    function _getTransport()
+        internal view override
+        returns (IComposeTransportFacet.Transport memory _transport)
+    {
+        (address fxrpOft, uint32 destinationEid, bytes32 destinationPeer) =
+            IBridgeRoutesFacet(controllerAddress).getSubaccountTypeRoute(_accountType());
+        require(
+            fxrpOft != address(0) && destinationEid != 0 && destinationPeer != bytes32(0),
+            BridgeRouteNotConfigured()
+        );
+        _transport = IComposeTransportFacet.Transport({
+            lzEndpoint: address(IOAppCore(fxrpOft).endpoint()),
+            oft: fxrpOft,
+            originEid: destinationEid,
+            originPeer: destinationPeer
+        });
+    }
+
+    /// @dev The redeem-home compose carries the executor fee as compose value and spends it in
+    /// the same call; no other action here may carry value.
+    function _acceptsComposeValue(
+        uint8 _action
+    )
+        internal pure virtual override
+        returns (bool)
+    {
+        return _action == ACTION_REDEEM_HOME;
+    }
+
     /// @dev Before expiry, redeems at most the authenticated `_amountLD` (the cap limits the
     /// amount, not the token provenance - FXRP is fungible) with the compose value as the
     /// executor fee, zero included. After the sender-stamped deadline the packet skips
@@ -250,4 +250,5 @@ abstract contract BridgingSubaccountBase is IBridgingSubaccount, SubaccountBase,
 
         emit FXrpRedeemed(parent, _amount, _redeemedAmount);
     }
+
 }

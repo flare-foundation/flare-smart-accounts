@@ -112,8 +112,8 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * envelope and the EVM destination are validated before quoting
      * ({InvalidLoanInstruction}) and the loan chain re-validates on delivery. It sends to this
      * account's own cross-chain address through the configured pinned peer, sharing the
-     * bridging core's guards: paused reverts, configured settings required, live peer
-     * re-checked. `_extraOptions` must be type-3 options carrying both the destination
+     * bridging core's guards: paused reverts, a configured route that is not suspended required,
+     * live peer re-checked. `_extraOptions` must be type-3 options carrying both the destination
      * `lzReceive` gas and the `lzCompose` gas. `msg.value` must cover the LayerZero fee; the
      * excess is refunded to the parent.
      * @param _collateralAmount FXRP to bridge and supply as collateral; may be zero, at most

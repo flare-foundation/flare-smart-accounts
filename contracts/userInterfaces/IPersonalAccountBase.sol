@@ -7,8 +7,9 @@ import {IControlledAccount} from "./IControlledAccount.sol";
  * @title IPersonalAccountBase
  * @notice The identity every Personal Account implementation exposes, on Flare and on the remote
  * chains. The frozen `PersonalAccountProxy` creation code delegate-calls `initialize` from the
- * proxy constructor, so every implementation behind the PA beacon must implement exactly this;
- * the ABI is frozen with the proxy.
+ * proxy constructor, so every implementation behind the PA beacon must implement exactly this.
+ * Only the initializer's ABI is frozen with the proxy creation code; the rest of this interface
+ * is the protocol's compatibility requirement on every implementation.
  */
 interface IPersonalAccountBase is IControlledAccount {
 

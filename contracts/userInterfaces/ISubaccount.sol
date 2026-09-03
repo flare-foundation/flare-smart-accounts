@@ -8,8 +8,10 @@ import {IControlledAccount} from "./IControlledAccount.sol";
  * @notice The type-generic subaccount surface every implementation must expose. The frozen
  * `SubaccountProxy` creation code embeds `initialize`'s exact selector and delegate-calls
  * it from the proxy constructor, so a new subaccount type is not merely "any contract with a
- * registered implementation": its implementation must implement this interface. The ABI is
- * frozen with the proxy — changing it shifts every predicted subaccount address.
+ * registered implementation": its implementation must implement this interface. Only the
+ * initializer's ABI is frozen with the proxy creation code — changing it shifts every predicted
+ * subaccount address; the rest of this interface is the protocol's requirement on every
+ * implementation, not something the proxy embeds.
  */
 interface ISubaccount is IControlledAccount {
 

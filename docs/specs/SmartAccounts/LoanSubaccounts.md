@@ -88,7 +88,7 @@ FXRP on the Flare subaccount means redemption:
   - It takes **no parameters**: the destination is the parent (fixed at deployment, part of the address), the executor comes from the controller, and `msg.value` travels whole as the fee (FAssets records it in whole gwei). Public callers must cover the controller's **configured executor fee** — the price of the permissionless rail, so forcing the backward direction is never gas-only (see the accepted risk below) — while `redeemFromSubaccount` itself forwards whatever it receives, leaving an authenticated route free to send less or nothing (the executor stays appointed, unpaid). An empty balance reverts with `NothingToRedeem` rather than no-op, so a caller's value is returned instead of being trapped.
   - The parent calls `redeemAmount` (the UBA-based entry point on `IRedeemExtended`) with the **whole pushed balance** rather than `redeem`, which only accepts whole lots and would strand the remainder. A balance below the FAssets minimum is pushed to the parent **unredeemed** instead (FAssets would reject it): `redeemedAmount` is zero, the value joins the parent's float (`NativeSweptToParent`), and `TokenSweptToParent` is emitted — the rail never fails on amount and costs the configured fee either way.
   - The parent's redemption runs in its **own reentrancy-guard domain**, because the legitimate path (`executeUserOp` → `sweepRedeem` → `redeemFromSubaccount`) re-enters the parent while its shared guard is held. The nesting is bounded: the method pulls before it redeems and writes no account state, so a redemption reached from beneath any guarded method (no dependency does that today) cannot touch the parent's pre-existing FXRP, and a nested redemption is refused by the guard.
-  - The same core runs when FXRP comes home from the loan chain: the twin's `sweepToOrigin` attaches the `ACTION_REDEEM_HOME` compose (its only field a deadline, the sender's block time plus `REDEEM_HOME_TTL`), this account authenticates it exactly as the loan-chain accounts authenticate theirs (the shared base, with the transport read from the bridge settings) and redeems **at most the packet's authenticated amount** on arrival (`min(balance, amountLD)`; the rest stays for the public rail — FXRP is fungible, so the cap bounds how much one compose can move, not which units), with the compose value as the executor fee. Zero is allowed there: the packet already cost its sender the LayerZero fee. Past its deadline the packet skips terminally (nothing redeemed, the balance left for the public rail, value to the parent's float), so a packet cannot outlive its delivery window as a standing instruction over later funds. In both the dust branch and the skip, value goes to the parent — never to `msg.sender`, which on that path is the endpoint.
+  - The same core runs when FXRP comes home from the loan chain: the twin's `sweepToOrigin` attaches the `ACTION_REDEEM_HOME` compose (its only field a deadline, the sender's block time plus `REDEEM_HOME_TTL`), this account authenticates it exactly as the loan-chain accounts authenticate theirs (the shared base, with the transport derived from its type's bridge route) and redeems **at most the packet's authenticated amount** on arrival (`min(balance, amountLD)`; the rest stays for the public rail — FXRP is fungible, so the cap bounds how much one compose can move, not which units), with the compose value as the executor fee. Zero is allowed there: the packet already cost its sender the LayerZero fee. Past its deadline the packet skips terminally (nothing redeemed, the balance left for the public rail, value to the parent's float), so a packet cannot outlive its delivery window as a standing instruction over later funds. In both the dust branch and the skip, value goes to the parent — never to `msg.sender`, which on that path is the endpoint.
 
   The parent is the **recorded redeemer**. That is the point of the relocation: every redemption outcome — a partial fill, a payment-default payout, a refund — lands on the parent, where `executeUserOp` already handles anything, including triggering the payment default directly on the asset manager. The subaccount keeps no redemption-request or default state and no relay methods; `sweepRedeem` is its one redemption method.
 
@@ -221,7 +221,7 @@ collateral, or a withdraw, which never carries tokens. Only the cleanup moves ke
 whole-balance semantics, because sweeping everything is what cleanup means. All three
 instructions share one bridging core in the contract, so the guards are identical by
 construction: a paused
-controller blocks it, the governance-pinned settings name the route, and the OFT's live peer
+controller blocks it, the type's pinned bridge route names the destination, and the OFT's live peer
 is re-checked against the pinned one on every call. What differs is authorization and inputs:
 
 - **Restricted to the parent Personal Account** (`onlyParent`): the instruction names a loan
@@ -382,7 +382,29 @@ and its bridge-back authentication fail closed exactly as an unconfigured route 
 user operation names its `destinationEid` explicitly, and the route registry is its allowlist
 (`UnknownBridgeRoute`). Every send re-checks the adapter's live peer for its destination against
 the pinned one, and an adapter rotation (`setFxrpOft`) re-validates every registered route
-against the new adapter's peers, so a route can never silently die in the field.
+against the new adapter's peers — the **Flare half** of a rotation, which is all Flare can see.
+The remote half is not: each remote OFT holds a live peer for Flare, and each remote diamond's
+compose transport pins that adapter as its `originPeer` (`setComposeTransport` requires the two
+to agree). What a packet from the new adapter meets depends on the phase: while the remote
+OFT's live Flare peer still names the old adapter, it fails in `lzReceive`, before any token is
+credited; once that peer names the new adapter but the transport's `originPeer` does not yet,
+a token-bearing compose is credited and then fails compose authentication (retriable) and a
+message-only user operation parks. A rotation is therefore a coordinated runbook, never one
+call: **(1) pause the Flare side — the source of new traffic — but not the remote destinations,
+which must keep delivering; (2) cancel the conflicting queued setters on both sides; (3) let
+the old traffic drain fully through `lzCompose`, return packets included; (4) wire the new
+adapter's peers: on every remote chain set the remote OFT's live Flare peer to the new
+adapter, and on Flare set the new adapter's own peer for every registered route's endpoint to
+that route's stored remote peer (the adapter's owner does this on the OFT); (5) on every
+remote chain `setComposeTransport` with `originPeer` = the new adapter; (6) `setFxrpOft` on
+Flare; (7) unpause.** Only two of these orderings are enforced by code — the remote transport
+validates `originPeer` against its OFT's live Flare peer, and `setFxrpOft` re-validates every
+stored route against the new adapter's own peers, so both halves of (4) must precede (5) and
+(6) respectively; keeping `setFxrpOft` last, after the remote side is wired, is an operational
+rule, not a validation. A seamless rotation would need dual-peer acceptance for the
+transition in both the remote OFT's receive path (a standard OFT holds one peer per source
+endpoint) and the compose authentication — a separate future extension, distinct from the
+multi-origin `acceptedOrigins[srcEid]` design deferred under Multiple remote chains.
 
 Adding a remote chain is a deployment of existing bytecode plus governance, with nothing changing
 in what users sign or what clients build: bootstrap the diamond there from the pinned init code,
@@ -391,7 +413,11 @@ cut the remote facet set, `setComposeTransport`, register the pool under a new t
 on Flare `setSubaccountImplementation(type, <the Flare LoanSubaccount>)`, `setBridgeRoute` and
 `setSubaccountTypeRoute` — the route last, once the remote side exists. Clearing a route (zero
 peer) fails every type pointed at it and every user operation naming it closed until it is set
-again, with the type pins kept; suspending one type stops only that type.
+again, with the type pins kept; suspending one type stops only that type. None of these stops
+cancels a queued timelocked setter — it survives, matures, and anyone may then execute it and
+undo the stop — so the Flare containment runbook is the remote one's: cancel queued conflicting
+`setFxrpOft` / `setBridgeRoute` / `setSubaccountTypeRouteSuspended` calls first
+(`cancelTimelockedCall`).
 
 Deliberately not built: **multiple accepted origins on a remote transport** (a remote Personal
 Account relaying a Flare-signed batch onward to a second remote chain). The base authenticates
@@ -1027,28 +1053,29 @@ as an authenticated LayerZero compose message sent by this same account on Flare
 subaccount's self-to-self trick applied to the PA family.
 
 **Naming.** Four words, one axis each. *Loan* is business-specific and stays only on what
-exists for the loan (`LoanSubaccount`, `LoanSubaccountRemote`, the settings facets); *Remote*
+exists for the loan (`LoanSubaccount`, `LoanSubaccountRemote`, `LoanMarketsFacet`); *Remote*
 is location seen from Flare, the non-Flare implementation at the same address
 (`PersonalAccountRemote`, `LoanSubaccountRemote`); *Compose* is the ingress authentication
 mechanism (`ComposeReceiverAccountBase` — and only that ingress, since the subaccounts also
 have parent-driven and public rails); *Bridging* is the Flare-side surface every type that
 bridges FXRP to its remote twin shares (`BridgingSubaccountBase`); *CrossChain* is the Flare-side send
 (`sendCrossChainUserOp`, which sends a user operation to another chain and executes nothing
-itself). "Cross-chain" is general in name only while one configured destination exists: the
-sender rides the loan bridge's FXRP OFT and a remote PA exists only on the loan chain, so a
-multi-destination PA would need per-destination routes.
+itself). "Cross-chain" is general in fact as well as in name: the sender names its
+`destinationEid`, allowlisted by the per-chain route registry (`BridgeRoutesFacet`), and every
+remote chain bootstraps the same diamond and remote Personal Account — see Multiple remote
+chains.
 
 **The shared base.** The authentication checklist (endpoint-only caller, configured FXRP OFT
 as sender, origin chain, `composeFrom` equal to the account's own address, GUID recomputed
 from the pinned origin peer) is identical for the remote PA, the loan-chain subaccount and the
-Flare subaccount (as the receiver of its own bridge-back, its transport derived from the bridge
-settings — with one accepted trust extension: that receiver reads its authenticating endpoint
+Flare subaccount (as the receiver of its own bridge-back, its transport derived from its type's
+bridge route — with one accepted trust extension: that receiver reads its authenticating endpoint
 live from the governance-set OFT rather than pinning it; the canonical `OFTAdapter`'s endpoint
 is immutable, a compromised OFT could already move the locked FXRP, and the only action
 forgeable here redeems the account's own FXRP to its owner's XRPL address), as is the
 operation-id replay protection with the skip semantics that the signed
-actions use (the unsigned Flare action carries no id and relies on the endpoint's at-most-once
-compose delivery), and they live once in
+actions use (the id-less Flare redeem-home carries no id and relies on the endpoint's
+at-most-once compose delivery), and they live once in
 [`ComposeReceiverAccountBase`](../../../contracts/smartAccounts/implementation/ComposeReceiverAccountBase.sol)
 (public surface: [`IComposeReceiverAccountBase`](../../../contracts/userInterfaces/IComposeReceiverAccountBase.sol)).
 Derived accounts define only their action set, their transport source, whether compose value is
@@ -1214,7 +1241,14 @@ gaining `minComposeValue` and `returnOptions` (the fee's signed bounds — borro
 a withdraw FXRP cap — were added and removed again inside the same pre-cut window), and the
 removal of the sweep-deposit action (id 4 retired, never reused; ids 1–3 unchanged). An environment that had
 shipped the old scheme would need a new payload version instead. The settings storage namespaces
-are fresh — `smartAccounts.ComposeTransport.State` and `smartAccounts.LoanMarkets.State` —
+are fresh — `smartAccounts.ComposeTransport.State` and `smartAccounts.LoanMarkets.State` on the
+loan chain, and on Flare `smartAccounts.BridgeRoutes.State`, which replaced the earlier
+`smartAccounts.LoanBridgeSettings.State` outright (never cut, verified 2026-09-03 against the
+complete `DiamondCut` history of the controller — 3 cuts on flare, 3 on songbird, 8 on coston2,
+read through the explorer log API — none of which ever added the retired facet's
+`getLoanBridgeSettings()` or `setLoanBridgeSettings(address,uint32,bytes32)` selectors; no cut
+plan under `deployment/cuts/` ever named it either, so nothing was ever configured under the
+old namespace and no migration or legacy slot is needed) —
 and splitting the earlier single settings namespace is itself a pre-first-cut-only move under
 the same condition: after a first cut it would need a migration or a permanent legacy slot. The
 storage-lineage gate below is the third member of this family.

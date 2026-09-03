@@ -67,7 +67,9 @@ library BridgeRoutes {
         );
         // a rotation must carry every registered route: the new adapter's live peer for each
         // route's endpoint must be exactly the pinned one, or the route would fail closed in
-        // the field instead of at this timelocked call
+        // the field instead of at this timelocked call. This is the Flare half only - the remote
+        // OFTs' live Flare peers and the remote transports' origin peers are both invisible here
+        // (see the spec's rotation runbook)
         uint256 count = state.destinationEids.length();
         for (uint256 i = 0; i < count; i++) {
             uint32 destinationEid = uint32(state.destinationEids.at(i));

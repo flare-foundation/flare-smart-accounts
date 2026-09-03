@@ -12,6 +12,7 @@ import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
 import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
+import {IPersonalAccountBase} from "../contracts/userInterfaces/IPersonalAccountBase.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
 import {MyERC4626, IERC20} from "../contracts/mock/MyERC4626.sol";
 import {MockSingletonFactory} from "../contracts/mock/MockSingletonFactory.sol";
@@ -2295,6 +2296,8 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(predicted.code.length, 0);
 
         vm.prank(makeAddr("anyone"));
+        vm.expectEmit();
+        emit IPersonalAccountBase.PersonalAccountInitialized(address(masterAccountController), xrplAddress1);
         vm.expectEmit();
         emit IPersonalAccountsFacet.PersonalAccountCreated(predicted, xrplAddress1);
         address created = masterAccountController.createPersonalAccount(xrplAddress1);

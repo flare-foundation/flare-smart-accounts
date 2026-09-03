@@ -2,6 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
+import {IPersonalAccountBase} from "../contracts/userInterfaces/IPersonalAccountBase.sol";
 import {IControlledAccount} from "../contracts/userInterfaces/IControlledAccount.sol";
 import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
 import {IDiamond} from "../contracts/diamond/interfaces/IDiamond.sol";
@@ -130,6 +131,8 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
 
         address caller = makeAddr("anyone");
         vm.prank(caller);
+        vm.expectEmit();
+        emit IPersonalAccountBase.PersonalAccountInitialized(address(controller), xrplOwner);
         address created = controller
             .createPersonalAccount(xrplOwner);
         assertEq(created, predicted);

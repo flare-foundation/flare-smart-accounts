@@ -14,7 +14,8 @@ import {ControlledAccountBase} from "./ControlledAccountBase.sol";
  * chains and whatever the type does: the parent Personal Account and the type (both fixed at
  * deployment and part of the account's CREATE2 address), the frozen-proxy `initialize`, the
  * `onlyParent` gate and the type-aware beacon lookup. The frozen `SubaccountProxy` dictates this
- * contract for every type, so it exists once.
+ * surface ({ISubaccount}) for every type; implementing the interface directly is enough (the
+ * generic test mock does), and this base is its one shared implementation.
  * @dev STORAGE: the parent and the type live in the `smartAccounts.SubaccountBase.State` namespace,
  * never in linear slots, so this base can grow without shifting a derived lineage; the derived
  * contract's own linear state starts right after {ControlledAccountBase}'s slot 0.

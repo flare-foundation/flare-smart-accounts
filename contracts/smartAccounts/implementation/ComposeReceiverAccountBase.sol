@@ -93,6 +93,15 @@ abstract contract ComposeReceiverAccountBase is
     )
         internal virtual;
 
+    /// @dev Consumes an operation id: the signed action it carried has executed.
+    function _markOperationUsed(
+        bytes32 _operationId
+    )
+        internal
+    {
+        _getComposeReceiverState().usedOperations[_operationId] = true;
+    }
+
     /// @dev The full authentication checklist: the caller must be the endpoint, the sender
     /// the configured OFT, the source chain the origin, the source-chain sender this
     /// account itself, and the delivered GUID must recompute from the pinned origin peer
@@ -149,26 +158,6 @@ abstract contract ComposeReceiverAccountBase is
         return 0;
     }
 
-    /// @dev Consumes an operation id: the signed action it carried has executed.
-    function _markOperationUsed(
-        bytes32 _operationId
-    )
-        internal
-    {
-        _getComposeReceiverState().usedOperations[_operationId] = true;
-    }
-
-    function _getComposeReceiverState()
-        private pure
-        returns (ComposeReceiverState storage _state)
-    {
-        bytes32 position = COMPOSE_RECEIVER_STATE_POSITION;
-        // solhint-disable-next-line no-inline-assembly
-        assembly {
-            _state.slot := position
-        }
-    }
-
     function _checkNotPaused()
         internal view
     {
@@ -180,7 +169,7 @@ abstract contract ComposeReceiverAccountBase is
     /// @dev The transport this receiver authenticates against: the endpoint that may call, the
     /// OFT that must be the sender, the chain the message must come from and the peer it must
     /// have been sent by. The remote accounts read the diamond's compose transport; the Flare
-    /// receiver derives it from its own bridge settings.
+    /// receiver derives it from its type's bridge route.
     function _getTransport()
         internal view virtual
         returns (IComposeTransportFacet.Transport memory _transport)
@@ -202,5 +191,16 @@ abstract contract ComposeReceiverAccountBase is
         returns (bool)
     {
         return false;
+    }
+
+    function _getComposeReceiverState()
+        private pure
+        returns (ComposeReceiverState storage _state)
+    {
+        bytes32 position = COMPOSE_RECEIVER_STATE_POSITION;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            _state.slot := position
+        }
     }
 }

@@ -80,7 +80,7 @@ Seventeen facets are cut on Flare; the table is the cross-chain union, so it als
 
 ## Libraries
 
-Thirteen libraries hold the actual business logic. Most own a single ERC-7201 storage slot.
+Nineteen libraries hold the actual business logic. Most own a single ERC-7201 storage slot.
 
 | Library | Storage slot | Purpose |
 |---------|--------------|---------|
@@ -95,6 +95,11 @@ Thirteen libraries hold the actual business logic. Most own a single ERC-7201 st
 | [`InstructionFees`](../../../contracts/smartAccounts/library/InstructionFees.sol) | `smartAccounts.InstructionFees.State` | Default fee + per-instruction-ID fee (1-based to distinguish unset from zero). |
 | [`Pause`](../../../contracts/smartAccounts/library/Pause.sol) | `smartAccounts.Pause.State` | `paused` flag plus pauser / unpauser `EnumerableSet.AddressSet`s. |
 | [`Timelock`](../../../contracts/smartAccounts/library/Timelock.sol) | `smartAccounts.Timelock.State` | `executing` re-entry flag, `timelockDurationSeconds`, `timelockedCalls` map. |
+| [`Subaccounts`](../../../contracts/smartAccounts/library/Subaccounts.sol) | `smartAccounts.Subaccounts.State` | Per-type subaccount implementation registry and the CREATE2 creation/prediction of `SubaccountProxy` instances. |
+| [`BridgeRoutes`](../../../contracts/smartAccounts/library/BridgeRoutes.sol) | `smartAccounts.BridgeRoutes.State` | Flare-only routing to the remote chains: the FXRP OFT adapter, one pinned peer per endpoint id, each bridging type's write-once chain pin and its suspension flag. |
+| [`ComposeTransport`](../../../contracts/smartAccounts/library/ComposeTransport.sol) | `smartAccounts.ComposeTransport.State` | A remote diamond's compose transport (endpoint, OFT, pinned origin route), one per diamond. |
+| [`LoanMarkets`](../../../contracts/smartAccounts/library/LoanMarkets.sol) | `smartAccounts.LoanMarkets.State` | Write-once per-type Morpho market binding, the per-type borrow switch and the Flare fee terms. Loan chain only. |
+| [`MorphoMath`](../../../contracts/smartAccounts/library/MorphoMath.sol) | *(stateless)* | Morpho market id and virtual-share conversions (our MIT copy, pinned to upstream by `MorphoConformance.t.sol`). |
 | [`FXrp`](../../../contracts/smartAccounts/library/FXrp.sol) | *(stateless)* | `reserveCollateral` / `transfer` / `redeem` wrappers around `IIPersonalAccount` + event emission. `lotsToAmount` view. |
 | [`Vault`](../../../contracts/smartAccounts/library/Vault.sol) | *(stateless)* | Vault primitives (`deposit`, `redeem`, `claimWithdrawal`, `requestRedeem`, `claim`) wrapping `IIPersonalAccount` + event emission. Date helper for the Upshift `claim` shape. |
 | [`PaymentReferenceParser`](../../../contracts/smartAccounts/library/PaymentReferenceParser.sol) | *(stateless)* | Pure decoders for the 32-byte payment reference: instruction ID/type/command, value, agent-vault ID, vault ID, address. |
