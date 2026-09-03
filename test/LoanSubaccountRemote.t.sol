@@ -52,6 +52,8 @@ import {
 import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
+import {MockReentrantToken} from "../contracts/mock/MockReentrantToken.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {MockOft} from "../contracts/mock/MockOft.sol";
 import {MockAssetManager} from "../contracts/mock/MockAssetManager.sol";
@@ -2128,7 +2130,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
-        // the fee paid the one way it can be - loan tokens through repay - the whole
+        // the fee paid in loan tokens through repay (payLoanFee is the other way) - the whole
         // collateral goes home
         rlusd.mint(subaccount, 70e18);
         ILoanSubaccountRemote(subaccount).repay();
@@ -2430,10 +2432,168 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(feeDebtX18, 0);
     }
 
+    function testPayLoanFeeFromParentUnblocksTheOverlapWithoutClosingTheDebt() public {
+        // the fee-only way through the overlap: the parent pays exactly the collectible from
+        // its own RLUSD, nothing touches the debt, and the refused withdrawal passes with the
+        // loan still open
+        morpho.setHealthCheckDisabled(false);
+        _configureSettings();
+        (address parent, address subaccount) = _parentAndSubaccount("rPayFeeOverlapOwner");
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _externalRepay(subaccount, 90e18);
+
+        bytes memory payload = _withdrawPayload(bytes32("op-w"), 92e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 7e18)
+        );
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+
+        rlusd.mint(parent, 7e18);
+        vm.startPrank(parent);
+        rlusd.approve(subaccount, 7e18);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), 7e18);
+        uint256 paid = ILoanSubaccountRemote(subaccount).payLoanFee(7e18);
+        vm.stopPrank();
+        assertEq(paid, 7e18);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 7e18);
+        assertEq(rlusd.balanceOf(parent), 0);
+        assertEq(rlusd.balanceOf(subaccount), 0);
+        (uint256 principal, uint256 feeDebtX18, , , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
+        assertEq(principal, 10e18);
+
+        _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 92e6);
+        (principal, , , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 10e18);
+    }
+
+    function testPayLoanFeeClampsToTheCollectible() public {
+        // the signed amount is a ceiling: more than owed pays exactly the collectible; the
+        // leftover allowance cannot be spent by a second call once nothing is owed - and is why
+        // the canonical batch ends with approve(0)
+        _configureSettings();
+        (address parent, address subaccount) = _borrowedPairWithFee("rPayFeeClampOwner");
+        rlusd.mint(parent, 100e18);
+        vm.startPrank(parent);
+        rlusd.approve(subaccount, 100e18);
+        uint256 paid = ILoanSubaccountRemote(subaccount).payLoanFee(100e18);
+        assertEq(paid, 70e18);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        assertEq(rlusd.allowance(parent, subaccount), 30e18);
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 0);
+
+        vm.expectRevert(ILoanSubaccountRemote.NothingCollectible.selector);
+        ILoanSubaccountRemote(subaccount).payLoanFee(30e18);
+        vm.stopPrank();
+        assertEq(rlusd.balanceOf(parent), 30e18);
+    }
+
+    function testPayLoanFeeGuards() public {
+        // only the parent; a non-zero cap; held while paused; an unapproved parent reverts
+        // whole and retriable with the fee untouched
+        _configureSettings();
+        (address parent, address subaccount) = _borrowedPairWithFee("rPayFeeGuardOwner");
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        rlusd.mint(parent, 70e18);
+
+        vm.expectRevert(ILoanSubaccountRemote.OnlyParent.selector);
+        ILoanSubaccountRemote(subaccount).payLoanFee(70e18);
+
+        vm.prank(parent);
+        vm.expectRevert(ILoanSubaccountRemote.ZeroAmount.selector);
+        ILoanSubaccountRemote(subaccount).payLoanFee(0);
+
+        vm.prank(parent);
+        vm.expectRevert();
+        ILoanSubaccountRemote(subaccount).payLoanFee(70e18);
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 70e18 * 1e18);
+
+        _pauseController();
+        vm.startPrank(parent);
+        rlusd.approve(subaccount, 70e18);
+        vm.expectRevert(IPauseFacet.IsPaused.selector);
+        ILoanSubaccountRemote(subaccount).payLoanFee(70e18);
+        vm.stopPrank();
+        _unpauseController();
+
+        vm.prank(parent);
+        assertEq(ILoanSubaccountRemote(subaccount).payLoanFee(70e18), 70e18);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+    }
+
+    function testPayLoanFeeThroughTheParentBatch() public {
+        // the shape the front end signs: one cross-chain user operation on the remote Personal
+        // Account - approve, payLoanFee, approve(0) - all or nothing; then the parked exit passes
+        _configureSettings();
+        (address parent, address subaccount) = _borrowedPairWithFee("rPayFeeBatchOwner");
+        _externalRepay(subaccount, 1000e18);
+        rlusd.mint(parent, 80e18);
+
+        bytes memory stripping = _withdrawPayload(bytes32("op-w"), 100e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, stripping);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(
+            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 70e18)
+        );
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+
+        // approve a little above the quoted fee, pay (clamped to what is owed), revoke the rest
+        IPersonalAccountRemote.Call[] memory calls = new IPersonalAccountRemote.Call[](3);
+        calls[0] = IPersonalAccountRemote.Call({
+            target: address(rlusd), value: 0,
+            data: abi.encodeCall(IERC20.approve, (subaccount, 80e18))
+        });
+        calls[1] = IPersonalAccountRemote.Call({
+            target: subaccount, value: 0,
+            data: abi.encodeCall(ILoanSubaccountRemote.payLoanFee, (80e18))
+        });
+        calls[2] = IPersonalAccountRemote.Call({
+            target: address(rlusd), value: 0,
+            data: abi.encodeCall(IERC20.approve, (subaccount, 0))
+        });
+        bytes memory batch = abi.encode(
+            PAYLOAD_VERSION_1,
+            PA_ACTION_EXECUTE,
+            abi.encode(bytes32("op-fee"), uint64(vm.getBlockTimestamp() + 1 hours), calls)
+        );
+        (bytes memory paMessage, bytes32 paGuid) = _composeMessage(parent, 3, 0, batch);
+        vm.prank(lzEndpoint);
+        IPersonalAccountRemote(parent).lzCompose(address(fxrpOft), paGuid, paMessage, executor, "");
+        assertTrue(IPersonalAccountRemote(parent).usedOperations(bytes32("op-fee")));
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        assertEq(rlusd.balanceOf(parent), 10e18);
+        assertEq(rlusd.allowance(parent, subaccount), 0);
+
+        _deliverWithValue(subaccount, 2, 0, stripping, RETURN_MIN_VALUE);
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 100e6);
+    }
+
     function testFrozenSubaccountKeepsTheExitGatedUntilUnfrozen() public {
-        // the address whose ability to receive and spend RLUSD carries the whole settlement:
-        // frozen, no loan tokens can reach it and repay has nothing to work with, so an
-        // under-secured exit simply stays refused; unfreezing, funding and repaying reopens it
+        // the repay path runs through this address: frozen, no loan tokens can reach it and
+        // repay has nothing to work with, so on that path an under-secured exit stays refused
+        // until unfreezing, funding and repaying (the parent-signed payLoanFee, which never
+        // touches this balance, is the other way out - see the next test)
         _configureSettings();
         uint256 typeB = 2;
         MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
@@ -2483,6 +2643,88 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
         assertEq(amountLD, 98e6);
+    }
+
+    function testPayLoanFeeWorksAroundAFrozenSubaccount() public {
+        // payLoanFee moves the parent's tokens straight to the recipient, so a frozen
+        // subaccount address does not stand in its way: the fee is paid and the FXRP exit
+        // (a different token) passes while the loan token still refuses the subaccount
+        _configureSettings();
+        uint256 typeB = 2;
+        MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.loanToken = address(frozenRlusd);
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        _setDefaultFeeTerms(address(controller), typeB);
+        vm.stopPrank();
+        address parent = _remotePaOnThisDiamond("rFrozenPayFeeOwner");
+        address subaccount = controller.createSubaccount("rFrozenPayFeeOwner", typeB);
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-frz"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _externalRepayWith(frozenRlusd, marketB, subaccount, 1000e18);
+        frozenRlusd.setFrozen(subaccount, true);
+
+        frozenRlusd.mint(parent, 70e18);
+        vm.startPrank(parent);
+        frozenRlusd.approve(subaccount, 70e18);
+        assertEq(ILoanSubaccountRemote(subaccount).payLoanFee(70e18), 70e18);
+        vm.stopPrank();
+        assertEq(frozenRlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+
+        _deliverWithValue(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 100e6), RETURN_MIN_VALUE);
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 100e6);
+    }
+
+    function testPayLoanFeeCallbackCannotReenter() public {
+        // a loan token whose transferFrom calls back into the account: the permissionless
+        // repay meets the transient guard - asserted by the guard's own error, so the test
+        // fails if the guard is ever removed - and payLoanFee itself refuses any non-parent
+        // caller before that; the whole payment reverts and the fee stays owed
+        _configureSettings();
+        uint256 typeB = 2;
+        MockReentrantToken evil = new MockReentrantToken();
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.loanToken = address(evil);
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        _setDefaultFeeTerms(address(controller), typeB);
+        vm.stopPrank();
+        address parent = _remotePaOnThisDiamond("rEvilPayFeeOwner");
+        address subaccount = controller.createSubaccount("rEvilPayFeeOwner", typeB);
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-evil"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+
+        evil.mint(parent, 70e18);
+        evil.setCallback(subaccount, abi.encodeCall(ILoanSubaccountRemote.repay, ()));
+        vm.startPrank(parent);
+        evil.approve(subaccount, 70e18);
+        vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
+        ILoanSubaccountRemote(subaccount).payLoanFee(70e18);
+
+        evil.setCallback(
+            subaccount, abi.encodeCall(ILoanSubaccountRemote.payLoanFee, (70e18))
+        );
+        vm.expectRevert(ILoanSubaccountRemote.OnlyParent.selector);
+        ILoanSubaccountRemote(subaccount).payLoanFee(70e18);
+        vm.stopPrank();
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, 70e18 * 1e18);
+        assertEq(evil.balanceOf(makeAddr("feeCollector")), 0);
     }
 
     function testLzComposeRevertTransportNotConfigured() public {
@@ -3752,11 +3994,22 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     /// A third party repays `_assets` of the subaccount's debt directly on Morpho - outside
     /// the rails, unobserved by the account (the donation path).
     function _externalRepay(address _subaccount, uint256 _assets) private {
+        _externalRepayWith(rlusd, _defaultMarket(), _subaccount, _assets);
+    }
+
+    function _externalRepayWith(
+        MintableERC20 _loanToken,
+        ILoanMarketsFacet.Market memory _market,
+        address _subaccount,
+        uint256 _assets
+    )
+        private
+    {
         address donor = makeAddr("donor");
-        rlusd.mint(donor, _assets);
+        _loanToken.mint(donor, _assets);
         vm.startPrank(donor);
-        rlusd.approve(address(morpho), _assets);
-        morpho.repay(_defaultMarket().marketParams, _assets, 0, _subaccount, "");
+        _loanToken.approve(address(morpho), _assets);
+        morpho.repay(_market.marketParams, _assets, 0, _subaccount, "");
         vm.stopPrank();
     }
 

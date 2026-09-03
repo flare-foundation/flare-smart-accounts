@@ -35,9 +35,11 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * controller-as-beacon. Authenticated compose actions ({ComposeReceiverAccountBase}), sent by
  * this same account on Flare, operate on its type's write-once Morpho market - so the address
  * itself commits to the pool. Repayment, idle-collateral deposit and the fee checkpoint are
- * permissionless fixed rails; the one narrow direct authority is the parent's signed exit
+ * permissionless fixed rails; the two narrow direct authorities are the parent's signed exit
  * {sweepToOrigin}, which can only send idle FXRP to this account's own fixed Flare address,
- * never redirect funds or touch collateral or debt. On the permissionless and cleanup rails
+ * and the parent's signed fee payment {payLoanFee}, which can only move the parent's own loan
+ * tokens to the fee recipient up to what is owed - never redirect funds or touch Morpho
+ * collateral or debt. On the permissionless and cleanup rails
  * every destination is fixed on-chain - the account's own position, the parent, the
  * governance-set fee recipient, or this account's own address on Flare - so no caller ever
  * chooses a destination, a market or an amount source. The one user-chosen destination is a
@@ -181,6 +183,35 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     }
 
     /// @inheritdoc ILoanSubaccountRemote
+    function payLoanFee(
+        uint256 _maxAmount
+    )
+        external
+        onlyParent
+        nonReentrant
+        returns (uint256 _paid)
+    {
+        require(_maxAmount > 0, ZeroAmount());
+        // money leaving the user's accounts toward the collector waits out an incident, like
+        // repay's fee leg; the parent's batch reverts and stays retriable
+        _checkNotPaused();
+        ILoanMarketsFacet.Market memory market = _myMarket();
+        _checkpointFee(market);
+        uint256 collectible = flareDebtX18 / WAD;
+        require(collectible > 0, NothingCollectible());
+        // the signed amount is the cap: never more than it, never more than is owed. The
+        // parent's own balance and allowance fund the transfer straight to the recipient -
+        // nothing lands here, so this account's loan tokens keep their one meaning; an
+        // under-approved, underfunded or frozen party reverts, retriable
+        _paid = Math.min(_maxAmount, collectible);
+        address recipient = ILoanMarketsFacet(controller).getLoanFeeTerms(subaccountType).feeRecipient;
+        IERC20(market.marketParams.loanToken).safeTransferFrom(parentPersonalAccount, recipient, _paid);
+        flareDebtX18 -= _paid * WAD;
+        _forgiveFeeDust();
+        emit LoanFeeCollected(recipient, _paid);
+    }
+
+    /// @inheritdoc ILoanSubaccountRemote
     function sweepToOrigin(
         bytes calldata _extraOptions
     )
@@ -193,7 +224,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         // every exit from this chain rides the OFT itself, so an OFT incident must stop it
         _checkNotPaused();
         // check the fee claim against the full position (the sweep moves idle FXRP, not the
-        // position): under-secured blocks - settle through repay first. A live
+        // position): under-secured blocks - settle through repay or payLoanFee first. A live
         // principal checkpoints first; zero principal and zero collectible need no
         // Morpho/oracle read, and debt-free dust is forgiven rather than blocking
         if (feePrincipal != 0) {
@@ -448,8 +479,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
         _checkNotPaused();
         ILoanMarketsFacet.Market memory market = _myMarket();
         // the secured-claim gate: checkpoint, then refuse the withdrawal (retriably) if it
-        // would leave the fee under-secured - the fee is paid in loan tokens through repay,
-        // never taken from the collateral
+        // would leave the fee under-secured - the fee is paid in loan tokens through repay or
+        // payLoanFee, never taken from the collateral
         _checkpointFee(market);
         require(_exitLeavesFeeSecured(market, amount), OutstandingLoanFee(flareDebtX18 / WAD));
         usedOperations[operationId] = true;
@@ -620,7 +651,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, ComposeReceiverAccountBa
     /// would remain, valued at the market oracle's price, covers FEE_SECURITY_FACTOR times
     /// the collectible fee. Zero collectible needs no reads at all (and forgives debt-free
     /// dust); a zero, dead or reverting oracle values the security at nothing, so the exit is
-    /// refused (the fee is settled through repay, oracle-free, and the exit retried).
+    /// refused (the fee is settled through repay or payLoanFee, oracle-free, and the exit
+    /// retried).
     function _exitLeavesFeeSecured(
         ILoanMarketsFacet.Market memory _market,
         uint256 _withdrawAmount

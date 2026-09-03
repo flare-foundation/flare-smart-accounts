@@ -26,8 +26,8 @@ uint8 constant ACTION_BORROW = 1;
 /// window, so the redeposit ordering race cannot touch a withdrawal. **The fee is a secured
 /// claim**: the withdrawal passes while the collateral remaining after it, valued at the market
 /// oracle's price, covers three times the collectible fee, and otherwise reverts retriably
-/// (`OutstandingLoanFee`) - the fee is paid in loan tokens through {repay}, never taken from
-/// the collateral, so no price ever moves funds here. `minComposeValue` is the delivery floor:
+/// (`OutstandingLoanFee`) - the fee is paid in loan tokens through {repay} or {payLoanFee},
+/// never taken from the collateral, so no price ever moves funds here. `minComposeValue` is the delivery floor:
 /// compose delivery is permissionless and LayerZero does not authenticate the delivered value,
 /// so a delivery carrying less - execution and terminal skip alike - reverts
 /// (`InsufficientDeliveryValue`), which is what stops a zero-value front-run from consuming
@@ -41,9 +41,10 @@ uint8 constant ACTION_BORROW = 1;
 /// return-send failure: retry the same packet once its cause clears - more value cannot help,
 /// since exactly the newly quoted fee is forwarded. An under-secured fee (`OutstandingLoanFee`,
 /// which a dead or zero-priced oracle also produces, since it values the security at
-/// nothing): send loan tokens to the account and let {repay} collect (live debt is repaid
-/// first, so with debt outstanding the tokens must cover it before any reach the fee), after
-/// which the retried delivery passes with nothing collectible, oracle-free. Bad `returnOptions` frozen into the
+/// nothing): pay the fee - send loan tokens to the account and let {repay} collect (live debt
+/// is repaid first, so with debt outstanding the tokens must cover it before any reach the
+/// fee), or pay the fee alone from the parent through {payLoanFee} - after which the retried
+/// delivery passes with nothing collectible, oracle-free. Bad `returnOptions` frozen into the
 /// signed packet (the accepted residual - no retry can fix the blob itself): issue a corrected
 /// instruction reusing the SAME operation id, whereupon the parked packet later
 /// duplicate-skips. Position health is enforced by Morpho.
@@ -74,7 +75,8 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  * account on Flare, execute the typed actions on the type's write-once Morpho market — so the
  * address itself commits to the pool. Repayment, idle-collateral deposit and the fee
  * checkpoint are permissionless fixed rails; only the parent Personal Account (the remote
- * implementation, itself compose-driven) may sweep idle FXRP home ({sweepToOrigin}). On those
+ * implementation, itself compose-driven) may sweep idle FXRP home ({sweepToOrigin}) or pay the
+ * fee from its own balance ({payLoanFee}). On those
  * rails every destination is fixed on-chain - the account's own position, the parent, the
  * governance-set fee recipient, or this account's own address on Flare - while the one
  * user-chosen destination is a signed borrow's disbursement. It has no native rail.
@@ -223,7 +225,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when accrued fee is paid to the fee recipient in loan tokens, from
-     * the account's balance at the end of {repay}.
+     * the account's balance at the end of {repay}, or from the parent's balance through
+     * {payLoanFee}.
      * @param feeRecipient The collector paid.
      * @param amount The amount paid (whole base units; the fee debt shrinks by exactly this).
      */
@@ -333,6 +336,12 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     error NothingToSweep();
 
     /**
+     * @notice Reverts a {payLoanFee} with nothing collectible: no fee is owed, or only a
+     * sub-unit remainder that no transfer can move.
+     */
+    error NothingCollectible();
+
+    /**
      * @notice Reverts if the OFT's live peer for the origin chain no longer matches the pinned
      * one; the sweep fails closed instead of bridging toward an unknown remote OApp.
      */
@@ -353,9 +362,10 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     error RefundFailed();
 
     /**
-     * @notice Reverts if {sweepToOrigin} is called by anything other than the parent
-     * Personal Account (the remote implementation): by policy the exit direction requires the
-     * user's signature, carried by the parent's cross-chain user operation.
+     * @notice Reverts if {sweepToOrigin} or {payLoanFee} is called by anything other than the
+     * parent Personal Account (the remote implementation): by policy the exit direction and a
+     * payment from the parent's balance require the user's signature, carried by the parent's
+     * cross-chain user operation.
      */
     error OnlyParent();
 
@@ -373,7 +383,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * @notice Reverts an exit - a withdraw action or {sweepToOrigin} - that would leave the
      * collectible fee under-secured: the collateral remaining after it, at the market oracle's
      * price, would be worth less than three times the fee (a dead or zero-priced oracle values
-     * it at nothing). Retriable: send loan tokens to the account, let {repay} collect, retry.
+     * it at nothing). Retriable: pay the fee - loan tokens to the account and {repay}, or the
+     * fee alone from the parent through {payLoanFee} - then retry.
      * @param collectible The fee currently payable.
      */
     error OutstandingLoanFee(
@@ -464,6 +475,34 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
         returns (uint256 _amount);
 
     /**
+     * @notice Pays the collectible Flare fee from the parent Personal Account's own loan-token
+     * balance - the fee alone, the Morpho debt untouched - so an under-secured exit can be
+     * unblocked without closing the loan.
+     * @dev Restricted to the parent Personal Account (the remote implementation), so it is
+     * reached only through a user-signed cross-chain user operation: the batch approves this
+     * account for the amount and calls this method, and `_maxAmount` is the user's signed cap.
+     * Checkpoints first, then transfers `min(_maxAmount, collectible)` from the parent
+     * straight to the governance-set fee recipient (`transferFrom`; nothing lands here, so this
+     * account's loan tokens keep their one meaning, repayment). Pause-gated like {repay}'s fee
+     * leg: money leaving the user's accounts toward the collector waits out an incident. An
+     * under-approved, underfunded or frozen parent, a frozen recipient, or nothing collectible
+     * reverts the whole batch, retriable. The batch should end by resetting the allowance
+     * (`approve(0)`): the clamp can leave a remainder, and an allowance to this upgradeable
+     * account is spending authority - harmless under this implementation, not something to
+     * leave standing. The complement of {repay}, which pays the debt first and reaches the fee
+     * only from what remains ({LoanFeeCollected}; debt-free sub-unit dust is forgiven). With
+     * live debt and a dead oracle this clears the fee gate, but Morpho's own health check still
+     * reads that oracle, so the withdrawal waits for the debt to be closed.
+     * @param _maxAmount The most this call may transfer (whole base units; the signed cap).
+     * @return _paid The amount transferred to the fee recipient.
+     */
+    function payLoanFee(
+        uint256 _maxAmount
+    )
+        external
+        returns (uint256 _paid);
+
+    /**
      * @notice Bridges all idle FXRP back to this account's own address on the origin chain
      * (Flare), where it is redeemed on arrival toward the user's XRPL address.
      * @dev Restricted to the parent Personal Account (the remote implementation), so it is
@@ -478,7 +517,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * past the deadline it skips. Waiting while the Flare side is paused or its route
      * unconfigured is accepted - custody is unaffected. The secured-claim exit gate applies: a
      * live fee principal checkpoints first, an under-secured collectible fee blocks the sweep
-     * ({OutstandingLoanFee} - settle through {repay} first), and a fee the position's
+     * ({OutstandingLoanFee} - settle through {repay} or {payLoanFee} first), and a fee the position's
      * collateral still covers to the gate's threshold rides along uncollected. With zero
      * principal and nothing collectible the gate avoids Morpho and the oracle entirely and
      * forgives sub-unit dust, never blocking.
