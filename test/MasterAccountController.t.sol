@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.27;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, stdError} from "forge-std/Test.sol";
+import {MockMemoInstructionsHarness} from "../contracts/mock/MockMemoInstructionsHarness.sol";
 import {MasterAccountController} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {IIMasterAccountController} from "../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {IPayment} from "flare-periphery/src/flare/IPayment.sol";
@@ -3326,6 +3327,75 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(masterAccountController.getExecutor(personalAccountAddr), address(0));
     }
 
+    function testMemoInstructionsRejectsAnUnsupportedOpcode() public {
+        // the library's own opcode guard: the facet dispatches only 0xFF and 0xFE into
+        // `execute`, so nothing in production can reach this - the harness calls it directly
+        MockMemoInstructionsHarness harness = new MockMemoInstructionsHarness();
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IMemoInstructionsFacet.InvalidInstructionId.selector, uint8(0xAB))
+        );
+        harness.execute(abi.encodePacked(uint8(0xAB), uint8(1), uint64(0)), pa, "");
+    }
+
+    function testDirectMintWithMatchingPersonalAccountExecutor() public {
+        // the other side of the per-account executor check: with a PA executor set, the
+        // matching executor passes it and the instruction executes
+        address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
+        uint256 amount = 5000;
+        address paExecutor = makeAddr("paExecutor");
+
+        fxrp.mint(address(masterAccountController), amount);
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("setExecTx4"),
+            xrplAddress1,
+            amount,
+            0,
+            abi.encodePacked(uint8(0xD0), uint8(1), uint64(0), paExecutor),
+            payable(executor),
+            ""
+        );
+        assertEq(masterAccountController.getExecutor(personalAccountAddr), paExecutor);
+
+        fxrp.mint(address(masterAccountController), amount);
+        IPersonalAccount.Call[] memory calls = new IPersonalAccount.Call[](1);
+        calls[0] = IPersonalAccount.Call({
+            target: address(simpleExample),
+            value: 0,
+            data: abi.encodeWithSignature("setFlag(bool)", true)
+        });
+        bytes memory memoData = abi.encodePacked(
+            uint8(0xFF),
+            uint8(1),
+            uint64(0),
+            abi.encode(PackedUserOperation({
+                sender: personalAccountAddr,
+                nonce: 0,
+                initCode: "",
+                callData: abi.encodeCall(IPersonalAccount.executeUserOp, (calls)),
+                accountGasLimits: 0,
+                preVerificationGas: 0,
+                gasFees: 0,
+                paymasterAndData: "",
+                signature: ""
+            }))
+        );
+
+        vm.prank(assetManagerFxrpMock);
+        masterAccountController.handleMintedFAssets(
+            bytes32("execTx4"),
+            xrplAddress1,
+            amount,
+            0,
+            memoData,
+            payable(paExecutor),
+            ""
+        );
+        assertTrue(simpleExample.flag());
+    }
+
     function testDirectMintRevertWrongExecutor() public {
         address personalAccountAddr = masterAccountController.getPersonalAccount(xrplAddress1);
         uint256 amount = 5000;
@@ -4107,6 +4177,28 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(balances.vaults[1].vaultId, 4);
         assertEq(balances.vaults[1].shares, 0);
         assertEq(balances.vaults[1].assets, 0);
+    }
+
+    function testGetBalancesRevertsOnAnUnsupportedVaultType() public {
+        // the reader's `assert(false)` guard: `addVaults` accepts only Firelight and Upshift,
+        // so a `None` type can only appear through storage corruption - forced here - and the
+        // reader must fail loudly rather than report a zero balance for a vault it cannot read
+        address pa = masterAccountController.getPersonalAccount(xrplAddress1);
+        bytes32 statePosition = keccak256(
+            abi.encode(uint256(keccak256("smartAccounts.Vaults.State")) - 1)
+        ) & ~bytes32(uint256(0xff));
+        // State.vaultIdToVaultInfo is the first field, and VaultInfo packs the address at
+        // offset 0 with the type at offset 20 of the same slot
+        bytes32 vaultInfoSlot = keccak256(abi.encode(uint256(1), statePosition));
+        bytes32 packed = vm.load(address(masterAccountController), vaultInfoSlot);
+        vm.store(
+            address(masterAccountController),
+            vaultInfoSlot,
+            packed & ~bytes32(uint256(0xff) << 160)
+        );
+
+        vm.expectRevert(stdError.assertionError);
+        masterAccountController.getBalances(pa);
     }
 
     function testGetBalancesWithNat() public {

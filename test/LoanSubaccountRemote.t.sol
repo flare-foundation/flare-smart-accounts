@@ -16,6 +16,7 @@ import {
     LoanSubaccountRemote
 } from "../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
 import {SubaccountProxy} from "../contracts/smartAccounts/proxy/SubaccountProxy.sol";
+import {MockNativeRejectingParent} from "../contracts/mock/MockNativeRejectingParent.sol";
 import {ComposeTransportFacet} from "../contracts/smartAccounts/facets/ComposeTransportFacet.sol";
 import {LoanMarketsFacet} from "../contracts/smartAccounts/facets/LoanMarketsFacet.sol";
 import {SubaccountsFacet} from "../contracts/smartAccounts/facets/SubaccountsFacet.sol";
@@ -47,8 +48,10 @@ import {IILoanMarketsFacet} from "../contracts/smartAccounts/interface/IILoanMar
 import {IMorpho} from "../contracts/smartAccounts/interface/IMorpho.sol";
 import {
     ISubaccountsFacet,
-    SUBACCOUNT_TYPE_LOAN
+    SUBACCOUNT_TYPE_LOAN,
+    SUBACCOUNT_TYPE_NONE
 } from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
 import {ILoanBridgeSettingsFacet} from "../contracts/userInterfaces/facets/ILoanBridgeSettingsFacet.sol";
 import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
 import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
@@ -2795,6 +2798,71 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 70e18 * 1e18);
         assertEq(evil.balanceOf(makeAddr("feeCollector")), 0);
+    }
+
+    function testInitializeValidatesItsArgumentsOnAClearedAccount() public {
+        // defense in depth: the proxy always passes its own constructor arguments, and it
+        // resolves the implementation through the controller first, so these guards cannot be
+        // reached in production. Clearing the controller slot re-opens `initialize` on a live
+        // account, which is the only way to exercise them.
+        address subaccount = address(_deploySubaccount());
+        vm.store(subaccount, bytes32(0), bytes32(0));
+
+        vm.expectRevert(IComposeReceiverAccountBase.InvalidControllerAddress.selector);
+        ISubaccount(subaccount).initialize(address(0), parentPersonalAccount, SUBACCOUNT_TYPE_LOAN);
+
+        vm.expectRevert(ILoanSubaccountRemote.InvalidParentPersonalAccount.selector);
+        ISubaccount(subaccount).initialize(address(controller), address(0), SUBACCOUNT_TYPE_LOAN);
+
+        vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
+        ISubaccount(subaccount).initialize(
+            address(controller), parentPersonalAccount, SUBACCOUNT_TYPE_NONE
+        );
+    }
+
+    function testSweepRefundFailureRevertsTheSweep() public {
+        // the sweep refunds its excess to the caller - the parent - and this account has no
+        // native exit, so a parent that cannot receive native reverts the whole sweep instead
+        // of stranding the excess here; exactly the quoted fee still goes through
+        _configureSettings();
+        MockNativeRejectingParent rejectingParent = new MockNativeRejectingParent();
+        address subaccount = address(new SubaccountProxy(
+            address(controller), address(rejectingParent), SUBACCOUNT_TYPE_LOAN
+        ));
+        fxrp.mint(subaccount, 5e6);
+        vm.deal(address(rejectingParent), 0.03 ether);
+
+        bytes memory sweepCall = abi.encodeCall(ILoanSubaccountRemote.sweepToOrigin, (""));
+        vm.expectRevert(ILoanSubaccountRemote.RefundFailed.selector);
+        rejectingParent.callWithValue(subaccount, 0.02 ether, sweepCall);
+        assertEq(fxrp.balanceOf(subaccount), 5e6);
+
+        rejectingParent.callWithValue(subaccount, 0.01 ether, sweepCall);
+        (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 5e6);
+        assertEq(subaccount.balance, 0);
+    }
+
+    function testSkippedWithdrawValueForwardFailureReverts() public {
+        // a terminal skip forwards its delivered value to the parent, since the endpoint is no
+        // refund target and this account has no native exit: a parent that cannot receive it
+        // reverts the delivery, which keeps the value with the endpoint and the packet retriable
+        _configureSettings();
+        MockNativeRejectingParent rejectingParent = new MockNativeRejectingParent();
+        address subaccount = address(new SubaccountProxy(
+            address(controller), address(rejectingParent), SUBACCOUNT_TYPE_LOAN
+        ));
+
+        bytes memory payload = _withdrawPayload(bytes32("op-w"), 10e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 1, 0, payload);
+        vm.warp(vm.getBlockTimestamp() + 2 hours);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(ILoanSubaccountRemote.RefundFailed.selector);
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testLzComposeRevertTransportNotConfigured() public {

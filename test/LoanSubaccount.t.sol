@@ -24,6 +24,7 @@ import {SubaccountProxy} from "../contracts/smartAccounts/proxy/SubaccountProxy.
 import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
 import {MockLoanSubaccount} from "../contracts/mock/MockLoanSubaccount.sol";
 import {MockGenericSubaccount} from "../contracts/mock/MockGenericSubaccount.sol";
+import {MockNativeRejectingParent} from "../contracts/mock/MockNativeRejectingParent.sol";
 import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
 import {MockOft} from "../contracts/mock/MockOft.sol";
 import {MockAssetManager} from "../contracts/mock/MockAssetManager.sol";
@@ -1967,6 +1968,51 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
         ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(
             100e6, bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
+        );
+    }
+
+    function testInstructionRefundFailureRevertsTheInstruction() public {
+        // the excess refund goes to the caller - the parent Personal Account - and a parent that
+        // cannot receive native must not leave the excess stranded here (this account has no
+        // native exit), so the whole instruction reverts and stays retriable with the exact fee
+        MockNativeRejectingParent rejectingParent = new MockNativeRejectingParent();
+        address subaccount = address(new SubaccountProxy(
+            address(controller), address(rejectingParent), SUBACCOUNT_TYPE_LOAN
+        ));
+        fxrp.mint(subaccount, 100e6);
+        _configureLoanBridge();
+        vm.deal(address(rejectingParent), 2 * messagingFee);
+
+        bytes memory withdrawCall = abi.encodeCall(
+            ILoanSubaccount.withdraw,
+            (30e6, bytes32("op-w"), uint64(block.timestamp + 1 hours), _withdrawOptions())
+        );
+        vm.expectRevert(ILoanSubaccount.RefundFailed.selector);
+        rejectingParent.callWithValue(subaccount, 2 * messagingFee, withdrawCall);
+
+        // exactly the quoted fee still goes through: nothing is stranded and nothing is lost
+        rejectingParent.callWithValue(subaccount, messagingFee, withdrawCall);
+        assertEq(address(subaccount).balance, 0);
+        assertEq(address(rejectingParent).balance, messagingFee);
+    }
+
+    function testInitializeValidatesItsArgumentsOnAClearedAccount() public {
+        // defense in depth: the proxy always passes its own constructor arguments, and it
+        // resolves the implementation through the controller first, so these guards cannot be
+        // reached in production. Clearing the controller slot re-opens `initialize` on a live
+        // account, which is the only way to exercise them.
+        address subaccount = address(_deploySubaccount());
+        vm.store(subaccount, bytes32(0), bytes32(0));
+
+        vm.expectRevert(IComposeReceiverAccountBase.InvalidControllerAddress.selector);
+        ISubaccount(subaccount).initialize(address(0), parentPersonalAccount, SUBACCOUNT_TYPE_LOAN);
+
+        vm.expectRevert(ILoanSubaccount.InvalidParentPersonalAccount.selector);
+        ISubaccount(subaccount).initialize(address(controller), address(0), SUBACCOUNT_TYPE_LOAN);
+
+        vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
+        ISubaccount(subaccount).initialize(
+            address(controller), parentPersonalAccount, SUBACCOUNT_TYPE_NONE
         );
     }
 

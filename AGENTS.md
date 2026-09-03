@@ -94,6 +94,14 @@ forge build
 pnpm coverage
 ```
 
+Coverage target: **100% of lines, functions and branches** on every contract you touch. Branches
+are the ones that slip: each `require`, `if` and short-circuit has an arm for both outcomes, and
+reaching a guard that no production path can hit may need a harness (a mock exposing an internal
+library, `vm.store` to clear or corrupt a slot, a parent mock that cannot receive native).
+Comment such a test with why the guard is unreachable in production. Two caveats: `forge coverage`
+mis-attributes branch arms inside modifiers (an arm can read as never taken while a test does
+exercise it), and it reports 0/0 branches for files that have none.
+
 For TypeScript changes:
 
 ```bash
