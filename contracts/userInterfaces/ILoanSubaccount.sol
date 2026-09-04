@@ -63,14 +63,12 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * @notice Emitted when a deposit-collateral instruction is sent to this account's
      * loan-chain twin.
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param operationId The user-chosen operation id.
      * @param amount FXRP bridged with the instruction, to become collateral.
      * @param destinationEid The loan chain's LayerZero endpoint id.
      * @param guid The LayerZero message id.
      */
     event CollateralDepositInstructionSent(
         address indexed parentPersonalAccount,
-        bytes32 operationId,
         uint256 amount,
         uint32 destinationEid,
         bytes32 guid
@@ -94,8 +92,8 @@ interface ILoanSubaccount is IBridgingSubaccount {
 
     /**
      * @notice Reverts on a loan instruction whose arguments cannot execute on the loan chain:
-     * a zero operation id, a deadline already passed, a zero borrow, deposit or withdrawal
-     * amount, a borrow disbursement that is not a clean non-zero EVM address other than
+     * a zero operation id or a deadline already passed (borrow and withdraw), a zero borrow,
+     * deposit or withdrawal amount, a borrow disbursement that is not a clean non-zero EVM address other than
      * this account, or a withdraw with a zero delivery-value floor. Checked here, before any
      * bridge fee is paid.
      */
@@ -144,18 +142,18 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * @notice The deposit-collateral instruction: bridges exactly `_amount` FXRP to this
      * account's own address on the loan chain, with the typed deposit payload the loan-chain
      * twin executes on arrival — supply the bridged amount as collateral, no debt change.
-     * @dev Restricted to the parent Personal Account; same validation, guards, and fee
-     * handling as {borrow}. On the loan chain the deposit is the defensive move: while the
-     * controller is paused it still executes when the position carries live debt.
+     * @dev Restricted to the parent Personal Account; same guards and fee handling as
+     * {borrow}. It carries no operation id and no deadline: a deposit only adds the user's own
+     * collateral, which the loan chain's permissionless rail can do with the same tokens
+     * anyway, so neither replay protection nor expiry buys anything (the loan-chain action is
+     * id-less, like the Flare redeem-home). On the loan chain the deposit is the defensive
+     * move: while the controller is paused it still executes when the position carries live
+     * debt.
      * @param _amount FXRP to bridge and supply as collateral; non-zero, at most the balance.
-     * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
-     * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
     function depositCollateral(
         uint256 _amount,
-        bytes32 _operationId,
-        uint64 _deadline,
         bytes calldata _extraOptions
     )
         external payable;

@@ -14,7 +14,8 @@ import {ISubaccount} from "./ISubaccount.sol";
 /// type's current terms at delivery (the front end warns while a change is pending in the
 /// timelock and keeps deadlines short; see the spec). It is a debt increase: pause-gated and
 /// subject to the per-type borrow switch, both of which revert retriably. The operation id
-/// must be non-zero and globally unique per subaccount across all action types; clients
+/// must be non-zero and globally unique per subaccount across the actions that carry one (the
+/// borrow and the withdraw); clients
 /// retrying an expired intent must reuse its id only for the same intent with a fresh
 /// deadline (a convention, not contract-enforced). A pure collateral deposit is its own action
 /// (`ACTION_DEPOSIT_COLLATERAL`).
@@ -51,8 +52,11 @@ uint8 constant ACTION_BORROW = 1;
 /// duplicate-skips. Position health is enforced by Morpho.
 uint8 constant ACTION_WITHDRAW = 2;
 
-/// @dev Deposit-collateral action: `actionData` is `abi.encode(bytes32 operationId,
-/// uint64 deadline)`. Supplies the account's whole idle FXRP balance as collateral on its one
+/// @dev Deposit-collateral action: carries no action data (empty bytes) - no operation id, since
+/// a re-issued deposit (a new packet; a delivered compose cannot replay) only adds the user's own
+/// collateral, which the permissionless rail can do
+/// with the same tokens anyway, and no deadline, since a late deposit is harmless. Supplies the
+/// account's whole idle FXRP balance as collateral on its one
 /// market: the authenticated bridged amount (the codec's `amountLD`, which must be non-zero) plus
 /// any residue waiting for the permissionless rail, less whatever that rail already put into the
 /// position before delivery; no debt changes hands. While the controller is paused it executes
@@ -111,7 +115,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     /**
      * @notice Emitted when a deposit-collateral action executes.
      * @param parentPersonalAccount The parent Personal Account address.
-     * @param operationId The user-chosen operation id, now consumed.
      * @param amount FXRP supplied in this execution: the whole idle balance - the bridged credit
      * plus any residue, less whatever the permissionless deposit rail had already put into the
      * position.
@@ -119,7 +122,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      */
     event CollateralDeposited(
         address indexed parentPersonalAccount,
-        bytes32 operationId,
         uint256 amount,
         bytes32 guid
     );

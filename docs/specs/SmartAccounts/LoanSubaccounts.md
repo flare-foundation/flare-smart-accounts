@@ -167,8 +167,8 @@ subaccount the FXRP came from.
 
 The forward moves are the **loan
 instructions**: `borrow(collateralAmount, borrowAmount, destinationKind, destination,
-operationId, deadline, extraOptions)`, `depositCollateral(amount, operationId, deadline,
-extraOptions)` and `withdraw(amount, operationId, deadline, options)`: typed methods that
+operationId, deadline, extraOptions)`, `depositCollateral(amount, extraOptions)` and
+`withdraw(amount, operationId, deadline, options)`: typed methods that
 build the compose payload
 **on-chain** and bridge it to this account's own address on the loan chain, where the
 loan-chain twin executes it on arrival (supply as collateral, borrow, disburse; deposit
@@ -211,8 +211,8 @@ accepts zero value by design — the executor goes unpaid, never a custody chang
 
 The three are separate instructions with separate actions — a borrow always increases debt
 (`borrowAmount` non-zero), `depositCollateral` never does — so each carries exactly the
-fields it needs and its own pause rule (a deposit is the defensive move; see the loan-chain
-section).
+fields it needs and its own pause rule (a deposit is the defensive move, and carries neither an
+operation id nor a deadline; see the loan-chain section).
 `borrow`'s collateral amount is explicit rather than the whole balance: what travels is what the
 user signs (the OFT's `amountLD` authenticates it on the destination), and idle residue on this
 side — donations, strands from skipped deliveries — stays behind for the cleanup moves. (On the
@@ -466,8 +466,10 @@ untrusted and ignored. A failing delivery reverts and stays retriable through th
 the credited FXRP is already on the account either way.
 
 **The payload, version 1** — `abi.encode(uint8 version, uint8 action, bytes actionData)`. Every
-inbound action here is signed and carries `(bytes32 operationId, uint64 deadline, …)` — a
-uniform envelope, since the one-direction policy removed the unsigned sweep deposit. The
+inbound action here is signed; the borrow and the withdraw carry `(bytes32 operationId, uint64
+deadline, …)`, while the deposit carries no action data at all — a re-issued deposit (a new
+packet; a delivered compose cannot replay) only adds the user's own collateral, which the permissionless rail can do with the same tokens anyway, and
+a late one is harmless, the same reasoning that leaves the Flare redeem-home id-less. The
 market is not a payload field:
 the account operates on exactly one market — the one its type is bound to — so the subaccount
 address itself commits to the pool:
@@ -477,8 +479,8 @@ address itself commits to the pool:
   already-consumed id completes the delivery without effect (`LoanActionSkipped`). An expired
   skip leaves the id unconsumed, so the same intent can retry under it (expiry is cured by
   refreshing the deadline, a non-economic field); a duplicate id was consumed by its first
-  execution. Ids must be non-zero and globally unique per subaccount across
-  action types; retrying clients must reuse an expired id only for the same intent with a
+  execution. Ids must be non-zero and globally unique per subaccount across the actions that
+  carry one (borrow and withdraw); retrying clients must reuse an expired id only for the same intent with a
   fresh deadline (a convention, not contract-enforced). The terminal gates run before the
   borrow switch and the market lookup, so a duplicate or expired packet finalizes even on a
   sunset pool or an unregistered market.
@@ -505,7 +507,9 @@ address itself commits to the pool:
 - **`ACTION_DEPOSIT_COLLATERAL`** supplies the account's whole idle FXRP balance (the
   authenticated bridged amount, non-zero, plus any residue) as collateral and changes no debt —
   the defensive action: while the controller is paused it executes only when the position
-  carries live debt.
+  carries live debt. It carries no operation id and no deadline, so it never skips: delivered
+  late it deposits, delivered twice (two packets, two credits) it deposits twice — the user's
+  own collateral each time.
 - For both of those, the bridged amount authenticates the packet, it does not cap the supply:
   residue from skipped packets or direct sends rides along instead of waiting for the
   permissionless rail's separate call, and if that rail already put the credit into the position
@@ -1021,8 +1025,8 @@ terms accrue zero, and debt presupposes the borrow gate passed).
   uint64 deadline, uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`.
 - Withdraw action data, unchanged from before the fee: `abi.encode(bytes32 operationId,
   uint64 deadline, uint256 amount, uint256 minComposeValue, bytes returnOptions)`.
-- Deposit-collateral action data, unchanged: `abi.encode(bytes32 operationId,
-  uint64 deadline)`.
+- Deposit-collateral action data: empty (`bytes("")`; the operation id and deadline it once
+  carried were dropped pre-cut, 2026-09-04).
 - `WithdrawOptions` (Flare, signed): `{bytes destinationOptions; bytes returnOptions;
   uint256 minComposeValue;}`.
 - Skip reasons: 1 = duplicate, 2 = expired (3, the retired signed-terms skip, is never
@@ -1236,7 +1240,8 @@ loan-chain settings facet has ever been cut, no old-V1 packet is queued or in fl
 in LayerZero, and no client or tooling holds prebuilt old-schema payloads — all true today:
 nothing has been deployed to Ethereum, so `deployment/deploys/ethereum.json` does not exist
 yet. The same condition
-covers every later in-place V1 change, most recently the withdraw action's `actionData`
+covers every later in-place V1 change, most recently the deposit action's `actionData` emptying
+(its operation id and deadline dropped), before that the withdraw action's `actionData`
 gaining `minComposeValue` and `returnOptions` (the fee's signed bounds — borrow rate maxima and
 a withdraw FXRP cap — were added and removed again inside the same pre-cut window), and the
 removal of the sweep-deposit action (id 4 retired, never reused; ids 1–3 unchanged). An environment that had
@@ -1354,6 +1359,7 @@ deliberately not built.
 - ~~`sweepToOrigin`~~ — removed (2026-09-04). On a canonical market `supplyCollateral` has no conditions of its own beyond an existing market, a non-zero amount and the collateral token's `transferFrom` (Morpho is immutable with no pause; the Ethereum FXRP token is an upgradeable proxy whose current implementation has no pause or blocklist — a dependency assumption, not an invariant), so idle FXRP on the loan-chain account has its route home through the position: `depositIdleFxrp`, then the signed withdraw, under the position's ordinary conditions (health, the fee gate, the pause, the oracle, the transport; collateral a position needs can be liquidated). The parent-signed direct bridge-back only added a second signed authority over the subaccount, the residue race with the deposit rail, and a Morpho-free special case to document. Residual accepted: idle FXRP on an account whose type has no market yet, or whose Morpho is dead, waits — for the registration, or for the beacon upgrade a dead Morpho needs anyway. The remote subaccount then kept one parent-only method, `payLoanFee`, removed the same day.
 - ~~Pause-gating the fee legs~~ — resolved (2026-09-04): not gated. `repay`'s fee legs (and, until its removal the same day, `payLoanFee`) move the user's RLUSD to Flare's own governance-set recipient, at an amount the contract computes or the signature caps, so an overcharge during an incident lands on Flare's address and is refundable — the pause bought little there, while holding the fee made the paused route debt-first and needed its own deferred/reserved cases. Accepted on two stated assumptions: the recipient is governance-set and replaceable (a compromised or wrong recipient would collect the fee shares of the repayments made during one rotation window), and the fee accounting is simple and audited. The pause keeps gating debt increases, withdrawals and debt-free deposits.
 - ~~`payLoanFee`~~ — removed (2026-09-04). It was kept for two reasons, both gone: as the escape for an RLUSD-frozen subaccount (false - Ethereum RLUSD checks the spender in `transferFrom`/`approve`, and the subaccount is the spender), and as the fee-only payment that keeps the loan whole, which the team does not want to offer (the fee is presented with the debt as one obligation). Pro-rata `repay` pays the fee on the default route and in full once the debt is closed, and the overlap band is crossed by a pro-rata top-up. With it go the remote subaccount's last parent-only method, the approve/call/approve(0) batch, `NothingCollectible`, and the `_forgiveFeeDust` sub-unit guard that only a partial fee-only payment could reach.
+- ~~The deposit's operation id and deadline~~ — dropped (2026-09-04). Both were functionally inert on a deposit: it only adds the user's own collateral, which the permissionless `depositIdleFxrp` can do with the same tokens anyway, so a re-issued deposit is harmless (a new packet; a delivered compose cannot replay), an expired one would only have left the credit for the rail, and the id's retire-a-parked-packet use belongs to borrow and withdraw. They were kept for the uniform envelope and FE correlation (the GUID serves); `depositCollateral(amount, extraOptions)` now sends an empty action payload, `CollateralDeposited` and `CollateralDepositInstructionSent` lost their id. The borrow and the withdraw keep both fields (item I in the release TODO revisits the id).
 - ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`.
 - ~~`LoanBridgeSettingsFacet`, one global destination~~ — resolved: the Flare end became the type-generic `BridgeRoutesFacet` — one FXRP adapter (`setFxrpOft`, re-validating every route on rotation), one pinned peer per remote chain (`setBridgeRoute`), and the chain each bridging subaccount type lives on (`setSubaccountTypeRoute`, write-once — the type IS that identity, and its instructions carry no destination; `setSubaccountTypeRouteSuspended` is the reversible per-type stop); the Personal Account's `sendCrossChainUserOp` names its `destinationEid`, allowlisted by the registry. A new remote chain is a deployment plus governance. Multiple accepted origins on a remote transport (relay hops) were deliberately left for a later, additive change — see Multiple remote chains.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.

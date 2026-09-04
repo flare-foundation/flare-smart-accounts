@@ -201,7 +201,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         } else if (_action == ACTION_WITHDRAW) {
             _executeWithdraw(_actionData, _guid);
         } else if (_action == ACTION_DEPOSIT_COLLATERAL) {
-            _executeDepositCollateral(_actionData, _guid, _amountLD);
+            _executeDepositCollateral(_guid, _amountLD);
         } else {
             revert UnsupportedAction(_action);
         }
@@ -265,27 +265,26 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     }
 
     /// @dev Supplies the whole idle FXRP balance as collateral - the authenticated bridged
-    /// amount and any residue - without changing debt. During a pause only an indebted position
-    /// may receive it - defending stays available, new exposure waits - and a temporary
-    /// rejection reverts, leaving the packet retriable.
+    /// amount and any residue - without changing debt. The action carries no operation id and
+    /// no deadline: a deposit only adds the user's own collateral, which the permissionless
+    /// rail can do with the same tokens anyway, so a re-issued one (a new packet - a delivered
+    /// compose cannot replay) deposits again and a late one
+    /// is harmless (the same reasoning that leaves the Flare redeem-home id-less). During a
+    /// pause only an indebted position may receive it - defending stays available, new
+    /// exposure waits - and a temporary rejection reverts, leaving the packet retriable.
     function _executeDepositCollateral(
-        bytes memory _actionData,
         bytes32 _guid,
         uint256 _bridgedAmount
     )
         private
     {
-        (bytes32 operationId, uint64 deadline) = abi.decode(_actionData, (bytes32, uint64));
         require(_bridgedAmount > 0, ZeroAmount());
-        require(operationId != bytes32(0), InvalidOperationId());
-        if (_skipped(operationId, deadline, _guid)) return;
         if (IPauseFacet(controllerAddress).isPaused()) {
             require(_borrowSharesOf(_myMarket()) > 0, IPauseFacet.IsPaused());
         }
-        _markOperationUsed(operationId);
 
         uint256 supplied = _supplyAndBorrow(0, bytes32(0), 0);
-        emit CollateralDeposited(_parentAccount(), operationId, supplied, _guid);
+        emit CollateralDeposited(_parentAccount(), supplied, _guid);
     }
 
     /// @dev The asset moves of the borrow and deposit actions, separated from the decodes to
@@ -400,7 +399,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         }
     }
 
-    /// @dev The soft gates shared by all actions (see {ComposeReceiverAccountBase._terminalSkipReason}):
+    /// @dev The soft gates shared by the borrow and the withdraw - the deposit carries no id and no
+    /// deadline (see {ComposeReceiverAccountBase._terminalSkipReason}):
     /// a duplicate id or a stale deadline completes the delivery without executing; the
     /// bridged FXRP stays for the fixed rails.
     function _skipped(

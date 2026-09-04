@@ -881,9 +881,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // authenticated amount), no debt
         vm.expectEmit();
         emit ILoanSubaccountRemote.CollateralDeposited(
-            parentPersonalAccount, bytes32("op-1"), 100e6, _guidFor(1)
+            parentPersonalAccount, 100e6, _guidFor(1)
         );
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
 
         (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
@@ -891,14 +891,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // a deposit that brings nothing is malformed, not a skip
         _deliverExpectRevertZeroAmount(
-            subaccount, 2, _depositPayload(bytes32("op-2")), ILoanSubaccountRemote.ZeroAmount.selector
+            subaccount, 2, _depositPayload(), ILoanSubaccountRemote.ZeroAmount.selector
         );
     }
 
     function testLzComposeBorrowAgainstExistingCollateral() public {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
 
         // a zero bridged amount with a non-zero borrow draws against the existing position
         address destination = makeAddr("exchangeDeposit");
@@ -914,7 +914,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testLzComposeWithdrawBridgesCollateralHome() public {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
 
         bytes32 operationId = bytes32("op-2");
         vm.expectEmit();
@@ -965,7 +965,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // withdrawn, the id stays unconsumed, and the delivery stays retriable (quotes drift)
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
 
         bytes32 operationId = bytes32("op-2");
         (bytes memory message, bytes32 guid) = _composeMessage(
@@ -993,7 +993,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // account (no native rail) and never with the executor
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
 
         bytes memory payload = _withdrawPayloadWithMin(bytes32("op-2"), 30e6, 0.05 ether);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
@@ -1021,7 +1021,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // (a zero-value front-run of a doomed packet must not burn the prepaid value)
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
 
         // execution path: a zero-value delivery reverts and stays retriable
         (bytes memory message, bytes32 guid) =
@@ -1060,7 +1062,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         (bytes memory message, bytes32 guid) =
-            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload());
 
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
@@ -1073,7 +1075,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testLzComposeRevertOnlyEndpoint() public {
         address subaccount = _createConfiguredSubaccount();
         (bytes memory message, bytes32 guid) =
-            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload());
 
         vm.prank(makeAddr("notTheEndpoint"));
         vm.expectRevert(IComposeReceiverAccountBase.OnlyEndpoint.selector);
@@ -1083,7 +1085,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testLzComposeRevertWrongComposeSender() public {
         address subaccount = _createConfiguredSubaccount();
         (bytes memory message, bytes32 guid) =
-            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload());
 
         address notTheOft = makeAddr("notTheOft");
         vm.prank(lzEndpoint);
@@ -1101,7 +1103,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             100e6,
             abi.encodePacked(
                 bytes32(uint256(uint160(subaccount))),
-                _depositPayload(bytes32("op-1"))
+                _depositPayload()
             )
         );
 
@@ -1123,7 +1125,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             1,
             originEid,
             100e6,
-            abi.encodePacked(attacker, _depositPayload(bytes32("op-1")))
+            abi.encodePacked(attacker, _depositPayload())
         );
 
         vm.prank(lzEndpoint);
@@ -1142,7 +1144,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         (bytes memory message,) =
-            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload());
         bytes32 forgedGuid = GUID.generate(
             1, originEid, makeAddr("maliciousPeer"), dstEid,
             bytes32(uint256(uint160(address(fxrpOft))))
@@ -1189,7 +1191,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 50e6);
         _pauseController();
 
-        _deliver(subaccount, 2, 50e6, _depositPayload(bytes32("op-2")));
+        _deliver(subaccount, 2, 50e6, _depositPayload());
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 150e6);
     }
@@ -1221,7 +1223,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _pauseController();
 
         _deliverExpectRevert(
-            subaccount, 1, _depositPayload(bytes32("op-1")),
+            subaccount, 1, _depositPayload(),
             IPauseFacet.IsPaused.selector
         );
     }
@@ -1299,7 +1301,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // delete collateral-only positions
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
 
         vm.expectRevert(bytes("no debt to liquidate"));
         morpho.simulateLiquidation(_defaultMarket().marketParams, subaccount);
@@ -2135,7 +2137,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         (, address subaccount) = _parentAndSubaccount("rOverdrawOwner");
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-dep")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
 
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 101e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
@@ -2716,7 +2718,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // with nothing withdrawn and the id unconsumed, and passes once the peer is restored
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
         fxrpOft.setPeer(originEid, bytes32(uint256(0xbad)));
 
         bytes memory payload = _withdrawPayload(bytes32("op-2"), 30e6);
@@ -2761,7 +2763,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testLzComposeRevertTransportNotConfigured() public {
         address subaccount = _createConfiguredSubaccount();
         (bytes memory message, bytes32 guid) =
-            _composeMessage(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+            _composeMessage(subaccount, 1, 100e6, _depositPayload());
         vm.prank(governance);
         IIComposeTransportFacet(address(controller)).clearComposeTransport();
 
@@ -2831,30 +2833,40 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testLzComposeSkipDuplicateOperation() public {
         address subaccount = _createConfiguredSubaccount();
         bytes32 operationId = bytes32("op-1");
+        address destination = makeAddr("exchangeDeposit");
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(operationId));
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            operationId, DESTINATION_KIND_EVM, bytes32(uint256(uint160(destination))), 300e18
+        ));
 
-        // a retried instruction delivered twice must not double-execute; the second delivery
-        // completes without effect and its bridged FXRP stays on the account
+        // a retried instruction delivered twice must not double-execute: the second delivery
+        // completes without effect - no second borrow - and its bridged FXRP stays on the
+        // account for the rail
         fxrp.mint(subaccount, 100e6);
         vm.expectEmit();
         emit ILoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
-        _deliver(subaccount, 2, 100e6, _depositPayload(operationId));
+        _deliver(subaccount, 2, 100e6, _borrowPayload(
+            operationId, DESTINATION_KIND_EVM, bytes32(uint256(uint160(destination))), 300e18
+        ));
 
-        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
+        assertEq(borrowShares, 300e18 * 1e6);
+        assertEq(rlusd.balanceOf(destination), 300e18);
         assertEq(fxrp.balanceOf(subaccount), 100e6);
     }
 
     function testWithdrawSkipDuplicateOperation() public {
-        // the duplicate terminal gate finalizes every action kind, not just borrows: a
-        // consumed operation id skips a withdraw without any effect
+        // the duplicate terminal gate finalizes every action kind that carries an id: an
+        // operation id consumed by a borrow skips a withdraw without any effect
         address subaccount = _createConfiguredSubaccount();
         bytes32 operationId = bytes32("op-1");
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(operationId));
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            operationId, DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
 
         vm.expectEmit();
         emit ILoanSubaccountRemote.LoanActionSkipped(
@@ -2873,27 +2885,29 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testLzComposeSkipExpiredDeadlineWithoutConsumingTheOperation() public {
         address subaccount = _createConfiguredSubaccount();
         bytes32 operationId = bytes32("op-1");
+        address destination = makeAddr("exchangeDeposit");
         fxrp.mint(subaccount, 100e6);
 
-        bytes memory stale = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_DEPOSIT_COLLATERAL,
-            abi.encode(operationId, uint64(block.timestamp - 1))
-        );
         vm.expectEmit();
         emit ILoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_EXPIRED, _guidFor(1)
         );
-        _deliver(subaccount, 1, 100e6, stale);
+        _deliver(subaccount, 1, 100e6, _borrowPayloadAt(
+            operationId, uint64(block.timestamp - 1), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(destination))), 300e18
+        ));
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
 
         // the same intent retries under the same operation id with a fresh deadline; the
         // retry is a real second packet, crediting its own amount - and the first packet's
         // stale credit rides along into the position with it
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 2, 100e6, _depositPayload(operationId));
-        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        _deliver(subaccount, 2, 100e6, _borrowPayload(
+            operationId, DESTINATION_KIND_EVM, bytes32(uint256(uint160(destination))), 300e18
+        ));
+        (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 200e6);
+        assertEq(borrowShares, 300e18 * 1e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
     }
@@ -2941,7 +2955,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // a collateral deposit is not a debt increase and still works (a real second packet,
         // crediting its own amount; packet 2's idle credit rides along into the position)
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 3, 100e6, _depositPayload(bytes32("op-3")));
+        _deliver(subaccount, 3, 100e6, _depositPayload());
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 300e6);
 
@@ -3051,19 +3065,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(rlusd.balanceOf(makeAddr("destB")), 100e18);
     }
 
-    function testLzComposeRevertInvalidOperationId() public {
-        address subaccount = _createConfiguredSubaccount();
-        fxrp.mint(subaccount, 100e6);
-
-        _deliverExpectRevert(
-            subaccount, 1, _depositPayload(bytes32(0)),
-            IComposeReceiverAccountBase.InvalidOperationId.selector
-        );
-    }
-
     function testLzComposeRevertHardChecksOnEveryAction() public {
         // each action carries its own copy of the hard checks, so each copy needs its own
-        // negative delivery - the deposit test above cannot stand in for borrow or withdraw
+        // negative delivery (the deposit carries no id, so only its zero amount is checked)
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
 
@@ -3085,17 +3089,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testLzComposeDepositSuppliesTheWholeIdleBalance() public {
         // the accepted race, made a no-op: the permissionless rail deposits the credit before
         // the deposit compose executes; the compose then supplies what is idle - nothing
-        // here - consumes its id and reports the amount it actually supplied
+        // here - and reports the amount it actually supplied
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         ILoanSubaccountRemote(subaccount).depositIdleFxrp();
 
         vm.expectEmit();
         emit ILoanSubaccountRemote.CollateralDeposited(
-            parentPersonalAccount, bytes32("op-1"), 0, _guidFor(1)
+            parentPersonalAccount, 0, _guidFor(1)
         );
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
 
@@ -3104,9 +3107,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 40e6);
         vm.expectEmit();
         emit ILoanSubaccountRemote.CollateralDeposited(
-            parentPersonalAccount, bytes32("op-2"), 40e6, _guidFor(2)
+            parentPersonalAccount, 40e6, _guidFor(2)
         );
-        _deliver(subaccount, 2, 100e6, _depositPayload(bytes32("op-2")));
+        _deliver(subaccount, 2, 100e6, _depositPayload());
         (, , collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 140e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
@@ -3116,9 +3119,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 150e6);
         vm.expectEmit();
         emit ILoanSubaccountRemote.CollateralDeposited(
-            parentPersonalAccount, bytes32("op-3"), 150e6, _guidFor(3)
+            parentPersonalAccount, 150e6, _guidFor(3)
         );
-        _deliver(subaccount, 3, 100e6, _depositPayload(bytes32("op-3")));
+        _deliver(subaccount, 3, 100e6, _depositPayload());
         (, , collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 290e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
@@ -3270,13 +3273,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccountB, 100e6);
 
         _deliverExpectRevert(
-            subaccountB, 1, _depositPayload(bytes32("op-1")),
+            subaccountB, 1, _depositPayload(),
             abi.encodeWithSelector(
                 ILoanMarketsFacet.MarketNotRegistered.selector, typeB
             )
         );
-        // the revert rolled the whole delivery back: the id stays unconsumed for a retry
-        assertFalse(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-1")));
+        // the revert rolled the whole delivery back; the packet stays retriable
 
         vm.expectRevert(
             abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, typeB)
@@ -3297,14 +3299,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
         fxrp.mint(subaccountB, 100e6);
 
-        bytes memory payload = _depositPayload(bytes32("op-1"));
+        bytes memory payload = _depositPayload();
         _deliverExpectRevert(
             subaccountB, 1, payload,
             abi.encodeWithSelector(
                 ILoanMarketsFacet.MarketNotRegistered.selector, typeB
             )
         );
-        assertFalse(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-1")));
 
         ILoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
@@ -3320,7 +3321,6 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, , uint128 collateral) =
             morpho.position(keccak256(abi.encode(marketB.marketParams)), subaccountB);
         assertEq(collateral, 100e6);
-        assertTrue(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-1")));
     }
 
     function testRepayPartialByAssets() public {
@@ -3522,7 +3522,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // simply stays idle on the account for the fixed rails
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        _deliver(subaccount, 1, 100e6, _depositPayload());
 
         fxrp.mint(subaccount, 5e6);
         _deliverWithValue(subaccount, 2, 5e6, _withdrawPayload(bytes32("op-2"), 30e6), 0.01 ether);
@@ -3725,14 +3725,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // any idle residue - none here), no debt
         fxrp.mint(sender, 30e6);
         vm.prank(parentPersonalAccount);
-        ILoanSubaccount(sender).depositCollateral{value: 0.01 ether}(30e6, bytes32("op-d"), deadline, "");
+        ILoanSubaccount(sender).depositCollateral{value: 0.01 ether}(30e6, "");
         (amountLD, payload) = _lastSentCompose();
         assertEq(amountLD, 30e6);
         fxrp.mint(subaccount, amountLD);
         _deliver(subaccount, 4, amountLD, payload);
         (, , collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 90e6);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-d")));
 
 
         // the Personal Account's transfer: sent by a Flare PersonalAccount through
@@ -4104,7 +4103,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         bytes memory payload = _borrowAmount == 0
-            ? _depositPayload(bytes32("op-borrow"))
+            ? _depositPayload()
             : _borrowPayload(
                 bytes32("op-borrow"), DESTINATION_KIND_EVM,
                 bytes32(uint256(uint160(makeAddr("exchangeDeposit")))), _borrowAmount
@@ -4199,19 +4198,6 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         return _borrowPayloadAt(
             _operationId, uint64(vm.getBlockTimestamp() + 1 hours), _destinationKind,
             _destination, _borrowAmount
-        );
-    }
-
-    function _depositPayload(
-        bytes32 _operationId
-    )
-        private
-        returns (bytes memory)
-    {
-        return abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_DEPOSIT_COLLATERAL,
-            abi.encode(_operationId, uint64(vm.getBlockTimestamp() + 1 hours))
         );
     }
 
@@ -4352,6 +4338,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     /// The amount and compose payload of the last send the Flare side handed to the OFT.
     function _lastSentCompose() private view returns (uint256 _amountLD, bytes memory _payload) {
         (, , _amountLD, , , _payload, ) = fxrpOft.lastSendParam();
+    }
+
+    function _depositPayload()
+        private
+        pure
+        returns (bytes memory)
+    {
+        return abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_COLLATERAL, bytes(""));
     }
 
     function _feeTerms(

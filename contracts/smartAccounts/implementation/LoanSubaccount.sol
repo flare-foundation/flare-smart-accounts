@@ -78,27 +78,18 @@ contract LoanSubaccount is ILoanSubaccount, BridgingSubaccountBase {
     /// @inheritdoc ILoanSubaccount
     function depositCollateral(
         uint256 _amount,
-        bytes32 _operationId,
-        uint64 _deadline,
         bytes calldata _extraOptions
     )
         external payable
         onlyParent
         nonReentrant
     {
-        require(
-            _operationId != bytes32(0) && _deadline >= block.timestamp && _amount > 0,
-            InvalidLoanInstruction()
-        );
-        bytes memory payload = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_DEPOSIT_COLLATERAL,
-            abi.encode(_operationId, _deadline)
-        );
+        require(_amount > 0, InvalidLoanInstruction());
+        // no operation id and no deadline: the deposit only adds the user's own collateral,
+        // which the loan chain's permissionless rail can do with the same tokens anyway
+        bytes memory payload = abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_COLLATERAL, bytes(""));
         (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, _extraOptions, payload);
-        emit CollateralDepositInstructionSent(
-            _parentAccount(), _operationId, _amount, destinationEid, guid
-        );
+        emit CollateralDepositInstructionSent(_parentAccount(), _amount, destinationEid, guid);
     }
 
     /// @inheritdoc ILoanSubaccount
