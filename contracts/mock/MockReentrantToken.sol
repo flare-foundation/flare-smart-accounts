@@ -8,17 +8,25 @@ import {MintableERC20} from "./MintableERC20.sol";
  * @notice An ERC-20 whose `transfer` and `transferFrom` first call back into a configured
  * target - the shape of a malicious token trying to re-enter the account moving it. A failing
  * callback fails the transfer with the callback's own revert data bubbled up, so a test can
- * assert exactly which guard stopped the re-entry.
+ * assert exactly which guard stopped the re-entry. In soft mode the failure is recorded
+ * instead and the transfer goes through, for paths that swallow a failed transfer.
  */
 contract MockReentrantToken is MintableERC20 {
     address public callbackTarget;
     bytes public callbackData;
+    bool public softFailures;
+    bytes public lastCallbackRevert;
+    uint256 public callbackFailures;
 
     constructor() MintableERC20("Reentrant", "RNT", 18) {}
 
     function setCallback(address _target, bytes calldata _data) external {
         callbackTarget = _target;
         callbackData = _data;
+    }
+
+    function setSoftFailures(bool _soft) external {
+        softFailures = _soft;
     }
 
     function transfer(address _to, uint256 _amount) public override returns (bool) {
@@ -36,6 +44,11 @@ contract MockReentrantToken is MintableERC20 {
         // solhint-disable-next-line avoid-low-level-calls
         (bool ok, bytes memory returndata) = callbackTarget.call(callbackData);
         if (!ok) {
+            if (softFailures) {
+                lastCallbackRevert = returndata;
+                callbackFailures++;
+                return;
+            }
             // bubble the callback's revert data verbatim
             // solhint-disable-next-line no-inline-assembly
             assembly {

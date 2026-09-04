@@ -41,9 +41,10 @@ uint8 constant ACTION_BORROW = 1;
 /// return-send failure: retry the same packet once its cause clears - more value cannot help,
 /// since exactly the newly quoted fee is forwarded. An under-secured fee (`OutstandingLoanFee`,
 /// which a dead or zero-priced oracle also produces, since it values the security at
-/// nothing): pay the fee - send loan tokens to the account and let {repay} collect (live debt
-/// is repaid first, so with debt outstanding the tokens must cover it before any reach the
-/// fee), or pay the fee alone from the parent through {payLoanFee} - after which the retried
+/// nothing): pay the fee - send loan tokens to the account and let {repay} collect (with debt
+/// outstanding the tokens are split pro rata between debt and fee, so covering both settles
+/// it and a smaller top-up pays only its share), or pay the fee alone from the parent through
+/// {payLoanFee} - after which the retried
 /// delivery passes with nothing collectible, oracle-free. Bad `returnOptions` frozen into the
 /// signed packet (the accepted residual - no retry can fix the blob itself): issue a corrected
 /// instruction reusing the SAME operation id, whereupon the parked packet later
@@ -211,9 +212,10 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when accrued fee is paid to the fee recipient in loan tokens, from
-     * the account's balance at the end of {repay}, or from the parent's balance through
-     * {payLoanFee}.
+     * @notice Emitted when accrued fee is paid to the fee recipient in loan tokens: from the
+     * account's balance in {repay} (the fee's pro-rata share of a partial payment, or, once
+     * the debt is closed, as much of the collectible as the balance covers), or from the
+     * parent's balance through {payLoanFee}.
      * @param feeRecipient The collector paid.
      * @param amount The amount paid (whole base units; the fee debt shrinks by exactly this).
      */
@@ -243,6 +245,21 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * @param amount The reserved amount (whole base units).
      */
     event LoanFeeReserved(
+        address indexed feeRecipient,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when the initial pro-rata attempt of a partial {repay} failed to pay
+     * the fee's share - held while paused, or the token refused the recipient. The share
+     * stays in the repayment balance and repays debt; if that closes the debt, the remainder
+     * is attempted again and whatever still cannot be paid is reserved on the account
+     * ({LoanFeeReserved}). Whatever the call leaves unpaid stays owed; a later {repay} or
+     * {payLoanFee} collects it.
+     * @param feeRecipient The collector the share was owed to.
+     * @param amount The unpaid share (whole base units).
+     */
+    event LoanFeeDeferred(
         address indexed feeRecipient,
         uint256 amount
     );
@@ -401,20 +418,33 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Repays the account's debt with its idle loan-token balance, clamped to the
-     * live debt, then settles the accrued Flare fee from what remains.
+     * @notice Repays the account's debt and the accrued Flare fee with its idle loan-token
+     * balance: a payment short of the two is split pro rata between them, a covering one
+     * closes the debt, attempts the whole collectible (reserving anything unpaid) and returns
+     * the surplus to the parent.
      * @dev Permissionless and pause-exempt for the debt reduction, which only moves the
      * account's own position toward safety. It checkpoints before the repayment and re-syncs
-     * the canonical debt after (see {checkpointFee}). With live debt, interest accrues; a
-     * balance covering the full debt closes by exact borrow shares (no over-repay revert), a
-     * smaller one repays by assets. Then, in order: the fee leg pays the collectible fee from
-     * the remainder - best-effort, held while paused, never rolling back the repayment
-     * ({LoanFeeCollected}; the fee debt shrinks only by the successfully requested transfer,
-     * conventional ERC-20 semantics being a market-registration policy) - as much of the rest
-     * as the outstanding fee needs stays reserved here ({LoanFeeReserved}), and only the
-     * unreserved balance is pushed to the parent once debt-free ({LoanSurplusRecovered};
-     * best-effort, {LoanSurplusRetained} on refusal). Closing through the rails therefore
-     * costs the live debt plus the collectible fee, from one balance in one call.
+     * the canonical debt after (see {checkpointFee}). With live debt `D` and collectible fee
+     * `F`, interest accrues, then a balance `P < D + F` pays `P × F / (D + F)` (rounded down)
+     * to the fee recipient first and repays Morpho with the rest - by exact borrow shares when
+     * that rest covers the debt (no over-repay revert), otherwise by assets; a balance covering
+     * `D + F` closes the debt by exact shares and attempts the whole collectible from the
+     * remainder. Every fee payment is best-effort, held while paused,
+     * never rolling back the repayment ({LoanFeeCollected}; the fee debt shrinks only by the
+     * successfully requested transfer, conventional ERC-20 semantics being a
+     * market-registration policy): a share that cannot be paid stays in the balance and
+     * repays debt ({LoanFeeDeferred}), and once debt-free the remainder is attempted again,
+     * with as much of it as the outstanding fee needs reserved here ({LoanFeeReserved}). Only
+     * the unreserved balance is pushed to the parent once debt-free ({LoanSurplusRecovered};
+     * best-effort, {LoanSurplusRetained} on refusal). Settling both claims through this rail
+     * therefore costs the live debt plus the collectible fee, from one balance in one call; a
+     * payment that covers the debt but not the fee leaves a pro-rata sliver of both, unless
+     * the debt closes for less: a paid share's round-down can leave exactly the debt (possible
+     * within roughly `F / D` base units of `D + F`), and a deferred share leaves the full
+     * payment available, which may cover it - Morpho then consumes exactly the debt and the
+     * tail handles any remainder, with fee still outstanding. The default route pays the fee
+     * alongside the debt; repaying Morpho directly, on this account's behalf, pays the debt
+     * alone.
      * @return _assets The assets repaid.
      */
     function repay()
@@ -460,12 +490,14 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * straight to the governance-set fee recipient (`transferFrom`; nothing lands here, so this
      * account's loan tokens keep their one meaning, repayment). Pause-gated like {repay}'s fee
      * leg: money leaving the user's accounts toward the collector waits out an incident. An
-     * under-approved, underfunded or frozen parent, a frozen recipient, or nothing collectible
-     * reverts the whole batch, retriable. The batch should end by resetting the allowance
+     * under-approved, underfunded or frozen parent, a frozen recipient, a frozen subaccount
+     * (the token checks the spender too), or nothing collectible reverts the whole batch,
+     * retriable. The batch should end by resetting the allowance
      * (`approve(0)`): the clamp can leave a remainder, and an allowance to this upgradeable
      * account is spending authority - harmless under this implementation, not something to
-     * leave standing. The complement of {repay}, which pays the debt first and reaches the fee
-     * only from what remains ({LoanFeeCollected}; debt-free sub-unit dust is forgiven). With
+     * leave standing. The complement of {repay}, which pays the fee pro rata with the debt and
+     * attempts the whole collectible only on a payment covering both, reserving what it cannot
+     * pay ({LoanFeeCollected}; debt-free sub-unit dust is forgiven). With
      * live debt and a dead oracle this clears the fee gate, but Morpho's own health check still
      * reads that oracle, so the withdrawal waits for the debt to be closed.
      * @param _maxAmount The most this call may transfer (whole base units; the signed cap).

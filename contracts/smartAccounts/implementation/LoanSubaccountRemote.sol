@@ -92,9 +92,29 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
             // the checkpoint's accrual)
             IMorpho(market.morpho).accrueInterest(market.marketParams);
             (uint128 borrowShares, uint256 fullDebt) = _debtOf(market);
+            uint256 collectible = flareDebtX18 / WAD;
+            if (balance < fullDebt + collectible) {
+                // a payment short of debt plus fee is split pro rata between the two: the
+                // fee's share (rounded down, the remainder to the debt) is paid first,
+                // best-effort - held while paused or refused by the token, it stays in the
+                // balance and repays debt (if that closes the debt, the tail below retries
+                // the remainder and reserves what still cannot be paid); what the tail
+                // cannot pay either stays owed
+                uint256 feeShare = Math.mulDiv(balance, collectible, fullDebt + collectible);
+                if (feeShare > 0) {
+                    address recipient = _feeRecipient();
+                    uint256 paid = _payFee(loanToken, recipient, feeShare);
+                    if (paid == 0) {
+                        emit LoanFeeDeferred(recipient, feeShare);
+                    }
+                    balance -= paid;
+                }
+            }
             if (balance >= fullDebt) {
-                // the balance covers the whole debt: close by exact borrow shares (no
-                // over-repay revert)
+                // the balance covers the whole debt (from the split when the paid share's
+                // round-down leaves exactly the debt, or when a deferred share leaves the
+                // full payment available): close by exact borrow shares (no over-repay
+                // revert) - Morpho pulls exactly the debt, the tail handles any remainder
                 loanToken.forceApprove(market.morpho, fullDebt);
                 (_assets, ) = IMorpho(market.morpho).repay(
                     market.marketParams, 0, borrowShares, address(this), ""
@@ -168,7 +188,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         // under-approved, underfunded or frozen party reverts, retriable. `msg.sender` IS the
         // parent (onlyParent), spelled that way so the pull is visibly from the caller
         _paid = Math.min(_maxAmount, collectible);
-        address recipient = ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient;
+        address recipient = _feeRecipient();
         IERC20(market.marketParams.loanToken).safeTransferFrom(msg.sender, recipient, _paid);
         flareDebtX18 -= _paid * WAD;
         _forgiveFeeDust();
@@ -652,13 +672,12 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         emit LoanFeePrincipalSynced(_parentAccount(), feePrincipal);
     }
 
-    /// @dev The tail of {repay}: pay `min(collectible, balance)` to the fee recipient -
-    /// best-effort, held while paused, never rolling back the repayment; the fee debt
-    /// shrinks only by the successfully requested transfer (conventional ERC-20 semantics
-    /// are a registration policy) - then reserve as much of the still-outstanding fee as the
-    /// remaining balance covers (a later repay retries that reservation without a new top-up;
-    /// an uncovered shortfall needs new funds) and send only the unreserved balance to the
-    /// parent, once debt-free. Debt implies a configured recipient.
+    /// @dev The tail of {repay}, over the balance a closed or debt-free position leaves: pay
+    /// `min(collectible, balance)` to the fee recipient ({_payFee}, best-effort, never rolling
+    /// back the repayment), then reserve as much of the still-outstanding fee as the remaining
+    /// balance covers (a later repay retries that reservation without a new top-up; an
+    /// uncovered shortfall needs new funds) and send only the unreserved balance to the
+    /// parent, once debt-free.
     function _collectFeeAndPushSurplus(
         ILoanMarketsFacet.Market memory _market,
         IERC20 _loanToken
@@ -670,18 +689,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
 
         uint256 collectible = flareDebtX18 / WAD;
         if (collectible > 0) {
-            address recipient =
-                ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient;
-            if (!IPauseFacet(controllerAddress).isPaused()) {
-                uint256 payment = Math.min(collectible, balance);
-                if (_loanToken.trySafeTransfer(recipient, payment)) {
-                    flareDebtX18 -= payment * WAD;
-                    balance -= payment;
-                    collectible = flareDebtX18 / WAD;
-                    emit LoanFeeCollected(recipient, payment);
-                }
-            }
-            uint256 reserved = Math.min(collectible, balance);
+            address recipient = _feeRecipient();
+            balance -= _payFee(_loanToken, recipient, Math.min(collectible, balance));
+            uint256 reserved = Math.min(flareDebtX18 / WAD, balance);
             if (reserved > 0) {
                 balance -= reserved;
                 emit LoanFeeReserved(recipient, reserved);
@@ -697,6 +707,36 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
                 emit LoanSurplusRetained(_parentAccount(), balance);
             }
         }
+    }
+
+    /// @dev Pays `_amount` (non-zero) of the collectible fee from this account's balance to
+    /// the fee recipient, best-effort: nothing moves while paused (money leaving toward the
+    /// collector waits out an incident) or when the token refuses the recipient (RLUSD can
+    /// freeze addresses), so a repayment never rolls back; the fee debt shrinks only by the
+    /// successfully requested transfer (conventional ERC-20 semantics are a registration
+    /// policy). Returns the amount paid - zero when nothing moved.
+    function _payFee(
+        IERC20 _loanToken,
+        address _recipient,
+        uint256 _amount
+    )
+        private
+        returns (uint256)
+    {
+        if (IPauseFacet(controllerAddress).isPaused()) return 0;
+        if (!_loanToken.trySafeTransfer(_recipient, _amount)) return 0;
+        flareDebtX18 -= _amount * WAD;
+        emit LoanFeeCollected(_recipient, _amount);
+        return _amount;
+    }
+
+    /// @dev The type's governance-set fee recipient. Debt, or a collectible fee, implies it
+    /// is configured: the terms are the borrow activation marker.
+    function _feeRecipient()
+        private view
+        returns (address)
+    {
+        return ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient;
     }
 
     /// @dev The account's one market, bound write-once to its type. If its Morpho stops

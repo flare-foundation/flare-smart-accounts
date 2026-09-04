@@ -171,6 +171,7 @@
     "pragma",
     "precheck",
     "Proxyable",
+    "rata",
     "recompiles",
     "reentrancy",
     "Reentrancy",
