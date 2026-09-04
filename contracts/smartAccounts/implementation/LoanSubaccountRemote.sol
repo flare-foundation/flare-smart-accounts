@@ -228,7 +228,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         internal override
     {
         if (_action == ACTION_BORROW) {
-            _executeBorrow(_actionData, _guid, _amountLD);
+            _executeBorrow(_actionData, _guid);
         } else if (_action == ACTION_WITHDRAW) {
             _executeWithdraw(_actionData, _guid);
         } else if (_action == ACTION_DEPOSIT_COLLATERAL) {
@@ -250,13 +250,12 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         return _action == ACTION_WITHDRAW;
     }
 
-    /// @dev Supplies the authenticated bridged amount (if any) as collateral and borrows on the
+    /// @dev Supplies the whole idle FXRP balance (if any) as collateral and borrows on the
     /// type's market, disbursing to the destination. Temporary debt gates revert rather than
     /// skip, so the packet stays retriable.
     function _executeBorrow(
         bytes memory _actionData,
-        bytes32 _guid,
-        uint256 _bridgedAmount
+        bytes32 _guid
     )
         private
     {
@@ -284,11 +283,11 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         );
         _markOperationUsed(operationId);
 
-        _supplyAndBorrow(_bridgedAmount, destinationKind, destination, borrowAmount);
+        uint256 supplied = _supplyAndBorrow(destinationKind, destination, borrowAmount);
         emit LoanOpened(
             _parentAccount(),
             operationId,
-            _bridgedAmount,
+            supplied,
             borrowAmount,
             destinationKind,
             destination,
@@ -296,10 +295,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         );
     }
 
-    /// @dev Supplies exactly the authenticated bridged amount as collateral, without changing
-    /// debt. During a pause only an indebted position may receive it - defending stays
-    /// available, new exposure waits - and a temporary rejection reverts, leaving the packet
-    /// retriable.
+    /// @dev Supplies the whole idle FXRP balance as collateral - the authenticated bridged
+    /// amount and any residue - without changing debt. During a pause only an indebted position
+    /// may receive it - defending stays available, new exposure waits - and a temporary
+    /// rejection reverts, leaving the packet retriable.
     function _executeDepositCollateral(
         bytes memory _actionData,
         bytes32 _guid,
@@ -316,31 +315,34 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         }
         _markOperationUsed(operationId);
 
-        _supplyAndBorrow(_bridgedAmount, 0, bytes32(0), 0);
-        emit CollateralDeposited(_parentAccount(), operationId, _bridgedAmount, _guid);
+        uint256 supplied = _supplyAndBorrow(0, bytes32(0), 0);
+        emit CollateralDeposited(_parentAccount(), operationId, supplied, _guid);
     }
 
     /// @dev The asset moves of the borrow and deposit actions, separated from the decodes to
-    /// keep stack depth flat: supply the bridged amount (if any), then borrow and disburse
-    /// (if any).
+    /// keep stack depth flat: supply the whole idle FXRP balance (if any), then borrow and
+    /// disburse (if any). Returns the amount supplied.
     function _supplyAndBorrow(
-        uint256 _bridgedAmount,
         uint8 _destinationKind,
         bytes32 _destination,
         uint256 _borrowAmount
     )
         private
+        returns (uint256 _supplied)
     {
         ILoanMarketsFacet.Market memory market = _myMarket();
-        if (_bridgedAmount > 0) {
-            IERC20 fxrp = IERC20(market.marketParams.collateralToken);
-            uint256 balance = fxrp.balanceOf(address(this));
-            // the credit can have been moved before delivery (the accepted race); this cap
-            // stops a signed action from absorbing more than its own credit
-            require(balance >= _bridgedAmount, InsufficientComposeBalance(_bridgedAmount, balance));
-            fxrp.forceApprove(market.morpho, _bridgedAmount);
+        IERC20 fxrp = IERC20(market.marketParams.collateralToken);
+        // every FXRP on this account is the user's own and has one route, the position: the
+        // packet's credit and any residue (a skipped packet's credit, a direct send) that would
+        // otherwise wait for the permissionless rail all go in. That rail can also have
+        // deposited the credit before delivery (the accepted race), leaving nothing idle; the
+        // borrow below is authorized against the position as it stands, within its deadline
+        // and Morpho's health check
+        _supplied = fxrp.balanceOf(address(this));
+        if (_supplied > 0) {
+            fxrp.forceApprove(market.morpho, _supplied);
             IMorpho(market.morpho).supplyCollateral(
-                market.marketParams, _bridgedAmount, address(this), ""
+                market.marketParams, _supplied, address(this), ""
             );
         }
         if (_borrowAmount > 0) {

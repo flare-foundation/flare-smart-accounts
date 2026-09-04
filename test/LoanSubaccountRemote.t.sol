@@ -843,10 +843,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     // step 3: the authenticated lzCompose entry point
     //
 
-    function testLzComposeBorrowSuppliesBridgedAmountAndDisburses() public {
+    function testLzComposeBorrowSuppliesTheWholeIdleBalanceAndDisburses() public {
         address subaccount = _createConfiguredSubaccount();
         address destination = makeAddr("exchangeDeposit");
-        // the authenticated bridged amount plus an unrelated donation on the same balance
+        // the authenticated bridged amount plus a donation on the same balance: every FXRP here
+        // is the user's own and has one route, so both go in
         fxrp.mint(subaccount, 100e6);
         fxrp.mint(subaccount, 5e6);
 
@@ -855,7 +856,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         emit ILoanSubaccountRemote.LoanOpened(
             parentPersonalAccount,
             operationId,
-            100e6,
+            105e6,
             500e18,
             DESTINATION_KIND_EVM,
             bytes32(uint256(uint160(destination))),
@@ -865,12 +866,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             operationId, DESTINATION_KIND_EVM, bytes32(uint256(uint160(destination))), 500e18
         ));
 
-        // exactly the authenticated amount was supplied; the donation stays idle
+        // the whole idle balance was supplied, donation included
         (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
-        assertEq(collateral, 100e6);
+        assertEq(collateral, 105e6);
         // first borrow: shares = assets scaled by the virtual-share offset
         assertEq(borrowShares, 500e18 * 1e6);
-        assertEq(fxrp.balanceOf(subaccount), 5e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
         assertEq(rlusd.balanceOf(destination), 500e18);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
     }
@@ -879,7 +880,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
 
-        // the deposit action supplies exactly the authenticated bridged amount, no debt
+        // the deposit action supplies the credit (the whole idle balance - here exactly the
+        // authenticated amount), no debt
         vm.expectEmit();
         emit ILoanSubaccountRemote.CollateralDeposited(
             parentPersonalAccount, bytes32("op-1"), 100e6, _guidFor(1)
@@ -3220,13 +3222,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
 
         // the same intent retries under the same operation id with a fresh deadline; the
-        // retry is a real second packet, crediting its own amount - the first packet's stale
-        // credit stays idle on the account for the fixed rails
+        // retry is a real second packet, crediting its own amount - and the first packet's
+        // stale credit rides along into the position with it
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 2, 100e6, _depositPayload(operationId));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
-        assertEq(collateral, 100e6);
-        assertEq(fxrp.balanceOf(subaccount), 100e6);
+        assertEq(collateral, 200e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
     }
 
@@ -3271,13 +3273,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
 
         // a collateral deposit is not a debt increase and still works (a real second packet,
-        // crediting its own amount; packet 2's credit stays idle for its later retry)
+        // crediting its own amount; packet 2's idle credit rides along into the position)
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 3, 100e6, _depositPayload(bytes32("op-3")));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
-        assertEq(collateral, 200e6);
+        assertEq(collateral, 300e6);
 
-        // re-enabling makes the exact same packet deliverable again
+        // re-enabling makes the exact same packet deliverable again: nothing left to supply,
+        // the signed borrow executes against the position
         vm.prank(governance);
         vm.expectEmit();
         emit ILoanMarketsFacet.LoanBorrowingEnabled(SUBACCOUNT_TYPE_LOAN);
@@ -3286,6 +3289,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         _deliver(subaccount, 2, 100e6, borrowMore);
         assertEq(rlusd.balanceOf(makeAddr("dest")), 100e18);
+        (, , collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 300e6);
     }
 
     function testDuplicateFinalizesWhileBorrowingDisabled() public {
@@ -3411,20 +3416,98 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
     }
 
-    function testLzComposeRevertInsufficientComposeBalance() public {
-        // the credited tokens were moved before the compose executed (the documented race):
-        // the action fails closed instead of consuming unrelated idle balance
+    function testLzComposeDepositSuppliesTheWholeIdleBalance() public {
+        // the accepted race, made a no-op: the permissionless rail deposits the credit before
+        // the deposit compose executes; the compose then supplies what is idle - nothing
+        // here - consumes its id and reports the amount it actually supplied
         address subaccount = _createConfiguredSubaccount();
-        fxrp.mint(subaccount, 40e6);
+        fxrp.mint(subaccount, 100e6);
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
 
-        _deliverExpectRevert(
-            subaccount, 1, _depositPayload(bytes32("op-1")),
-            abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientComposeBalance.selector, 100e6, 40e6
-            )
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.CollateralDeposited(
+            parentPersonalAccount, bytes32("op-1"), 0, _guidFor(1)
         );
+        _deliver(subaccount, 1, 100e6, _depositPayload(bytes32("op-1")));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+
+        // whatever is idle goes in, less or more than the packet's own amount: 40 idle against
+        // a 100 packet supplies 40
+        fxrp.mint(subaccount, 40e6);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.CollateralDeposited(
+            parentPersonalAccount, bytes32("op-2"), 40e6, _guidFor(2)
+        );
+        _deliver(subaccount, 2, 100e6, _depositPayload(bytes32("op-2")));
+        (, , collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 140e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+
+        // and residue rides along: 150 idle (a direct send on top of the credit) against a 100
+        // packet supplies all 150 - no separate rail call needed
+        fxrp.mint(subaccount, 150e6);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.CollateralDeposited(
+            parentPersonalAccount, bytes32("op-3"), 150e6, _guidFor(3)
+        );
+        _deliver(subaccount, 3, 100e6, _depositPayload(bytes32("op-3")));
+        (, , collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 290e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
     }
 
+    function testLzComposePreemptedBorrowStillBorrowsAsSigned() public {
+        // the same race on a borrow: the credit already sits in the position, so the compose
+        // supplies nothing and borrows exactly the signed amount against it, to the signed
+        // destination
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        address destination = makeAddr("exchangeDeposit");
+
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanOpened(
+            parentPersonalAccount, bytes32("op-1"), 0, 300e18, DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(destination))), _guidFor(1)
+        );
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(destination))), 300e18
+        ));
+        (, uint128 borrowShares, uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+        assertEq(borrowShares, 300e18 * 1e6);
+        assertEq(rlusd.balanceOf(destination), 300e18);
+    }
+    function testLzComposePreemptedBorrowExecutesAgainstThePositionAsItStands() public {
+        // the interleaving the aggregate semantics allow: the credit is deposited by the rail,
+        // the user's own signed withdraw then takes part of the position out, and the delayed
+        // borrow still executes - supplying nothing, borrowing the signed amount against what
+        // is left, under Morpho's health check (enabled here) and within its deadline
+        morpho.setHealthCheckDisabled(false);
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        _deliverWithValue(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 30e6), RETURN_MIN_VALUE);
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 70e6);
+
+        // 70 FXRP = 140 RLUSD carries 107.8 at LLTV 77%: the signed 100 is healthy and executes
+        address destination = makeAddr("exchangeDeposit");
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanOpened(
+            parentPersonalAccount, bytes32("op-1"), 0, 100e18, DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(destination))), _guidFor(1)
+        );
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(destination))), 100e18
+        ));
+        (, uint128 borrowShares, uint128 collateralAfter) = morpho.position(_marketId(), subaccount);
+        assertEq(collateralAfter, 70e6);
+        assertEq(borrowShares, 100e18 * 1e6);
+        assertEq(rlusd.balanceOf(destination), 100e18);
+    }
     function testCreateSubaccountWithoutPersonalAccount() public {
         // the generic creation route works on this chain: no Personal Account exists or
         // ever will, the parent falls back to its computed address
@@ -3972,7 +4055,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(sender), 0);
         assertEq(fxrp.balanceOf(parentPersonalAccount), 40e6);
 
-        // the signed deposit: exactly the signed amount travels and is supplied, no debt
+        // the signed deposit: exactly the signed amount travels; the loan chain supplies it (with
+        // any idle residue - none here), no debt
         fxrp.mint(sender, 30e6);
         vm.prank(parentPersonalAccount);
         ILoanSubaccount(sender).depositCollateral{value: 0.01 ether}(30e6, bytes32("op-d"), deadline, "");

@@ -7,9 +7,10 @@ import {ISubaccount} from "./ISubaccount.sol";
 /// @dev Borrow action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
 /// uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`. The market is not a
 /// payload field: the account type fixes it (write-once), so the subaccount address itself
-/// commits to the pool. The authenticated bridged amount (the codec's `amountLD`, never the
-/// idle balance) becomes collateral - zero borrows against the existing position - and
-/// `borrowAmount` (non-zero) is borrowed and sent to `destination`. The fee terms are the
+/// commits to the pool. The account's whole idle FXRP balance - the authenticated bridged amount
+/// (the codec's `amountLD`) plus any residue - becomes collateral (a zero amount with nothing idle
+/// borrows against the existing position), and `borrowAmount` (non-zero) is borrowed and sent to
+/// `destination`. The fee terms are the
 /// type's current terms at delivery (the front end warns while a change is pending in the
 /// timelock and keeps deadlines short; see the spec). It is a debt increase: pause-gated and
 /// subject to the per-type borrow switch, both of which revert retriably. The operation id
@@ -52,11 +53,12 @@ uint8 constant ACTION_BORROW = 1;
 uint8 constant ACTION_WITHDRAW = 2;
 
 /// @dev Deposit-collateral action: `actionData` is `abi.encode(bytes32 operationId,
-/// uint64 deadline)`. Supplies exactly the authenticated bridged amount (the codec's
-/// `amountLD`, which must be non-zero) as collateral on the account's one market; no debt
-/// changes hands. While the controller is paused it executes only when the position carries
-/// live debt (the defensive case - protecting an endangered position); a debt-free deposit is
-/// new exposure and waits out the pause.
+/// uint64 deadline)`. Supplies the account's whole idle FXRP balance as collateral on its one
+/// market: the authenticated bridged amount (the codec's `amountLD`, which must be non-zero) plus
+/// any residue waiting for the permissionless rail, less whatever that rail already put into the
+/// position before delivery; no debt changes hands. While the controller is paused it executes
+/// only when the position carries live debt (the defensive case - protecting an endangered
+/// position); a debt-free deposit is new exposure and waits out the pause.
 uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
 
 /// @dev The destination is an EVM address (cleanly zero-padded into the `bytes32`), paid by a
@@ -90,8 +92,9 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * @notice Emitted when a borrow action executes.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
-     * @param collateralSupplied FXRP supplied as collateral (the authenticated bridged amount;
-     * zero for a borrow against the existing position).
+     * @param collateralSupplied FXRP supplied in this execution: the whole idle balance - the
+     * bridged credit plus any residue, less whatever the permissionless deposit rail had already
+     * put into the position (zero for a message-only borrow with nothing idle).
      * @param borrowAmount Loan-token amount borrowed and disbursed (non-zero).
      * @param destinationKind The destination kind (see the `DESTINATION_KIND_*` constants).
      * @param destination The disbursement destination.
@@ -111,7 +114,9 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * @notice Emitted when a deposit-collateral action executes.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
-     * @param amount FXRP supplied as collateral (the authenticated bridged amount).
+     * @param amount FXRP supplied in this execution: the whole idle balance - the bridged credit
+     * plus any residue, less whatever the permissionless deposit rail had already put into the
+     * position.
      * @param guid The LayerZero message id the action arrived with.
      */
     event CollateralDeposited(
@@ -402,18 +407,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * deposit with no bridged amount, or a withdraw of zero.
      */
     error ZeroAmount();
-
-    /**
-     * @notice Reverts if the account's FXRP balance does not cover the authenticated bridged
-     * amount — the credited tokens were moved before the composed action executed (deposited
-     * into the position by the permissionless rail, the accepted race).
-     * @param required The authenticated bridged amount.
-     * @param available The account's FXRP balance.
-     */
-    error InsufficientComposeBalance(
-        uint256 required,
-        uint256 available
-    );
 
     /**
      * @notice Repays the account's debt and the accrued Flare fee with its idle loan-token

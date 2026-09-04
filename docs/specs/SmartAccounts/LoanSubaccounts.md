@@ -213,10 +213,11 @@ The three are separate instructions with separate actions — a borrow always in
 (`borrowAmount` non-zero), `depositCollateral` never does — so each carries exactly the
 fields it needs and its own pause rule (a deposit is the defensive move; see the loan-chain
 section).
-`borrow`'s collateral amount is explicit rather than the whole balance: what travels becomes
-the authenticated collateral figure on the destination (the OFT's `amountLD`), so the user
-signs exactly what is collateralized, and idle residue — donations, strands from skipped
-deliveries — stays behind for the cleanup moves. A **zero collateral amount is a
+`borrow`'s collateral amount is explicit rather than the whole balance: what travels is what the
+user signs (the OFT's `amountLD` authenticates it on the destination), and idle residue on this
+side — donations, strands from skipped deliveries — stays behind for the cleanup moves. (On the
+loan chain the action then supplies its credit together with whatever is idle there, since that
+account's FXRP has one route anyway; see the loan-chain section.) A **zero collateral amount is a
 message-only send** (verified against the live adapter): a borrow against existing
 collateral, or a withdraw, which never carries tokens. Only the cleanup moves keep
 whole-balance semantics, because sweeping everything is what cleanup means. All three
@@ -439,12 +440,15 @@ decision to take on its own, with its own review.
 
 One race is accepted on this side: LayerZero credits the bridged tokens and executes the
 composed action in two separate steps, and in that window anyone can call the permissionless
-`depositIdleFxrp`, which locks the newly credited FXRP into the user's own position; the
-composed action then finds less idle balance than it bridged and reverts
-(`InsufficientComposeBalance`, retriable, the operation id unconsumed), and the user re-issues a
-message-only borrow under the same operation id, whereupon the parked packet duplicate-skips.
-Gas-only for the griefer, a delay and a message fee for the user, nothing redirected — accepted.
-Also noted for later: the pause is a single global switch today; separate pause
+`depositIdleFxrp`, which locks the newly credited FXRP into the user's own position. The
+composed action then finds less idle balance than it bridged, supplies whatever is idle and
+proceeds, the borrow exactly as signed. The borrow is
+authorized against the position as it stands at execution, not against the bridged credit
+specifically: the credit went into the position, and the user's own signed withdraw or a
+liquidation may have moved collateral since — Morpho's health check and the packet's deadline
+bound what a delayed borrow can do. Gas-only for the griefer, nothing lost or delayed for the
+user, nothing redirected. (Before the sweep's removal the action failed closed instead, since the
+credit could also have left the account.) Also noted for later: the pause is a single global switch today; separate pause
 domains for the Morpho actions and the bridge would give cleaner containment if one ever needs
 stopping without the other.
 
@@ -492,21 +496,26 @@ address itself commits to the pool:
   the account for the fixed rails.
 - Skipped deliveries leave their bridged FXRP on the account for the fixed rails.
 
-- **`ACTION_BORROW`** supplies **exactly the authenticated bridged amount** (the codec's
-  `amountLD`, never the idle balance, which can commingle donations and unrelated transfers) as
-  collateral, if any, and borrows `borrowAmount` (non-zero) against the account's own position,
+- **`ACTION_BORROW`** supplies **the account's whole idle FXRP balance** (the packet's credit
+  and any residue — every FXRP on this account is the user's own and has one route, the
+  position) as collateral, if any, and borrows `borrowAmount` (non-zero) against the account's own position,
   paying the destination — EVM kind only, clean zero-padded address, Wormhole kind reserved. As a
   debt increase it is pause-gated, subject to the per-type borrow switch, and gated on the fee:
   unconfigured fee terms revert retriably (`FeeTermsNotConfigured`), the loan is priced at the
   type's terms current at delivery (see the front-end requirement under The Flare fee), and the
   fee checkpoint runs before the borrow with the principal re-syncing after it.
-- **`ACTION_DEPOSIT_COLLATERAL`** supplies exactly the authenticated bridged amount (non-zero) as
-  collateral and changes no debt — the defensive action: while the controller is paused it
-  executes only when the position carries live debt.
-- For both of those, if the credited tokens were moved before delivery (the accepted race
-  above), the action fails closed with `InsufficientComposeBalance` — a cap rather than
-  provenance, since every balance on the account is the user's own, but it stops a signed action
-  from absorbing more than its own credit.
+- **`ACTION_DEPOSIT_COLLATERAL`** supplies the account's whole idle FXRP balance (the
+  authenticated bridged amount, non-zero, plus any residue) as collateral and changes no debt —
+  the defensive action: while the controller is paused it executes only when the position
+  carries live debt.
+- For both of those, the bridged amount authenticates the packet, it does not cap the supply:
+  residue from skipped packets or direct sends rides along instead of waiting for the
+  permissionless rail's separate call, and if that rail already put the credit into the position
+  before delivery (the accepted race above) the action supplies that much less — down to
+  nothing — and proceeds; a borrow is authorized against the aggregate position as it stands at
+  execution, not against its bridged credit specifically. The events carry the amount actually
+  supplied in the execution. (Pre-cut history: the supply was first capped at the packet's own
+  amount and failed closed below it, when the signed sweep could still take a credit elsewhere.)
 - **`ACTION_WITHDRAW`** is the atomic withdrawal: it withdraws collateral from the account's own
   position and bridges it back to the account's own Flare address **in the same
   execution**, with the redeem-home compose — no idle window between the two, so the redeposit
@@ -646,7 +655,9 @@ a user-signed action:
   Morpho on every check — nothing is cached, so an external liquidation is visible to the
   very next call. It is also the only way idle FXRP leaves the account — into the position,
   from where the signed withdraw brings it home — so the credit of a composed action can be
-  deposited by anyone before that action executes (the accepted race above). It can never
+  deposited by anyone before that action executes (the accepted race above), which the action
+  then simply does not supply twice — and any residue idle at that moment goes in with the
+  action, so the rail's separate call is only ever needed when no action is coming. It can never
   touch a withdrawal — the withdraw action bridges its amount home in the same execution, with
   no idle window. Funds are never redirected — the impact is delay and a repeat cost.
 - **There is no generic recovery rail.** Loan-token surplus is the one thing that needs an
