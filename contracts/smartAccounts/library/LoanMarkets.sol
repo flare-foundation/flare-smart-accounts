@@ -55,11 +55,16 @@ library LoanMarkets {
             marketParams.lltv != 0,
             ILoanMarketsFacet.InvalidMarketParams()
         );
-        // both tokens must be contracts: the binding is permanent, and a Morpho market can
-        // exist for a token address that carries no code
+        // both tokens and the oracle must be contracts: the binding is permanent, a Morpho
+        // market can exist for addresses that carry no code (createMarket checks none of
+        // them), and a codeless oracle would escape the exit gate's try/catch - the call
+        // succeeds with empty return data and decoding it reverts outside the catch, a raw
+        // revert instead of the gate's refusal. Code presence at registration only; the
+        // oracle's later behavior is the gate's business
         require(
             marketParams.loanToken.code.length > 0 &&
-            marketParams.collateralToken.code.length > 0,
+            marketParams.collateralToken.code.length > 0 &&
+            marketParams.oracle.code.length > 0,
             ILoanMarketsFacet.InvalidMarketParams()
         );
         require(

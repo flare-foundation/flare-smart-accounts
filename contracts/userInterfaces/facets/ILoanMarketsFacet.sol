@@ -98,8 +98,8 @@ interface ILoanMarketsFacet {
 
     /**
      * @notice Reverts if the Morpho market parameters are invalid: a zero or codeless token,
-     * identical tokens, a zero LLTV, a collateral token other than the transport OFT's token,
-     * or a market that does not exist on the Morpho contract.
+     * a codeless oracle, identical tokens, a zero LLTV, a collateral token other than the
+     * transport OFT's token, or a market that does not exist on the Morpho contract.
      */
     error InvalidMarketParams();
 

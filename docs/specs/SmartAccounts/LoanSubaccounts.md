@@ -547,7 +547,11 @@ cached, so an external liquidation is visible to the very next call
 with no synchronization step. (The Flare fee keeps its own checkpoint bookkeeping — principal,
 clock, terms snapshot — but that prices elapsed periods and gates the exit; it never answers a
 Morpho debt question, and it marks itself to the live debt at every checkpoint.) Market registration validates that the market exists on the Morpho
-contract, both tokens carry code, and the collateral token is exactly the transport OFT's
+contract, both tokens and the oracle carry code (Morpho's `createMarket` checks none of them, and
+a codeless oracle would escape the exit gate's `try`: the call succeeds with empty return data and
+decoding it reverts outside the `catch` — a raw revert instead of the gate's refusal; code presence
+at registration is all this checks, the oracle's later behavior is the gate's), and the
+collateral token is exactly the transport OFT's
 token; the first registration also pins the collateral token for every later transport and —
 transitively — every later market (see the configuration section). The loan token is
 deliberately not pinned: RLUSD is governance policy per registration, not an on-chain

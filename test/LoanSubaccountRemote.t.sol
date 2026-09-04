@@ -3824,6 +3824,20 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
     }
 
+    function testRegisterLoanMarketRevertCodelessOracle() public {
+        // the oracle too: Morpho's createMarket accepts a codeless oracle, and the exit gate's
+        // try/catch around price() cannot catch one - the call succeeds with empty return data
+        // and decoding it reverts outside the catch - so the whole withdraw would revert raw
+        // instead of the gate refusing; registration is the place to close it
+        _configureTransport();
+        ILoanMarketsFacet.Market memory market = _defaultMarket();
+        market.marketParams.oracle = makeAddr("codelessOracle");
+        morpho.createMarket(market.marketParams);
+        _registerMarketExpectRevert(
+            market, ILoanMarketsFacet.InvalidMarketParams.selector
+        );
+    }
+
     function testRegisterLoanMarketRevertNonexistentMarket() public {
         // the market must actually exist on the Morpho contract, or every credited compose
         // action against it would revert

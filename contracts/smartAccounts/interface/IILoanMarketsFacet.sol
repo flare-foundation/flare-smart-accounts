@@ -11,7 +11,8 @@ interface IILoanMarketsFacet is ILoanMarketsFacet {
     /**
      * @notice Registers the market a subaccount type is bound to, write-once: a different
      * market means a new subaccount type. Requires the compose transport (the collateral token
-     * must be the OFT's token) and an existing market on the Morpho contract. The first
+     * must be the OFT's token), both tokens and the oracle carrying code, and an existing
+     * market on the Morpho contract. The first
      * registration permanently pins the collateral token for every later transport.
      * Registration does not configure the type's fee terms: borrowing reverts until
      * {setLoanFeeTerms} activates them, so a registered-but-unpriced type cannot take on
