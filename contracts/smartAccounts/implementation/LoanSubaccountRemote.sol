@@ -32,13 +32,14 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * controller-as-beacon. Authenticated compose actions ({ComposeReceiverAccountBase}), sent by
  * this same account on Flare, operate on its type's write-once Morpho market - so the address
  * itself commits to the pool. Repayment, idle-collateral deposit and the fee checkpoint are
- * permissionless fixed rails; the two narrow direct authorities are the parent's signed exit
- * {sweepToOrigin}, which can only send idle FXRP to this account's own fixed Flare address,
- * and the parent's signed fee payment {payLoanFee}, which can only move the parent's own loan
- * tokens to the fee recipient up to what is owed - never redirect funds or touch Morpho
- * collateral or debt. On the permissionless and cleanup rails
- * every destination is fixed on-chain - the account's own position, the parent, the
- * governance-set fee recipient, or this account's own address on Flare - so no caller ever
+ * permissionless fixed rails; the one narrow direct authority is the parent's signed fee
+ * payment {payLoanFee}, which can only move the parent's own loan tokens to the fee recipient
+ * up to what is owed - never redirect funds or touch Morpho collateral or debt. Idle FXRP has
+ * one route, into the position ({depositIdleFxrp}), from where the signed withdraw action
+ * brings it home under the position's ordinary conditions. Across the rails and the signed
+ * actions every destination is fixed on-chain - the account's own position, the parent, the
+ * governance-set fee recipient, or (the withdraw's return leg) this account's own address on
+ * Flare - so no caller ever
  * chooses a destination, a market or an amount source. The one user-chosen destination is a
  * signed borrow's disbursement, authorized by the XRPL signature its payload carries.
  * @dev No native rail: the only protocol-delivered native is a withdraw delivery's compose
@@ -193,44 +194,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         flareDebtX18 -= _paid * WAD;
         _forgiveFeeDust();
         emit LoanFeeCollected(recipient, _paid);
-    }
-
-    /// @inheritdoc ILoanSubaccountRemote
-    function sweepToOrigin(
-        bytes calldata _extraOptions
-    )
-        external payable
-        onlyParent
-        nonReentrant
-        returns (uint256 _amount)
-    {
-        IComposeTransportFacet.Transport memory transport = _getTransport();
-        // every exit from this chain rides the OFT itself, so an OFT incident must stop it
-        _checkNotPaused();
-        // check the fee claim against the full position (the sweep moves idle FXRP, not the
-        // position): under-secured blocks - settle through repay or payLoanFee first. A live
-        // principal checkpoints first; zero principal and zero collectible need no
-        // Morpho/oracle read, and debt-free dust is forgiven rather than blocking
-        if (feePrincipal != 0) {
-            _checkpointFee(_myMarket());
-        }
-        if (flareDebtX18 / WAD != 0) {
-            require(
-                _exitLeavesFeeSecured(_myMarket(), 0),
-                OutstandingLoanFee(flareDebtX18 / WAD)
-            );
-        } else {
-            _forgiveFeeDust();
-        }
-
-        // the OFT's own underlying is the authoritative FXRP identity on this chain
-        IERC20 fxrp = IERC20(IOFT(transport.oft).token());
-        _amount = fxrp.balanceOf(address(this));
-        require(_amount > 0, NothingToSweep());
-
-        // per-call value accounting: exactly the quoted fee is spent, only this call's excess
-        // is refunded - pre-existing native on the account never subsidizes a caller
-        _bridgeHome(transport, _amount, _extraOptions, msg.value, msg.sender);
     }
 
     /// @inheritdoc ILoanSubaccountRemote
@@ -457,9 +420,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         emit CollateralWithdrawn(_parentAccount(), operationId, amount, _guid);
 
         // the return leg, in the same execution; the LayerZero fee rode in as compose value
-        uint256 excess = _bridgeHome(
-            _getTransport(), amount, returnOptions, msg.value, _parentAccount()
-        );
+        uint256 excess = _bridgeHome(_getTransport(), amount, returnOptions, msg.value);
         if (excess > 0) {
             emit NativeSweptToParent(_parentAccount(), excess);
         }
@@ -484,20 +445,18 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         return true;
     }
 
-    /// @dev The shared bridge-home core of {sweepToOrigin} and the withdraw action: sends
-    /// exactly `_amount` FXRP to this account's own Flare address (same address on every
-    /// chain) with the redeem-home compose - a deadline, this block time plus
-    /// `REDEEM_HOME_TTL`, and nothing else - so the Flare twin redeems at most this amount on
-    /// arrival. Equal validated decimals allow `minAmountLD == amountLD`. `_options` carry the
-    /// Flare-side gas and, optionally, the redemption's executor fee as compose value. Exactly
-    /// the quoted fee is spent from `_value` and the excess goes to `_excessTo` (the caller on
-    /// the sweep rail, the parent on the withdraw action).
+    /// @dev The withdraw action's return leg: sends exactly `_amount` FXRP to this account's
+    /// own Flare address (same address on every chain) with the redeem-home compose - a
+    /// deadline, this block time plus `REDEEM_HOME_TTL`, and nothing else - so the Flare twin
+    /// redeems at most this amount on arrival. Equal validated decimals allow
+    /// `minAmountLD == amountLD`. `_options` carry the Flare-side gas and, optionally, the
+    /// redemption's executor fee as compose value. Exactly the quoted fee is spent from
+    /// `_value` and the excess goes to the parent (the endpoint is no refund target).
     function _bridgeHome(
         IComposeTransportFacet.Transport memory _transport,
         uint256 _amount,
         bytes memory _options,
-        uint256 _value,
-        address _excessTo
+        uint256 _value
     )
         private
         returns (uint256 _excess)
@@ -522,7 +481,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         });
 
         MessagingFee memory fee = IOFT(_transport.oft).quoteSend(sendParam, false);
-        require(_value >= fee.nativeFee, InsufficientFundsForSweep(fee.nativeFee));
+        require(_value >= fee.nativeFee, InsufficientFundsForBridgeHome(fee.nativeFee));
 
         IERC20 fxrp = IERC20(IOFT(_transport.oft).token());
         fxrp.forceApprove(_transport.oft, _amount);
@@ -534,23 +493,23 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         (MessagingReceipt memory receipt, ) = IOFT(_transport.oft).send{value: fee.nativeFee}(
             sendParam,
             fee,
-            _excessTo
+            _parentAccount()
         );
         // slither-disable-end arbitrary-send-eth
         fxrp.forceApprove(_transport.oft, 0);
 
         _excess = _value - fee.nativeFee;
         if (_excess > 0) {
-            // the excess never strands here (no native rail): back to the sweep caller, or
-            // forward to the parent for the withdraw action (which emits for it)
+            // the excess never strands here (no native rail): forward to the parent (the
+            // withdraw action emits for it)
             // slither-disable-start arbitrary-send-eth
             // solhint-disable-next-line avoid-low-level-calls
-            (bool success, ) = _excessTo.call{value: _excess}("");
+            (bool success, ) = _parentAccount().call{value: _excess}("");
             // slither-disable-end arbitrary-send-eth
             require(success, RefundFailed());
         }
 
-        emit FXrpSweptToOrigin(_parentAccount(), _amount, _transport.originEid, receipt.guid);
+        emit FXrpBridgedToOrigin(_parentAccount(), _amount, _transport.originEid, receipt.guid);
     }
 
     /// @dev Forwards a skipped withdraw's compose value to the parent: the endpoint is not a
@@ -646,7 +605,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     }
 
     /// @dev A sub-unit remainder on a debt-free position can never be transferred (ERC-20
-    /// moves whole units) and never grows again - a raw-zero gate would park the exits
+    /// moves whole units) and never grows again - a raw-zero gate would park the exit
     /// forever over dust, so it is forgiven when a gate passes or a payment brings the fee
     /// down to it. Never more than that: a whole unit or more stays owed.
     function _forgiveFeeDust()

@@ -16,7 +16,8 @@ import {
 /**
  * @title MockOft
  * @notice Minimal lock/unlock OFT adapter: pulls the token from the sender the way the real
- * adapter does, so tests can assert that the sweep approved and actually transferred the FXRP.
+ * adapter does, so tests can assert that the return leg approved and actually transferred the
+ * FXRP.
  */
 contract MockOft is IOFT {
     using SafeERC20 for IERC20;

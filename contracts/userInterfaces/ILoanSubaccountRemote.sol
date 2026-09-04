@@ -76,11 +76,13 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  * account on Flare, execute the typed actions on the type's write-once Morpho market — so the
  * address itself commits to the pool. Repayment, idle-collateral deposit and the fee
  * checkpoint are permissionless fixed rails; only the parent Personal Account (the remote
- * implementation, itself compose-driven) may sweep idle FXRP home ({sweepToOrigin}) or pay the
- * fee from its own balance ({payLoanFee}). On those
- * rails every destination is fixed on-chain - the account's own position, the parent, the
- * governance-set fee recipient, or this account's own address on Flare - while the one
- * user-chosen destination is a signed borrow's disbursement. It has no native rail.
+ * implementation, itself compose-driven) may pay the fee from its own balance
+ * ({payLoanFee}). Idle FXRP has one route, into the position ({depositIdleFxrp}), from where
+ * the signed withdraw action brings it home under the position's ordinary conditions. Across
+ * the rails and the signed actions every destination is fixed on-chain - the account's own
+ * position, the parent, the governance-set fee recipient, or (the withdraw's return leg) this
+ * account's own address on Flare - while the one user-chosen destination is a signed
+ * borrow's disbursement. It has no native rail.
  */
 interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
@@ -122,7 +124,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when a withdraw action executes; the withdrawn collateral is bridged
-     * home in the same execution ({FXrpSweptToOrigin} follows).
+     * home in the same execution ({FXrpBridgedToOrigin} follows).
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
      * @param amount Collateral withdrawn from the position and bridged.
@@ -157,13 +159,13 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when FXRP is bridged back to this account's address on the origin
-     * chain, to be redeemed on arrival: the sweep rail, or a withdraw action's return leg.
+     * chain, to be redeemed on arrival: a withdraw action's return leg.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param amount The amount bridged.
      * @param originEid The origin chain's LayerZero endpoint id.
      * @param guid The LayerZero message id of the bridge-back send.
      */
-    event FXrpSweptToOrigin(
+    event FXrpBridgedToOrigin(
         address indexed parentPersonalAccount,
         uint256 amount,
         uint32 originEid,
@@ -228,7 +230,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * @notice Emitted when a sub-unit fee remainder is forgiven - at an exit gate, or when a
      * {payLoanFee} brings the fee down to it: on a debt-free position it can never be
      * transferred (ERC-20 moves whole base units) and never grows again, so a raw-zero gate
-     * would park the exits forever over less than one base unit. Never more than a sub-unit
+     * would park the exit forever over less than one base unit. Never more than a sub-unit
      * remainder: a whole base unit or more stays owed.
      * @param remainderX18 The forgiven remainder (base units at WAD precision, below 1e18).
      */
@@ -331,11 +333,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
 
     /**
-     * @notice Reverts if there is no FXRP to sweep back to the origin chain.
-     */
-    error NothingToSweep();
-
-    /**
      * @notice Reverts a {payLoanFee} with nothing collectible: no fee is owed, or only a
      * sub-unit remainder that no transfer can move.
      */
@@ -343,21 +340,22 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Reverts if the OFT's live peer for the origin chain no longer matches the pinned
-     * one; the sweep fails closed instead of bridging toward an unknown remote OApp.
+     * one; the return leg fails closed instead of bridging toward an unknown remote OApp.
      */
     error WrongOriginPeer();
 
     /**
-     * @notice Reverts if the sent value does not cover the LayerZero messaging fee.
+     * @notice Reverts if the delivered compose value does not cover the return leg's LayerZero
+     * messaging fee.
      * @param required The required fee.
      */
-    error InsufficientFundsForSweep(
+    error InsufficientFundsForBridgeHome(
         uint256 required
     );
 
     /**
-     * @notice Reverts if excess native could not be pushed to its destination: the sweep
-     * caller's refund, or the parent on the withdraw action.
+     * @notice Reverts if excess or skipped compose value could not be forwarded to the parent
+     * (this account has no native exit); the delivery stays retriable.
      */
     error RefundFailed();
 
@@ -372,7 +370,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts an exit - a withdraw action or {sweepToOrigin} - that would leave the
+     * @notice Reverts a withdraw action that would leave the
      * collectible fee under-secured: the collateral remaining after it, at the market oracle's
      * price, would be worth less than three times the fee (a dead or zero-priced oracle values
      * it at nothing). Retriable: pay the fee - loan tokens to the account and {repay}, or the
@@ -407,8 +405,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Reverts if the account's FXRP balance does not cover the authenticated bridged
-     * amount — the credited tokens were moved (e.g. swept back to the origin chain) before the
-     * composed action executed.
+     * amount — the credited tokens were moved before the composed action executed (deposited
+     * into the position by the permissionless rail, the accepted race).
      * @param required The authenticated bridged amount.
      * @param available The account's FXRP balance.
      */
@@ -508,34 +506,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     )
         external
         returns (uint256 _paid);
-
-    /**
-     * @notice Bridges all idle FXRP back to this account's own address on the origin chain
-     * (Flare), where it is redeemed on arrival toward the user's XRPL address.
-     * @dev Restricted to the parent Personal Account (the remote implementation), so it is
-     * reached only through a user-signed cross-chain user operation - by policy the exit
-     * direction requires the user's signature - and pause-gated on this chain, since every
-     * exit rides the OFT. The parent's batch supplies `msg.value` from its own native balance
-     * (fund it with a native drop in the same instruction if needed); exactly the quote is
-     * spent, only this call's excess is refunded to the parent, and the account's own native
-     * never subsidizes the caller. The live peer is re-checked against the pinned one, and
-     * the attached compose is the Flare twin's redeem-home action, carrying only a deadline
-     * (this block time plus the protocol TTL): on arrival it redeems at most this amount, and
-     * past the deadline it skips. Waiting while the Flare side is paused or its route
-     * unconfigured is accepted - custody is unaffected. The secured-claim exit gate applies: a
-     * live fee principal checkpoints first, an under-secured collectible fee blocks the sweep
-     * ({OutstandingLoanFee} - settle through {repay} or {payLoanFee} first), and a fee the position's
-     * collateral still covers to the gate's threshold rides along uncollected. With zero
-     * principal and nothing collectible the gate avoids Morpho and the oracle entirely and
-     * forgives sub-unit dust, never blocking.
-     * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
-     * @return _amount Amount of FXRP bridged.
-     */
-    function sweepToOrigin(
-        bytes calldata _extraOptions
-    )
-        external payable
-        returns (uint256 _amount);
 
     /**
      * @notice Returns the account's fee state, as of the last checkpoint or post-action

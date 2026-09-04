@@ -1196,7 +1196,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     //
 
     function testRedeemHomeComposeRedeemsThroughTheParent() public {
-        // the loan-chain twin's sweepToOrigin bridges FXRP here with the redeem-home compose (a
+        // the loan-chain twin's withdraw action bridges FXRP here with the redeem-home compose (a
         // deadline and nothing else); this account authenticates it against its bridge route
         // (the adapter, its endpoint,
         // the loan chain, the pinned peer) and runs the sweep-redeem logic with the compose

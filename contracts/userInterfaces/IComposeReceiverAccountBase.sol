@@ -26,7 +26,7 @@ uint8 constant SKIP_REASON_EXPIRED = 2;
  * loan subaccount as the receiver of its own bridge-back. It authenticates the endpoint, the
  * OFT, the origin chain, the pinned peer and `composeFrom`, and tracks replay state for the
  * signed actions (an id-less action, such as the Flare redeem-home - which itself originates
- * from a signed withdraw or sweep - carries no id and relies on the endpoint's at-most-once
+ * from a signed withdraw - carries no id and relies on the endpoint's at-most-once
  * compose delivery). Users are XRPL-only and their
  * signatures become on-chain authority only on Flare, so every action arriving here was sent by
  * this same address on the other chain — the account's own twin. Account-specific

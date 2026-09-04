@@ -5,7 +5,7 @@ import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
 
 /// @dev Redeem-home action: the compose the remote bridge-back attaches to the FXRP it
-/// returns - the parent-signed `sweepToOrigin`, or the withdraw action's return leg. Its
+/// returns - the withdraw action's return leg. Its
 /// `actionData` is `abi.encode(uint64 deadline)`, stamped by the sender as its block time plus
 /// `REDEEM_HOME_TTL`. Before expiry, at most the authenticated `amountLD` is redeemed through
 /// the parent; below the FAssets minimum it is transferred unredeemed, and the compose value is
