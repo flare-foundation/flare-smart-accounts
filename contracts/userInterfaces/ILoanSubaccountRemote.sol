@@ -27,8 +27,8 @@ uint8 constant ACTION_BORROW = 1;
 /// window, so the redeposit ordering race cannot touch a withdrawal. **The fee is a secured
 /// claim**: the withdrawal passes while the collateral remaining after it, valued at the market
 /// oracle's price, covers three times the collectible fee, and otherwise reverts retriably
-/// (`OutstandingLoanFee`) - the fee is paid in loan tokens through {repay} or {payLoanFee},
-/// never taken from the collateral, so no price ever moves funds here. `minComposeValue` is the delivery floor:
+/// (`OutstandingLoanFee`) - the fee is paid in loan tokens through {repay}, never taken from
+/// the collateral, so no price ever moves funds here. `minComposeValue` is the delivery floor:
 /// compose delivery is permissionless and LayerZero does not authenticate the delivered value,
 /// so a delivery carrying less - execution and terminal skip alike - reverts
 /// (`InsufficientDeliveryValue`), which is what stops a zero-value front-run from consuming
@@ -44,8 +44,7 @@ uint8 constant ACTION_BORROW = 1;
 /// which a dead or zero-priced oracle also produces, since it values the security at
 /// nothing): pay the fee - send loan tokens to the account and let {repay} collect (with debt
 /// outstanding the tokens are split pro rata between debt and fee, so covering both settles
-/// it and a smaller top-up pays only its share), or pay the fee alone from the parent through
-/// {payLoanFee} - after which the retried
+/// it and a smaller top-up pays only its share) - after which the retried
 /// delivery passes with nothing collectible, oracle-free. Bad `returnOptions` frozen into the
 /// signed packet (the accepted residual - no retry can fix the blob itself): issue a corrected
 /// instruction reusing the SAME operation id, whereupon the parked packet later
@@ -77,9 +76,8 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  * CREATE2 address as its Flare counterpart. Authenticated compose payloads, sent by this same
  * account on Flare, execute the typed actions on the type's write-once Morpho market — so the
  * address itself commits to the pool. Repayment, idle-collateral deposit and the fee
- * checkpoint are permissionless fixed rails; only the parent Personal Account (the remote
- * implementation, itself compose-driven) may pay the fee from its own balance
- * ({payLoanFee}). Idle FXRP has one route, into the position ({depositIdleFxrp}), from where
+ * checkpoint are permissionless fixed rails, and nothing here is parent-callable. Idle FXRP
+ * has one route, into the position ({depositIdleFxrp}), from where
  * the signed withdraw action brings it home under the position's ordinary conditions. Across
  * the rails and the signed actions every destination is fixed on-chain - the account's own
  * position, the parent, the governance-set fee recipient, or (the withdraw's return leg) this
@@ -221,8 +219,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     /**
      * @notice Emitted when accrued fee is paid to the fee recipient in loan tokens: from the
      * account's balance in {repay} (the fee's pro-rata share of a partial payment, or, once
-     * the debt is closed, as much of the collectible as the balance covers), or from the
-     * parent's balance through {payLoanFee}.
+     * the debt is closed, as much of the collectible as the balance covers).
      * @param feeRecipient The collector paid.
      * @param amount The amount paid (whole base units; the fee debt shrinks by exactly this).
      */
@@ -232,8 +229,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Emitted when a sub-unit fee remainder is forgiven - at an exit gate, or when a
-     * {payLoanFee} brings the fee down to it: on a debt-free position it can never be
+     * @notice Emitted when a sub-unit fee remainder is forgiven at an exit gate: on a
+     * debt-free position it can never be
      * transferred (ERC-20 moves whole base units) and never grows again, so a raw-zero gate
      * would park the exit forever over less than one base unit. Never more than a sub-unit
      * remainder: a whole base unit or more stays owed.
@@ -261,8 +258,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * the fee's share - the token refused the recipient (RLUSD can freeze addresses). The share
      * stays in the repayment balance and repays debt; if that closes the debt, the remainder
      * is attempted again and whatever still cannot be paid is reserved on the account
-     * ({LoanFeeReserved}). Whatever the call leaves unpaid stays owed; a later {repay} or
-     * {payLoanFee} collects it.
+     * ({LoanFeeReserved}). Whatever the call leaves unpaid stays owed; a later {repay}
+     * collects it.
      * @param feeRecipient The collector the share was owed to.
      * @param amount The unpaid share (whole base units).
      */
@@ -338,12 +335,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
 
     /**
-     * @notice Reverts a {payLoanFee} with nothing collectible: no fee is owed, or only a
-     * sub-unit remainder that no transfer can move.
-     */
-    error NothingCollectible();
-
-    /**
      * @notice Reverts if the OFT's live peer for the origin chain no longer matches the pinned
      * one; the return leg fails closed instead of bridging toward an unknown remote OApp.
      */
@@ -378,8 +369,8 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * @notice Reverts a withdraw action that would leave the
      * collectible fee under-secured: the collateral remaining after it, at the market oracle's
      * price, would be worth less than three times the fee (a dead or zero-priced oracle values
-     * it at nothing). Retriable: pay the fee - loan tokens to the account and {repay}, or the
-     * fee alone from the parent through {payLoanFee} - then retry.
+     * it at nothing). Retriable: pay the fee - loan tokens to the account and {repay} - then
+     * retry.
      * @param collectible The fee currently payable.
      */
     error OutstandingLoanFee(
@@ -471,38 +462,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     function depositIdleFxrp()
         external
         returns (uint256 _amount);
-
-    /**
-     * @notice Pays the collectible Flare fee from the parent Personal Account's own loan-token
-     * balance - the fee alone, the Morpho debt untouched - so an under-secured exit can be
-     * unblocked without closing the loan.
-     * @dev Restricted to the parent Personal Account (the remote implementation), so it is
-     * reached only through a user-signed cross-chain user operation: the batch approves this
-     * account for the amount and calls this method, and `_maxAmount` is the user's signed cap.
-     * Checkpoints first, then transfers `min(_maxAmount, collectible)` from the parent
-     * straight to the governance-set fee recipient (`transferFrom`; nothing lands here, so this
-     * account's loan tokens keep their one meaning, repayment). No pause check of its own,
-     * like {repay}'s fee legs (the money goes to Flare's own recipient, capped by the
-     * signature); in production it is reached only through the remote Personal Account's
-     * signed batch, which the pause does block. An under-approved, underfunded or frozen
-     * parent, a frozen recipient, a frozen subaccount (the token checks the spender too), or
-     * nothing collectible reverts the whole batch, retriable. The batch should end by
-     * resetting the allowance
-     * (`approve(0)`): the clamp can leave a remainder, and an allowance to this upgradeable
-     * account is spending authority - harmless under this implementation, not something to
-     * leave standing. The complement of {repay}, which pays the fee pro rata with the debt and
-     * attempts the whole collectible only on a payment covering both, reserving what it cannot
-     * pay ({LoanFeeCollected}; debt-free sub-unit dust is forgiven). With
-     * live debt and a dead oracle this clears the fee gate, but Morpho's own health check still
-     * reads that oracle, so the withdrawal waits for the debt to be closed.
-     * @param _maxAmount The most this call may transfer (whole base units; the signed cap).
-     * @return _paid The amount transferred to the fee recipient.
-     */
-    function payLoanFee(
-        uint256 _maxAmount
-    )
-        external
-        returns (uint256 _paid);
 
     /**
      * @notice Returns the account's fee state, as of the last checkpoint or post-action

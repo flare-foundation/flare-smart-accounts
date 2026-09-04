@@ -171,7 +171,7 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * too little parks the delivery as retriable). See {WithdrawOptions} for the signed
      * delivery-value floor. A withdrawal that would leave the Flare fee under-secured reverts
      * on the loan chain (`OutstandingLoanFee`, retriable) until the fee is paid in loan tokens
-     * through the subaccount's `repay` or the parent-signed `payLoanFee`.
+     * through the subaccount's `repay`.
      * @param _amount Collateral to withdraw on the loan chain and bridge home; non-zero.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.

@@ -2,7 +2,7 @@
 
 A loan subaccount is a deterministic, restricted staging account owned by a [Personal Account](./PersonalAccounts.md), used to stage loan-related assets (FXRP on the way to or from a cross-chain lending flow). It is not a generic smart wallet: it will expose only a fixed set of loan operations, and anyone may trigger only predefined cleanup actions on it.
 
-Status: the contract surface described here is implemented — the account and its proxy, the per-type implementation registry, creation and prediction, the account abstraction dispatch, the Flare-side loan instructions, the loan-chain-side account with its compose entry point, market binding, permissionless rails and signed fee payment, and the Flare fee. Two behaviors are worth naming up front: each account has exactly one permissionless direction (on Flare, `sweepRedeem` home — forward moves are signed), and redemption belongs to the parent Personal Account, so the subaccount carries no redemption-default relays. Production activation remains gated by the **Deployment** checklist.
+Status: the contract surface described here is implemented — the account and its proxy, the per-type implementation registry, creation and prediction, the account abstraction dispatch, the Flare-side loan instructions, the loan-chain-side account with its compose entry point, market binding and permissionless rails, and the Flare fee. Two behaviors are worth naming up front: each account has exactly one permissionless direction (on Flare, `sweepRedeem` home — forward moves are signed), and redemption belongs to the parent Personal Account, so the subaccount carries no redemption-default relays. Production activation remains gated by the **Deployment** checklist.
 
 ## Typed subaccounts
 
@@ -296,7 +296,7 @@ side):
 Two different rules apply, and the difference is the signature:
 
 - **Instruction destinations are the user's choice.** A borrow names where the RLUSD goes, and the XRPL signature authorizes it. Version 1 implements only the EVM/ERC-20 form (typically an exchange deposit address), paid by a direct transfer; the XRPL-over-Wormhole form is reserved by the payload's destination-kind tag and added when Wormhole provides specs. The EVM address is checked for shape only — clean zero-padded, non-zero, and not the subaccount itself (the proceeds could only repay the new debt); the parent Personal Account, the user's own compose-driven account on the loan chain, is a valid target — beyond that it is the user's money and the user's choice, the same way the XRPL target is already allowed to be an arbitrary account.
-- **Cleanup destinations are never the caller's choice.** The cleanup moves and the surplus push — permissionless (`sweepRedeem`, `depositIdleFxrp`, `repay`) or parent-signed (`payLoanFee`) — carry no destination input: it is derived on-chain — the account's own position, `parentPersonalAccount`, or (for the fee leg of `repay` and for `payLoanFee`) the governance-set fee recipient — never from caller-supplied data. Whoever may move the assets the protocol routes, nobody may redirect them (a stray token has no rail at all and strands).
+- **Cleanup destinations are never the caller's choice.** The cleanup moves and the surplus push — all permissionless (`sweepRedeem`, `depositIdleFxrp`, `repay`) — carry no destination input: it is derived on-chain — the account's own position, `parentPersonalAccount`, or (for the fee legs of `repay`) the governance-set fee recipient — never from caller-supplied data. Whoever may move the assets the protocol routes, nobody may redirect them (a stray token has no rail at all and strands).
 
 Caveats specific to the EVM disbursement option, for the front end rather than the contracts: RLUSD is a regulated stablecoin and can freeze or blacklist addresses, so a transfer can revert and turn a borrow into a stuck disbursement; some exchange deposit addresses are not credited when the sender is a contract, or need a tag an ERC-20 transfer cannot carry; and a wrong address is unrecoverable, since nothing is checked.
 
@@ -312,15 +312,13 @@ launch) registers
 The implementation never enters the CREATE2 derivation, so the registration choice cannot move
 the address (a test pins this).
 
-The defining difference on the loan chain: **almost nothing is parent-driven.** The parent
+The defining difference on the loan chain: **nothing is parent-driven.** The parent
 Personal Account has no local key on the loan chain — instructions exist only on Flare, and
 its loan-chain presence is the compose-driven remote Personal Account described below. Every authorized action
 arrives as an authenticated LayerZero compose payload sent by this same account on Flare
-(`borrow`, `depositCollateral`, `withdraw`), with one exception: the subaccount's
-`onlyParent` method, the signed fee payment `payLoanFee`, whose only permitted caller is the
-remote Personal Account — reachable only through the user's cross-chain user operation, and
-able only to move the parent's own RLUSD to the fee recipient up to what is owed and the signed
-cap.
+(`borrow`, `depositCollateral`, `withdraw`), with no exception: the subaccount has no
+parent-callable method at all (the parent-signed fee payment `payLoanFee` existed pre-cut and
+was removed; see the resolved decisions).
 Everything else is permissionless movement along fixed rails, the same invariant as
 everywhere: anyone may move the assets toward the user, nobody may redirect them (the one
 fixed destination that is not the user's own is the governance-set fee recipient of the
@@ -522,7 +520,7 @@ address itself commits to the pool:
   race cannot touch a withdrawal. It is also an exit-gate event for the Flare fee: after the
   pause gate it checkpoints and applies the secured-claim rule to the post-withdrawal remainder —
   a withdrawal that would leave the fee under-secured is refused (`OutstandingLoanFee`,
-  retriable) until the fee is paid in loan tokens through `repay` or `payLoanFee`; nothing is ever taken from the
+  retriable) until the fee is paid in loan tokens through `repay`; nothing is ever taken from the
   collateral (see The Flare fee; most mid-loan withdrawals pass untouched). It is the one action
   that accepts compose value, spent in the same call: the value pays the return send's LayerZero
   fee, quoted live against the signed `returnOptions` from the payload, with the excess to the
@@ -594,8 +592,8 @@ routine one. Market bindings, `repay`
 (with its surplus push), and defensive idle deposits persist through both levers. The global
 pause blocks debt increases, withdrawals (their return leg included) and debt-free deposits (the
 surplus push to the parent is inward and stays open, and `repay`'s fee legs are never held — that
-money goes to Flare's own recipient — while `payLoanFee` has no check of its own but is reached
-only through the remote PA's signed user operations, which are what the pause stops) — while **repayment and defensive collateral deposits stay available**: a composed
+money goes to Flare's own recipient; the remote PA's signed user operations are what the pause
+stops) — while **repayment and defensive collateral deposits stay available**: a composed
 deposit or an idle-rail deposit executes during a pause exactly when the position carries
 live debt, so an endangered position can still be defended, while a debt-free deposit is new
 exposure and waits out the pause like everything else. Accepted consequence: the global pause
@@ -833,8 +831,8 @@ fee-on-transfer, no rebasing (RLUSD at launch).
 
 ### Collection
 
-The fee is denominated in the **loan token** and collects at two points, both loan-token and
-both fixed-destination: inside `repay`, and through the parent-signed `payLoanFee`; the exit
+The fee is denominated in the **loan token** and collects at one point, loan-token and
+fixed-destination: inside `repay`; the exit
 never collects — it only refuses while the fee is under-secured (the exit gate below). The
 collection:
 
@@ -858,25 +856,11 @@ collection:
   improvement, say); a debt-only external repayment, a partial liquidation or a third-party
   repayment raises the fee-to-debt ratio, and later `repay` payments then allocate a larger
   share to the fee — an accepted consequence.
-- **`payLoanFee(maxAmount)`** — `onlyParent`, so reached only through the user's signed
-  cross-chain batch on the remote Personal Account (approve the subaccount for the amount, then
-  call), in this order: checkpoint → transfer `min(maxAmount,
-  collectible)` from the parent's own RLUSD straight to the fee recipient by `transferFrom` →
-  reduce `flareDebtX18` → forgive debt-free dust. No pause check of its own — no fee leg has one,
-  the money goes to Flare's own recipient — though the remote PA's signed batch that reaches it
-  waits out a pause. The fee alone, never the debt, and the signed
-  `maxAmount` is the cap — the user authorizes an exact ceiling in the same signature that
-  moves the money, so a wrong computation can refuse but never overcharge. Nothing lands on
-  the subaccount, so subaccount RLUSD keeps its one meaning (repay). An under-approved,
-  underfunded or frozen parent, a frozen recipient, a frozen subaccount (the token checks the
-  spender too), or nothing collectible reverts the whole
-  batch, retriable. The canonical batch is `approve(X)` → `payLoanFee(X)` → `approve(0)`: the
-  clamp can leave a remainder, and an allowance to the upgradeable subaccount is spending
-  authority — harmless under this implementation, not something to leave standing.
 
 Settling both claims through the rails therefore costs the live Morpho debt plus the collectible,
 from the same RLUSD balance in one `repay` (rounding or a deferred fee share can close Morpho for
-less, leaving fee outstanding); paying the fee alone, with the loan kept open, is `payLoanFee`.
+less, leaving fee outstanding). There is no fee-only payment: a top-up to the subaccount is split
+pro rata, and a fee left with zero debt is what `repay` pays first.
 
 ### The exit gate
 
@@ -895,23 +879,21 @@ would strip that security.
   net of Morpho's senior debt: at Morpho's LLTV boundary the equity behind the fee can be well
   under the fee itself. Mid-loan partial withdrawals therefore carry no fee friction while the
   remainder clears the threshold; only the exit that would leave the fee under-secured must
-  first be settled through `repay` or `payLoanFee`. When `collectible`
+  first be settled through `repay`. When `collectible`
   is zero the rule needs no oracle and no position read. A zero or dead oracle values the
-  security at nothing, so the exit is refused — the escape is settling through `repay` or `payLoanFee`, after
+  security at nothing, so the exit is refused — the escape is settling through `repay`, after
   which the retried delivery passes with nothing collectible, oracle-free. (A live-debt
-  withdrawal is blocked by Morpho's own oracle-dependent health check anyway — `payLoanFee`
-  clears the fee gate there but not Morpho's check, so the debt must be closed — and the
-  refused case is effectively the debt-free one, where the fee is static and exactly
-  settleable.)
+  withdrawal is blocked by Morpho's own oracle-dependent health check anyway, so the debt must
+  be closed — and the refused case is effectively the debt-free one, where the fee is static
+  and exactly settleable.)
 - **`withdraw` (the atomic bridge-home)**, in this exact order: the hard argument checks
   (zero amount, zero id) → the delivery-value floor → duplicate/expired skip → pause gate →
   checkpoint (with a live fee principal; zero principal has nothing to accrue) →
   the security rule on the post-withdrawal remainder — secured passes, under-secured reverts
   `OutstandingLoanFee` (retriable) → consume the operation id → withdraw and bridge.
   Settlement is deliberately not part of the withdraw: the fee is paid in loan tokens through
-  `repay` (subaccount RLUSD means repay, the free direction) or `payLoanFee` (the fee alone,
-  from the parent, parent-signed), after which the same parked packet passes; no price ever
-  moves funds at an exit.
+  `repay` (subaccount RLUSD means repay, the free direction), after which the same parked
+  packet passes; no price ever moves funds at an exit.
 - **Final-exit forgiveness:** when a gate passes with `principal == 0` and a sub-unit
   fractional remainder still in `flareDebtX18`, the remainder is cleared with
   `LoanFeeRemainderForgiven` — it can never be transferred (ERC-20 moves whole base units)
@@ -924,10 +906,7 @@ exit until settled — so the accrual logic carries money-path review weight.
 **Settlement is loan-token only.** No exit converts the fee: an under-secured withdraw
 refuses (`OutstandingLoanFee`), the user pays the fee in RLUSD — to the subaccount, where `repay`
 collects it pro rata with any live debt and attempts the whole collectible on a payment covering
-both (reserving what it cannot pay), or from the
-parent through
-`payLoanFee`, the fee alone — and
-the retried packet passes. An FXRP settlement mode
+both (reserving what it cannot pay) — and the retried packet passes. An FXRP settlement mode
 — the fee deducted from the withdrawn collateral at the market oracle's price under a signed cap
 — was built and removed (2026-09-02): it only ever served users who had closed outside the rails
 or underfunded `repay`, and it was the one place a price moved funds. Removing it takes the
@@ -935,40 +914,37 @@ oracle out of every money path (it survives only in the gate's comparison, where
 can refuse an exit but never take from it), drops a payload field, four errors and an event, and
 leaves the collector holding RLUSD only.
 
-**The overlap (Morpho allows, the gate refuses) and the fee-only payment.** `repay` pays the fee
+**The overlap (Morpho allows, the gate refuses).** `repay` pays the fee
 pro rata with the debt, so under the rails alone the fee-to-debt ratio stays near the accrual
 rate (a few percent a year) and the gate is met with room to spare. The ratio jumps only when
 the debt is paid outside the rails — a debt-only Morpho repayment, a partial liquidation, a
 third party repaying on the account's behalf. Once the collectible `F` exceeds `D / (LLTV ×
 FEE_SECURITY_FACTOR)` of the live debt `D` (about 43% at LLTV 0.77 and factor 3), a band of
 remainders `D / LLTV ≤ V < FEE_SECURITY_FACTOR × F` passes Morpho's health check but fails the
-gate. Two ways through with the loan still open: a top-up to the subaccount, which `repay`
-splits pro rata (a fee-sized one shrinks both claims by `F / (D + F)` — it may or may not clear
-the gate), or `payLoanFee`, the fee alone from the remote Personal Account's own RLUSD in one
-signed batch — the precise one. The factor stays 3 (lowering it only makes the band rarer — the
+gate. The way through with the loan still open is a top-up to the subaccount, which `repay`
+splits pro rata: every payment shrinks both claims, so a large enough one brings
+`FEE_SECURITY_FACTOR × F` under the remainder `V` (at `P = (D + F)(1 − V / (3F))`) with debt
+still outstanding; the alternative is to withdraw less. The factor stays 3 (lowering it only makes the band rarer — the
 threshold moves to ~65% of debt at 2 — while cutting the debt-free recovery headroom from a 67%
-to a 50% price fall). Pinned by `testOverlapTopUpOnTheSubaccountPaysTheFeeProRata` and
-`testPayLoanFeeFromParentUnblocksTheOverlapWithoutClosingTheDebt`. Front-end requirements, in
-the spirit of the wallet invariant: detect the band for the requested remainder `V`; offer the
-three ways out — pay the fee alone from the PA (`approve` + `payLoanFee` + `approve(0)`, with
-`maxAmount` a little above the quoted collectible since it accrues by the minute; the clamp
-makes the excess safe and the final reset leaves no allowance standing), withdraw less, or
-settle both through `repay` (which needs `D + F` plus headroom for in-flight interest; the surplus
-returns to the PA); say that RLUSD sent to the subaccount is split pro rata between debt and
-fee (a fee-sized top-up pays only its share of the fee), and that the refused packet stays
-unconsumed and retriable. The design path, for the
-record: a withdraw-time settlement pulled from the parent (a signed cap field in the withdraw
-payload, the subaccount reaching into the PA) was built and rejected twice, in FXRP and in
-RLUSD; the parent-driven `payLoanFee` keeps the withdraw schema, gets the cap for free as the
-signed amount, and keeps authority in the direction that already existed (parent → subaccount).
+to a 50% price fall). Pinned by `testOverlapTopUpOnTheSubaccountPaysTheFeeProRata`. Front-end
+requirements, in the spirit of the wallet invariant: detect the band for the requested remainder
+`V`; offer the two ways out — a top-up to the subaccount sized to clear the gate (the split pays
+`P × F / (D + F)` of the fee), or withdraw less — and quote `D + F` plus headroom for in-flight
+interest to settle both claims through `repay` (the surplus returns to the PA); say that RLUSD
+sent to the subaccount is split pro rata between debt and fee (a fee-sized top-up pays only its
+share of the fee), and that the refused packet stays unconsumed and retriable. The design path,
+for the record: a withdraw-time settlement pulled from the parent (a signed cap field in the
+withdraw payload, the subaccount reaching into the PA) was built and rejected twice, in FXRP and
+in RLUSD; a parent-signed fee-only payment from the remote PA's own RLUSD (`payLoanFee`) followed
+and was removed on 2026-09-04 (see the resolved decisions).
 
 **Dead-Morpho residual (accepted):** with a permanently reverting IRM, a position's collateral
 is lost anyway, and so is idle FXRP on that account, whose only route home runs through the
 position (`depositIdleFxrp`, then the signed withdraw); the shares-first rule still frees the
 loan-token balance of every debt-free account, because that path reads the position but never
 the IRM. A Morpho that no longer answers at all blocks even that read, and with it every
-position-dependent rail and `repay`'s surplus push; with `feePrincipal == 0`, `checkpointFee` and
-`payLoanFee` still run without touching Morpho. No standing governance write-off power; if the case ever
+position-dependent rail and `repay`'s surplus push; with `feePrincipal == 0`, `checkpointFee`
+still runs without touching Morpho. No standing governance write-off power; if the case ever
 materializes, the implementation behind the beacon can be upgraded — the escape hatch the
 architecture already has.
 
@@ -1063,7 +1039,7 @@ through the rails now costs 2100 + 114. On 1.1.2029 Morpho says 2000 (someone re
 100+interest externally; `I` clamps to 0): owed = max(147, 21) = 147, fee debt ≈ 261,
 `principal` = 2000. If the rest is also repaid externally, **a year later** (1.1.2030) the
 next checkpoint charges max(140, 20) = 140 on the old base, marks `principal` to 0, and
-accrual stops; fee debt ≈ 401 waits at the exit gate, payable in RLUSD through `repay` or `payLoanFee`.
+accrual stops; fee debt ≈ 401 waits at the exit gate, payable in RLUSD through `repay`.
 
 ## The remote Personal Account
 
@@ -1141,10 +1117,8 @@ run the batch of calls the user signed — with the authenticated compose in the
 controller plays on Flare. The blast-radius claim follows: a compromised compose root has the
 **full on-chain authority of the remote PA's address** — balances, approvals, external positions
 and any role granted to it — the same class as a controller compromise on Flare, but over
-the loan subaccount it holds exactly one narrow authority: the parent-only
-`payLoanFee`, able only to move the remote PA's own RLUSD to the governance-set fee recipient up
-to the collectible and the signed cap — never to redirect funds or touch Morpho collateral or debt,
-which stay behind the subaccount's own compose authentication. Callbacks into the remote PA's compose entry (`lzCompose`) meet the active
+the loan subaccount it holds no direct authority at all: the subaccount has no parent-callable
+method, so Morpho collateral and debt stay behind the subaccount's own compose authentication. Callbacks into the remote PA's compose entry (`lzCompose`) meet the active
 reentrancy guard; `receive()` and the views stay callable and are benign.
 
 - `PA_ACTION_EXECUTE(opId, deadline, Call[] calls)` — the signed batch, `Call {target,
@@ -1329,7 +1303,7 @@ storage-lineage gate below is the third member of this family.
   canonical Morpho's `withdrawCollateral` accrues interest and oracle-checks position
   health, so a dead oracle blocks live-debt withdrawals at Morpho itself — which is why
   the gate's dead-oracle parked case is effectively the debt-free one, settleable through
-  `repay` or `payLoanFee` (see The Flare fee). `MockMorpho` models this check behind a switch (the fee
+  `repay` (see The Flare fee). `MockMorpho` models this check behind a switch (the fee
   fixtures run over-leveraged with it off; dedicated tests run with it on), so the
   interplay is pinned at the unit level; what remains is verifying the premise against the
   canonical Morpho source and the real market in the integration harness before launch;
@@ -1375,10 +1349,11 @@ deliberately not built.
 
 - ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed — by `repay` itself or by a full external liquidation — the same `repay` call pushes the surplus to the parent Personal Account (the user's own loan-chain account), best-effort: a push the token refuses stays on the account for a later `repay` to retry, never rolling back the repayment. No generic `recoverToken`: stray tokens strand, as on the Flare side. Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
 - ~~Atomic withdraw-and-bridge action~~ — resolved, built as `ACTION_WITHDRAW` itself: the withdraw compose withdraws the collateral and bridges it home in the same execution (the withdraw/redeposit race is closed for withdrawals; it survives only for residue). Compose value is accepted for this one action and spent in the same call — the return leg's fee, prepaid from Flare as message-1 compose value, quoted against the signed `returnOptions`, excess to the parent; every delivery must carry the signed `minComposeValue` floor (delivery is permissionless, the value unauthenticated — below the floor nothing consumes the packet), and a short delivery reverts and stays retriable. Two accepted residuals: bad signed `returnOptions` park that withdrawal until a fresh instruction reusing the same operation id (the parked packet then terminal-skips as a duplicate), and the redeem-home packet residual above applies to the return leg as to any bridge-back — including its best-effort redemption fee.
-- ~~The Flare fee~~ — resolved, designed and built: checkpoint accounting of `max(feeFloor, market interest + feeSpread)` over the account's Morpho debt, per-type timelocked terms behind a recipient activation marker, collection in `repay` (pro rata with the debt on a partial payment; a payment covering debt plus fee attempts the whole collectible and reserves what it cannot pay) and through the parent-signed `payLoanFee` (the fee alone, from the remote PA's own RLUSD, the signed amount as cap), with the exit gated as a secured claim (an under-secured withdraw is refused until the fee is paid). The gate's basis is gross collateral at factor 3: an equity basis would widen the Morpho-allows/gate-refuses band about fourfold, and a lower factor would trade recovery headroom for a rarer band; `payLoanFee` is the fee-only way through that band (see The exit gate). See The Flare fee.
-- ~~Debt-first vs pro-rata `repay`~~ — resolved (2026-09-04): pro rata. A partial `repay` pays the fee `P × F / (D + F)` alongside the debt, so the fee is realized incrementally on the default route instead of only at close. Strict — a payment covering the debt but not the fee leaves a sliver of both, bar the rounding edge where the share's round-down leaves Morpho exactly `D` (within roughly `F / D` base units of `D + F`) and the deferred case, where the full payment stays available and may cover `D` (closing the debt alone would hand a debt-first route to anyone sending exactly `D`) — and without a stored reserve: a share the collector cannot receive stays in the payment, repaying debt (`LoanFeeDeferred`), which costs Flare only timing, only during a freeze of its own recipient. `payLoanFee` stays as the fee-only payment; direct Morpho repayment stays the debt-only route. See Collection.
-- ~~`sweepToOrigin`~~ — removed (2026-09-04). On a canonical market `supplyCollateral` has no conditions of its own beyond an existing market, a non-zero amount and the collateral token's `transferFrom` (Morpho is immutable with no pause; the Ethereum FXRP token is an upgradeable proxy whose current implementation has no pause or blocklist — a dependency assumption, not an invariant), so idle FXRP on the loan-chain account has its route home through the position: `depositIdleFxrp`, then the signed withdraw, under the position's ordinary conditions (health, the fee gate, the pause, the oracle, the transport; collateral a position needs can be liquidated). The parent-signed direct bridge-back only added a second signed authority over the subaccount, the residue race with the deposit rail, and a Morpho-free special case to document. Residual accepted: idle FXRP on an account whose type has no market yet, or whose Morpho is dead, waits — for the registration, or for the beacon upgrade a dead Morpho needs anyway. The remote subaccount keeps one parent-only method, `payLoanFee`.
-- ~~Pause-gating the fee legs~~ — resolved (2026-09-04): not gated. `repay`'s fee legs and `payLoanFee` move the user's RLUSD to Flare's own governance-set recipient, at an amount the contract computes or the signature caps, so an overcharge during an incident lands on Flare's address and is refundable — the pause bought little there, while holding the fee made the paused route debt-first and needed its own deferred/reserved cases. Accepted on two stated assumptions: the recipient is governance-set and replaceable (a compromised or wrong recipient would collect the fee shares of the repayments made during one rotation window), and the fee accounting is simple and audited. `payLoanFee` lost its redundant local check; its only production route, the remote PA's signed batch, is still what the pause stops. The pause keeps gating debt increases, withdrawals and debt-free deposits.
+- ~~The Flare fee~~ — resolved, designed and built: checkpoint accounting of `max(feeFloor, market interest + feeSpread)` over the account's Morpho debt, per-type timelocked terms behind a recipient activation marker, collection in `repay` (pro rata with the debt on a partial payment; a payment covering debt plus fee attempts the whole collectible and reserves what it cannot pay), with the exit gated as a secured claim (an under-secured withdraw is refused until the fee is paid). The gate's basis is gross collateral at factor 3: an equity basis would widen the Morpho-allows/gate-refuses band about fourfold, and a lower factor would trade recovery headroom for a rarer band (see The exit gate). See The Flare fee.
+- ~~Debt-first vs pro-rata `repay`~~ — resolved (2026-09-04): pro rata. A partial `repay` pays the fee `P × F / (D + F)` alongside the debt, so the fee is realized incrementally on the default route instead of only at close. Strict — a payment covering the debt but not the fee leaves a sliver of both, bar the rounding edge where the share's round-down leaves Morpho exactly `D` (within roughly `F / D` base units of `D + F`) and the deferred case, where the full payment stays available and may cover `D` (closing the debt alone would hand a debt-first route to anyone sending exactly `D`) — and without a stored reserve: a share the collector cannot receive stays in the payment, repaying debt (`LoanFeeDeferred`), which costs Flare only timing, only during a freeze of its own recipient. direct Morpho repayment stays the debt-only route (`payLoanFee`, then the fee-only payment, was removed later that day). See Collection.
+- ~~`sweepToOrigin`~~ — removed (2026-09-04). On a canonical market `supplyCollateral` has no conditions of its own beyond an existing market, a non-zero amount and the collateral token's `transferFrom` (Morpho is immutable with no pause; the Ethereum FXRP token is an upgradeable proxy whose current implementation has no pause or blocklist — a dependency assumption, not an invariant), so idle FXRP on the loan-chain account has its route home through the position: `depositIdleFxrp`, then the signed withdraw, under the position's ordinary conditions (health, the fee gate, the pause, the oracle, the transport; collateral a position needs can be liquidated). The parent-signed direct bridge-back only added a second signed authority over the subaccount, the residue race with the deposit rail, and a Morpho-free special case to document. Residual accepted: idle FXRP on an account whose type has no market yet, or whose Morpho is dead, waits — for the registration, or for the beacon upgrade a dead Morpho needs anyway. The remote subaccount then kept one parent-only method, `payLoanFee`, removed the same day.
+- ~~Pause-gating the fee legs~~ — resolved (2026-09-04): not gated. `repay`'s fee legs (and, until its removal the same day, `payLoanFee`) move the user's RLUSD to Flare's own governance-set recipient, at an amount the contract computes or the signature caps, so an overcharge during an incident lands on Flare's address and is refundable — the pause bought little there, while holding the fee made the paused route debt-first and needed its own deferred/reserved cases. Accepted on two stated assumptions: the recipient is governance-set and replaceable (a compromised or wrong recipient would collect the fee shares of the repayments made during one rotation window), and the fee accounting is simple and audited. The pause keeps gating debt increases, withdrawals and debt-free deposits.
+- ~~`payLoanFee`~~ — removed (2026-09-04). It was kept for two reasons, both gone: as the escape for an RLUSD-frozen subaccount (false - Ethereum RLUSD checks the spender in `transferFrom`/`approve`, and the subaccount is the spender), and as the fee-only payment that keeps the loan whole, which the team does not want to offer (the fee is presented with the debt as one obligation). Pro-rata `repay` pays the fee on the default route and in full once the debt is closed, and the overlap band is crossed by a pro-rata top-up. With it go the remote subaccount's last parent-only method, the approve/call/approve(0) batch, `NothingCollectible`, and the `_forgiveFeeDust` sub-unit guard that only a partial fee-only payment could reach.
 - ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`.
 - ~~`LoanBridgeSettingsFacet`, one global destination~~ — resolved: the Flare end became the type-generic `BridgeRoutesFacet` — one FXRP adapter (`setFxrpOft`, re-validating every route on rotation), one pinned peer per remote chain (`setBridgeRoute`), and the chain each bridging subaccount type lives on (`setSubaccountTypeRoute`, write-once — the type IS that identity, and its instructions carry no destination; `setSubaccountTypeRouteSuspended` is the reversible per-type stop); the Personal Account's `sendCrossChainUserOp` names its `destinationEid`, allowlisted by the registry. A new remote chain is a deployment plus governance. Multiple accepted origins on a remote transport (relay hops) were deliberately left for a later, additive change — see Multiple remote chains.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.

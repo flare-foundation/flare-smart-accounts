@@ -7,8 +7,7 @@ import {MintableERC20} from "./MintableERC20.sol";
 /// @notice Models a regulated stablecoin (RLUSD) that can freeze addresses: any transfer
 /// from or to a frozen address reverts, as does a `transferFrom` whose caller (the spender)
 /// is frozen and an `approve` by or naming a frozen address - Ethereum RLUSD checks every
-/// party. Used to pin that a refused surplus push never rolls back a repayment, and that a
-/// frozen subaccount cannot spend the parent's allowance.
+/// party. Used to pin that a refused fee payment or surplus push never rolls back a repayment.
 contract MockFreezableToken is MintableERC20 {
 
     mapping(address account => bool) public frozen;

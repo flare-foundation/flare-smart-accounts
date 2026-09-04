@@ -26,11 +26,9 @@ uint8 constant PA_ACTION_EXECUTE = 1;
  * a signed batch of calls, the way the Flare account executes `executeUserOp`. The blast
  * radius is therefore the same as a controller compromise on Flare: a compromised compose
  * root has the full on-chain authority of this address - balances, approvals, external
- * positions and any role granted to it - and over the loan subaccount exactly one narrow
- * authority: the parent-only `payLoanFee`, which can only move this
- * account's own loan tokens to the governance-set fee recipient up to the fee owed and the
- * signed cap - never redirect funds or touch Morpho collateral or debt, which
- * stay behind the subaccount's own compose authentication. There is
+ * positions and any role granted to it - and over the loan subaccount no direct authority at
+ * all: it has no parent-callable method, so Morpho collateral and debt stay behind the
+ * subaccount's own compose authentication. There is
  * no permissionless rail: what arrives here (borrow proceeds the user directed here,
  * recovered loan-token surplus, strays, native delivered with a message to fund
  * value-carrying calls) moves only by the user's signature.
