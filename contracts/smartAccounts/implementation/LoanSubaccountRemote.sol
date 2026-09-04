@@ -407,10 +407,14 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         // pause); the exit itself waits - it rides the OFT
         _checkNotPaused();
         ILoanMarketsFacet.Market memory market = _myMarket();
-        // the secured-claim gate: checkpoint, then refuse the withdrawal (retriably) if it
-        // would leave the fee under-secured - the fee is paid in loan tokens through repay or
-        // payLoanFee, never taken from the collateral
-        _checkpointFee(market);
+        // the secured-claim gate: a live fee principal checkpoints first (zero principal has
+        // nothing to accrue and no snapshot worth refreshing - a borrow re-baselines itself),
+        // then the withdrawal is refused (retriably) if it would leave the fee under-secured -
+        // the fee is paid in loan tokens through repay or payLoanFee, never taken from the
+        // collateral
+        if (feePrincipal != 0) {
+            _checkpointFee(market);
+        }
         require(_exitLeavesFeeSecured(market, amount), OutstandingLoanFee(flareDebtX18 / WAD));
         _markOperationUsed(operationId);
 

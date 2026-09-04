@@ -887,7 +887,7 @@ would strip that security.
   settleable.)
 - **`withdraw` (the atomic bridge-home)**, in this exact order: the hard argument checks
   (zero amount, zero id) → the delivery-value floor → duplicate/expired skip → pause gate →
-  checkpoint →
+  checkpoint (with a live fee principal; zero principal has nothing to accrue) →
   the security rule on the post-withdrawal remainder — secured passes, under-secured reverts
   `OutstandingLoanFee` (retriable) → consume the operation id → withdraw and bridge.
   Settlement is deliberately not part of the withdraw: the fee is paid in loan tokens through
