@@ -66,9 +66,10 @@ abstract contract BridgingSubaccountBase is IBridgingSubaccount, SubaccountBase,
 
     /// @dev Shared forward-move core of the type's instructions: bridges exactly `_amount` FXRP
     /// over LayerZero to this account's own address on its type's remote chain, so every entry
-    /// point shares the same guards by construction. A zero amount is a message-only send; the
-    /// destination is never caller-chosen. Exactly the quoted fee is spent; the caller's excess
-    /// is returned.
+    /// point shares the same guards by construction. A zero amount is a message-only send that
+    /// skips the FAssets-registry lookup, the balance read and the approval (the adapter still
+    /// runs a zero-value pull on the token); the destination is never caller-chosen.
+    /// Exactly the quoted fee is spent; the caller's excess is returned.
     function _bridgeToSelf(
         uint256 _amount,
         bytes memory _extraOptions,
@@ -77,9 +78,15 @@ abstract contract BridgingSubaccountBase is IBridgingSubaccount, SubaccountBase,
         internal
         returns (uint32 _destinationEid, bytes32 _guid)
     {
-        IERC20 fxrp = ContractRegistry.getAssetManagerFXRP().fAsset();
-        uint256 balance = fxrp.balanceOf(address(this));
-        require(_amount <= balance, AmountExceedsBalance(_amount, balance));
+        // only a token-bearing send resolves FXRP through the registry and reads the balance; a
+        // message-only send (a borrow against existing collateral, a withdraw) skips both
+        IERC20 fxrp = _amount > 0
+            ? ContractRegistry.getAssetManagerFXRP().fAsset()
+            : IERC20(address(0));
+        if (_amount > 0) {
+            uint256 balance = fxrp.balanceOf(address(this));
+            require(_amount <= balance, AmountExceedsBalance(_amount, balance));
+        }
 
         // the forward move is the incident-containment surface: pausing the controller stops
         // bridging out immediately, while the backward sweep stays available so assets can
@@ -113,7 +120,7 @@ abstract contract BridgingSubaccountBase is IBridgingSubaccount, SubaccountBase,
         });
 
         MessagingFee memory fee = IOFT(fxrpOft).quoteSend(sendParam, false);
-        require(msg.value >= fee.nativeFee, InsufficientFundsForSweep(fee.nativeFee));
+        require(msg.value >= fee.nativeFee, InsufficientFundsForBridge(fee.nativeFee));
 
         // the OFT is a lock/unlock adapter, so it must be approved to pull the FXRP
         if (_amount > 0) {

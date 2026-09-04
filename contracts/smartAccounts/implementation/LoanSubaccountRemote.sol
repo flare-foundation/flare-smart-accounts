@@ -393,10 +393,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         emit CollateralWithdrawn(_parentAccount(), operationId, amount, _guid);
 
         // the return leg, in the same execution; the LayerZero fee rode in as compose value
-        uint256 excess = _bridgeHome(_getTransport(), amount, returnOptions, msg.value);
-        if (excess > 0) {
-            emit NativeSweptToParent(_parentAccount(), excess);
-        }
+        // and its excess goes to the parent
+        _bridgeHome(_getTransport(), amount, returnOptions, msg.value);
     }
 
     /// @dev The soft gates shared by the borrow and the withdraw - the deposit carries no id and no
@@ -425,7 +423,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// redeems at most this amount on arrival. Equal validated decimals allow
     /// `minAmountLD == amountLD`. `_options` carry the Flare-side gas and, optionally, the
     /// redemption's executor fee as compose value. Exactly the quoted fee is spent from
-    /// `_value` and the excess goes to the parent (the endpoint is no refund target).
+    /// `_value` and the excess is forwarded to the parent (the endpoint is no refund target).
     function _bridgeHome(
         IComposeTransportFacet.Transport memory _transport,
         uint256 _amount,
@@ -433,7 +431,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         uint256 _value
     )
         private
-        returns (uint256 _excess)
     {
         // a peer mutation on the OFT after configuration must fail closed
         require(
@@ -472,22 +469,14 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         // slither-disable-end arbitrary-send-eth
         fxrp.forceApprove(_transport.oft, 0);
 
-        _excess = _value - fee.nativeFee;
-        if (_excess > 0) {
-            // the excess never strands here (no native rail): forward to the parent (the
-            // withdraw action emits for it)
-            // slither-disable-start arbitrary-send-eth
-            // solhint-disable-next-line avoid-low-level-calls
-            (bool success, ) = _parentAccount().call{value: _excess}("");
-            // slither-disable-end arbitrary-send-eth
-            require(success, RefundFailed());
-        }
-
         emit FXrpBridgedToOrigin(_parentAccount(), _amount, _transport.originEid, receipt.guid);
+        // the excess never strands here (no native rail)
+        _sweepValueToParent(_value - fee.nativeFee);
     }
 
-    /// @dev Forwards a skipped withdraw's compose value to the parent: the endpoint is not a
-    /// valid refund target, and this account has no native exit.
+    /// @dev Forwards compose value to the parent - a skipped withdraw's whole value, or the
+    /// return leg's excess over the quoted fee: the endpoint is not a valid refund target, and
+    /// this account has no native exit.
     function _sweepValueToParent(
         uint256 _value
     )

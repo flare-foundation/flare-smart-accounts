@@ -2572,7 +2572,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         ILoanSubaccount(subaccount).depositCollateral{value: messagingFee}(100e6, "");
     }
 
-    function testForwardMoveRevertInsufficientFundsForSweep() public {
+    function testForwardMoveRevertInsufficientFundsForBridge() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -2581,7 +2581,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         vm.expectRevert(
-            abi.encodeWithSelector(IBridgingSubaccount.InsufficientFundsForSweep.selector, messagingFee)
+            abi.encodeWithSelector(IBridgingSubaccount.InsufficientFundsForBridge.selector, messagingFee)
         );
         ILoanSubaccount(subaccount).depositCollateral{value: messagingFee - 1}(100e6, "");
     }

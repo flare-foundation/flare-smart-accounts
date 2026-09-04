@@ -102,10 +102,11 @@ interface IBridgingSubaccount is IComposeReceiverAccountBase, ISubaccount {
     error WrongDestinationPeer();
 
     /**
-     * @notice Reverts if the sent value does not cover the LayerZero messaging fee.
+     * @notice Reverts if the value sent with a forward move does not cover the LayerZero
+     * messaging fee of the bridge.
      * @param messagingFee The required messaging fee.
      */
-    error InsufficientFundsForSweep(
+    error InsufficientFundsForBridge(
         uint256 messagingFee
     );
 
