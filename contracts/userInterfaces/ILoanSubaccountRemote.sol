@@ -253,7 +253,7 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice Emitted when the initial pro-rata attempt of a partial {repay} failed to pay
-     * the fee's share - held while paused, or the token refused the recipient. The share
+     * the fee's share - the token refused the recipient (RLUSD can freeze addresses). The share
      * stays in the repayment balance and repays debt; if that closes the debt, the remainder
      * is attempted again and whatever still cannot be paid is reserved on the account
      * ({LoanFeeReserved}). Whatever the call leaves unpaid stays owed; a later {repay} or
@@ -420,15 +420,17 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * balance: a payment short of the two is split pro rata between them, a covering one
      * closes the debt, attempts the whole collectible (reserving anything unpaid) and returns
      * the surplus to the parent.
-     * @dev Permissionless and pause-exempt for the debt reduction, which only moves the
-     * account's own position toward safety. It checkpoints before the repayment and re-syncs
+     * @dev Permissionless and pause-exempt throughout: the debt reduction only moves the
+     * account's own position toward safety, and the fee legs only move money to Flare's own
+     * recipient. It checkpoints before the repayment and re-syncs
      * the canonical debt after (see {checkpointFee}). With live debt `D` and collectible fee
      * `F`, interest accrues, then a balance `P < D + F` pays `P × F / (D + F)` (rounded down)
      * to the fee recipient first and repays Morpho with the rest - by exact borrow shares when
      * that rest covers the debt (no over-repay revert), otherwise by assets; a balance covering
      * `D + F` closes the debt by exact shares and attempts the whole collectible from the
-     * remainder. Every fee payment is best-effort, held while paused,
-     * never rolling back the repayment ({LoanFeeCollected}; the fee debt shrinks only by the
+     * remainder. Every fee payment is best-effort, never held by the pause (an overcharge
+     * would land on Flare's own recipient and is refundable), never rolling back the
+     * repayment ({LoanFeeCollected}; the fee debt shrinks only by the
      * successfully requested transfer, conventional ERC-20 semantics being a
      * market-registration policy): a share that cannot be paid stays in the balance and
      * repays debt ({LoanFeeDeferred}), and once debt-free the remainder is attempted again,
@@ -486,11 +488,13 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      * account for the amount and calls this method, and `_maxAmount` is the user's signed cap.
      * Checkpoints first, then transfers `min(_maxAmount, collectible)` from the parent
      * straight to the governance-set fee recipient (`transferFrom`; nothing lands here, so this
-     * account's loan tokens keep their one meaning, repayment). Pause-gated like {repay}'s fee
-     * leg: money leaving the user's accounts toward the collector waits out an incident. An
-     * under-approved, underfunded or frozen parent, a frozen recipient, a frozen subaccount
-     * (the token checks the spender too), or nothing collectible reverts the whole batch,
-     * retriable. The batch should end by resetting the allowance
+     * account's loan tokens keep their one meaning, repayment). No pause check of its own,
+     * like {repay}'s fee legs (the money goes to Flare's own recipient, capped by the
+     * signature); in production it is reached only through the remote Personal Account's
+     * signed batch, which the pause does block. An under-approved, underfunded or frozen
+     * parent, a frozen recipient, a frozen subaccount (the token checks the spender too), or
+     * nothing collectible reverts the whole batch, retriable. The batch should end by
+     * resetting the allowance
      * (`approve(0)`): the clamp can leave a remainder, and an allowance to this upgradeable
      * account is spending authority - harmless under this implementation, not something to
      * leave standing. The complement of {repay}, which pays the fee pro rata with the debt and

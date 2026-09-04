@@ -97,7 +97,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
             if (balance < fullDebt + collectible) {
                 // a payment short of debt plus fee is split pro rata between the two: the
                 // fee's share (rounded down, the remainder to the debt) is paid first,
-                // best-effort - held while paused or refused by the token, it stays in the
+                // best-effort - refused by the token (a frozen recipient), it stays in the
                 // balance and repays debt (if that closes the debt, the tail below retries
                 // the remainder and reserves what still cannot be paid); what the tail
                 // cannot pay either stays owed
@@ -176,9 +176,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         returns (uint256 _paid)
     {
         require(_maxAmount > 0, ZeroAmount());
-        // money leaving the user's accounts toward the collector waits out an incident, like
-        // repay's fee leg; the parent's batch reverts and stays retriable
-        _checkNotPaused();
+        // no pause check of its own, like repay's fee legs: the money goes to Flare's own
+        // recipient, capped by the signature. In production it is reached only through the
+        // remote PA's signed batch, which the pause does block
         ILoanMarketsFacet.Market memory market = _myMarket();
         _checkpointFee(market);
         uint256 collectible = flareDebtX18 / WAD;
@@ -673,11 +673,12 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     }
 
     /// @dev Pays `_amount` (non-zero) of the collectible fee from this account's balance to
-    /// the fee recipient, best-effort: nothing moves while paused (money leaving toward the
-    /// collector waits out an incident) or when the token refuses the recipient (RLUSD can
-    /// freeze addresses), so a repayment never rolls back; the fee debt shrinks only by the
-    /// successfully requested transfer (conventional ERC-20 semantics are a registration
-    /// policy). Returns the amount paid - zero when nothing moved.
+    /// the fee recipient, best-effort: nothing moves when the token refuses the recipient
+    /// (RLUSD can freeze addresses), so a repayment never rolls back; the fee debt shrinks
+    /// only by the successfully requested transfer (conventional ERC-20 semantics are a
+    /// registration policy). Not held by the pause: the money goes to Flare's own recipient,
+    /// where an overcharge would be refundable, and holding it only made the paused route
+    /// debt-first. Returns the amount paid - zero when nothing moved.
     function _payFee(
         IERC20 _loanToken,
         address _recipient,
@@ -686,7 +687,6 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         private
         returns (uint256)
     {
-        if (IPauseFacet(controllerAddress).isPaused()) return 0;
         if (!_loanToken.trySafeTransfer(_recipient, _amount)) return 0;
         flareDebtX18 -= _amount * WAD;
         emit LoanFeeCollected(_recipient, _amount);

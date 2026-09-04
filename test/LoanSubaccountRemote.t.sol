@@ -1684,25 +1684,22 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(borrowShares, 0);
     }
 
-    function testRepayFeeLegHoldsWhilePausedAndReserves() public {
-        // while paused the fee leg holds entirely: the Morpho repayment and the checkpoint
-        // still run, tokens covering the fee stay RESERVED here (never pushed as surplus),
-        // and a later repay collects them without another top-up
+    function testRepayFeeLegPaysWhilePaused() public {
+        // the pause never holds a fee payment: the money goes to Flare's own recipient, so a
+        // covering repay during a pause closes the debt, pays the fee and pushes the surplus
+        // exactly as when unpaused - nothing is reserved
         address subaccount = _borrowedSubaccount(1000e18);
         vm.warp(vm.getBlockTimestamp() + 365 days);
         rlusd.mint(subaccount, 1100e18);
         _pauseController();
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeReserved(makeAddr("feeCollector"), 70e18);
+        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), 70e18);
+        vm.expectEmit();
+        emit ILoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 30e18);
         assertEq(ILoanSubaccountRemote(subaccount).repay(), 1000e18);
-        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 0);
-        assertEq(rlusd.balanceOf(parentPersonalAccount), 30e18);
-        assertEq(rlusd.balanceOf(subaccount), 70e18);
-
-        _unpauseController();
-        ILoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 30e18);
         assertEq(rlusd.balanceOf(subaccount), 0);
     }
 
@@ -1726,34 +1723,24 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertGt(borrowShares, 0);
     }
 
-    function testRepayProRataFeeShareHeldWhilePausedRepaysDebtInstead() public {
-        // a partial payment while paused: the fee's share cannot leave, so it repays debt
-        // with the rest (LoanFeeDeferred) - nothing is reserved on the account, the fee stays
-        // owed in full, and the paused route is debt-first for its duration
+    function testRepayProRataFeeShareIsPaidWhilePaused() public {
+        // a partial payment during a pause is split exactly as when unpaused: the fee's share
+        // is paid, the rest repays Morpho
         address subaccount = _borrowedSubaccount(1000e18);
         vm.warp(vm.getBlockTimestamp() + 365 days);
         rlusd.mint(subaccount, 100e18);
         _pauseController();
+        uint256 feeShare = uint256(100e18) * 70e18 / 1070e18;
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeDeferred(
-            makeAddr("feeCollector"), uint256(100e18) * 70e18 / 1070e18
-        );
+        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 100e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18);
-        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 0);
+        emit ILoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 100e18 - feeShare);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18 - feeShare);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), feeShare);
         assertEq(rlusd.balanceOf(subaccount), 0);
-        (uint256 principal, uint256 feeDebtX18, , , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
-        assertEq(feeDebtX18, 70e18 * 1e18);
-        assertApproxEqAbs(principal, 900e18, 1);
-
-        // unpaused, the next payment is split at the now higher fee-to-debt ratio: 70 of 970
-        _unpauseController();
-        rlusd.mint(subaccount, 97e18);
-        ILoanSubaccountRemote(subaccount).repay();
-        assertApproxEqAbs(rlusd.balanceOf(makeAddr("feeCollector")), 7e18, 1);
+        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(feeDebtX18, (70e18 - feeShare) * 1e18);
     }
 
     function testRepayProRataRoundsTheFeeShareDown() public {
@@ -2712,8 +2699,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testPayLoanFeeGuards() public {
-        // only the parent; a non-zero cap; held while paused; an unapproved parent reverts
-        // whole and retriable with the fee untouched
+        // only the parent; a non-zero cap; an unapproved parent reverts whole and retriable
+        // with the fee untouched; no pause check of its own (in production the remote PA's
+        // signed batch that reaches it is pause-gated - here the parent calls directly)
         _configureSettings();
         (address parent, address subaccount) = _borrowedPairWithFee("rPayFeeGuardOwner");
         ILoanSubaccountRemote(subaccount).checkpointFee();
@@ -2735,13 +2723,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _pauseController();
         vm.startPrank(parent);
         rlusd.approve(subaccount, 70e18);
-        vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanSubaccountRemote(subaccount).payLoanFee(70e18);
-        vm.stopPrank();
-        _unpauseController();
-
-        vm.prank(parent);
         assertEq(ILoanSubaccountRemote(subaccount).payLoanFee(70e18), 70e18);
+        vm.stopPrank();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
     }
 
