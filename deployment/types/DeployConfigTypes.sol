@@ -12,11 +12,18 @@ import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.s
  *      via-ir (run() exceeds the legacy stack limit and the script assigns
  *      memory struct arrays to storage), while `forge coverage` builds
  *      without via-ir.
+ *
+ *      Field order is load-bearing. `vm.parseJson` orders a JSON object's members by
+ *      looking up ANY compiled struct whose field names match, and `IReaderFacet`'s
+ *      `AgentVaultDetails` and `VaultDetails` carry exactly these field-name sets. When two
+ *      candidates disagree, the lookup's winner - and with it the decode - varies between
+ *      runs, so these structs must declare their fields in the same order as their reader
+ *      twins; `DeployConfigDecode.t.sol` pins the two orders against each other.
  */
 abstract contract DeployConfigTypes {
     struct AgentVaultConfig {
-        address agentVaultAddress;
         uint256 agentVaultId;
+        address agentVaultAddress;
     }
 
     struct VaultConfig {

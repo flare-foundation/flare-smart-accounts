@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 import {DeployConfigTypes} from "../../../deployment/types/DeployConfigTypes.sol";
+import {IReaderFacet} from "../../../contracts/userInterfaces/facets/IReaderFacet.sol";
 import {IVaultsFacet} from "../../../contracts/userInterfaces/facets/IVaultsFacet.sol";
 
 /**
@@ -26,6 +27,13 @@ import {IVaultsFacet} from "../../../contracts/userInterfaces/facets/IVaultsFace
  * The fixture values below are ABI-compatible in each other's slots (a small
  * id fits an address slot and any address fits a uint256), so a reordering
  * would NOT revert — only these assertions catch it.
+ *
+ * The struct lookup matches on field names alone, and `IReaderFacet` already
+ * declares `AgentVaultDetails` and `VaultDetails` with these exact field-name
+ * sets. With two candidates the winner varies between runs, so the config
+ * structs must declare their fields in their reader twins' order; the
+ * encoding tests below pin that deterministically, where the decode tests
+ * alone would only fail intermittently.
  */
 contract DeployConfigDecodeTest is Test, DeployConfigTypes {
     address private constant VAULT_1 = 0x1111111111111111111111111111111111111111;
@@ -78,6 +86,22 @@ contract DeployConfigDecodeTest is Test, DeployConfigTypes {
         assertEq(agentVaults.length, 1, "agent vault count");
         assertEq(agentVaults[0].agentVaultId, 7, "agentVaultId");
         assertEq(agentVaults[0].agentVaultAddress, AGENT_VAULT, "agentVaultAddress");
+    }
+
+    function testAgentVaultConfigDeclaresItsReaderTwinsFieldOrder() public pure {
+        assertEq(
+            abi.encode(AgentVaultConfig(7, AGENT_VAULT)),
+            abi.encode(IReaderFacet.AgentVaultDetails(7, AGENT_VAULT)),
+            "AgentVaultConfig and IReaderFacet.AgentVaultDetails must declare the same field order"
+        );
+    }
+
+    function testVaultConfigDeclaresItsReaderTwinsFieldOrder() public pure {
+        assertEq(
+            abi.encode(VaultConfig(1, VAULT_1, IVaultsFacet.VaultType.Firelight)),
+            abi.encode(IReaderFacet.VaultDetails(1, VAULT_1, IVaultsFacet.VaultType.Firelight)),
+            "VaultConfig and IReaderFacet.VaultDetails must declare the same field order"
+        );
     }
 
     function _assertVaults(string memory json) private pure {
