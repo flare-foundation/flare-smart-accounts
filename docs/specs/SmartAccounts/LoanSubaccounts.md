@@ -1240,7 +1240,13 @@ diamond is owned by the historical `DiamondArgs.owner` EOA
 (`0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA`) — confirm that key is still controlled
 before relying on an Ethereum deployment. The Ethereum cut installs `SubaccountsFacet`,
 `TimelockFacet`, `PauseFacet`, `PersonalAccountsFacet` (the PA beacon and creation surface for the
-remote Personal Accounts), `ComposeTransportFacet` and `LoanMarketsFacet` through the standard cut flow
+remote Personal Accounts), `ComposeTransportFacet` and `LoanMarketsFacet` through the standard cut flow, with
+[`EthereumControllerInit`](../../../contracts/smartAccounts/facets/EthereumControllerInit.sol) as the
+cut's init: `MasterAccountControllerInit` is Flare-specific and is skipped, so this sets the four
+ERC-165 interface flags and nothing else (the executor, payment-proof and instruction-fee settings
+belong to facets the Ethereum cut does not carry, and the Personal Account beacon and each type's
+implementation are timelocked governance calls made after the cut, never init writes; the cut plan
+names it as its `init` block with no arguments — see `deployment/cuts/ethereum/cut-example.json`)
 (the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
 `deployment/deploys/ethereum.json` is written by the bootstrap when it runs — the record exists
 only once the contracts do, and the cut planner refuses to plan without it), and both
@@ -1305,15 +1311,29 @@ storage-lineage gate below is the third member of this family.
   only because no subaccount or remote Personal Account proxy exists yet; before the first
   deployment of any of those implementations on ANY network, verify on chain that no proxy of
   the lineage exists there. The Flare Personal Account's layout is unchanged by construction;
+  Both halves are tooled: the OpenZeppelin upgrade-safety validator (`pnpm build:upgrade-info &&
+  pnpm validate-upgrade`, a CI job) checks the six proxy-backed implementations — the three live ones
+  (the Flare Personal Account and the two composer contracts) against a reconstructed v2.0.0
+  reference build (`deployment/build-info-v2.0.0/`, reconstructed runtimes matching the deployed code modulo
+  generated fields; an incompatible layout change fails by field, a safe append passes), the three
+  lineages with no proxy yet without a
+  reference until their first deployment freezes one — the namespaces being pinned by the test above;
+  and
+  `pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]` answers the on-chain half
+  where the chain is decisive — a Personal Account proxy needs a non-zero beacon that can never
+  return to zero, and a subaccount proxy needs a registered implementation, which only the
+  `SubaccountImplementationSet` history can rule out (an RPC serving full-range logs) — and
+  otherwise answers from the retained git history of the network's deployment record and cut
+  files (a facet any current, historical or example record names may have been installed), on the
+  stated assumption that every installation was committed under its canonical facet name before
+  execution and remains reachable from the clone's refs, failing closed on
+  anything unproven. Verified 2026-09-05: the **subaccount lineage is fresh on flare, songbird,
+  coston2 and coston2-staging** (`SubaccountsFacet` is cut on none of them and no version of their
+  records ever named it) and Ethereum has no deployment record (the check refuses to infer
+  freshness from that; the bootstrap has not run), so the re-laid subaccount layouts are safe; the
+  **Personal Account lineage is not fresh** on any of the four (beacons set), and its layout is
+  unchanged, as the rule requires and the validator's v2.0.0 reference enforces;
 
-- ~~a minimal Ethereum-side init contract for the cut~~ — built as
-  [`EthereumControllerInit`](../../../contracts/smartAccounts/facets/EthereumControllerInit.sol):
-  `MasterAccountControllerInit` is Flare-specific and is skipped, so this sets the four ERC-165
-  interface flags and nothing else (the executor, payment-proof and instruction-fee settings
-  belong to facets the Ethereum cut does not carry, and the Personal Account beacon and each
-  type's implementation are timelocked governance calls made after the cut, never init writes).
-  The cut plan names it as its `init` block with no arguments — see
-  `deployment/cuts/ethereum/cut-example.json`;
 - post-cut verification: loupe/selector layout, owner, and ERC-165 answers checked against
   the expected Ethereum facet set (the bootstrap itself already verifies init-code hashes,
   CREATE2 addresses, and runtime code against the pinned Flare fixtures, in CI and at

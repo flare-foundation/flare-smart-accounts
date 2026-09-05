@@ -22,6 +22,14 @@ fs_permissions = [
 ffi = true
 via_ir = true
 
+# Isolated build for the OpenZeppelin upgrade-safety validator (`pnpm build:upgrade-info` then
+# `pnpm validate-upgrade`): full build-info plus storage layouts, in its own out and cache dirs.
+[profile.upgrade_validation]
+out = "artifacts-upgrades"
+cache_path = "cache-upgrades"
+build_info = true
+extra_output = ["storageLayout"]
+
 [dependencies]
 "@openzeppelin-contracts" = "5.5.0"
 "@openzeppelin-contracts-upgradeable" = "5.5.0"

@@ -9,6 +9,8 @@ deployment/deploys/all/scdev.json
 # Foundry files
 cache-forge/
 artifacts-forge/
+artifacts-upgrades/
+cache-upgrades/
 broadcast/
 dependencies/
 

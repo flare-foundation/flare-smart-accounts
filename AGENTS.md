@@ -92,6 +92,7 @@ For Solidity or deployment-script changes:
 pnpm lint-sol
 forge build
 pnpm coverage
+pnpm build:upgrade-info && pnpm validate-upgrade   # when a proxy-backed implementation changed
 ```
 
 Coverage target: **100% of lines, functions and branches** on every contract you touch. Branches
@@ -139,6 +140,7 @@ test/
 deployment/
   chain-config/      # Per-network chain config JSON
   deploys/           # Deployed contract addresses per network
+  build-info-v2.0.0/ # Reconstructed v2.0.0 build of the three live implementations: the upgrade validator's reference
   cuts/              # Diamond cut files per network
   scripts/           # Forge deploy scripts (.s.sol), bash wrappers, TS helpers
   utils/             # Deployment utility scripts
@@ -318,6 +320,54 @@ repository is MIT. The Morpho surface the accounts use is our own code (`contrac
 `contracts/smartAccounts/interface/IOracle.sol`, `contracts/smartAccounts/library/MorphoMath.sol`), pinned to upstream
 v1.0.0 by `test/unit/smartAccounts/MorphoConformance.t.sol` (selectors, return schemas, the live market id,
 share-math vectors). Do not add a Morpho import anywhere.
+
+### Proxy storage layouts
+
+Proxies keep their storage across upgrades, so every implementation in a proxy's chain-local
+lineage must preserve that proxy's layout: append fields, never insert, reorder or retype. The
+OpenZeppelin upgrade-safety validator gates this, locally and in CI (`upgrade-build-info` +
+`validate-upgrade`):
+
+```bash
+pnpm build:upgrade-info && pnpm validate-upgrade
+```
+
+`build:upgrade-info` compiles the isolated `upgrade_validation` profile (full build-info and storage
+layouts under `artifacts-upgrades/`); `validate-upgrade` runs the validator over the six proxy-backed
+implementations. The three that are live — the Flare Personal Account, `FAssetRedeemComposer` and
+`FAssetRedeemerAccount` — are checked against `deployment/build-info-v2.0.0/`, a reconstructed v2.0.0
+reference: the build-info of those three compilation units rebuilt from the `v2.0.0` tag with its solc
+0.8.30. The reconstructed runtimes match the deployed implementations modulo the identified generated fields (the
+metadata hashes, including the one embedded in the redeemer-proxy creation code, and the UUPS
+immutable), so an incompatible layout change fails with field-level diagnostics while a safe append
+passes. The remote
+Personal Account and both loan subaccounts have no proxy on any network yet and run the checks that
+need no reference (constructor and initializer safety, unsafe operations, annotated namespaces); before
+re-laying one of those layouts, check the lineage is still empty with
+`pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]`. It is decisive on chain only through
+the beacon or the registration event history, which needs an RPC serving full-range logs (a private
+node); otherwise it answers from the retained git history of the network's deployment record and cut
+files (a full clone), on the stated assumption that every installation was committed under its canonical
+facet name before execution and remains reachable from the clone's refs (a facet named by any current,
+historical or example record may have been installed), and fails
+closed on anything unproven. At a lineage's first production
+deployment, copy that build's `artifacts-upgrades/build-info` into a tracked
+`deployment/build-info-<version>/` directory right away (CI artifacts expire, so the window closes
+with the deployment) and add it to `validate-upgrade` with `--referenceBuildInfoDirs` and
+`--reference <dirname>:<Contract> --requireReference`.
+
+Two things to know about the validator's output. The implementations' constructors carry the
+`@custom:oz-upgrades-unsafe-allow constructor` waiver (`ControlledAccountBase` for the four accounts, the
+two composer contracts for theirs). The validator's constructor rule applies to them as to any
+implementation; the waiver suppresses its finding because these constructors run on the implementation
+only, never on a proxy, and it keeps the exception reviewed rather than silent. And the
+diamond libraries' `State` structs raise "namespace struct is defined outside of a contract" warnings,
+which is expected (the validator covers the proxied implementations; the diamond's namespaces are the
+facets' concern). The rule the
+account bases follow — controller at slot 0 in every lineage, `xrplOwner` at slot 1 in every Personal
+Account lineage, every other base field in an ERC-7201 namespace — stays pinned by
+`test/unit/smartAccounts/AccountStorageLayout.t.sol`, which pins the cross-lineage layout rule the validator
+does not compare (it checks each lineage only against its own reference).
 
 ## Commits
 

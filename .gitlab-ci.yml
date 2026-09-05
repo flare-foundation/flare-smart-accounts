@@ -23,7 +23,9 @@ default:
 .partials:
   cache-nodejs:
     key:
-      files: [ pnpm-lock.yaml ]
+      # pnpm-workspace.yaml governs build-script permissions, so a change to it must not reuse
+      # node_modules prepared under the previous policy.
+      files: [ pnpm-lock.yaml, pnpm-workspace.yaml ]
     paths:
     - node_modules/
     policy: pull
@@ -64,7 +66,9 @@ build-node-modules:
   - pnpm exec tsx --eval 'const value = 1 as number; if (value !== 1) process.exit(1)'
   cache:
   - key:
-      files: [ pnpm-lock.yaml ]
+      # pnpm-workspace.yaml governs build-script permissions, so a change to it must not reuse
+      # node_modules prepared under the previous policy.
+      files: [ pnpm-lock.yaml, pnpm-workspace.yaml ]
     paths:
     - node_modules/
     policy: pull-push
@@ -139,6 +143,47 @@ test-tooling:
   script:
   - corepack enable pnpm
   - pnpm test:tooling
+
+# Builds the isolated upgrade-validation profile (full build-info + storage layout) and hands
+# it to the validator job as an artifact. A clean build is required: the validator needs a full
+# compilation and rejects a directory that also holds stale build-info from earlier runs.
+upgrade-build-info:
+  image: flarefoundation/foundry-custom:latest
+  stage: test
+  tags: [ flarenetwork-md ]
+  timeout: 10 minutes
+  needs: []
+  variables:
+    FOUNDRY_PROFILE: upgrade_validation
+  before_script:
+  - forge soldeer install
+  - forge install --no-git
+  script:
+  - forge clean
+  - forge build
+  artifacts:
+    expire_in: 1 day
+    paths:
+    - artifacts-upgrades/build-info/
+
+# Blocking: the OpenZeppelin upgrade-safety validator over the six proxy-backed implementations.
+# The three live ones (Personal Account, FAssetRedeemComposer, FAssetRedeemerAccount) are checked
+# against the reconstructed v2.0.0 reference build (deployment/build-info-v2.0.0): an incompatible
+# layout change fails with field-level diagnostics, a safe append passes; the lineages
+# with no proxy yet run the checks that need no reference (constructor/initializer, unsafe operations,
+# namespaces) until their first deployment freezes one too.
+validate-upgrade:
+  image: node:24
+  stage: test
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  - job: upgrade-build-info
+    artifacts: true
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm validate-upgrade
 
 format-check:
   image: node:24
