@@ -3,6 +3,8 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 import {IControlledAccount} from "../../../contracts/userInterfaces/IControlledAccount.sol";
+import {IPersonalAccountsFacet} from "../../../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IBridgingSubaccount} from "../../../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
@@ -190,8 +192,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testDeployRevertWhenImplementationNotConfigured() public {
-        // the reserved type 0 is never configured, so resolution returns address(0)
-        vm.expectRevert();
+        // the reserved type 0 is never configured, so resolution returns address(0) and the
+        // frozen proxy's delegatecall into it fails closed on the missing code
+        vm.expectRevert(abi.encodeWithSelector(Address.AddressEmptyCode.selector, address(0)));
         new SubaccountProxy(
             address(controller),
             parentPersonalAccount,
@@ -346,7 +349,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 250e6);
         mockAssetManager.setMinimumRedeemAmountUBA(10e6);
         vm.deal(address(this), 2 * executorFee);
-        vm.expectRevert();
+        vm.expectRevert(bytes(""));
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
 
         // below the minimum it never calls parent code: the FXRP and the fee park at the
@@ -385,7 +388,15 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertNotEq(subaccount.code.length, 0);
 
         vm.deal(address(this), collateralReservationFee + executorFee);
-        vm.expectRevert();
+        // the parent's CREATE2 fails inside the factory, so the creation reports the predicted
+        // address as not deployed - the very address the orphan is bound to
+        address orphanParent = controller.getPersonalAccount("");
+        assertEq(orphanParent, LoanSubaccount(payable(subaccount)).parentPersonalAccount());
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPersonalAccountsFacet.PersonalAccountNotSuccessfullyDeployed.selector, orphanParent
+            )
+        );
         controller.reserveCollateral{value: collateralReservationFee + executorFee}(
             "",
             (bytes32(uint256(1)) << 160) | (bytes32(uint256(1)) << 144),
@@ -2068,7 +2079,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         mockAssetManager.setMinimumRedeemAmountUBA(10e6);
 
         vm.deal(address(this), 2 * executorFee);
-        vm.expectRevert();
+        vm.expectRevert(bytes(""));
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
 
         vm.prank(makeAddr("anyone"));

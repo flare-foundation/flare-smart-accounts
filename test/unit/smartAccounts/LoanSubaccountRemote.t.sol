@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 import {IControlledAccount} from "../../../contracts/userInterfaces/IControlledAccount.sol";
+import {IPersonalAccountsFacet} from "../../../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
 import {ISubaccount} from "../../../contracts/userInterfaces/ISubaccount.sol";
 import {FacetsDeploy} from "../../utils/FacetsDeploy.t.sol";
 import {IDiamond} from "../../../contracts/diamond/interfaces/IDiamond.sol";
@@ -1385,7 +1386,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         ILoanSubaccountRemote(subaccount).checkpointFee();
         (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
-        assertApproxEqAbs(feeDebtX18, 77e18 * 1e18, 1e18);
+        assertEq(feeDebtX18, 70e18 * 1e18 + principal * 0.07e18);
     }
 
     function testLiquidationKeepsFloorAccruingUntilPing() public {
@@ -1447,7 +1448,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ILoanSubaccountRemote(subaccount).checkpointFee();
         (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
         // the second year is priced on ~100, not the stale 1000
-        assertApproxEqAbs(feeDebtX18, 77e18 * 1e18, 1e18);
+        assertEq(feeDebtX18, 70e18 * 1e18 + principal * 0.07e18);
     }
 
     function testRateChangeAppliesFromTheNextCheckpointOnly() public {
@@ -2448,9 +2449,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function testMixedInterestCheckpointPathDependenceIsThePromise() public {
         // the design's per-checkpoint promise, pinned: zero interest in the first half-year,
-        // heavy interest in the second - the account checkpointed halfway owes ~40 (35 floor
-        // + 5 spread), the untouched one owes ~10 (interest ate the whole-year floor). Both
-        // are correct; the advertised measurement is per-checkpoint, not whole-period.
+        // heavy interest in the second - the account checkpointed halfway owes exactly 40 (35
+        // floor + 5 spread), the untouched one exactly 10 (interest ate the whole-year floor;
+        // in the spread branch the interest cancels, so neither depends on Morpho's rounding).
+        // Both are correct; the advertised measurement is per-checkpoint, not whole-period.
         _configureSettings();
         address pinged = controller.createSubaccount("rPingedOwner", SUBACCOUNT_TYPE_LOAN);
         address dormant = controller.createSubaccount("rDormantOwner", SUBACCOUNT_TYPE_LOAN);
@@ -2475,8 +2477,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         (, uint256 feePinged, , , , ) = ILoanSubaccountRemote(pinged).getLoanFeeState();
         (, uint256 feeDormant, , , , ) = ILoanSubaccountRemote(dormant).getLoanFeeState();
-        assertApproxEqAbs(feePinged, 40e18 * 1e18, 2e18);
-        assertApproxEqAbs(feeDormant, 10e18 * 1e18, 2e18);
+        assertEq(feePinged, 40e18 * 1e18);
+        assertEq(feeDormant, 10e18 * 1e18);
     }
 
     function testRepayFrozenFeeRecipientReservesAndRetries() public {
@@ -3258,10 +3260,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(crossCollateralB, 0);
     }
 
-    function testBorrowRevertMarketNotRegistered() public {
+    function testUnregisteredTypeRevertsBorrowDepositAndRail() public {
         // mis-sync fail-safe: a type with no market yet cannot execute composed actions
-        // (retriable revert); the credit waits idle for the registration - its one route is
-        // into the position, so the deposit rail waits the same way
+        // (retriable reverts, the operation id stays unconsumed). A borrow stops first at the
+        // activation gate - fee terms follow registration, so an unregistered type has none -
+        // while the deposit compose and the deposit rail stop at the registration itself; the
+        // credit waits idle, its one route being into the position
         _configureSettings();
         uint256 typeB = 2;
         vm.prank(governance);
@@ -3271,25 +3275,31 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         address subaccountB = address(proxyB);
         fxrp.mint(subaccountB, 100e6);
+        bytes memory notRegistered =
+            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, typeB);
 
         _deliverExpectRevert(
-            subaccountB, 1, _depositPayload(),
-            abi.encodeWithSelector(
-                ILoanMarketsFacet.MarketNotRegistered.selector, typeB
-            )
+            subaccountB, 1,
+            _borrowPayload(
+                bytes32("op-borrow"), DESTINATION_KIND_EVM,
+                bytes32(uint256(uint160(makeAddr("dest")))), 50e18
+            ),
+            ILoanSubaccountRemote.FeeTermsNotConfigured.selector
         );
-        // the revert rolled the whole delivery back; the packet stays retriable
+        // the revert rolled the whole delivery back: the packet stays retriable, the id unconsumed
+        assertFalse(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-borrow")));
+        _deliverExpectRevert(subaccountB, 2, _depositPayload(), notRegistered);
 
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, typeB)
-        );
+        vm.expectRevert(notRegistered);
         ILoanSubaccountRemote(subaccountB).depositIdleFxrp();
         assertEq(fxrp.balanceOf(subaccountB), 100e6);
     }
 
     function testBorrowRetriesAfterMarketRegistration() public {
-        // the mis-sync revert is retriable: once governance registers the type's market,
-        // the exact same packet delivers
+        // the mis-sync revert is retriable: the borrow stops at the activation gate while the
+        // type has no market (and so no fee terms); once governance registers the market and
+        // sets the terms, the exact same packet delivers - supplying the idle credit, opening
+        // the debt, disbursing, and consuming the id
         _configureSettings();
         uint256 typeB = 2;
         vm.prank(governance);
@@ -3298,29 +3308,29 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             address(controller), parentPersonalAccount, typeB
         ));
         fxrp.mint(subaccountB, 100e6);
-
-        bytes memory payload = _depositPayload();
+        address dest = makeAddr("dest");
+        bytes memory payload = _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(dest))), 50e18
+        );
         _deliverExpectRevert(
-            subaccountB, 1, payload,
-            abi.encodeWithSelector(
-                ILoanMarketsFacet.MarketNotRegistered.selector, typeB
-            )
+            subaccountB, 1, payload, ILoanSubaccountRemote.FeeTermsNotConfigured.selector
         );
 
         ILoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
-            typeB, marketB
-        );
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
 
         _deliver(subaccountB, 1, 100e6, payload);
-        (, , uint128 collateral) =
+        (, uint128 borrowShares, uint128 collateral) =
             morpho.position(keccak256(abi.encode(marketB.marketParams)), subaccountB);
         assertEq(collateral, 100e6);
+        assertGt(borrowShares, 0);
+        assertEq(rlusd.balanceOf(dest), 50e18);
+        assertTrue(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-borrow")));
     }
 
     function testRepayPartialByAssets() public {
@@ -3819,7 +3829,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // PA beacon, through the generic creation route on the PersonalAccountsFacet - but
         // only once the implementation is registered: the frozen BeaconProxy asks the beacon
         // at construction, and an unset beacon fails the creation closed
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IPersonalAccountsFacet.PersonalAccountNotSuccessfullyDeployed.selector, parent
+            )
+        );
         minimalController.createPersonalAccount(xrplOwner);
         PersonalAccountRemote remotePaImpl = new PersonalAccountRemote();
         vm.prank(initialOwner);
