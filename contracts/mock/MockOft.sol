@@ -37,29 +37,58 @@ contract MockOft is IOFT {
     uint256 public lastValue;
     address public lastRefundAddress;
 
-    constructor(IERC20 _token, uint256 _nativeFee) {
+    /// @notice The send-time fee check the real endpoint performs (`LZ_InsufficientFee`): a quote
+    /// that rose between the caller's `quoteSend` and its `send` fails the send.
+    error NativeFeeBelowQuote(uint256 quoted, uint256 provided);
+
+    constructor(
+        IERC20 _token,
+        uint256 _nativeFee
+    ) {
         underlyingToken = _token;
         nativeFee = _nativeFee;
     }
 
-    function setNativeFee(uint256 _nativeFee) external {
+    function setNativeFee(
+        uint256 _nativeFee
+    )
+        external
+    {
         nativeFee = _nativeFee;
     }
 
-    function setSharedDecimals(uint8 _sharedDecimals) external {
+    function setSharedDecimals(
+        uint8 _sharedDecimals
+    )
+        external
+    {
         sharedDecimalsValue = _sharedDecimals;
     }
 
-    function setPeer(uint32 _eid, bytes32 _peer) external {
+    function setPeer(
+        uint32 _eid,
+        bytes32 _peer
+    )
+        external
+    {
         peers[_eid] = _peer;
     }
 
-    function setOftVersion(bytes4 _interfaceId, uint64 _version) external {
+    function setOftVersion(
+        bytes4 _interfaceId,
+        uint64 _version
+    )
+        external
+    {
         oftInterfaceId = _interfaceId;
         oftMessageVersion = _version;
     }
 
-    function setEndpoint(address _endpoint) external {
+    function setEndpoint(
+        address _endpoint
+    )
+        external
+    {
         endpoint = _endpoint;
     }
 
@@ -72,6 +101,8 @@ contract MockOft is IOFT {
         external payable
         returns (MessagingReceipt memory, OFTReceipt memory)
     {
+        // the endpoint charges the live fee, not the one the caller quoted earlier
+        require(msg.value >= nativeFee, NativeFeeBelowQuote(nativeFee, msg.value));
         // lock/unlock adapter: pull the tokens from the sender
         underlyingToken.safeTransferFrom(msg.sender, address(this), _sendParam.amountLD);
 
