@@ -1306,9 +1306,14 @@ storage-lineage gate below is the third member of this family.
   deployment of any of those implementations on ANY network, verify on chain that no proxy of
   the lineage exists there. The Flare Personal Account's layout is unchanged by construction;
 
-- a minimal Ethereum-side init contract for the cut: `MasterAccountControllerInit` is
-  Flare-specific and is skipped, so ERC-165 interface flags (and nothing else) must be set
-  explicitly;
+- ~~a minimal Ethereum-side init contract for the cut~~ — built as
+  [`EthereumControllerInit`](../../../contracts/smartAccounts/facets/EthereumControllerInit.sol):
+  `MasterAccountControllerInit` is Flare-specific and is skipped, so this sets the four ERC-165
+  interface flags and nothing else (the executor, payment-proof and instruction-fee settings
+  belong to facets the Ethereum cut does not carry, and the Personal Account beacon and each
+  type's implementation are timelocked governance calls made after the cut, never init writes).
+  The cut plan names it as its `init` block with no arguments — see
+  `deployment/cuts/ethereum/cut-example.json`;
 - post-cut verification: loupe/selector layout, owner, and ERC-165 answers checked against
   the expected Ethereum facet set (the bootstrap itself already verifies init-code hashes,
   CREATE2 addresses, and runtime code against the pinned Flare fixtures, in CI and at
