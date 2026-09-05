@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {ExecuteDiamondCutHarness} from "./ExecuteDiamondCutHarness.sol";
+import {ExecuteDiamondCutHarness} from "../../utils/ExecuteDiamondCutHarness.sol";
 
 /**
  * @title ExecuteDiamondCutGuardsTest

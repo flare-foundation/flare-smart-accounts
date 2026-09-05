@@ -3,8 +3,8 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 
-import {MyERC4626} from "../contracts/mock/MyERC4626.sol";
-import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
+import {MyERC4626} from "../../../contracts/mock/MyERC4626.sol";
+import {MintableERC20} from "../../../contracts/mock/MintableERC20.sol";
 
 contract MyERC4626Test is Test {
     MyERC4626 private myERC4626;

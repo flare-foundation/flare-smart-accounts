@@ -2,8 +2,8 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {DeployConfigTypes} from "../deployment/types/DeployConfigTypes.sol";
-import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
+import {DeployConfigTypes} from "../../../deployment/types/DeployConfigTypes.sol";
+import {IVaultsFacet} from "../../../contracts/userInterfaces/facets/IVaultsFacet.sol";
 
 /**
  * @title DeployConfigDecodeTest

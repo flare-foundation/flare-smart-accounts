@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {ExecuteDiamondCut} from "../deployment/scripts/ExecuteDiamondCut.s.sol";
+import {ExecuteDiamondCut} from "../../deployment/scripts/ExecuteDiamondCut.s.sol";
 
 /**
  * @title ExecuteDiamondCutHarness

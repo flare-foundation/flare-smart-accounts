@@ -2,10 +2,10 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
-import {PersonalAccountRemote} from "../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
-import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSubaccount.sol";
-import {LoanSubaccountRemote} from "../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
+import {PersonalAccount} from "../../../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {PersonalAccountRemote} from "../../../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
+import {LoanSubaccount} from "../../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
+import {LoanSubaccountRemote} from "../../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
 
 /// The storage rule of the account bases, pinned: `controllerAddress` is slot 0, linear, in
 /// every lineage, and `xrplOwner` slot 1 in every Personal Account lineage - the production

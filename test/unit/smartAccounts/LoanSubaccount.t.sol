@@ -2,8 +2,8 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {IControlledAccount} from "../contracts/userInterfaces/IControlledAccount.sol";
-import {IBridgingSubaccount} from "../contracts/userInterfaces/IBridgingSubaccount.sol";
+import {IControlledAccount} from "../../../contracts/userInterfaces/IControlledAccount.sol";
+import {IBridgingSubaccount} from "../../../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
@@ -12,40 +12,40 @@ import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferen
 import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AvailableAgentInfo.sol";
-import {FacetsDeploy} from "./utils/FacetsDeploy.t.sol";
-import {IDiamond} from "../contracts/diamond/interfaces/IDiamond.sol";
-import {DiamondArgs} from "../contracts/diamond/implementation/Diamond.sol";
-import {NotContractOwner} from "../contracts/diamond/libraries/LibDiamond.sol";
-import {IISingletonFactory} from "../contracts/smartAccounts/interface/IISingletonFactory.sol";
-import {MasterAccountController} from "../contracts/smartAccounts/implementation/MasterAccountController.sol";
-import {IIMasterAccountController} from "../contracts/smartAccounts/interface/IIMasterAccountController.sol";
-import {MasterAccountControllerInit} from "../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
-import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
-import {LoanSubaccount} from "../contracts/smartAccounts/implementation/LoanSubaccount.sol";
-import {SubaccountProxy} from "../contracts/smartAccounts/proxy/SubaccountProxy.sol";
-import {MockSingletonFactoryNoDeploy} from "../contracts/mock/MockSingletonFactoryNoDeploy.sol";
-import {MockLoanSubaccount} from "../contracts/mock/MockLoanSubaccount.sol";
-import {MockGenericSubaccount} from "../contracts/mock/MockGenericSubaccount.sol";
-import {MockNativeRejectingParent} from "../contracts/mock/MockNativeRejectingParent.sol";
-import {ISubaccount} from "../contracts/userInterfaces/ISubaccount.sol";
-import {MockOft} from "../contracts/mock/MockOft.sol";
-import {MockAssetManager} from "../contracts/mock/MockAssetManager.sol";
-import {MintableERC20} from "../contracts/mock/MintableERC20.sol";
-import {ILoanSubaccount} from "../contracts/userInterfaces/ILoanSubaccount.sol";
-import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../contracts/userInterfaces/IBridgingSubaccount.sol";
+import {FacetsDeploy} from "../../utils/FacetsDeploy.t.sol";
+import {IDiamond} from "../../../contracts/diamond/interfaces/IDiamond.sol";
+import {DiamondArgs} from "../../../contracts/diamond/implementation/Diamond.sol";
+import {NotContractOwner} from "../../../contracts/diamond/libraries/LibDiamond.sol";
+import {IISingletonFactory} from "../../../contracts/smartAccounts/interface/IISingletonFactory.sol";
+import {MasterAccountController} from "../../../contracts/smartAccounts/implementation/MasterAccountController.sol";
+import {IIMasterAccountController} from "../../../contracts/smartAccounts/interface/IIMasterAccountController.sol";
+import {MasterAccountControllerInit} from "../../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
+import {PersonalAccount} from "../../../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {LoanSubaccount} from "../../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
+import {SubaccountProxy} from "../../../contracts/smartAccounts/proxy/SubaccountProxy.sol";
+import {MockSingletonFactoryNoDeploy} from "../../../contracts/mock/MockSingletonFactoryNoDeploy.sol";
+import {MockLoanSubaccount} from "../../../contracts/mock/MockLoanSubaccount.sol";
+import {MockGenericSubaccount} from "../../../contracts/mock/MockGenericSubaccount.sol";
+import {MockNativeRejectingParent} from "../../../contracts/mock/MockNativeRejectingParent.sol";
+import {ISubaccount} from "../../../contracts/userInterfaces/ISubaccount.sol";
+import {MockOft} from "../../../contracts/mock/MockOft.sol";
+import {MockAssetManager} from "../../../contracts/mock/MockAssetManager.sol";
+import {MintableERC20} from "../../../contracts/mock/MintableERC20.sol";
+import {ILoanSubaccount} from "../../../contracts/userInterfaces/ILoanSubaccount.sol";
+import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {
     ISubaccountsFacet,
     SUBACCOUNT_TYPE_LOAN,
     SUBACCOUNT_TYPE_NONE
-} from "../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
-import {IBridgeRoutesFacet} from "../contracts/userInterfaces/facets/IBridgeRoutesFacet.sol";
-import {IMasterAccountController} from "../contracts/userInterfaces/IMasterAccountController.sol";
-import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
+} from "../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {IBridgeRoutesFacet} from "../../../contracts/userInterfaces/facets/IBridgeRoutesFacet.sol";
+import {IMasterAccountController} from "../../../contracts/userInterfaces/IMasterAccountController.sol";
+import {IPersonalAccount} from "../../../contracts/userInterfaces/IPersonalAccount.sol";
 import {
     IComposeReceiverAccountBase,
     PAYLOAD_VERSION_1
-} from "../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
-import {MockLzEndpoint} from "../contracts/mock/MockLzEndpoint.sol";
+} from "../../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
+import {MockLzEndpoint} from "../../../contracts/mock/MockLzEndpoint.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
 import {
@@ -53,11 +53,11 @@ import {
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM
-} from "../contracts/userInterfaces/ILoanSubaccountRemote.sol";
-import {PA_ACTION_EXECUTE} from "../contracts/userInterfaces/IPersonalAccountRemote.sol";
+} from "../../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {PA_ACTION_EXECUTE} from "../../../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IMemoInstructionsFacet} from "../contracts/userInterfaces/facets/IMemoInstructionsFacet.sol";
-import {IPauseFacet} from "../contracts/userInterfaces/facets/IPauseFacet.sol";
+import {IMemoInstructionsFacet} from "../../../contracts/userInterfaces/facets/IMemoInstructionsFacet.sol";
+import {IPauseFacet} from "../../../contracts/userInterfaces/facets/IPauseFacet.sol";
 
 /**
  * @title LoanSubaccountTest

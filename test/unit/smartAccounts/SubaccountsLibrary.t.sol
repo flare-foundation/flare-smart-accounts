@@ -2,8 +2,8 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {Subaccounts} from "../contracts/smartAccounts/library/Subaccounts.sol";
-import {SubaccountProxy} from "../contracts/smartAccounts/proxy/SubaccountProxy.sol";
+import {Subaccounts} from "../../../contracts/smartAccounts/library/Subaccounts.sol";
+import {SubaccountProxy} from "../../../contracts/smartAccounts/proxy/SubaccountProxy.sol";
 
 /**
  * @title SubaccountsLibraryTest

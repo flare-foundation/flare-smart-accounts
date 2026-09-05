@@ -3,11 +3,11 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {FAssetRedeemComposer} from "../contracts/composer/implementation/FAssetRedeemComposer.sol";
-import {FAssetRedeemerAccount} from "../contracts/composer/implementation/FAssetRedeemerAccount.sol";
-import {FAssetRedeemComposerProxy} from "../contracts/composer/proxy/FAssetRedeemComposerProxy.sol";
-import {IFAssetRedeemComposer} from "../contracts/userInterfaces/IFAssetRedeemComposer.sol";
-import {IOwnableWithTimelock} from "../contracts/userInterfaces/IOwnableWithTimelock.sol";
+import {FAssetRedeemComposer} from "../../../contracts/composer/implementation/FAssetRedeemComposer.sol";
+import {FAssetRedeemerAccount} from "../../../contracts/composer/implementation/FAssetRedeemerAccount.sol";
+import {FAssetRedeemComposerProxy} from "../../../contracts/composer/proxy/FAssetRedeemComposerProxy.sol";
+import {IFAssetRedeemComposer} from "../../../contracts/userInterfaces/IFAssetRedeemComposer.sol";
+import {IOwnableWithTimelock} from "../../../contracts/userInterfaces/IOwnableWithTimelock.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IRedeemExtended} from "flare-periphery/src/flare/IRedeemExtended.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";

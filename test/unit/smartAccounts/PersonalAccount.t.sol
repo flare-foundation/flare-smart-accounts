@@ -2,13 +2,13 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {IPersonalAccountBase} from "../contracts/userInterfaces/IPersonalAccountBase.sol";
-import {IControlledAccount} from "../contracts/userInterfaces/IControlledAccount.sol";
-import {PersonalAccount} from "../contracts/smartAccounts/implementation/PersonalAccount.sol";
-import {IPersonalAccount} from "../contracts/userInterfaces/IPersonalAccount.sol";
-import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
-import {IIVault} from "../contracts/smartAccounts/interface/IIVault.sol";
-import {IVaultsFacet} from "../contracts/userInterfaces/facets/IVaultsFacet.sol";
+import {IPersonalAccountBase} from "../../../contracts/userInterfaces/IPersonalAccountBase.sol";
+import {IControlledAccount} from "../../../contracts/userInterfaces/IControlledAccount.sol";
+import {PersonalAccount} from "../../../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {IPersonalAccount} from "../../../contracts/userInterfaces/IPersonalAccount.sol";
+import {PersonalAccountProxy} from "../../../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
+import {IIVault} from "../../../contracts/smartAccounts/interface/IIVault.sol";
+import {IVaultsFacet} from "../../../contracts/userInterfaces/facets/IVaultsFacet.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {AgentInfo} from "flare-periphery/src/flare/data/AgentInfo.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
@@ -16,9 +16,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IERC1155Receiver} from "@openzeppelin/contracts/token/ERC1155/IERC1155Receiver.sol";
-import {MockBeacon} from "../contracts/mock/MockBeacon.sol";
-import {MockERC721} from "../contracts/mock/MockERC721.sol";
-import {MockERC1155} from "../contracts/mock/MockERC1155.sol";
+import {MockBeacon} from "../../../contracts/mock/MockBeacon.sol";
+import {MockERC721} from "../../../contracts/mock/MockERC721.sol";
+import {MockERC1155} from "../../../contracts/mock/MockERC1155.sol";
 import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 contract PersonalAccountTest is Test {

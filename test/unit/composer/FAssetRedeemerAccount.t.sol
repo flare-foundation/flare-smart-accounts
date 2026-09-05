@@ -2,17 +2,17 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {FAssetRedeemerAccount} from "../contracts/composer/implementation/FAssetRedeemerAccount.sol";
-import {FAssetRedeemerAccountProxy} from "../contracts/composer/proxy/FAssetRedeemerAccountProxy.sol";
-import {IFAssetRedeemerAccount} from "../contracts/userInterfaces/IFAssetRedeemerAccount.sol";
+import {FAssetRedeemerAccount} from "../../../contracts/composer/implementation/FAssetRedeemerAccount.sol";
+import {FAssetRedeemerAccountProxy} from "../../../contracts/composer/proxy/FAssetRedeemerAccountProxy.sol";
+import {IFAssetRedeemerAccount} from "../../../contracts/userInterfaces/IFAssetRedeemerAccount.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
 import {IRedeemExtended} from "flare-periphery/src/flare/IRedeemExtended.sol";
 import {IReferencedPaymentNonexistence} from "flare-periphery/src/flare/IReferencedPaymentNonexistence.sol";
 import {IXRPPaymentNonexistence} from "flare-periphery/src/flare/IXRPPaymentNonexistence.sol";
-import {IFAssetRedeemComposer} from "../contracts/userInterfaces/IFAssetRedeemComposer.sol";
+import {IFAssetRedeemComposer} from "../../../contracts/userInterfaces/IFAssetRedeemComposer.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {MockBeacon} from "./utils/MockBeacon.sol";
-import {UninitializedProxy} from "./utils/UninitializedProxy.sol";
+import {MockBeacon} from "../../utils/MockBeacon.sol";
+import {UninitializedProxy} from "../../utils/UninitializedProxy.sol";
 
 contract FAssetRedeemerAccountTest is Test {
     FAssetRedeemerAccount private accountImpl;

@@ -81,7 +81,7 @@ Even the diamond's own ownership / selector map lives in an ERC-7201 namespace: 
 
 Each XRPL address gets a [`PersonalAccount`](../../contracts/smartAccounts/implementation/PersonalAccount.sol) deployed as a [`PersonalAccountProxy`](../../contracts/smartAccounts/proxy/PersonalAccountProxy.sol) — an OpenZeppelin `BeaconProxy` whose beacon is the diamond itself. The diamond's [`PersonalAccountsFacet.implementation()`](../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol) returns the current Personal Account implementation. Upgrading every Personal Account is therefore one timelocked call to `setPersonalAccountImplementation`.
 
-Personal Accounts are deployed via the [EIP-2470 Singleton Factory](https://eips.ethereum.org/EIPS/eip-2470) at `0xce0042B868300000d44A59004Da54A005ffdcf9f`. CREATE2 derivation uses a **frozen** copy of `type(PersonalAccountProxy).creationCode` in [`PersonalAccounts.PROXY_CREATION_CODE`](../../contracts/smartAccounts/library/PersonalAccounts.sol). The hash of that constant is pinned in [`test/PersonalAccountsLibrary.t.sol`](../../test/PersonalAccountsLibrary.t.sol):
+Personal Accounts are deployed via the [EIP-2470 Singleton Factory](https://eips.ethereum.org/EIPS/eip-2470) at `0xce0042B868300000d44A59004Da54A005ffdcf9f`. CREATE2 derivation uses a **frozen** copy of `type(PersonalAccountProxy).creationCode` in [`PersonalAccounts.PROXY_CREATION_CODE`](../../contracts/smartAccounts/library/PersonalAccounts.sol). The hash of that constant is pinned in [`test/unit/smartAccounts/PersonalAccountsLibrary.t.sol`](../../test/unit/smartAccounts/PersonalAccountsLibrary.t.sol):
 
 ```text
 EXPECTED_PROXY_CREATION_CODE_HASH = 0x309250c8635e70dc667c1239a7bb73386e767b7084e9328b70de2c1f505b9b4a

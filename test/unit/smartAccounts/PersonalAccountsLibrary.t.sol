@@ -2,8 +2,8 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {PersonalAccounts} from "../contracts/smartAccounts/library/PersonalAccounts.sol";
-import {PersonalAccountProxy} from "../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
+import {PersonalAccounts} from "../../../contracts/smartAccounts/library/PersonalAccounts.sol";
+import {PersonalAccountProxy} from "../../../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 
 /**
  * @title PersonalAccountsLibraryTest

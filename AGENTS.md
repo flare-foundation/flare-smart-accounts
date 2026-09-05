@@ -130,7 +130,12 @@ contracts/
   utils/             # Shared helpers (for example OwnableWithTimelock)
   mock/              # Test mocks
 docs/specs/          # Protocol-level specification docs (per-module pages link to .sol sources)
-test/                # Foundry tests
+test/
+  unit/              # Per-module suites grouped like contracts/, plus deployment/tooling suites
+  adversarial/       # Attack and ordering tests across whole flows, on both chains
+  invariants/        # Stateful invariant campaigns (handlers live in utils/)
+  fuzz/              # Property tests over the arithmetic and the gates
+  utils/             # Fixtures, handlers and harnesses shared by the suites
 deployment/
   chain-config/      # Per-network chain config JSON
   deploys/           # Deployed contract addresses per network
@@ -221,6 +226,7 @@ Formatting style:
 - Function parameters go each on their own line.
 - Visibility and mutability go on their own indented line after params.
 - Opening brace goes on its own line after visibility.
+- Never run `forge fmt` (or Prettier) over `.sol` files; format Solidity by hand to these conventions.
 
 Example:
 
@@ -252,8 +258,18 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
 
 ### Testing
 
-- Tests live in `test/` and use `forge-std` `Test`.
-- Test files are named `<ContractName>.t.sol`.
+- Tests live in `test/`, grouped by kind, and use `forge-std` `Test`:
+  - `test/unit/<module>/`: the per-module suites, grouped like `contracts/` (`smartAccounts`, `composer`, `vaults`)
+    plus `deployment` for the deploy scripts and cut tooling; mostly one file per contract, with the pinning
+    suites (storage layout, init code, Morpho conformance) beside them.
+  - `test/adversarial/`: attack and ordering tests across whole flows; every test names the attack it rules out.
+  - `test/invariants/`: stateful invariant campaigns, bounded and with a fixed seed; a smoke test pins that every
+    handler path executes.
+  - `test/fuzz/`: property tests, each stated as the spec's formula computed independently of the contract.
+  - `test/utils/`: fixtures, handlers and harnesses shared by the suites. Mocks live in `contracts/mock/`. Both are
+    excluded from the coverage figure.
+- Test files are named `<ContractName>.t.sol`; a suite that is not about one contract names its subject
+  (`LoanFeeFuzz.t.sol`).
 - Test contracts are named `<ContractName>Test`.
 - Use `setUp()` for initialization.
 - Use `vm.mockCall`, `vm.prank`, `vm.deal`, `vm.expectRevert`, `vm.expectEmit`, `assertEq`, and `assertTrue`.
@@ -300,8 +316,8 @@ Dependencies are managed through Soldeer (`foundry.toml [dependencies]`).
 `morpho-blue` is deliberately **not** a dependency: its interfaces and libraries are GPL-2.0-or-later and this
 repository is MIT. The Morpho surface the accounts use is our own code (`contracts/smartAccounts/interface/IMorpho.sol`,
 `contracts/smartAccounts/interface/IOracle.sol`, `contracts/smartAccounts/library/MorphoMath.sol`), pinned to upstream
-v1.0.0 by `test/MorphoConformance.t.sol` (selectors, return schemas, the live market id, share-math vectors). Do not add
-a Morpho import anywhere.
+v1.0.0 by `test/unit/smartAccounts/MorphoConformance.t.sol` (selectors, return schemas, the live market id,
+share-math vectors). Do not add a Morpho import anywhere.
 
 ## Commits
 

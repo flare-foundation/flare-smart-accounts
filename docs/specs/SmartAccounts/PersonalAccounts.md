@@ -49,7 +49,7 @@ The CREATE2 input on the proxy side is **not** `type(PersonalAccountProxy).creat
 
 `type(...).creationCode` is resolved at compile time and includes the trailing CBOR metadata IPFS hash. That IPFS hash is recomputed from the entire compilation context of `PersonalAccountProxy` — its source, its imports' sources, compiler settings. Any drift there (even a comment edit in a transitively-imported file) shifts the CREATE2 address of every future PA.
 
-Freezing the constant makes the derivation purely a function of `(controller, xrplOwner)`, immune to project drift. The hash is pinned in [`test/PersonalAccountsLibrary.t.sol`](../../../test/PersonalAccountsLibrary.t.sol):
+Freezing the constant makes the derivation purely a function of `(controller, xrplOwner)`, immune to project drift. The hash is pinned in [`test/unit/smartAccounts/PersonalAccountsLibrary.t.sol`](../../../test/unit/smartAccounts/PersonalAccountsLibrary.t.sol):
 
 ```text
 EXPECTED_PROXY_CREATION_CODE_HASH = 0x309250c8635e70dc667c1239a7bb73386e767b7084e9328b70de2c1f505b9b4a

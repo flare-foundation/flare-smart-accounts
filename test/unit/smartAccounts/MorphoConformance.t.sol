@@ -2,11 +2,11 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {IMorpho} from "../contracts/smartAccounts/interface/IMorpho.sol";
-import {IOracle} from "../contracts/smartAccounts/interface/IOracle.sol";
-import {MorphoMath} from "../contracts/smartAccounts/library/MorphoMath.sol";
-import {MockMorpho} from "../contracts/mock/MockMorpho.sol";
-import {MockRawReturner} from "../contracts/mock/MockRawReturner.sol";
+import {IMorpho} from "../../../contracts/smartAccounts/interface/IMorpho.sol";
+import {IOracle} from "../../../contracts/smartAccounts/interface/IOracle.sol";
+import {MorphoMath} from "../../../contracts/smartAccounts/library/MorphoMath.sol";
+import {MockMorpho} from "../../../contracts/mock/MockMorpho.sol";
+import {MockRawReturner} from "../../../contracts/mock/MockRawReturner.sol";
 
 /**
  * @title MorphoConformanceTest

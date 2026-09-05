@@ -42,7 +42,7 @@ abi.encodePacked(
 
 with `salt = bytes32(0)`. The subaccount address is therefore a pure function of `(diamond, parentPersonalAccount, subaccountType)` — per-type and per-account unique, and identical on every chain where the diamond has the same address. No implementation or beacon address enters the derivation, so implementation upgrades never move addresses.
 
-> **Frozen:** the derivation uses the frozen `Subaccounts.PROXY_CREATION_CODE` hex constant, exactly like [`PersonalAccounts.PROXY_CREATION_CODE`](./PersonalAccounts.md#frozen-proxy_creation_code). Its hash is pinned in `test/SubaccountsLibrary.t.sol`, and two further tests compare it against a fresh compilation of the proxy source (by length, and byte-exact modulo CBOR metadata), so any drift fails CI. Editing the constant or the proxy source is a cross-chain coordination event: all predicted-but-not-deployed subaccount addresses would shift. Re-frozen twice pre-deployment: 2026-08-21, when the beacon query was renamed to `implementationForType`, and 2026-08-26, when the proxy contract was renamed to `SubaccountProxy` (the generic deployment vehicle had kept its loan-era name); no subaccount address had shipped either time, so nothing moved on chain.
+> **Frozen:** the derivation uses the frozen `Subaccounts.PROXY_CREATION_CODE` hex constant, exactly like [`PersonalAccounts.PROXY_CREATION_CODE`](./PersonalAccounts.md#frozen-proxy_creation_code). Its hash is pinned in `test/unit/smartAccounts/SubaccountsLibrary.t.sol`, and two further tests compare it against a fresh compilation of the proxy source (by length, and byte-exact modulo CBOR metadata), so any drift fails CI. Editing the constant or the proxy source is a cross-chain coordination event: all predicted-but-not-deployed subaccount addresses would shift. Re-frozen twice pre-deployment: 2026-08-21, when the beacon query was renamed to `implementationForType`, and 2026-08-26, when the proxy contract was renamed to `SubaccountProxy` (the generic deployment vehicle had kept its loan-era name); no subaccount address had shipped either time, so nothing moved on chain.
 
 ## Creation and prediction
 
@@ -591,7 +591,7 @@ arithmetic — is our own MIT code: the upstream `morpho-blue` files are GPL-2.0
 deliberately not a dependency. It was verified once against v1.0.0 (commit `55d2d99`, 2026-09-03:
 the canonical selectors, the `position`/`market`/`price` return schemas, the live FXRP/RLUSD
 market id, `SharesMathLib` vectors) and is pinned by
-`test/MorphoConformance.t.sol`; Morpho Blue is immutable, so the target never moves. It matters because the
+`test/unit/smartAccounts/MorphoConformance.t.sol`; Morpho Blue is immutable, so the target never moves. It matters because the
 binding is permanent and the account's debt checks must be able to read its live position: a
 Morpho that could later change behavior or start reverting would block that account's
 debt-gated paths (borrowing, defensive deposits, repayment and its surplus push) — inherent to where the
@@ -1229,7 +1229,7 @@ drift changes the base facets' bytecode, their CREATE2 addresses, the diamond's 
 arguments, and with them its address. The historical init code of
 the diamond and its three base facets is therefore pinned as raw bytes under
 `deployment/pinned-init-code/` (recovered from the Flare creation transactions and verified:
-its CREATE2 derivation reproduces the live addresses exactly; `test/PinnedInitCode.t.sol`
+its CREATE2 derivation reproduces the live addresses exactly; `test/unit/smartAccounts/PinnedInitCode.t.sol`
 asserts the hashes, the derivation, and a golden xrplOwner → Personal Account → subaccount
 address vector in CI). `pnpm deploy_ethereum_controller` reproduces all four contracts on
 Ethereum at the production addresses — permissionless, since CREATE2 through the EIP-2470
@@ -1297,7 +1297,7 @@ storage-lineage gate below is the third member of this family.
   namespaced** (ERC-7201: `smartAccounts.ComposeReceiverAccountBase.State` for the consumed
   operation ids, `smartAccounts.SubaccountBase.State` for the parent and the type), so a base can
   gain fields without shifting any derived lineage's own linear state, which starts right after
-  the linear base fields. `test/AccountStorageLayout.t.sol` pins the rule. Adopting it moved
+  the linear base fields. `test/unit/smartAccounts/AccountStorageLayout.t.sol` pins the rule. Adopting it moved
   the not-yet-deployed lineages' fields (the remote subaccount's fee state from slot 4 to
   slot 1, the remote PA's `xrplOwner` to slot 1, `usedOperations` into its namespace) — safe
   only because no subaccount or remote Personal Account proxy exists yet; before the first
