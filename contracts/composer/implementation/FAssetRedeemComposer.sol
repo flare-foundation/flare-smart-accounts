@@ -59,6 +59,9 @@ contract FAssetRedeemComposer is
 
     /**
      * @notice Disables initializers on implementation contract.
+     * @dev Intentional: it runs on the implementation only, never on a proxy, so the waiver below
+     * suppresses the upgrade-safety validator's constructor finding for it (see AGENTS.md).
+     * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor() {
         _disableInitializers();

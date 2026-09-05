@@ -23,6 +23,10 @@ abstract contract ControlledAccountBase is IControlledAccount {
     /// @inheritdoc IControlledAccount
     address public controllerAddress;
 
+    /// @dev The one constructor in every proxy-backed lineage. It is intentional: it runs on the
+    /// implementation, never on a proxy, so the waiver below suppresses the upgrade-safety
+    /// validator's constructor finding for it (see AGENTS.md).
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         // ensure the implementation contract itself cannot be initialized/used
         controllerAddress = EMPTY_ADDRESS;
