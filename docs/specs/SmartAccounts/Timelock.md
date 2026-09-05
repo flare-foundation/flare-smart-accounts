@@ -1,6 +1,6 @@
 # Timelock
 
-Every owner-driven state-changing operation on the diamond goes through a timelock. The pattern is the same one used by the composer's [`OwnableWithTimelock`](../../../contracts/utils/implementation/OwnableWithTimelock.sol) — record on first call, execute after a delay.
+Every owner-driven state-changing operation on the diamond goes through a timelock, apart from the five deliberate exceptions listed under [What is timelocked](#what-is-timelocked). The pattern is the same one used by the composer's [`OwnableWithTimelock`](../../../contracts/utils/implementation/OwnableWithTimelock.sol) — record on first call, execute after a delay.
 
 ## Library and facet
 
@@ -88,12 +88,15 @@ Three points worth noting:
 
 ## What is timelocked
 
-Every state-changing owner call **except** these two:
+Every state-changing owner call **except** these five:
 
+- `ComposeTransportFacet.clearComposeTransport()` — `onlyOwner`, no timelock (setting the transport stays timelocked). Rationale: containment on the remote diamond — clearing the compose transport fails every delivery closed and must be as fast as a pause.
 - `ExecutorsFacet.setExecutor(address)` — `onlyOwner`, no timelock. Rationale: rotating a compromised executor address must be fast.
+- `OwnershipFacet.transferOwnership(address)` — `onlyOwner`, no timelock (the standard EIP-2535 ownership facet). Queued calls survive the transfer and stay executable by anyone once matured.
+- `PauseFacet.removeUnpausers(address[])` — `onlyOwner`, no timelock. Rationale: it can only keep the system paused, and a delay would leave a compromised unpauser able to undo every pause meanwhile — see [Pause](./Pause.md).
 - `TimelockFacet.cancelTimelockedCall(bytes)` — `onlyOwner`, no timelock. Rationale: cancellation has to outpace the original execution.
 
-Everything else — diamond cuts, pause role management, vault registration, agent vault registration, instruction fee changes, payment-proof validity duration changes, PA implementation upgrades, executor *fee* changes, XRPL provider wallet rotation, the timelock duration itself — is `onlyOwnerWithTimelock`.
+Everything else — diamond cuts, the other pause role changes, vault registration, agent vault registration, instruction fee changes, payment-proof validity duration changes, PA implementation upgrades, executor *fee* changes, XRPL provider wallet rotation, the timelock duration itself — is `onlyOwnerWithTimelock`.
 
 Pause and unpause are role-gated (not owner-gated) and explicitly **not** timelocked — see [Pause](./Pause.md).
 

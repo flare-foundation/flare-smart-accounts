@@ -153,7 +153,7 @@ Both expose `setTimelockDuration` (clamped to 7 days), `executeTimelockedCall`, 
 
 The pattern: an `onlyOwnerWithTimelock` modifier either *records* the call (when timelock > 0 and not currently executing) by storing `keccak256(msg.data) → block.timestamp + duration`, or *executes immediately* (when timelock == 0, or when the call comes from `executeTimelockedCall`, which sets a transient `executing` flag and re-enters). Anyone can call `executeTimelockedCall` once the delay has passed — the timelock controls *when* but not *who*.
 
-The Smart Accounts pause role split (`pauser` vs. `unpauser`, in [`Pause` lib](../../contracts/smartAccounts/library/Pause.sol)) sits on top of this: both role sets are managed by `onlyOwnerWithTimelock`, but `pause()` / `unpause()` themselves only check the role and skip the timelock so an attacker-detected incident can be stopped immediately.
+The Smart Accounts pause role split (`pauser` vs. `unpauser`, in [`Pause` lib](../../contracts/smartAccounts/library/Pause.sol)) sits on top of this: both role sets are managed by `onlyOwnerWithTimelock` (except `removeUnpausers`, which is immediate), but `pause()` / `unpause()` themselves only check the role and skip the timelock so an attacker-detected incident can be stopped immediately.
 
 ## Replay protection
 

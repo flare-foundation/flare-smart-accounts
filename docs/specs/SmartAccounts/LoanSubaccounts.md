@@ -1213,8 +1213,10 @@ Account.
   implementation, and type `1` is registered with `setSubaccountImplementation` before
   `setTimelockDuration`, while the timelock is still zero.
 - **Existing deployments** (flare, songbird, coston2): the facet needs no dedicated deploy
-  step — naming `SubaccountsFacet`, `BridgeRoutesFacet` and the replaced `PersonalAccountsFacet`
-  (it gains `createPersonalAccount`) in a cut plan
+  step — naming `SubaccountsFacet`, `BridgeRoutesFacet`, the replaced `PersonalAccountsFacet`
+  (it gains `createPersonalAccount`) and the replaced `PauseFacet` (`removeUnpausers` becomes
+  immediate; a removal queued before the cut must be cancelled and redone directly — see
+  [Pause](./Pause.md#upgrading-to-the-immediate-unpauser-removal)) in a cut plan
   (`deployment/cuts/<network>/cuts-<date>.json`, verified with `pnpm check_cut`, executed with
   `pnpm diamond_cut`) deploys it from the artifact as part of the cut flow. The implementation
   is deployed with `pnpm deploy_loan_subaccount_implementation <network>` (Flare-family

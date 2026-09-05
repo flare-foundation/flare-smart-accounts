@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
   - `PersonalAccountsFacet` gains the permissionless, pause-gated `createPersonalAccount(xrplOwner)` (facet replacement on existing deployments); the `PersonalAccounts` library returns `address`.
-  - `removeUnpausers` is immediate (`onlyOwner`) instead of timelocked; pauser removal stays timelocked.
+  - `removeUnpausers` is immediate (`onlyOwner`) instead of timelocked; pauser removal stays timelocked. A removal queued before the facet cut cannot execute afterward: cancel it and remove directly.
   - `OwnableWithTimelock`: `renounceOwnership()` reverts with `RenounceDisabled`, and queueing a timelocked call with value reverts with `TimelockValueNotAllowed`.
 
 ## [[v2.0.0](https://github.com/flare-foundation/flare-smart-accounts/releases/tag/v2.0.0)] - 2026-07-07

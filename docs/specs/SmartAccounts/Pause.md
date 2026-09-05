@@ -29,14 +29,14 @@ Stored at `smartAccounts.Pause.State`. The `EnumerableSet` lets the facet enumer
 | `addPausers(address[])` | `onlyOwnerWithTimelock` | Add to the pauser set. |
 | `removePausers(address[])` | `onlyOwnerWithTimelock` | Remove from the pauser set. |
 | `addUnpausers(address[])` | `onlyOwnerWithTimelock` | Add to the unpauser set. |
-| `removeUnpausers(address[])` | `onlyOwnerWithTimelock` | Remove from the unpauser set. |
+| `removeUnpausers(address[])` | `onlyOwner` | Remove from the unpauser set. **No timelock** — see below. |
 | `isPaused()` | view | — |
 | `isPauser(address)` | view | — |
 | `isUnpauser(address)` | view | — |
 | `getPausers()` | view | Returns the pauser set. |
 | `getUnpausers()` | view | Returns the unpauser set. |
 
-Role management is timelocked — adding or removing a pauser/unpauser is a governance decision. Pause itself is **not** timelocked: the whole point is to freeze instantly under incident pressure.
+Role management is timelocked — adding a pauser or an unpauser, or removing a pauser, is a governance decision. Removing an unpauser is the one immediate role change: it can only keep the system paused, and delaying it would leave a compromised unpauser able to undo every pause for the whole timelock window. Pause itself is **not** timelocked: the whole point is to freeze instantly under incident pressure.
 
 ## Scope of `notPaused`
 
@@ -62,6 +62,10 @@ The split is deliberate. Three implications:
 3. Adding the same address to both sets is allowed; the sets are independent.
 
 If both sets are empty, the protocol is effectively un-pausable (no one can call `pause`) and un-resumable (no one can call `unpause`); the owner can recover by adding members via the timelocked `addPausers` / `addUnpausers`.
+
+## Upgrading to the immediate unpauser removal
+
+`removeUnpausers` used to be `onlyOwnerWithTimelock`. A removal queued under that facet cannot execute once the immediate facet replaces it: `executeTimelockedCall` self-calls the diamond, and `onlyOwner` sees the diamond — not the owner — as the caller, so the attempt reverts with `NotContractOwner` and leaves both the queue entry and the role in place. The cut runbook therefore has one extra step: inventory queued `removeUnpausers` calls before the cut, and after it have the owner remove each address directly and cancel the obsolete entry with `cancelTimelockedCall`. Pinned by [`QueuedPauseMigration.t.sol`](../../../test/adversarial/QueuedPauseMigration.t.sol).
 
 ## Init
 
