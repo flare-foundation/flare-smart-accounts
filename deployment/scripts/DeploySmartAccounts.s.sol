@@ -91,7 +91,7 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
         // encoding JSON objects in the declared field order of the matching
         // struct (foundry-rs/foundry#11612); older versions encode members
         // alphabetically and would silently swap ABI-compatible fields.
-        // test/DeployConfigDecode.t.sol pins the decode mapping.
+        // test/unit/deployment/DeployConfigDecode.t.sol pins the decode mapping.
         require(
             vm.foundryVersionAtLeast("1.5.0"),
             "forge >= 1.5.0 required: config struct decoding relies on declared field order"

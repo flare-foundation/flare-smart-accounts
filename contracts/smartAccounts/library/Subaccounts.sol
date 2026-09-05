@@ -42,7 +42,7 @@ library Subaccounts {
      * address on the loan chain, so a derivation shift would send assets to an address the
      * user's account no longer controls.
      *
-     * Hash of this constant is asserted in `test/SubaccountsLibrary.t.sol`. Do not edit
+     * Hash of this constant is asserted in `test/unit/smartAccounts/SubaccountsLibrary.t.sol`. Do not edit
      * without updating that fixture and acknowledging that all "predicted but not yet
      * deployed" subaccount addresses will shift to a new derivation moment.
      */

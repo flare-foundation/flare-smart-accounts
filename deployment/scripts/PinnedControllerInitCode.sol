@@ -19,7 +19,7 @@ pragma solidity ^0.8.27;
  * EOA: a freshly reproduced diamond is owned by it, so the post-deployment cut on a new chain
  * requires that key. Confirm it is still controlled before deploying to a new chain.
  *
- * `test/PinnedInitCode.t.sol` asserts all of this in CI.
+ * `test/unit/smartAccounts/PinnedInitCode.t.sol` asserts all of this in CI.
  */
 library PinnedControllerInitCode {
     address internal constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;

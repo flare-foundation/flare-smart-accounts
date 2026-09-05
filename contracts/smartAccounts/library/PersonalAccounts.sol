@@ -41,9 +41,9 @@ library PersonalAccounts {
      * makes the derivation `keccak256(constant || abi.encode(diamond, xrplOwner))`, which is purely
      * a function of inputs that don't change with project drift.
      *
-     * Hash of this constant is asserted in `test/PersonalAccountsLibrary.t.sol`. Do not edit without
-     * updating that fixture and acknowledging that all "predicted but not yet deployed" PA addresses
-     * will shift to a new derivation moment.
+     * Hash of this constant is asserted in `test/unit/smartAccounts/PersonalAccountsLibrary.t.sol`. Do not
+     * edit without updating that fixture and acknowledging that all "predicted but not yet deployed" PA
+     * addresses will shift to a new derivation moment.
      */
     bytes internal constant PROXY_CREATION_CODE =
         hex"60a08060405234610283575f6104a7803803809161001d82866102c0565b8439"

@@ -6,7 +6,7 @@ import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.s
 /**
  * @title DeployConfigTypes
  * @notice JSON decode targets for the chain-config vault arrays, shared
- *         between DeploySmartAccounts and test/DeployConfigDecode.t.sol.
+ *         between DeploySmartAccounts and test/unit/deployment/DeployConfigDecode.t.sol.
  * @dev Kept out of the deploy script so the test can compile the structs
  *      without importing the script: DeploySmartAccounts compiles only
  *      via-ir (run() exceeds the legacy stack limit and the script assigns

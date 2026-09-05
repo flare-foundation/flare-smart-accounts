@@ -11,7 +11,7 @@ import {IMorpho} from "../interface/IMorpho.sol";
  * and the share/asset conversions with Morpho's virtual offsets (`SharesMathLib`: one virtual
  * asset, 1e6 virtual shares, rounding as named). Written here rather than imported because the
  * upstream libraries are GPL-2.0-or-later; equality with `morpho-blue` v1.0.0 (commit 55d2d99)
- * is pinned by `test/MorphoConformance.t.sol` on fixed vectors. The full-precision `mulDiv`
+ * is pinned by `test/unit/smartAccounts/MorphoConformance.t.sol` on fixed vectors. The full-precision `mulDiv`
  * agrees with Morpho's checked multiplication everywhere Morpho itself does not revert.
  */
 library MorphoMath {
