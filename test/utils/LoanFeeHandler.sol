@@ -261,7 +261,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
         _recordSupply(logs);
     }
 
-    /// A successful withdraw must satisfy the fee gate; failed gates keep the operation unused.
+    /// A successful withdraw must satisfy the exit gate; failed gates keep the operation unused.
     function withdraw(
         uint64 _amount
     )
@@ -301,10 +301,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
                 _collateral() != collateral - amount ||
                 fxrp.balanceOf(address(oft)) != oftBalanceBefore + amount
             ) operationsCorrect = false;
-            (, , uint256 collectible, , , ) = account.getLoanFeeState();
-            uint256 value = Math.mulDiv(_collateral(), oracle.price(), 1e36);
-            if (collectible > 0 && value < 3 * collectible)
-                checks.exitSecurity = false;
+            if (!_exitCovered()) checks.exitSecurity = false;
         } else {
             _checkFailure(beforeCall);
             if (
@@ -534,6 +531,21 @@ contract LoanFeeHandler is LoanRemoteFixture {
             loanToken.balanceOf(parent) != _before.parentBalance + surplusAmount
         ) checks.surplus = false;
         if (_expectSync != (synced == 1)) baselineCorrect = false;
+    }
+
+    /// The exit gate's reference: the collateral left, at the oracle's price, covers
+    /// `(D + 2F) x 1.155 / LLTV` (rounded up) for the live debt and the collectible; with
+    /// nothing owed, no cover is required.
+    function _exitCovered(
+    )
+        private view
+        returns (bool)
+    {
+        (, , uint256 collectible, , , ) = account.getLoanFeeState();
+        uint256 required = Math.mulDiv(
+            _debt() + 2 * collectible, 1.155e18, params.lltv, Math.Rounding.Ceil
+        );
+        return required == 0 || Math.mulDiv(_collateral(), oracle.price(), 1e36) >= required;
     }
 
     function _checkFailure(

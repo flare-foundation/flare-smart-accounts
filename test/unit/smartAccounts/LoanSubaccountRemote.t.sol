@@ -54,6 +54,7 @@ import {MintableERC20} from "../../../contracts/mock/MintableERC20.sol";
 import {MockReentrantToken} from "../../../contracts/mock/MockReentrantToken.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {MockOft} from "../../../contracts/mock/MockOft.sol";
 import {MockAssetManager} from "../../../contracts/mock/MockAssetManager.sol";
 import {MockMorpho} from "../../../contracts/mock/MockMorpho.sol";
@@ -1849,15 +1850,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(dustX18, 0);
     }
 
-    function testWithdrawSecuredFeeRidesUncollected() public {
-        // the secured-claim rule: while the remaining collateral is worth at least 3x the
-        // collectible fee, a withdrawal collects nothing - the position IS the security
+    function testWithdrawWithinTheCoverPassesUncollected() public {
+        // the exit gate: while the remaining collateral covers 1.5x the debt plus twice the
+        // collectible fee, a withdrawal collects nothing - the position IS the fee's security
         _configureSettings();
         (, address subaccount) = _parentAndSubaccount("rSecuredOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
             bytes32("op-borrow"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 30 days);
         ILoanSubaccountRemote(subaccount).checkpointFee();
@@ -1865,7 +1866,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             ILoanSubaccountRemote(subaccount).getLoanFeeState();
         assertGt(collectible, 0);
 
-        // remaining 90 FXRP is worth 180 RLUSD >= 3x the ~5.75 fee: no caps, no collection
+        // remaining 90 FXRP is worth 180 RLUSD >= 1.5 x (100 + 2 x ~0.575) = ~151.7: no caps,
+        // no collection
+        assertGe(_valueOf(90e6), _requiredCover(100e18, collectible));
         _deliverWithValue(
             subaccount, 2, 0,
             _withdrawPayload(bytes32("op-w"), 10e6),
@@ -1879,30 +1882,29 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(amountLD, 10e6);
     }
 
-    function testWithdrawStrippingSecurityIsBlockedUntilTheFeeIsPaid() public {
-        // the exit that would leave the fee under-secured is refused - nothing is taken from
-        // the collateral; the fee is paid in loan tokens through repay, then the same packet
-        // passes
+    function testWithdrawStrippingTheCoverIsBlockedUntilRepaid() public {
+        // the exit that would leave the position uncovered is refused - nothing is taken from
+        // the collateral; debt and fee are paid in loan tokens through repay, then the same
+        // packet passes
         _configureSettings();
         (, address subaccount) = _parentAndSubaccount("rStrippingOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
             bytes32("op-borrow"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 30 days);
         ILoanSubaccountRemote(subaccount).checkpointFee();
         (, , uint256 collectible, , , ) =
             ILoanSubaccountRemote(subaccount).getLoanFeeState();
 
-        // remaining 2 FXRP (4 RLUSD) cannot secure the fee: refused, id unconsumed
+        // remaining 2 FXRP (4 RLUSD) cannot cover the ~151.7 the position needs: refused, id
+        // unconsumed
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 98e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, collectible)
-        );
+        vm.expectRevert(_uncovered(_requiredCover(100e18, collectible), 4e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -1910,7 +1912,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 0);
 
         // loan tokens to the account, repay closes the debt and pays the fee, the packet passes
-        rlusd.mint(subaccount, 1100e18);
+        rlusd.mint(subaccount, 110e18);
         ILoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), collectible);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
@@ -1920,69 +1922,69 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testWithdrawDeadOracleParksAndRepayIsTheEscape() public {
-        // a reverting oracle values the security at nothing, so the gate refuses the exit:
+        // a reverting oracle values the remainder at nothing, so the gate refuses the exit:
         // the escape is repay - settle debt and fee through the subaccount, then the same
-        // packet passes with nothing collectible, oracle-free
+        // packet passes with nothing owed, oracle-free
         _configureSettings();
         (, address subaccount) = _parentAndSubaccount("rDeadOracleGateOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
             bytes32("op-borrow"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 30 days);
         ILoanSubaccountRemote(subaccount).checkpointFee();
         (, , uint256 collectible, , , ) =
             ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        // a live oracle would pass this withdrawal (180 left against ~151.7); the dead one
+        // values the remainder at nothing
+        assertGe(_valueOf(90e6), _requiredCover(100e18, collectible));
         oracle.setPriceReverts(true);
 
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 10e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, collectible)
-        );
+        vm.expectRevert(_uncovered(_requiredCover(100e18, collectible), 0));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
 
-        rlusd.mint(subaccount, 1100e18);
+        rlusd.mint(subaccount, 110e18);
         ILoanSubaccountRemote(subaccount).repay();
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testWithdrawZeroPricedOracleRefusesAndRepayIsTheEscape() public {
-        // a zero price (answering, not reverting) also values the security at nothing: the
-        // same refusal with the id unconsumed, and the same escape - once nothing is
-        // collectible the retried packet passes without ever reading the still-zero oracle
+        // a zero price (answering, not reverting) also values the remainder at nothing: the
+        // same refusal with the id unconsumed, and the same escape - once nothing is owed the
+        // retried packet passes without ever reading the still-zero oracle
         _configureSettings();
         (, address subaccount) = _parentAndSubaccount("rZeroPriceGateOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
             bytes32("op-borrow"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 30 days);
         ILoanSubaccountRemote(subaccount).checkpointFee();
         (, , uint256 collectible, , , ) =
             ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertGe(_valueOf(90e6), _requiredCover(100e18, collectible));
         oracle.setPrice(0);
 
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 10e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, collectible)
-        );
+        vm.expectRevert(_uncovered(_requiredCover(100e18, collectible), 0));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
-        rlusd.mint(subaccount, 1100e18);
+        rlusd.mint(subaccount, 110e18);
         ILoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), collectible);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
@@ -1990,12 +1992,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(oracle.storedPrice(), 0);
     }
 
-    function testMorphoBlocksLiveDebtWithdrawUnderDeadOracleBeforeTheGate() public {
-        // the premise the exit gate leans on, modelled by the mock: with live borrow shares
-        // canonical Morpho reads the oracle in withdrawCollateral, so a dead oracle blocks a
-        // live-debt withdrawal at Morpho itself - here with nothing collectible, where the
-        // gate is oracle-free and Morpho is the only thing in the way. The escape is the
-        // spec's: settle through repay (no shares, no health check), then the packet passes
+    function testDeadOracleWithLiveDebtRefusesAtTheGateNotAtMorpho() public {
+        // canonical Morpho reads the oracle in withdrawCollateral while borrow shares are live,
+        // so a dead oracle would block a live-debt withdrawal there too - but the gate comes
+        // first and refuses on its own, valuing the remainder at nothing, with nothing
+        // collectible and the id unconsumed. The escape is the spec's: settle through repay
+        // (no shares, no health check, no oracle), then the packet passes oracle-free
         morpho.setHealthCheckDisabled(false);
         _configureSettings();
         (, address subaccount) = _parentAndSubaccount("rMorphoDeadOracleOwner");
@@ -2010,7 +2012,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(bytes("oracle reverted"));
+        vm.expectRevert(_uncovered(_requiredCover(500e18, 0), 0));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -2020,11 +2022,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ILoanSubaccountRemote(subaccount).repay();
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(oracle.priceReverts());
     }
 
-    function testMorphoEnforcesPositionHealthOnWithdraw() public {
-        // "Morpho enforces position health": a withdrawal the fee gate passes still reverts
-        // at Morpho when it would leave the position under its LLTV - retriable, id unconsumed
+    function testExitGateIsStricterThanMorphoHealth() public {
+        // the gate is Morpho's liquidation line with a 15.5% headroom (1.5x at LLTV 77%), so it
+        // implies Morpho's health check: a fresh 1000 RLUSD loan on 1000 FXRP (2000 RLUSD) may
+        // run down to 1299 RLUSD of collateral at Morpho, but the gate keeps 1500 RLUSD = 750
+        // FXRP in the position - with nothing collectible, the debt alone sets the cover
         morpho.setHealthCheckDisabled(false);
         _configureSettings();
         (, address subaccount) = _parentAndSubaccount("rMorphoHealthOwner");
@@ -2034,29 +2039,38 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
         ));
 
-        // 600 FXRP left = 1200 RLUSD x 77% = 924 < the 1000 owed
-        bytes memory tooMuch = _withdrawPayload(bytes32("op-w"), 400e6);
+        // Morpho alone allows 350 FXRP out (650 left = 1300 RLUSD x 77% = 1001 >= 1000) - proved
+        // directly and rolled back, so the gate is the only thing in the way below
+        uint256 snapshot = vm.snapshotState();
+        vm.prank(subaccount);
+        morpho.withdrawCollateral(_defaultMarket().marketParams, 350e6, subaccount, subaccount);
+        vm.revertToState(snapshot);
+
+        // 251 out leaves 749 FXRP = 1498 RLUSD < 1500: refused by the gate, id unconsumed
+        bytes memory tooMuch = _withdrawPayload(bytes32("op-w"), 251e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, tooMuch);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(bytes("insufficient collateral"));
+        vm.expectRevert(_uncovered(1500e18, 1498e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
-        // 700 FXRP left = 1400 RLUSD x 77% = 1078 >= 1000: Morpho lets it through
+        // 250 out leaves exactly 1500: the boundary passes
         _deliverWithValue(
-            subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 300e6), RETURN_MIN_VALUE
+            subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 250e6), RETURN_MIN_VALUE
         );
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 750e6);
     }
 
     function testOverlapTopUpOnTheSubaccountPaysTheFeeProRata() public {
-        // the accepted overlap of the two exit limits: once the fee outgrows ~43% of the live
-        // debt (here after a debt-only external repayment), a remainder Morpho's health check
-        // accepts (debt <= 77% of it) can still fail the factor-3 gate. Subaccount RLUSD pays
-        // the fee pro rata with the debt, so a top-up shrinks both - here enough for the gate
+        // the band the gate's headroom opens: with live debt, a remainder Morpho's health check
+        // accepts (debt <= 77% of it) can still fall short of the cover - here after a debt-only
+        // external repayment left a large fee next to a small debt. Subaccount RLUSD pays the
+        // fee pro rata with the debt, so a top-up shrinks both claims - here enough for the gate
         // to pass with the loan still open
         morpho.setHealthCheckDisabled(false);
         _configureSettings();
@@ -2078,31 +2092,36 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         morpho.withdrawCollateral(_defaultMarket().marketParams, 92e6, subaccount, subaccount);
         vm.revertToState(snapshot);
 
-        // the gate wants 3 x 7 = 21 against the 16 left - refused, id unconsumed
+        // the gate wants 1.5 x (10 + 2 x 7) = 36 against the 16 left - refused, id unconsumed
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (uint256 debt, , uint256 collectible, , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 7e18);
+        assertApproxEqAbs(debt, 10e18, 1);
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 92e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 7e18)
-        );
+        vm.expectRevert(_uncovered(_requiredCover(debt, collectible), 16e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
-        // a fee-sized top-up is split 7 x 7 / 17 to the fee and 7 x 10 / 17 to the debt: the
-        // fee falls to 70 / 17 = 4.12 and the debt to 100 / 17 = 5.88, still 10:7
-        rlusd.mint(subaccount, 7e18);
-        uint256 feeShare = uint256(7e18) * 7e18 / 17e18;
+        // a 10 RLUSD top-up is split 10 x 7 / 17 to the fee and 10 x 10 / 17 to the debt: the
+        // fee falls to ~2.88 and the debt to ~4.12, still 10:7, and the cover to
+        // 1.5 x (4.12 + 2 x 2.88) = ~14.8 <= 16
+        rlusd.mint(subaccount, 10e18);
+        uint256 feeShare = Math.mulDiv(10e18, collectible, debt + collectible);
         ILoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), feeShare);
-        (uint256 principal, , uint256 collectible, , , ) =
+        (uint256 principal, , uint256 collectibleAfter, , , ) =
             ILoanSubaccountRemote(subaccount).getLoanFeeState();
-        assertEq(collectible, 7e18 - feeShare);
-        assertApproxEqAbs(principal, 10e18 - (7e18 - feeShare), 1);
+        assertEq(collectibleAfter, collectible - feeShare);
+        assertApproxEqAbs(principal, debt - (10e18 - feeShare), 1);
+        assertLe(_requiredCover(principal, collectibleAfter), 16e18);
 
-        // 16 >= 3 x 4.12: the same packet now passes, the debt still open
+        // the same packet now passes, the debt still open
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
@@ -2151,37 +2170,111 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
-    function testSecurityFactorBoundaryIsInclusive() public {
-        // remaining value == 3x the collectible passes uncollected (>=); one whole FXRP less
-        // in the remainder is refused - a >=/> regression flips exactly this pair
+    function testExitGateBoundaryIsInclusive() public {
+        // remaining value == the required cover passes uncollected (>=); half an FXRP less in
+        // the remainder is refused - a >=/> regression flips exactly this pair
         _configureSettings();
         (, address subaccount) = _parentAndSubaccount("rExactSecurityOwner");
         fxrp.mint(subaccount, 200e6);
         _deliver(subaccount, 1, 200e6, _borrowPayload(
             bytes32("op-borrow"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
         ILoanSubaccountRemote(subaccount).checkpointFee();
 
-        // 96 out leaves 104 FXRP = 208 RLUSD < 210: under-secured, refused
-        bytes memory underSecured = _withdrawPayload(bytes32("op-w1"), 96e6);
-        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, underSecured);
+        // a year's fee on 100 is 7, so the cover is 1.5 x (100 + 14) = 171 RLUSD = 85.5 FXRP;
+        // 115 out leaves 85 FXRP = 170 RLUSD < 171: uncovered, refused
+        assertEq(_requiredCover(100e18, 7e18), 171e18);
+        bytes memory uncovered = _withdrawPayload(bytes32("op-w1"), 115e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, uncovered);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 70e18)
-        );
+        vm.expectRevert(_uncovered(171e18, 170e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
 
-        // 95 out leaves 105 FXRP = 210 RLUSD == 3 x 70: exactly secured, rides uncollected
+        // 114.5 out leaves 85.5 FXRP = 171 RLUSD == the cover: exactly covered, rides uncollected
         _deliverWithValue(
-            subaccount, 3, 0, _withdrawPayload(bytes32("op-w2"), 95e6), RETURN_MIN_VALUE
+            subaccount, 3, 0, _withdrawPayload(bytes32("op-w2"), 114.5e6), RETURN_MIN_VALUE
         );
         (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
-        assertEq(feeDebtX18, 70e18 * 1e18);
+        assertEq(feeDebtX18, 7e18 * 1e18);
+    }
+
+    function testExitGateValuesTheRemainderRoundedDown() public {
+        // the remainder's value rounds down while the cover rounds up: at a price one unit under
+        // 2e48, 85.5 FXRP are worth 171 RLUSD minus a fraction of a base unit, which floors to one
+        // base unit short of the 171 cover - refused; a round-up would have passed it. At 2e48
+        // the same packet passes
+        _configureSettings();
+        (, address subaccount) = _parentAndSubaccount("rRoundingOwner");
+        fxrp.mint(subaccount, 200e6);
+        _deliver(subaccount, 1, 200e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        oracle.setPrice(2e48 - 1);
+
+        bytes memory payload = _withdrawPayload(bytes32("op-w"), 114.5e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(_uncovered(171e18, 171e18 - 1));
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+
+        oracle.setPrice(2e48);
+        _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+    }
+
+    function testExitGateFollowsTheMarketLltv() public {
+        // the cover is a headroom over the market's own liquidation line, not a flat 1.5x: on a
+        // 50% LLTV market a fresh 100 RLUSD loan needs 100 x 1.155 / 0.5 = 231 RLUSD left (a flat
+        // 1.5x would ask 150), so 885 of 1000 FXRP out (230 left) is refused and 884.5 out (231
+        // left) passes - both healthy at Morpho, whose line there is 200
+        morpho.setHealthCheckDisabled(false);
+        _configureSettings();
+        uint256 typeB = 2;
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.lltv = 0.5e18;
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        _setDefaultFeeTerms(address(controller), typeB);
+        vm.stopPrank();
+        address subaccount = address(new SubaccountProxy(
+            address(controller), parentPersonalAccount, typeB
+        ));
+        fxrp.mint(subaccount, 1000e6);
+        _deliver(subaccount, 1, 1000e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
+
+        bytes memory tooMuch = _withdrawPayload(bytes32("op-w"), 885e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, tooMuch);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(_uncovered(231e18, 230e18));
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+
+        _deliverWithValue(
+            subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 884.5e6), RETURN_MIN_VALUE
+        );
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        (, , uint128 collateral) =
+            morpho.position(keccak256(abi.encode(marketB.marketParams)), subaccount);
+        assertEq(collateral, 115.5e6);
     }
 
     function testPausedWithdrawTerminalSkipsFinalizeFreshOnesWait() public {
@@ -2231,13 +2324,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // year's fee across the external repayment (shares-first, floor on the old base)
         _externalRepay(subaccount, 1000e18);
 
+        // debt-free, the cover is 3x the 70 fee: 210 against nothing left
         bytes memory stripping = _withdrawPayload(bytes32("op-w"), 100e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, stripping);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 70e18)
-        );
+        vm.expectRevert(_uncovered(210e18, 0));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -2274,9 +2366,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 70e18)
-        );
+        vm.expectRevert(_uncovered(210e18, 0));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -2320,10 +2410,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 300e6);
         _deliver(subaccount, 1, 300e6, _borrowPayload(
             bytes32("op-borrow"), DESTINATION_KIND_EVM,
-            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
 
-        // half a year: fee 35; remaining 250 FXRP = 500 RLUSD >= 105 - secured, uncollected
+        // half a year: fee 3.5; remaining 250 FXRP = 500 RLUSD >= 1.5 x (100 + 7) = 160.5 -
+        // covered, uncollected
         vm.warp(vm.getBlockTimestamp() + 365 days / 2);
         _deliverWithValue(
             subaccount, 2, 0,
@@ -2331,9 +2422,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             RETURN_MIN_VALUE
         );
         (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
-        assertEq(feeDebtX18, 35e18 * 1e18);
+        assertEq(feeDebtX18, 3.5e18 * 1e18);
 
-        // price halves; remaining 200 FXRP = 200 RLUSD still >= 105 - still secured
+        // price halves; remaining 200 FXRP = 200 RLUSD still >= 160.5 - still covered
         oracle.setPrice(1e48);
         _deliverWithValue(
             subaccount, 3, 0,
@@ -2342,26 +2433,24 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 0);
 
-        // another half year (fee 70) and another halving: 200 FXRP = 100 RLUSD < 210 -
-        // the next exit is refused at the CURRENT price
+        // another half year (fee 7, cover 1.5 x (100 + 14) = 171) and another halving: taking
+        // 150 would leave 50 FXRP = 25 RLUSD - the next exit is refused at the CURRENT price
         vm.warp(vm.getBlockTimestamp() + 365 days / 2);
         oracle.setPrice(0.5e48);
         bytes memory refused = _withdrawPayload(bytes32("op-w3"), 150e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 4, 0, refused);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 70e18)
-        );
+        vm.expectRevert(_uncovered(171e18, 25e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
 
         // debt and fee paid in loan tokens through repay: the exit passes in full, and the
         // ledger is exact at every step
-        rlusd.mint(subaccount, 1071e18);
+        rlusd.mint(subaccount, 108e18);
         ILoanSubaccountRemote(subaccount).repay();
-        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 7e18);
         _deliverWithValue(subaccount, 4, 0, refused, RETURN_MIN_VALUE);
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
         assertEq(amountLD, 150e6);
@@ -2426,15 +2515,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
 
-        // the elapsed year is priced at the 7% SNAPSHOT (fee 70): the under-secured exit is
-        // refused and the idle 20 is untouched - it is not fee fuel
+        // the elapsed year is priced at the 7% SNAPSHOT (fee 70, cover 1.5 x (1000 + 140) =
+        // 1710 against the 120 that 60 FXRP are worth): the uncovered exit is refused and the
+        // idle 20 is untouched - it is not fee fuel
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 40e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 3, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 70e18)
-        );
+        vm.expectRevert(_uncovered(1710e18, 120e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -2561,7 +2649,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function testFrozenSubaccountKeepsTheExitGatedUntilUnfrozen() public {
         // the repay path runs through this address: frozen, no loan tokens can reach it and
-        // repay has nothing to work with, so an under-secured exit stays refused until
+        // repay has nothing to work with, so an uncovered exit stays refused until
         // unfreezing, funding and repaying
         _configureSettings();
         uint256 typeB = 2;
@@ -2583,14 +2671,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         frozenRlusd.setFrozen(subaccount, true);
 
-        // 2 FXRP left = 4 RLUSD against a 70 fee: refused
+        // 2 FXRP left = 4 RLUSD against the 1710 the 1000 debt and the 70 fee need: refused
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 98e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, 70e18)
-        );
+        vm.expectRevert(_uncovered(1710e18, 4e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -2997,8 +3083,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function testBorrowingDisabledLeavesExitsOpen() public {
         // the switch stops exactly one thing - new debt; every exit stays open on the sunset
-        // pool: composed withdrawal, repayment, and recovery of the surplus
-        address subaccount = _borrowedSubaccount(500e18);
+        // pool: composed withdrawal (the 70 FXRP = 140 RLUSD left cover the 1.5 x 50 the gate
+        // wants), repayment, and recovery of the surplus
+        address subaccount = _borrowedSubaccount(50e18);
         vm.prank(governance);
         IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
@@ -3008,10 +3095,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 70e6);
 
-        rlusd.mint(subaccount, 600e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 500e18);
+        rlusd.mint(subaccount, 100e18);
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 50e18);
         // the surplus left with the same call
-        assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 50e18);
     }
 
     function testBorrowDisbursesToParent() public {
@@ -3689,7 +3776,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(sender, 100e6);
         vm.prank(parentPersonalAccount);
         ILoanSubaccount(sender).borrow{value: 0.01 ether}(
-            100e6, 500e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(parentPersonalAccount))),
+            100e6, 50e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(parentPersonalAccount))),
             bytes32("op-b"), deadline, ""
         );
         (uint256 amountLD, bytes memory payload) = _lastSentCompose();
@@ -3698,11 +3785,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliver(subaccount, 1, amountLD, payload);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
-        assertEq(rlusd.balanceOf(parentPersonalAccount), 500e18);
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 50e18);
 
         // withdraw: message-only out, atomic on arrival - the receiver withdraws the
         // collateral and bridges it home in the same execution, under the signed return
-        // options, paid by the delivered compose value
+        // options, paid by the delivered compose value (the 60 FXRP = 120 RLUSD left cover the
+        // 1.5 x 50 the exit gate wants)
         vm.prank(parentPersonalAccount);
         ILoanSubaccount(sender).withdraw{value: 0.01 ether}(
             40e6, bytes32("op-w"), deadline,
@@ -4354,6 +4442,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, , _amountLD, , , _payload, ) = fxrpOft.lastSendParam();
     }
 
+    /// The loan-token value of `_fxrp` at the mock oracle's current price.
+    function _valueOf(
+        uint256 _fxrp
+    )
+        private view
+        returns (uint256)
+    {
+        return Math.mulDiv(_fxrp, oracle.storedPrice(), 1e36);
+    }
+
     function _depositPayload()
         private
         pure
@@ -4389,6 +4487,31 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             PAYLOAD_VERSION_1,
             ACTION_BORROW,
             abi.encode(_operationId, _deadline, _destinationKind, _destination, _borrowAmount)
+        );
+    }
+
+    /// The exit gate's required cover on the default market (LLTV 77%) - the spec's formula,
+    /// computed here: `(D + 2F) x 1.155 / 0.77`, rounded up.
+    function _requiredCover(
+        uint256 _debt,
+        uint256 _collectible
+    )
+        private pure
+        returns (uint256)
+    {
+        return Math.mulDiv(_debt + 2 * _collectible, 1.155e18, 0.77e18, Math.Rounding.Ceil);
+    }
+
+    /// The gate's refusal, as the delivery reverts with it.
+    function _uncovered(
+        uint256 _requiredCover,
+        uint256 _remainingValue
+    )
+        private pure
+        returns (bytes memory)
+    {
+        return abi.encodeWithSelector(
+            ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _requiredCover, _remainingValue
         );
     }
 }

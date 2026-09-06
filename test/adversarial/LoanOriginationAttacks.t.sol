@@ -460,7 +460,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         assertEq(fxrp.balanceOf(address(oft)), 1e6);
     }
 
-    /// An unobserved full liquidation cannot bypass a fee checkpoint or the secured exit gate.
+    /// An unobserved full liquidation cannot bypass a fee checkpoint or the exit gate.
     function testStalePrincipalAfterLiquidationCannotBypassExit() public {
         _open(10_000e18);
         vm.warp(block.timestamp + YEAR);
@@ -468,10 +468,13 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         _liquidate(_shares());
         fxrp.mint(address(account), 1_000e6);
         account.depositIdleFxrp();
+        // debt-free, the 700 fee needs 3x its size covered: 2100 against the 999 RLUSD the
+        // 999 FXRP left are worth at the new price
         _withdrawMustRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.OutstandingLoanFee.selector,
-                700e18
+                ILoanSubaccountRemote.InsufficientRemainingCollateral.selector,
+                2100e18,
+                999e18
             ),
             RETURN_VALUE
         );

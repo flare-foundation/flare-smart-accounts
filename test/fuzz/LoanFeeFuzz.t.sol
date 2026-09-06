@@ -11,9 +11,9 @@ import {MorphoMath} from "../../contracts/smartAccounts/library/MorphoMath.sol";
  * @notice Property tests over the Flare fee arithmetic of `LoanSubaccountRemote`, each stated as
  * the spec's formula computed here independently of the account: the pro-rata split of an
  * underfunded repayment, the covering repayment, the accrual over three periods with a terms
- * change in between (priced at the snapshotted terms, never compounding) and the secured-exit
- * gate. The health check is on; every position stays within the fixture's 10,000 FXRP of
- * collateral at 2 RLUSD.
+ * change in between (priced at the snapshotted terms, never compounding) and the exit gate. The
+ * health check is on; every position stays within the fixture's 10,000 FXRP of collateral at
+ * 2 RLUSD.
  * @dev The assertions sit in small helpers because `forge coverage` compiles without via-ir.
  */
 contract LoanFeeFuzzTest is LoanRemoteFixture {
@@ -29,7 +29,10 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
 
     /// @dev Below the market's 77% of the fixture's 20,000 RLUSD of collateral value.
     uint256 private constant MAX_DEBT = 10_000e18;
-    uint256 private constant FEE_SECURITY_FACTOR = 3;
+    /// @dev The exit gate's constants, as the spec states them: the cover is
+    /// `(D + FEE_WEIGHT * F) * EXIT_HEADROOM / LLTV`, rounded up.
+    uint256 private constant EXIT_HEADROOM = 1.155e18;
+    uint256 private constant FEE_WEIGHT = 2;
 
     function setUp() public {
         _setUpRemoteFixture();
@@ -119,13 +122,16 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         _accrueAndCheckpoint(principal, _period(_elapsed, _interest, debt, 3), next, next);
     }
 
-    /// With a collectible fee, a withdraw passes the gate iff the collateral it would leave, at
-    /// the oracle's price, is worth at least FEE_SECURITY_FACTOR times the collectible (gross
-    /// basis); a refusal is `OutstandingLoanFee`, changes nothing and leaves the id unused. Past
-    /// the gate only Morpho's own health check can still refuse the withdrawal.
+    /// A withdraw passes the exit gate iff the collateral it would leave, at the oracle's price
+    /// (rounded down), is worth at least `(D + 2F) x 1.155 / LLTV` (rounded up) for the live debt D
+    /// and the collectible F; a refusal is `InsufficientRemainingCollateral(required, remaining)`,
+    /// changes nothing and leaves the id unused. The gate implies Morpho's health check, so a covered
+    /// withdrawal executes. Prices span 1e30 to 1e50 with a four-digit mantissa, so below 1e36 the
+    /// valuation is inexact and the rounding direction is exercised.
     function testFuzzExitGateTracksTheRemainingCollateralValue(
         uint256 _debtSeed,
         uint256 _amount,
+        uint16 _priceMantissa,
         uint8 _priceExponent
     )
         public
@@ -133,29 +139,17 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         _open(bound(_debtSeed, 1e18, MAX_DEBT));
         vm.warp(block.timestamp + YEAR);
         account.checkpointFee();
-        (, , uint256 collectible, , , ) = account.getLoanFeeState();
-        assertGt(collectible, 0);
         uint256 collateral = _collateral();
         uint256 amount = bound(_amount, 1, collateral);
-        oracle.setPrice(10 ** bound(_priceExponent, 36, 50));
-        bool secured = collateral > amount
-            && Math.mulDiv(collateral - amount, oracle.price(), 1e36) >= FEE_SECURITY_FACTOR * collectible;
+        oracle.setPrice(bound(_priceMantissa, 1_000, 9_999) * 10 ** bound(_priceExponent, 27, 46));
+        (uint256 required, uint256 remaining) = _gateTerms(collateral, amount);
 
         (bool success, bytes memory data) = _tryWithdraw(amount);
 
-        if (!secured) {
-            assertFalse(success);
-            assertEq(data, abi.encodeWithSelector(ILoanSubaccountRemote.OutstandingLoanFee.selector, collectible));
-            assertEq(_collateral(), collateral);
-            assertFalse(account.usedOperations(bytes32("exit")));
-        } else if (success) {
-            assertEq(_collateral(), collateral - amount);
-            assertEq(fxrp.balanceOf(address(oft)), amount);
-            assertTrue(account.usedOperations(bytes32("exit")));
+        if (remaining < required) {
+            _assertRefused(success, data, required, remaining, collateral);
         } else {
-            assertEq(data, abi.encodeWithSignature("Error(string)", "insufficient collateral"));
-            assertEq(_collateral(), collateral);
-            assertFalse(account.usedOperations(bytes32("exit")));
+            _assertExecuted(success, collateral, amount);
         }
     }
 
@@ -227,6 +221,24 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         );
     }
 
+    /// The gate's two sides from the spec's formula: the cover for the checkpointed live debt and
+    /// collectible, and the value the withdrawal would leave at the oracle's price.
+    function _gateTerms(
+        uint256 _collateralBefore,
+        uint256 _amount
+    )
+        private view
+        returns (uint256 _required, uint256 _remaining)
+    {
+        (uint256 debt, , uint256 collectible, , , ) = account.getLoanFeeState();
+        assertEq(debt, _debt());
+        assertGt(collectible, 0);
+        _required = Math.mulDiv(debt + FEE_WEIGHT * collectible, EXIT_HEADROOM, params.lltv, Math.Rounding.Ceil);
+        _remaining = _collateralBefore > _amount
+            ? Math.mulDiv(_collateralBefore - _amount, oracle.price(), 1e36)
+            : 0;
+    }
+
     /// The account's debt as Morpho will report it after accruing the queued interest.
     function _liveDebtAfterAccrual(
         bytes32 _marketId
@@ -239,6 +251,39 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         return MorphoMath.toAssetsUp(
             shares, totalBorrowAssets + morpho.pendingInterest(_marketId), totalBorrowShares
         );
+    }
+
+    function _assertRefused(
+        bool _success,
+        bytes memory _data,
+        uint256 _required,
+        uint256 _remaining,
+        uint256 _collateralBefore
+    )
+        private view
+    {
+        assertFalse(_success);
+        assertEq(
+            _data,
+            abi.encodeWithSelector(
+                ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _required, _remaining
+            )
+        );
+        assertEq(_collateral(), _collateralBefore);
+        assertFalse(account.usedOperations(bytes32("exit")));
+    }
+
+    function _assertExecuted(
+        bool _success,
+        uint256 _collateralBefore,
+        uint256 _amount
+    )
+        private view
+    {
+        assertTrue(_success);
+        assertEq(_collateral(), _collateralBefore - _amount);
+        assertEq(fxrp.balanceOf(address(oft)), _amount);
+        assertTrue(account.usedOperations(bytes32("exit")));
     }
 
     function _assertFeeState(

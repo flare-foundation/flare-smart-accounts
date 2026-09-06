@@ -54,11 +54,15 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     uint256 private constant YEAR = 365 days;
     /// @dev Morpho's oracle scale: `loanAmount = mulDiv(collateralAmount, price, 1e36)`.
     uint256 private constant ORACLE_PRICE_SCALE = 1e36;
-    /// @dev The secured-claim gate's headroom: an exit passes uncollected while the remaining
-    /// collateral is worth this multiple of the collectible fee. It allows for the fee's growth
-    /// until the next gate event and for price drift, and is deliberately not
-    /// liquidation-proof (the accepted junior-claim risk).
-    uint256 private constant FEE_SECURITY_FACTOR = 3;
+    /// @dev The exit gate's headroom over Morpho's liquidation line (WAD): the collateral a
+    /// withdrawal leaves must be worth `EXIT_HEADROOM / LLTV` of the covered claim, where Morpho
+    /// itself lets a position run down to `1 / LLTV` (its withdraw and liquidation tests are one
+    /// and the same). At the launch market's 77% LLTV this is exactly 1.5x.
+    uint256 private constant EXIT_HEADROOM = 1.155e18;
+    /// @dev The fee's weight in the covered claim, `debt + FEE_WEIGHT * collectible`: the junior
+    /// claim behind the debt counts twice, so a debt-free exit needs 3x the collectible.
+    /// Deliberately not liquidation-proof (the accepted junior-claim risk).
+    uint256 private constant FEE_WEIGHT = 2;
 
     // this lineage's own linear state starts right after ControlledAccountBase's slot 0 (the
     // bases' other state is namespaced): the canonical principal at the last checkpoint, the
@@ -377,14 +381,16 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         // pause); the exit itself waits - it rides the OFT
         _checkNotPaused();
         ILoanMarketsFacet.Market memory market = _myMarket();
-        // the secured-claim gate: a live fee principal checkpoints first (zero principal has
-        // nothing to accrue and no snapshot worth refreshing - a borrow re-baselines itself),
-        // then the withdrawal is refused (retriably) if it would leave the fee under-secured -
-        // the fee is paid in loan tokens through repay, never taken from the collateral
+        // the exit gate: a live fee principal checkpoints first (zero principal has nothing to
+        // accrue and no snapshot worth refreshing - a borrow re-baselines itself), then the
+        // withdrawal is refused (retriably) unless the collateral it leaves covers the position
+        // - debt and fee are paid in loan tokens through repay, never taken from the collateral
         if (feePrincipal != 0) {
             _checkpointFee(market);
         }
-        require(_exitLeavesFeeSecured(market, amount), OutstandingLoanFee(flareDebtX18 / WAD));
+        (bool covered, uint256 requiredCover, uint256 remainingValue) =
+            _exitLeavesPositionCovered(market, amount);
+        require(covered, InsufficientRemainingCollateral(requiredCover, remainingValue));
         _markOperationUsed(operationId);
 
         IMorpho(market.morpho).withdrawCollateral(
@@ -535,35 +541,41 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         emit LoanFeeCheckpointed(_parentAccount(), feePrincipal, feeDeltaX18);
     }
 
-    /// @dev The secured-claim rule: the exit passes uncollected while the collateral that
-    /// would remain, valued at the market oracle's price, covers FEE_SECURITY_FACTOR times
-    /// the collectible fee. Zero collectible needs no reads at all (and forgives debt-free
-    /// dust); a zero, dead or reverting oracle values the security at nothing, so the exit is
-    /// refused (the fee is settled through repay, oracle-free, and the exit retried).
-    function _exitLeavesFeeSecured(
+    /// @dev The exit gate: the collateral remaining after the withdrawal, valued at the market
+    /// oracle's price, must cover {_requiredCoverOf} the live debt and the collectible fee -
+    /// Morpho's liquidation line with a fixed headroom, so the gate implies Morpho's health
+    /// check and a fresh loan is gated at `EXIT_HEADROOM / LLTV` of its debt. The debt read here
+    /// is accrued: the caller's checkpoint, or the same block's borrow, brought it forward.
+    /// With nothing owed the gate reads no oracle (and forgives debt-free dust); a zero, dead or
+    /// reverting oracle values the remainder at nothing, so the exit is refused (debt and fee
+    /// are settled through repay, oracle-free, and the exit retried). Returns the verdict with
+    /// the two numbers a refusal reports.
+    function _exitLeavesPositionCovered(
         ILoanMarketsFacet.Market memory _market,
         uint256 _withdrawAmount
     )
         private
-        returns (bool)
+        returns (bool _covered, uint256 _requiredCover, uint256 _remainingValue)
     {
-        uint256 collectible = flareDebtX18 / WAD;
-        if (collectible == 0) {
+        (, uint256 debt) = _debtOf(_market);
+        _requiredCover = _requiredCoverOf(debt, flareDebtX18 / WAD, _market.marketParams.lltv);
+        if (_requiredCover == 0) {
             _forgiveFeeDust();
-            return true;
+            return (true, 0, 0);
         }
         uint256 collateral = _collateralOf(_market);
         uint256 remaining = collateral > _withdrawAmount ? collateral - _withdrawAmount : 0;
-        if (remaining == 0) return false;
+        if (remaining == 0) {
+            return (false, _requiredCover, 0);
+        }
         uint256 price = 0;
         try IOracle(_market.marketParams.oracle).price() returns (uint256 _price) {
             price = _price;
         } catch {
             price = 0;
         }
-        if (price == 0) return false;
-        return Math.mulDiv(remaining, price, ORACLE_PRICE_SCALE)
-            >= FEE_SECURITY_FACTOR * collectible;
+        _remainingValue = Math.mulDiv(remaining, price, ORACLE_PRICE_SCALE);
+        _covered = _remainingValue >= _requiredCover;
     }
 
     /// @dev A sub-unit remainder on a debt-free position can never be transferred (ERC-20
@@ -715,5 +727,23 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
             IMorpho(_market.morpho).market(marketId);
         _fullDebt = MorphoMath.toAssetsUp(_borrowShares, totalBorrowAssets, totalBorrowShares);
+    }
+
+    /// @dev The exit gate's required cover, in loan tokens: `(debt + FEE_WEIGHT * collectible)
+    /// * EXIT_HEADROOM / lltv`, rounded up; zero when nothing is owed. Pure, so a quote can
+    /// reproduce exactly what the gate demands.
+    function _requiredCoverOf(
+        uint256 _debt,
+        uint256 _collectible,
+        uint256 _lltv
+    )
+        private pure
+        returns (uint256)
+    {
+        uint256 claim = _debt + FEE_WEIGHT * _collectible;
+        if (claim == 0) {
+            return 0;
+        }
+        return Math.mulDiv(claim, EXIT_HEADROOM, _lltv, Math.Rounding.Ceil);
     }
 }

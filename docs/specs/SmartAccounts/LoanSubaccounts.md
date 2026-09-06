@@ -536,11 +536,13 @@ address itself commits to the pool:
 - **`ACTION_WITHDRAW`** is the atomic withdrawal: it withdraws collateral from the account's own
   position and bridges it back to the account's own Flare address **in the same
   execution**, with the redeem-home compose — no idle window between the two, so the redeposit
-  race cannot touch a withdrawal. It is also an exit-gate event for the Flare fee: after the
-  pause gate it checkpoints and applies the secured-claim rule to the post-withdrawal remainder —
-  a withdrawal that would leave the fee under-secured is refused (`OutstandingLoanFee`,
-  retriable) until the fee is paid in loan tokens through `repay`; nothing is ever taken from the
-  collateral (see The Flare fee; most mid-loan withdrawals pass untouched). It is the one action
+  race cannot touch a withdrawal. It is also the exit gate's event: after the pause gate it
+  checkpoints the Flare fee and applies the cover rule to the post-withdrawal remainder — a
+  withdrawal that would leave the collateral worth less than `1.155 / LLTV` of the live debt plus
+  twice the collectible fee (1.5× at the launch market's 77% LLTV) is refused
+  (`InsufficientRemainingCollateral`, retriable) until debt and fee are repaid in loan tokens
+  through `repay`, or a smaller amount is signed; nothing is ever taken from the collateral (see
+  The exit gate). It is the one action
   that accepts compose value, spent in the same call: the value pays the return send's LayerZero
   fee, quoted live against the signed `returnOptions` from the payload, with the excess to the
   parent remote Personal Account and too little value for the quote reverting the delivery —
@@ -549,7 +551,8 @@ address itself commits to the pool:
   (`InsufficientDeliveryValue`, retriable), which is what stops a below-value front-run from
   consuming the packet with the prepaid value undelivered; a terminally skipped withdraw
   delivered at or above the floor forwards its value to the parent, since nothing may strand on
-  an account with no native rail. Morpho enforces position health.
+  an account with no native rail. The gate sits above Morpho's own liquidation line, so Morpho's
+  health check never binds on this path.
 
 **Creation route.** The same generic `createSubaccount(xrplOwner, type)` serves this chain —
 there is no separate loan-chain creation function. The parent Personal Account resolves the
@@ -853,7 +856,8 @@ fee-on-transfer, no rebasing (RLUSD at launch).
 
 The fee is denominated in the **loan token** and collects at one point, loan-token and
 fixed-destination: inside `repay`; the exit
-never collects — it only refuses while the fee is under-secured (the exit gate below). The
+never collects — it only refuses while the remainder would not cover the position (the exit gate
+below). The
 collection:
 
 - **`repay()`**, in this exact order: checkpoint → Morpho accrual, the live debt `D` and the
@@ -887,32 +891,37 @@ pro rata, and a fee left with zero debt is what `repay` pays first.
 The gate is what makes dodging the repay-side fee pointless — Morpho's `repay` is
 permissionless, so anyone can extinguish the debt directly, but the collateral leaves only
 through the account's rails (with the liquidation exception, accepted as decision 1). The
-exit is user-signed and gates on the collectible — **as a secured claim**: the
-collateral remaining in the position IS the fee's security, so an exit is refused when it
-would strip that security.
+exit is user-signed and gates on the whole position: the collateral remaining in the position
+is the security of the debt and of the fee behind it, so an exit is refused when it would strip
+that security. Morpho alone would let a user withdraw to the exact liquidation edge (its
+`_isHealthy` is the same test for a withdrawal and for a liquidation), so the buffer above that
+edge is the account's own.
 
-- **The security rule:** an exit passes uncollected when the collateral remaining after it,
-  valued at the market oracle's price, covers `FEE_SECURITY_FACTOR × collectible`
-  (factor 3 — headroom for the fee's growth until the next gate event and for price drift;
-  deliberately NOT liquidation-proof, which would need ~5× and is already accepted as the
-  junior-claim risk). The factor is a gross threshold on the remaining collateral, not equity
-  net of Morpho's senior debt: at Morpho's LLTV boundary the equity behind the fee can be well
-  under the fee itself. Mid-loan partial withdrawals therefore carry no fee friction while the
-  remainder clears the threshold; only the exit that would leave the fee under-secured must
-  first be settled through `repay`. When `collectible`
-  is zero the rule needs no oracle and no position read. A zero or dead oracle values the
-  security at nothing, so the exit is refused — the escape is settling through `repay`, after
-  which the retried delivery passes with nothing collectible, oracle-free. (A live-debt
-  withdrawal is blocked by Morpho's own oracle-dependent health check anyway, so the debt must
-  be closed — and the refused case is effectively the debt-free one, where the fee is static
-  and exactly settleable.)
+- **The cover rule:** a withdrawal passes when the collateral remaining after it, valued at the
+  market oracle's price, is worth at least
+
+  `requiredCover = (D + FEE_WEIGHT × F) × EXIT_HEADROOM / LLTV`, rounded up,
+
+  for the live Morpho debt `D`, the collectible fee `F` and the market's LLTV read from its
+  params — `EXIT_HEADROOM = 1.155e18`, `FEE_WEIGHT = 2`. At the launch market's 77% LLTV this is
+  exactly `1.5 × (D + 2F)`: Morpho's liquidation line `D / LLTV` with a 15.5% headroom, the fee
+  counted twice as the junior claim it is. The three regimes it fixes: a fresh loan (`F ≈ 0`) is
+  gated at `1.5 D` where Morpho would allow `1.3 D`; a debt-free position at `3F`, the fee's own
+  cover (deliberately not liquidation-proof — the accepted junior-claim risk); a live loan in
+  between. For `D = 1000`, `F = 70`: Morpho allows the collateral down to 1299, the gate keeps
+  1710; debt repaid, 210. The rule implies Morpho's health check (`1.155 × (D + 2F) ≥ D`), so
+  Morpho's own refusal never binds on this path. With nothing owed (`D = 0`, `F = 0`) the gate reads
+  no oracle. A zero or dead oracle values the remainder at nothing, so the exit is refused — the
+  escape is settling through `repay`, after which the retried delivery passes with nothing owed,
+  oracle-free.
 - **`withdraw` (the atomic bridge-home)**, in this exact order: the hard argument checks
   (zero amount, zero id) → the delivery-value floor → duplicate/expired skip → pause gate →
   checkpoint (with a live fee principal; zero principal has nothing to accrue) →
-  the security rule on the post-withdrawal remainder — secured passes, under-secured reverts
-  `OutstandingLoanFee` (retriable) → consume the operation id → withdraw and bridge.
-  Settlement is deliberately not part of the withdraw: the fee is paid in loan tokens through
-  `repay` (subaccount RLUSD means repay, the free direction), after which the same parked
+  the cover rule on the post-withdrawal remainder — covered passes, uncovered reverts
+  `InsufficientRemainingCollateral(requiredCover, remainingValue)` (retriable; the two numbers
+  let the front end size the repayment) → consume the operation id → withdraw and bridge.
+  Settlement is deliberately not part of the withdraw: debt and fee are paid in loan tokens
+  through `repay` (subaccount RLUSD means repay, the free direction), after which the same parked
   packet passes; no price ever moves funds at an exit.
 - **Final-exit forgiveness:** when a gate passes with `principal == 0` and a sub-unit
   fractional remainder still in `flareDebtX18`, the remainder is cleared with
@@ -923,40 +932,48 @@ would strip that security.
 Consequence to respect in review: an over-accrual bug is not self-limiting — it parks the
 exit until settled — so the accrual logic carries money-path review weight.
 
-**Settlement is loan-token only.** No exit converts the fee: an under-secured withdraw
-refuses (`OutstandingLoanFee`), the user pays the fee in RLUSD — to the subaccount, where `repay`
-collects it pro rata with any live debt and attempts the whole collectible on a payment covering
-both (reserving what it cannot pay) — and the retried packet passes. An FXRP settlement mode
-— the fee deducted from the withdrawn collateral at the market oracle's price under a signed cap
-— was built and removed (2026-09-02): it only ever served users who had closed outside the rails
-or underfunded `repay`, and it was the one place a price moved funds. Removing it takes the
-oracle out of every money path (it survives only in the gate's comparison, where a wrong price
-can refuse an exit but never take from it), drops a payload field, four errors and an event, and
-leaves the collector holding RLUSD only.
+**Settlement is loan-token only.** No exit converts the fee: an uncovered withdraw refuses
+(`InsufficientRemainingCollateral`), the user pays in RLUSD — to the subaccount, where `repay`
+splits it pro rata between the live debt and the fee and attempts the whole collectible on a
+payment covering both (reserving what it cannot pay) — and the retried packet passes once the fee
+has actually left the account: a collector the token refuses leaves the fee owed and reserved on
+the account (`LoanFeeReserved`), still counted by the gate, until a later `repay` retries it. An FXRP
+settlement mode — the fee deducted from the withdrawn collateral at the market oracle's price
+under a signed cap — was built and removed (2026-09-02): it only ever served users who had closed
+outside the rails or underfunded `repay`, and it was the one place a price moved funds. Removing
+it takes the oracle out of every money path (it survives only in the gate's comparison, where a
+wrong price can refuse an exit but never take from it), drops a payload field, four errors and
+an event, and leaves the collector holding RLUSD only.
 
-**The overlap (Morpho allows, the gate refuses).** `repay` pays the fee
-pro rata with the debt, so under the rails alone the fee-to-debt ratio stays near the accrual
-rate (a few percent a year) and the gate is met with room to spare. The ratio jumps only when
-the debt is paid outside the rails — a debt-only Morpho repayment, a partial liquidation, a
-third party repaying on the account's behalf. Once the collectible `F` exceeds `D / (LLTV ×
-FEE_SECURITY_FACTOR)` of the live debt `D` (about 43% at LLTV 0.77 and factor 3), a band of
-remainders `D / LLTV ≤ V < FEE_SECURITY_FACTOR × F` passes Morpho's health check but fails the
-gate. The way through with the loan still open is a top-up to the subaccount, which `repay`
-splits pro rata: every payment shrinks both claims, so a large enough one brings
-`FEE_SECURITY_FACTOR × F` under the remainder `V` (at `P = (D + F)(1 − V / (3F))`) with debt
-still outstanding; the alternative is to withdraw less. The factor stays 3 (lowering it only makes the band rarer — the
-threshold moves to ~65% of debt at 2 — while cutting the debt-free recovery headroom from a 67%
-to a 50% price fall). Pinned by `testOverlapTopUpOnTheSubaccountPaysTheFeeProRata`. Front-end
-requirements, in the spirit of the wallet invariant: detect the band for the requested remainder
-`V`; offer the two ways out — a top-up to the subaccount sized to clear the gate (the split pays
-`P × F / (D + F)` of the fee), or withdraw less — and quote `D + F` plus headroom for in-flight
-interest to settle both claims through `repay` (the surplus returns to the PA); say that RLUSD
-sent to the subaccount is split pro rata between debt and fee (a fee-sized top-up pays only its
-share of the fee), and that the refused packet stays unconsumed and retriable. The design path,
-for the record: a withdraw-time settlement pulled from the parent (a signed cap field in the
-withdraw payload, the subaccount reaching into the PA) was built and rejected twice, in FXRP and
-in RLUSD; a parent-signed fee-only payment from the remote PA's own RLUSD (`payLoanFee`) followed
-and was removed on 2026-09-04 (see the resolved decisions).
+**Stricter than Morpho by design (Morpho allows, the gate refuses).** With live debt the band
+`D / LLTV ≤ V < (D + 2F) × 1.155 / LLTV` of remainders passes Morpho's health check but fails
+the gate — that is the headroom, not an edge case, and it is widest where the fee is large next
+to the debt (after a debt-only Morpho repayment, a partial liquidation, a third party repaying on
+the account's behalf; on the rails alone `repay` keeps the fee-to-debt ratio near the accrual
+rate). The way through with the loan still open is a top-up to the subaccount, which `repay`
+splits pro rata: every payment shrinks both claims, and
+`P = (D + 2F − V × LLTV / 1.155) × (D + F) / (D + 2F)` is the payment that brings the remainder `V`
+to the line in exact arithmetic — a starting point, not a quote: the split rounds the fee share
+down, the debt is re-read from shares after the repayment and the cover rounds up, so the exact
+minimum comes from checking the post-repayment state and stepping the payment up until
+`ceil((D' + 2F') × 1.155 / LLTV) ≤ V` (for `D = 100`, `F = 7`, `V = 130` in base units the formula
+says 26 and 27 is needed; the position view planned for the release does this on-chain). The
+alternative is to withdraw less. Pinned by `testOverlapTopUpOnTheSubaccountPaysTheFeeProRata`,
+`testExitGateIsStricterThanMorphoHealth`, `testExitGateFollowsTheMarketLltv` and
+`testExitGateValuesTheRemainderRoundedDown`. Front-end requirements, in the spirit of the wallet
+invariant: quote the required cover and the remaining value for the requested amount (the
+refusal carries both); offer the two ways out — a top-up sized against the post-repayment state as
+above, or a smaller withdrawal — and quote `D + F` plus headroom for in-flight interest to settle
+both claims through
+`repay` (the surplus returns to the PA); say that RLUSD sent to the subaccount is split pro rata
+between debt and fee, and that the refused packet stays unconsumed and retriable. The design
+path, for the record: the first gate covered the fee alone, at three times the collectible on the
+gross remainder, and left a live-debt withdrawal to Morpho's own check — which lets a position
+run to its liquidation edge; the position-wide cover replaced it on 2026-09-05 (debt-free it is
+the same `3F`). Earlier, a withdraw-time settlement pulled from the parent (a signed cap field in
+the withdraw payload, the subaccount reaching into the PA) was built and rejected twice, in FXRP
+and in RLUSD; a parent-signed fee-only payment from the remote PA's own RLUSD (`payLoanFee`)
+followed and was removed on 2026-09-04 (see the resolved decisions).
 
 **Dead-Morpho residual (accepted):** with a permanently reverting IRM, a position's collateral
 is lost anyway, and so is idle FXRP on that account, whose only route home runs through the
@@ -1001,10 +1018,13 @@ which still exits only through the rails; only a deep liquidation — a price ga
 left unhealthy — strips everything and extinguishes the claim in practice. Decision 1 accepts
 this: the fee is junior to Morpho debt and the liquidation incentive, self-liquidation is a
 bounded-value dodge (gas, sniping risk, only the deep case escapes fully), and the expected
-write-off is priced, not prevented. With every withdrawal gated, liquidation is the *only*
-value exit around the gate: a secured withdrawal also passes uncollected, but
-deliberately, leaving the claim covered by the remaining position — only liquidation can
-strip the claim's security and make it unrecoverable.
+write-off is priced, not prevented. With every withdrawal gated, two value exits remain around
+the gate. Liquidation: a covered withdrawal also passes uncollected, but deliberately, leaving
+the claim covered by the remaining position — only liquidation can strip the claim's security
+and make it unrecoverable. And, in this step, borrowing: a borrow against the position is still
+bounded by Morpho's line alone, so a position sitting exactly at the cover (1710 for `D = 1000`,
+`F = 70`) can borrow another 316.7 RLUSD and consume the buffer the withdraw gate keeps; the same
+cover rule on borrow is decided and is the next step (see the release checklist).
 
 Accounting stays **prospective-only**: the contract cannot learn when a liquidation happened,
 so a ping stops the floor's clock from ping time, never retroactively — the FE surfaces "I
@@ -1347,14 +1367,19 @@ storage-lineage gate below is the third member of this family.
 - per-action `lzCompose` gas profiling against the real Morpho, oracle and token contracts
   — the test fixture's option values are illustrative headroom for the mock path, not
   production configuration;
-- **the canonical-Morpho premise of the fee's exit gate**: with live borrow shares,
-  canonical Morpho's `withdrawCollateral` accrues interest and oracle-checks position
-  health, so a dead oracle blocks live-debt withdrawals at Morpho itself — which is why
-  the gate's dead-oracle parked case is effectively the debt-free one, settleable through
-  `repay` (see The Flare fee). `MockMorpho` models this check behind a switch (the fee
-  fixtures run over-leveraged with it off; dedicated tests run with it on), so the
-  interplay is pinned at the unit level; what remains is verifying the premise against the
-  canonical Morpho source and the real market in the integration harness before launch;
+- **the canonical-Morpho premises of the exit gate**: the gate implies Morpho's health check
+  (`1.155 × (D + 2F) ≥ D`, cover rounded up, remaining value rounded down), so on the real
+  market Morpho's own refusal must never bind first, and with live debt a dead oracle is
+  refused by the gate itself; with `D = 0` and collectible `F = 0` the withdrawal passes the gate
+  oracle-free (debt-free with an unpaid fee still reads the oracle), which then needs canonical
+  `withdrawCollateral` to skip the oracle too with zero borrow shares (`_isHealthy` returns
+  early). `MockMorpho` models both behind a switch (the fee fixtures run
+  over-leveraged with it off; dedicated tests run with it on), so the interplay is pinned at
+  the unit level; what remains is verifying both against the canonical Morpho source and the
+  real market in the integration harness before launch;
+- **the cover rule on borrow** (decided 2026-09-05, not built): the same
+  `(D + 2F) × 1.155 / LLTV` cover applied to the post-borrow position, so a borrow cannot
+  consume the buffer the withdraw gate keeps (see The junior claim and liquidation);
 - **fee terms configured before any route opens**: `registerLoanMarket`, then the one
   `setLoanFeeTerms` call (the activation — borrowing reverts until it executes); verify all
   three fields before enabling the forward route;
@@ -1397,7 +1422,7 @@ deliberately not built.
 
 - ~~Stuck RLUSD on the loan-chain side~~ — resolved: while the account's position has debt, the balance is repayment material (`repay` is its only move); once the position is closed — by `repay` itself or by a full external liquidation — the same `repay` call pushes the surplus to the parent Personal Account (the user's own loan-chain account), best-effort: a push the token refuses stays on the account for a later `repay` to retry, never rolling back the repayment. No generic `recoverToken`: stray tokens strand, as on the Flare side. Same-id replay is prevented by the operation ids (two separately authorized ids can each borrow).
 - ~~Atomic withdraw-and-bridge action~~ — resolved, built as `ACTION_WITHDRAW` itself: the withdraw compose withdraws the collateral and bridges it home in the same execution (the withdraw/redeposit race is closed for withdrawals; it survives only for residue). Compose value is accepted for this one action and spent in the same call — the return leg's fee, prepaid from Flare as message-1 compose value, quoted against the signed `returnOptions`, excess to the parent; every delivery must carry the signed `minComposeValue` floor (delivery is permissionless, the value unauthenticated — below the floor nothing consumes the packet), and a short delivery reverts and stays retriable. Two accepted residuals: bad signed `returnOptions` park that withdrawal until a fresh instruction reusing the same operation id (the parked packet then terminal-skips as a duplicate), and the redeem-home packet residual above applies to the return leg as to any bridge-back — including its best-effort redemption fee.
-- ~~The Flare fee~~ — resolved, designed and built: checkpoint accounting of `max(feeFloor, market interest + feeSpread)` over the account's Morpho debt, per-type timelocked terms behind a recipient activation marker, collection in `repay` (pro rata with the debt on a partial payment; a payment covering debt plus fee attempts the whole collectible and reserves what it cannot pay), with the exit gated as a secured claim (an under-secured withdraw is refused until the fee is paid). The gate's basis is gross collateral at factor 3: an equity basis would widen the Morpho-allows/gate-refuses band about fourfold, and a lower factor would trade recovery headroom for a rarer band (see The exit gate). See The Flare fee.
+- ~~The Flare fee~~ — resolved, designed and built: checkpoint accounting of `max(feeFloor, market interest + feeSpread)` over the account's Morpho debt, per-type timelocked terms behind a recipient activation marker, collection in `repay` (pro rata with the debt on a partial payment; a payment covering debt plus fee attempts the whole collectible and reserves what it cannot pay), with the exit gated on the whole position (a withdraw that would leave the collateral worth less than `(D + 2F) × 1.155 / LLTV` is refused until repaid, or a smaller amount is signed). The gate's first form covered the fee alone at three times the collectible and left live-debt withdrawals to Morpho's own edge; the position-wide cover replaced it on 2026-09-05 (see The exit gate). See The Flare fee.
 - ~~Debt-first vs pro-rata `repay`~~ — resolved (2026-09-04): pro rata. A partial `repay` pays the fee `P × F / (D + F)` alongside the debt, so the fee is realized incrementally on the default route instead of only at close. Strict — a payment covering the debt but not the fee leaves a sliver of both, bar the rounding edge where the share's round-down leaves Morpho exactly `D` (within roughly `F / D` base units of `D + F`) and the deferred case, where the full payment stays available and may cover `D` (closing the debt alone would hand a debt-first route to anyone sending exactly `D`) — and without a stored reserve: a share the collector cannot receive stays in the payment, repaying debt (`LoanFeeDeferred`), which costs Flare only timing, only during a freeze of its own recipient. direct Morpho repayment stays the debt-only route (`payLoanFee`, then the fee-only payment, was removed later that day). See Collection.
 - ~~`sweepToOrigin`~~ — removed (2026-09-04). On a canonical market `supplyCollateral` has no conditions of its own beyond an existing market, a non-zero amount and the collateral token's `transferFrom` (Morpho is immutable with no pause; the Ethereum FXRP token is an upgradeable proxy whose current implementation has no pause or blocklist — a dependency assumption, not an invariant), so idle FXRP on the loan-chain account has its route home through the position: `depositIdleFxrp`, then the signed withdraw, under the position's ordinary conditions (health, the fee gate, the pause, the oracle, the transport; collateral a position needs can be liquidated). The parent-signed direct bridge-back only added a second signed authority over the subaccount, the residue race with the deposit rail, and a Morpho-free special case to document. Residual accepted: idle FXRP on an account whose type has no market yet, or whose Morpho is dead, waits — for the registration, or for the beacon upgrade a dead Morpho needs anyway. The remote subaccount then kept one parent-only method, `payLoanFee`, removed the same day.
 - ~~Pause-gating the fee legs~~ — resolved (2026-09-04): not gated. `repay`'s fee legs (and, until its removal the same day, `payLoanFee`) move the user's RLUSD to Flare's own governance-set recipient, at an amount the contract computes or the signature caps, so an overcharge during an incident lands on Flare's address and is refundable — the pause bought little there, while holding the fee made the paused route debt-first and needed its own deferred/reserved cases. Accepted on two stated assumptions: the recipient is governance-set and replaceable (a compromised or wrong recipient would collect the fee shares of the repayments made during one rotation window), and the fee accounting is simple and audited. The pause keeps gating debt increases, withdrawals and debt-free deposits.

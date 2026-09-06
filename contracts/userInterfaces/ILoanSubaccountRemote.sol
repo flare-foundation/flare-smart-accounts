@@ -25,11 +25,14 @@ uint8 constant ACTION_BORROW = 1;
 /// uint256 withdrawAmount, uint256 minComposeValue, bytes returnOptions)`. The atomic
 /// withdrawal: withdraws collateral from the account's one position and bridges it back to the
 /// account's own Flare address in the same execution, with the redeem-home compose - no idle
-/// window, so the redeposit ordering race cannot touch a withdrawal. **The fee is a secured
-/// claim**: the withdrawal passes while the collateral remaining after it, valued at the market
-/// oracle's price, covers three times the collectible fee, and otherwise reverts retriably
-/// (`OutstandingLoanFee`) - the fee is paid in loan tokens through {repay}, never taken from
-/// the collateral, so no price ever moves funds here. `minComposeValue` is the delivery floor:
+/// window, so the redeposit ordering race cannot touch a withdrawal. **The exit gate**: the
+/// withdrawal passes while the collateral remaining after it, valued at the market oracle's
+/// price, covers `1.155 / LLTV` of the live debt plus twice the collectible fee (1.5x at the
+/// launch market's 77% LLTV - Morpho's own liquidation line with a headroom, so the gate implies
+/// Morpho's health check), and otherwise reverts retriably (`InsufficientRemainingCollateral`,
+/// carrying the required cover and the remaining value) - debt and fee are paid in loan tokens
+/// through {repay}, never taken from the collateral, so no price ever moves funds here.
+/// `minComposeValue` is the delivery floor:
 /// compose delivery is permissionless and LayerZero does not authenticate the delivered value,
 /// so a delivery carrying less - execution and terminal skip alike - reverts
 /// (`InsufficientDeliveryValue`), which is what stops a zero-value front-run from consuming
@@ -41,12 +44,14 @@ uint8 constant ACTION_BORROW = 1;
 /// delivery retriable; what recovers it differs by cause, and this is the one place it is
 /// written out. A quote shortfall: retry the SAME packet with more value. Another transient
 /// return-send failure: retry the same packet once its cause clears - more value cannot help,
-/// since exactly the newly quoted fee is forwarded. An under-secured fee (`OutstandingLoanFee`,
-/// which a dead or zero-priced oracle also produces, since it values the security at
-/// nothing): pay the fee - send loan tokens to the account and let {repay} collect (with debt
-/// outstanding the tokens are split pro rata between debt and fee, so covering both settles
-/// it and a smaller top-up pays only its share) - after which the retried
-/// delivery passes with nothing collectible, oracle-free. Bad `returnOptions` frozen into the
+/// since exactly the newly quoted fee is forwarded. An uncovered remainder
+/// (`InsufficientRemainingCollateral`, which a dead or zero-priced oracle also produces, since
+/// it values the remainder at nothing): repay - send loan tokens to the account and let {repay}
+/// split them pro rata between debt and fee (every payment shrinks the required cover; covering
+/// both settles the position once the fee has actually been collected - a fee the collector
+/// cannot receive stays owed and reserved, and a later {repay} retries it) - after which the
+/// retried delivery passes, oracle-free once nothing is owed; or sign a smaller withdrawal. Bad
+/// `returnOptions` frozen into the
 /// signed packet (the accepted residual - no retry can fix the blob itself): issue a corrected
 /// instruction reusing the SAME operation id, whereupon the parked packet later
 /// duplicate-skips. Position health is enforced by Morpho.
@@ -368,15 +373,18 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts a withdraw action that would leave the
-     * collectible fee under-secured: the collateral remaining after it, at the market oracle's
-     * price, would be worth less than three times the fee (a dead or zero-priced oracle values
-     * it at nothing). Retriable: pay the fee - loan tokens to the account and {repay} - then
-     * retry.
-     * @param collectible The fee currently payable.
+     * @notice Reverts a withdraw action that would leave the position uncovered: the
+     * collateral remaining after it, at the market oracle's price, would be worth less than
+     * `1.155 / LLTV` of the live debt plus twice the collectible fee (a dead or zero-priced
+     * oracle values it at nothing). Retriable: repay - loan tokens to the account and {repay} -
+     * or sign a smaller withdrawal, then retry.
+     * @param requiredCover The remaining collateral value the gate demands, in loan tokens.
+     * @param remainingValue The value the withdrawal would have left, in loan tokens; zero
+     * under a dead or zero-priced oracle.
      */
-    error OutstandingLoanFee(
-        uint256 collectible
+    error InsufficientRemainingCollateral(
+        uint256 requiredCover,
+        uint256 remainingValue
     );
 
 

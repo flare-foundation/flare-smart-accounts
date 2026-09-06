@@ -89,7 +89,7 @@ contract LoanFeeInvariantsTest is Test {
         assertTrue(remainder, "live debt with idle repayment balance");
     }
 
-    /// A successful exit with a collectible fee leaves the specified gross collateral cover.
+    /// A successful exit leaves collateral worth `(D + 2F) x 1.155 / LLTV` at the oracle's price.
     // solhint-disable-next-line func-name-mixedcase
     function invariant_ExitSecurity() public view {
         (, , , , , , bool secured, , ) = handler.checks();

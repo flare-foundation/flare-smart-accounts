@@ -167,9 +167,10 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * carry, as compose value, the native that prepays the return leg's LayerZero fee (quoted
      * against `_options.returnOptions` on the loan chain; the excess lands on the parent, and
      * too little parks the delivery as retriable). See {WithdrawOptions} for the signed
-     * delivery-value floor. A withdrawal that would leave the Flare fee under-secured reverts
-     * on the loan chain (`OutstandingLoanFee`, retriable) until the fee is paid in loan tokens
-     * through the subaccount's `repay`.
+     * delivery-value floor. A withdrawal that would leave the position under the loan chain's
+     * exit gate reverts there (`InsufficientRemainingCollateral`, retriable) until debt and
+     * fee are repaid in loan tokens through the subaccount's `repay`, or a smaller amount is
+     * signed.
      * @param _amount Collateral to withdraw on the loan chain and bridge home; non-zero.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
