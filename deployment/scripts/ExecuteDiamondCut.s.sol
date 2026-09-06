@@ -649,7 +649,9 @@ contract ExecuteDiamondCut is Script {
         private view
         returns (address _addr, bytes32 _codeHash, bool _isPinned)
     {
-        if (block.chainid != 1) return (address(0), bytes32(0), false);
+        if (block.chainid != 1) {
+            return (address(0), bytes32(0), false);
+        }
         bytes32 nameHash = keccak256(bytes(_name));
         if (nameHash == keccak256("DiamondCutFacet")) {
             return (

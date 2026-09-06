@@ -40,7 +40,9 @@ contract MockReentrantToken is MintableERC20 {
     }
 
     function _callback() private {
-        if (callbackTarget == address(0)) return;
+        if (callbackTarget == address(0)) {
+            return;
+        }
         // solhint-disable-next-line avoid-low-level-calls
         (bool ok, bytes memory returndata) = callbackTarget.call(callbackData);
         if (!ok) {

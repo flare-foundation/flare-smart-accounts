@@ -51,7 +51,9 @@ contract MockFaultyParent {
             calls++;
             // solhint-disable-next-line avoid-low-level-calls
             (bool success, bytes memory result) = target.call(data);
-            if (!success) callbackError = result;
+            if (!success) {
+                callbackError = result;
+            }
         }
     }
 }

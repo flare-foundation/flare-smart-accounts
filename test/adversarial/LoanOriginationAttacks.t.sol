@@ -46,7 +46,9 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         uint256 snapshot = vm.snapshotState();
         for (uint256 order = 0; order < 3; order++) {
             fxrp.mint(address(account), 100e6);
-            if (order == 0) account.depositIdleFxrp();
+            if (order == 0) {
+                account.depositIdleFxrp();
+            }
             _deliver(10, 100e6, _deposit(), 0);
             if (order == 1) {
                 vm.expectRevert(
@@ -720,14 +722,18 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
             uint256 feeShare =
                 payment < 100 + fee ? (payment * fee) / (100 + fee) : fee;
             uint256 debtPaid = payment - feeShare;
-            if (debtPaid > 100) debtPaid = 100;
+            if (debtPaid > 100) {
+                debtPaid = 100;
+            }
             // With one borrower and zero interest the virtual-share ratio is exact here.
             assertEq(account.repay(), debtPaid);
             assertEq(_debt(), 100 - debtPaid);
             (, uint256 afterFee, , , , ) = account.getLoanFeeState();
             assertEq(afterFee, feeX18 - loanToken.balanceOf(collector) * WAD);
             assertEq(loanToken.balanceOf(collector), feeShare);
-            if (_debt() > 0) assertEq(loanToken.balanceOf(address(account)), 0);
+            if (_debt() > 0) {
+                assertEq(loanToken.balanceOf(address(account)), 0);
+            }
             assertTrue(vm.revertToState(snapshot));
         }
     }

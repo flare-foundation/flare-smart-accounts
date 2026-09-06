@@ -61,7 +61,9 @@ contract MockCallbackToken is MintableERC20 {
         public override
         returns (bool)
     {
-        if (_to == falseRecipient) return false;
+        if (_to == falseRecipient) {
+            return false;
+        }
         _callback(CALLBACK_ON_TRANSFER);
         return super.transfer(_to, _value);
     }
@@ -74,7 +76,9 @@ contract MockCallbackToken is MintableERC20 {
         public override
         returns (bool)
     {
-        if (_to == falseRecipient) return false;
+        if (_to == falseRecipient) {
+            return false;
+        }
         _callback(CALLBACK_ON_TRANSFER_FROM);
         return super.transferFrom(_from, _to, _value);
     }
@@ -95,10 +99,14 @@ contract MockCallbackToken is MintableERC20 {
     )
         private
     {
-        if (_kind != callbackKind || msg.sender != callbackCaller) return;
+        if (_kind != callbackKind || msg.sender != callbackCaller) {
+            return;
+        }
         callbackCount++;
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory result) = callbackTarget.call(callbackData);
-        if (!success) callbackError = result;
+        if (!success) {
+            callbackError = result;
+        }
     }
 }

@@ -183,7 +183,9 @@ contract PinnedInitCodeTest is Test {
     }
 
     function _contains(bytes memory _haystack, bytes memory _needle) private pure returns (bool) {
-        if (_needle.length > _haystack.length) return false;
+        if (_needle.length > _haystack.length) {
+            return false;
+        }
         for (uint256 i = 0; i <= _haystack.length - _needle.length; i++) {
             bool matched = true;
             for (uint256 j = 0; j < _needle.length; j++) {
@@ -192,7 +194,9 @@ contract PinnedInitCodeTest is Test {
                     break;
                 }
             }
-            if (matched) return true;
+            if (matched) {
+                return true;
+            }
         }
         return false;
     }

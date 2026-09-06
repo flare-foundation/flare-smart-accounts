@@ -72,14 +72,20 @@ contract SubaccountsLibraryTest is Test {
     /// still detects drift instead of silently passing.
     function _stripMetadata(bytes memory _code) private pure returns (bytes memory _stripped) {
         uint256 codeLen = _code.length;
-        if (codeLen < 2) return _code;
+        if (codeLen < 2) {
+            return _code;
+        }
 
         uint256 metaLen = (uint256(uint8(_code[codeLen - 2])) << 8)
             | uint256(uint8(_code[codeLen - 1]));
-        if (metaLen == 0 || metaLen + 2 > codeLen) return _code;
+        if (metaLen == 0 || metaLen + 2 > codeLen) {
+            return _code;
+        }
 
         uint256 metaStart = codeLen - metaLen - 2;
-        if (uint8(_code[metaStart]) >> 5 != 5) return _code;
+        if (uint8(_code[metaStart]) >> 5 != 5) {
+            return _code;
+        }
 
         _stripped = new bytes(metaStart);
         for (uint256 i = 0; i < metaStart; i++) {

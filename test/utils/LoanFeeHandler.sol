@@ -156,7 +156,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
                     beforeCall.parentBalance + amount ||
                 _collateral() != collateralBefore + idle ||
                 fxrp.balanceOf(address(account)) != 0
-            ) operationsCorrect = false;
+            ) {
+                operationsCorrect = false;
+            }
         } else {
             _checkFailure(beforeCall);
             if (
@@ -164,7 +166,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
                 loanToken.balanceOf(parent) != beforeCall.parentBalance ||
                 _collateral() != collateralBefore ||
                 fxrp.balanceOf(address(account)) != idle
-            ) operationsCorrect = false;
+            ) {
+                operationsCorrect = false;
+            }
         }
         _recordSupply(success ? logs : new Vm.Log[](0));
     }
@@ -206,9 +210,12 @@ contract LoanFeeHandler is LoanRemoteFixture {
         if (
             loanToken.balanceOf(parent) > beforeCall.parentBalance &&
             _shares() != 0
-        ) checks.surplus = false;
-        if (_shares() != 0 && loanToken.balanceOf(address(account)) != 0)
+        ) {
+            checks.surplus = false;
+        }
+        if (_shares() != 0 && loanToken.balanceOf(address(account)) != 0) {
             checks.repayRemainder = false;
+        }
         _recordSupply(logs);
     }
 
@@ -220,7 +227,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
         external
     {
         uint128 shares = _shares();
-        if (shares == 0) return;
+        if (shares == 0) {
+            return;
+        }
         uint256 selected = _full ? shares : bound(_fraction, 1, shares);
         uint256 funding =
             _debt() + morpho.pendingInterest(MorphoMath.marketId(params)) + 1;
@@ -244,7 +253,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
     {
         uint128 shares = _shares();
         uint256 collateral = _collateral();
-        if (shares == 0 || collateral == 0) return;
+        if (shares == 0 || collateral == 0) {
+            return;
+        }
         oracle.setPrice(Math.mulDiv(_debt(), 1e36, collateral));
         uint128 selected =
             _full ? shares : uint128(bound(_fraction, 1, shares));
@@ -268,7 +279,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
         external
     {
         uint256 collateral = _collateral();
-        if (collateral == 0) return;
+        if (collateral == 0) {
+            return;
+        }
         uint256 amount = bound(_amount, 1, collateral);
         BeforeCall memory beforeCall = _beforeCall();
         uint256 oftBalanceBefore = fxrp.balanceOf(address(oft));
@@ -292,7 +305,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
         if (success) {
             successfulWithdrawals++;
             _checkEvents(beforeCall, logs, false);
-            if (beforeCall.principal != 0) _checkBaseline();
+            if (beforeCall.principal != 0) {
+                _checkBaseline();
+            }
             if ((beforeCall.fee + beforeCall.expectedDelta) / WAD != 0) {
                 successfulFeeBearingWithdrawals++;
             }
@@ -300,15 +315,21 @@ contract LoanFeeHandler is LoanRemoteFixture {
                 !account.usedOperations(operationId) ||
                 _collateral() != collateral - amount ||
                 fxrp.balanceOf(address(oft)) != oftBalanceBefore + amount
-            ) operationsCorrect = false;
-            if (!_exitCovered()) checks.exitSecurity = false;
+            ) {
+                operationsCorrect = false;
+            }
+            if (!_exitCovered()) {
+                checks.exitSecurity = false;
+            }
         } else {
             _checkFailure(beforeCall);
             if (
                 account.usedOperations(operationId) ||
                 _collateral() != collateral ||
                 fxrp.balanceOf(address(oft)) != oftBalanceBefore
-            ) operationsCorrect = false;
+            ) {
+                operationsCorrect = false;
+            }
         }
         _checkConservation();
     }
@@ -322,13 +343,16 @@ contract LoanFeeHandler is LoanRemoteFixture {
     {
         bytes32 oldState = _feeStateHash();
         (uint256 principal, , , uint64 timestamp, , ) = account.getLoanFeeState();
-        if (principal != 0 && block.timestamp > timestamp)
+        if (principal != 0 && block.timestamp > timestamp) {
             pendingElapsedTermsChange = true;
+        }
         uint64 feeFloor = uint64(bound(_floor, 0, WAD));
         uint64 feeSpread = uint64(bound(_spread, 0, WAD));
         _setTerms(1, feeFloor, feeSpread);
         termsChanges++;
-        if (_feeStateHash() != oldState) checks.elapsedTerms = false;
+        if (_feeStateHash() != oldState) {
+            checks.elapsedTerms = false;
+        }
         ILoanMarketsFacet.FeeTerms memory stored = controller.getLoanFeeTerms(
             1
         );
@@ -336,7 +360,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
             stored.feeFloor != feeFloor ||
             stored.feeSpread != feeSpread ||
             stored.feeRecipient != collector
-        ) checks.elapsedTerms = false;
+        ) {
+            checks.elapsedTerms = false;
+        }
         _checkConservation();
     }
 
@@ -346,10 +372,15 @@ contract LoanFeeHandler is LoanRemoteFixture {
     )
         external
     {
-        if (controller.isPaused() == _paused) return;
+        if (controller.isPaused() == _paused) {
+            return;
+        }
         vm.prank(owner);
-        if (_paused) controller.pause();
-        else controller.unpause();
+        if (_paused) {
+            controller.pause();
+        } else {
+            controller.unpause();
+        }
         pauses++;
         _checkConservation();
     }
@@ -385,15 +416,21 @@ contract LoanFeeHandler is LoanRemoteFixture {
             if (
                 _collateral() != collateralBefore + idle ||
                 fxrp.balanceOf(address(account)) != 0
-            ) depositsCorrect = false;
+            ) {
+                depositsCorrect = false;
+            }
         } else {
             _checkFailure(beforeCall);
             if (
                 _collateral() != collateralBefore ||
                 fxrp.balanceOf(address(account)) != idle
-            ) depositsCorrect = false;
+            ) {
+                depositsCorrect = false;
+            }
         }
-        if (_feeStateHash() != oldFeeState) depositsCorrect = false;
+        if (_feeStateHash() != oldFeeState) {
+            depositsCorrect = false;
+        }
         _checkConservation();
     }
 
@@ -427,7 +464,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
         _before.collectorBalance = loanToken.balanceOf(collector);
         _before.parentBalance = loanToken.balanceOf(parent);
         uint256 elapsed = block.timestamp - timestamp;
-        if (_before.principal == 0 || elapsed == 0) return _before;
+        if (_before.principal == 0 || elapsed == 0) {
+            return _before;
+        }
         uint256 liveDebt;
         uint128 shares = _shares();
         if (shares > 0) {
@@ -474,63 +513,85 @@ contract LoanFeeHandler is LoanRemoteFixture {
         bool pushed;
         for (uint256 i = 0; i < _logs.length; i++) {
             Vm.Log memory entry = _logs[i];
-            if (entry.emitter != address(account) || entry.topics.length == 0)
+            if (entry.emitter != address(account) || entry.topics.length == 0) {
                 continue;
+            }
             if (entry.topics[0] == CHECKPOINT) {
                 (, uint256 delta) = abi.decode(entry.data, (uint256, uint256));
                 added += delta;
-                if (delta != _before.expectedDelta) checks.elapsedTerms = false;
-                if (_before.principal == 0) zeroPrincipalCheckpoints++;
+                if (delta != _before.expectedDelta) {
+                    checks.elapsedTerms = false;
+                }
+                if (_before.principal == 0) {
+                    zeroPrincipalCheckpoints++;
+                }
                 if (pendingElapsedTermsChange) {
                     elapsedTermsChangeCheckpoints++;
                     pendingElapsedTermsChange = false;
                 }
             } else if (entry.topics[0] == PRINCIPAL_SYNCED) {
                 synced++;
-                if (abi.decode(entry.data, (uint256)) != _debt())
+                if (abi.decode(entry.data, (uint256)) != _debt()) {
                     baselineCorrect = false;
+                }
             } else if (entry.topics[0] == COLLECTED) {
-                if (address(uint160(uint256(entry.topics[1]))) != collector)
+                if (address(uint160(uint256(entry.topics[1]))) != collector) {
                     checks.feeTransfers = false;
+                }
                 paid += abi.decode(entry.data, (uint256));
                 feeTransfers++;
             } else if (entry.topics[0] == RESERVED) {
-                if (address(uint160(uint256(entry.topics[1]))) != collector)
+                if (address(uint160(uint256(entry.topics[1]))) != collector) {
                     reservationsCorrect = false;
+                }
                 reserved += abi.decode(entry.data, (uint256));
                 feeReservations++;
             } else if (entry.topics[0] == FORGIVEN) {
                 uint256 dust = abi.decode(entry.data, (uint256));
                 (uint256 principal, , , , , ) = account.getLoanFeeState();
-                if (principal != 0 || dust >= WAD || dust == 0)
+                if (principal != 0 || dust >= WAD || dust == 0) {
                     checks.dust = false;
+                }
                 forgiven += dust;
                 dustForfeitures++;
             } else if (entry.topics[0] == SURPLUS) {
                 pushed = true;
-                if (address(uint160(uint256(entry.topics[1]))) != parent)
+                if (address(uint160(uint256(entry.topics[1]))) != parent) {
                     checks.surplus = false;
+                }
                 surplusAmount += abi.decode(entry.data, (uint256));
                 surplusPushes++;
-                if (_shares() != 0) checks.surplus = false;
+                if (_shares() != 0) {
+                    checks.surplus = false;
+                }
             }
         }
         (, uint256 afterFee, , , , ) = account.getLoanFeeState();
-        if (_before.fee + added != afterFee + paid * WAD + forgiven)
+        if (_before.fee + added != afterFee + paid * WAD + forgiven) {
             checks.accounting = false;
-        if (_before.principal == 0 && added != 0) checks.zeroPrincipal = false;
-        if (loanToken.balanceOf(collector) != _before.collectorBalance + paid)
+        }
+        if (_before.principal == 0 && added != 0) {
+            checks.zeroPrincipal = false;
+        }
+        if (loanToken.balanceOf(collector) != _before.collectorBalance + paid) {
             checks.feeTransfers = false;
+        }
         if (
             reserved != 0 &&
             (_shares() != 0 ||
                 loanToken.balanceOf(address(account)) != reserved)
-        ) reservationsCorrect = false;
+        ) {
+            reservationsCorrect = false;
+        }
         if (
             pushed &&
             loanToken.balanceOf(parent) != _before.parentBalance + surplusAmount
-        ) checks.surplus = false;
-        if (_expectSync != (synced == 1)) baselineCorrect = false;
+        ) {
+            checks.surplus = false;
+        }
+        if (_expectSync != (synced == 1)) {
+            baselineCorrect = false;
+        }
     }
 
     /// The exit gate's reference: the collateral left, at the oracle's price, covers
@@ -553,9 +614,12 @@ contract LoanFeeHandler is LoanRemoteFixture {
     )
         private
     {
-        if (_feeStateHash() != _before.stateHash) checks.accounting = false;
-        if (loanToken.balanceOf(collector) != _before.collectorBalance)
+        if (_feeStateHash() != _before.stateHash) {
+            checks.accounting = false;
+        }
+        if (loanToken.balanceOf(collector) != _before.collectorBalance) {
             checks.feeTransfers = false;
+        }
     }
 
     function _recordSupply(
@@ -569,10 +633,16 @@ contract LoanFeeHandler is LoanRemoteFixture {
                 entry.emitter != address(loanToken) ||
                 entry.topics.length != 3 ||
                 entry.topics[0] != TRANSFER
-            ) continue;
+            ) {
+                continue;
+            }
             uint256 amount = abi.decode(entry.data, (uint256));
-            if (entry.topics[1] == bytes32(0)) minted += amount;
-            if (entry.topics[2] == bytes32(0)) burned += amount;
+            if (entry.topics[1] == bytes32(0)) {
+                minted += amount;
+            }
+            if (entry.topics[2] == bytes32(0)) {
+                burned += amount;
+            }
         }
         _checkConservation();
     }
@@ -591,7 +661,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
         if (
             supply != _trackedBalances() ||
             initialSupply + minted != supply + burned
-        ) checks.conservation = false;
+        ) {
+            checks.conservation = false;
+        }
     }
 
     function _checkBaseline() private {
@@ -609,7 +681,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
             timestamp != block.timestamp ||
             floor != terms.feeFloor ||
             spread != terms.feeSpread
-        ) baselineCorrect = false;
+        ) {
+            baselineCorrect = false;
+        }
     }
 
     function _feeStateHash(

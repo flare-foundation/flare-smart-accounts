@@ -276,7 +276,9 @@ contract MockMorpho is IMorpho {
     )
         private view
     {
-        if (healthCheckDisabled) return;
+        if (healthCheckDisabled) {
+            return;
+        }
         PositionState storage p = _positions[id][account];
         MarketState storage m = _markets[id];
         uint256 price = IOracle(marketParams.oracle).price();

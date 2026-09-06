@@ -244,7 +244,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         // terminal gates come first, so a duplicate or expired delivery finalizes even when
         // borrowing is disabled or the market is not yet registered, instead of reverting
         // forever
-        if (_skipped(operationId, deadline, _guid)) return;
+        if (_skipped(operationId, deadline, _guid)) {
+            return;
+        }
         // a debt increase respects the pause and the per-type borrow switch
         _checkNotPaused();
         require(!ILoanMarketsFacet(controllerAddress).isLoanBorrowingDisabled(_accountType()), BorrowingDisabled());
@@ -488,7 +490,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     )
         private
     {
-        if (_value == 0) return;
+        if (_value == 0) {
+            return;
+        }
         // slither-disable-start arbitrary-send-eth
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = _parentAccount().call{value: _value}("");
@@ -619,7 +623,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         private
     {
         uint256 balance = _loanToken.balanceOf(address(this));
-        if (balance == 0) return;
+        if (balance == 0) {
+            return;
+        }
 
         uint256 collectible = flareDebtX18 / WAD;
         if (collectible > 0) {
@@ -658,7 +664,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         private
         returns (uint256)
     {
-        if (!_loanToken.trySafeTransfer(_recipient, _amount)) return 0;
+        if (!_loanToken.trySafeTransfer(_recipient, _amount)) {
+            return 0;
+        }
         flareDebtX18 -= _amount * WAD;
         emit LoanFeeCollected(_recipient, _amount);
         return _amount;

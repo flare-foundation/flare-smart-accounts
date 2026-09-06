@@ -137,7 +137,9 @@ library BridgeRoutes {
         // route is cleared (a retried timelocked call is harmless), and a different endpoint id
         // is refused as a re-point whether or not it is registered
         uint32 pinned = state.typeRoutes[_subaccountType];
-        if (pinned == _destinationEid) return;
+        if (pinned == _destinationEid) {
+            return;
+        }
         require(pinned == 0, IBridgeRoutesFacet.SubaccountTypeRoutePinned(_subaccountType, pinned));
         require(
             state.routes[_destinationEid] != bytes32(0),
