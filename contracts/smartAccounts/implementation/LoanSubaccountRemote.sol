@@ -22,6 +22,7 @@ import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
 import {IOracle} from "../interface/IOracle.sol";
 import {MorphoMath} from "../library/MorphoMath.sol";
+import {LoanMath} from "../library/LoanMath.sol";
 import {SubaccountBase} from "./SubaccountBase.sol";
 import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
@@ -49,20 +50,11 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
 
-    /// @dev Fee arithmetic: annual WAD rates over a fixed 365-day year.
-    uint256 private constant WAD = 1e18;
-    uint256 private constant YEAR = 365 days;
+    /// @dev WAD fixed point, the fee carry's precision (the fee formulas themselves live in
+    /// {LoanMath}, shared with the read surface).
+    uint256 private constant WAD = LoanMath.WAD;
     /// @dev Morpho's oracle scale: `loanAmount = mulDiv(collateralAmount, price, 1e36)`.
     uint256 private constant ORACLE_PRICE_SCALE = 1e36;
-    /// @dev The exit gate's headroom over Morpho's liquidation line (WAD): the collateral a
-    /// withdrawal leaves must be worth `EXIT_HEADROOM / LLTV` of the covered claim, where Morpho
-    /// itself lets a position run down to `1 / LLTV` (its withdraw and liquidation tests are one
-    /// and the same). At the launch market's 77% LLTV this is exactly 1.5x.
-    uint256 private constant EXIT_HEADROOM = 1.155e18;
-    /// @dev The fee's weight in the covered claim, `debt + FEE_WEIGHT * collectible`: the junior
-    /// claim behind the debt counts twice, so a debt-free exit needs 3x the collectible.
-    /// Deliberately not liquidation-proof (the accepted junior-claim risk).
-    uint256 private constant FEE_WEIGHT = 2;
 
     // this lineage's own linear state starts right after ControlledAccountBase's slot 0 (the
     // bases' other state is namespaced): the canonical principal at the last checkpoint, the
@@ -104,7 +96,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
                 // balance and repays debt (if that closes the debt, the tail below retries
                 // the remainder and reserves what still cannot be paid); what the tail
                 // cannot pay either stays owed
-                uint256 feeShare = Math.mulDiv(balance, collectible, fullDebt + collectible);
+                uint256 feeShare = LoanMath.feeShare(balance, fullDebt, collectible);
                 if (feeShare > 0) {
                     address recipient = _feeRecipient();
                     uint256 paid = _payFee(loanToken, recipient, feeShare);
@@ -530,12 +522,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
                     IMorpho(_market.morpho).accrueInterest(_market.marketParams);
                     (, liveDebt) = _debtOf(_market);
                 }
-                uint256 interestX18 = (liveDebt > principal ? liveDebt - principal : 0) * WAD;
-                uint256 owedX18 = Math.max(
-                    Math.mulDiv(principal * feeSnapshotFloor, elapsed, YEAR),
-                    interestX18 + Math.mulDiv(principal * feeSnapshotSpread, elapsed, YEAR)
+                feeDeltaX18 = LoanMath.feeDeltaX18(
+                    principal, liveDebt, elapsed, feeSnapshotFloor, feeSnapshotSpread
                 );
-                feeDeltaX18 = owedX18 - interestX18;
                 flareDebtX18 += feeDeltaX18;
                 feePrincipal = liveDebt;
             }
@@ -550,10 +539,10 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
 
     /// @dev The cover gate, shared by the withdraw (on the remainder after `_collateralOut`) and
     /// the borrow (on the post-borrow position, `_collateralOut == 0`): the collateral left in
-    /// the position, valued at the market oracle's price, must cover {_requiredCoverOf} the live
-    /// debt and the collectible fee - Morpho's liquidation line with a fixed headroom, so the
-    /// gate implies Morpho's health check and a fresh loan is gated at `EXIT_HEADROOM / LLTV` of
-    /// its debt. The debt read here is accrued: the caller's checkpoint, or the borrow just
+    /// the position, valued at the market oracle's price, must cover {LoanMath.requiredCover} of
+    /// the live debt and the collectible fee - Morpho's liquidation line with a fixed headroom, so
+    /// the gate implies Morpho's health check and a fresh loan is gated at `EXIT_HEADROOM / LLTV`
+    /// of its debt. The debt read here is accrued: the caller's checkpoint, or the borrow just
     /// made, brought it forward. With nothing owed the gate reads no oracle (and forgives
     /// debt-free dust); a zero, dead or reverting oracle values the remainder at nothing, so
     /// the action is refused - a withdrawal is then settled through repay, oracle-free, and
@@ -567,7 +556,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     {
         (, uint256 debt) = _debtOf(_market);
         uint256 requiredCover =
-            _requiredCoverOf(debt, flareDebtX18 / WAD, _market.marketParams.lltv);
+            LoanMath.requiredCover(debt, flareDebtX18 / WAD, _market.marketParams.lltv);
         if (requiredCover == 0) {
             _forgiveFeeDust();
             return;
@@ -743,23 +732,5 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
             IMorpho(_market.morpho).market(marketId);
         _fullDebt = MorphoMath.toAssetsUp(_borrowShares, totalBorrowAssets, totalBorrowShares);
-    }
-
-    /// @dev The cover gate's required cover, in loan tokens: `(debt + FEE_WEIGHT * collectible)
-    /// * EXIT_HEADROOM / lltv`, rounded up; zero when nothing is owed. Pure, so a quote can
-    /// reproduce exactly what the gate demands.
-    function _requiredCoverOf(
-        uint256 _debt,
-        uint256 _collectible,
-        uint256 _lltv
-    )
-        private pure
-        returns (uint256)
-    {
-        uint256 claim = _debt + FEE_WEIGHT * _collectible;
-        if (claim == 0) {
-            return 0;
-        }
-        return Math.mulDiv(claim, EXIT_HEADROOM, _lltv, Math.Rounding.Ceil);
     }
 }
