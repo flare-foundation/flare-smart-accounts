@@ -942,6 +942,9 @@ tokens against the same collateral.
   before anything is disbursed, and the whole delivery rolls back: the credit stays idle on the
   account and the packet stays retriable (a smaller signed borrow, more collateral, or a
   repayment reopens it).
+- **The front end's numbers** come from the read surface below: the required cover, the remaining
+  value, the largest amount that passes and the smallest repayment that reopens a refused exit
+  are computed on-chain by the code the gate runs.
 - **Final-exit forgiveness:** when a gate passes with `principal == 0` and a sub-unit
   fractional remainder still in `flareDebtX18`, the remainder is cleared with
   `LoanFeeRemainderForgiven` — it can never be transferred (ERC-20 moves whole base units)
@@ -950,6 +953,71 @@ tokens against the same collateral.
 
 Consequence to respect in review: an over-accrual bug is not self-limiting — it parks the
 exit until settled — so the accrual logic carries money-path review weight.
+
+### The read surface
+
+Five views on the loan-chain subaccount quote what the actions will do, computed by the same
+code the actions enforce: the fee and cover formulas live in one pure library (`LoanMath`), and
+the projection of Morpho's debt reproduces Morpho's own accrual (the rate model's `borrowRateView`
+compounded over the time since the market's last update, `MorphoMath.wTaylorCompounded`, then
+`toAssetsUp` on the accrued totals). `getLoanFeeState()` stays as the stored-state getter. Every
+quote is for the observed block; the contract recomputes at delivery, so a packet crossing chains
+must be re-checked against a fresh read before it is sent.
+
+- **`getLoanPosition()`** — the position projected to now: collateral in the position and idle
+  beside it, idle loan tokens, the live debt, the fee's running period priced at the snapshotted
+  terms (`feeDebtX18`; the collectible is its whole units), the oracle price (zero when dead —
+  the gate's own treatment, so a zero limit below is explained), the collateral value, the LLTV,
+  the cover the gate demands as things stand, Morpho's health factor (`morphoHealthFactor`,
+  named for the line it measures — Flare's cover is the stricter one) and the liquidation price
+  (`liquidationPrice`: the lowest oracle price at which Morpho still holds the position healthy,
+  both of its floor steps included; zero debt-free, the maximum with debt and no collateral).
+  Pinned by "the view in block N equals the stored state after a checkpoint in block N", in the
+  unit and fuzz suites, and by Morpho passing at the liquidation price and refusing one unit
+  below.
+- **`getLoanLimits(additionalCollateral)`** — the largest further borrow the cover passes
+  (`maxBorrowByCover`) once the idle collateral and the packet's are supplied (Morpho's share
+  rounding included: bisection on the exact post-borrow debt), the pool's remaining liquidity
+  as a separate figure (Morpho's own bound; the front end sees which one binds), and the largest
+  withdrawal the cover passes — the whole collateral when nothing is owed, zero under a dead
+  oracle otherwise. Both bounds are exact to the unit within what the cover and the collateral
+  allow: a positive bound passes the cover check and one unit more fails it, except that a
+  withdrawal bound equal to the whole collateral is capped by the collateral, where Morpho, not
+  the cover, refuses the excess; a zero bound means no positive amount is allowed, not that zero
+  itself was checked. They are arithmetic quotes, not execution guarantees — the pool's
+  liquidity, the pause, the borrow switch and the transport are separate conditions.
+- **`previewRepay(additionalLoanToken)`** — `repay`'s allocation of the idle loan tokens plus a
+  top-up: the pro-rata fee share of a payment short of both claims, the debt closed by shares or
+  repaid by assets with Morpho's rounding, the tail's fee, reservation and surplus, the state
+  left behind, and the top-up that closes both claims now. Oracle-free and shares-first, like
+  `repay`: a debt-free account's preview reads no rate model, so the fee-only settlement and the
+  surplus recovery stay quotable where `repay` stays available. It is the
+  **expected** allocation: a fee transfer the collector's token refuses is deferred to the debt
+  or reserved at execution, so the fee then stays owed — pinned by a frozen-collector test.
+- **`previewBorrow(amount, additionalCollateral)`** — the gate's verdict on a borrow
+  (`coverSatisfied`, the required cover of the post-borrow position, the supplied collateral's
+  value, the post-borrow debt with Morpho's share rounding, the pool's liquidity beside it) —
+  the one number the front end could not cheaply recompute is that debt.
+- **`previewWithdraw(amount)`** — the gate's verdict on a withdrawal (`coverSatisfied`, the
+  required cover and the remaining value — the two numbers a refusal carries) and, when refused, the
+  smallest top-up whose `repay` makes it pass: a binary search over the top-up with the exact
+  split simulated, since every unit paid shrinks both claims and closing both always suffices.
+  Under a dead oracle that minimum is the closing amount. Exact to the unit ("repay 9.44 to
+  withdraw this"), fuzzed against the gate. The cover check only: it does not check that the
+  amount exists in the position, which Morpho refuses at execution.
+
+Two dependencies to know. The projecting views call the market's rate model and add its interest
+into `uint128` totals as canonical accrual does; a reverting model, or an overflow, reverts them
+(it blocks every debt-bearing action too — the dead-Morpho residual), except `previewRepay` on a
+debt-free account, which like `repay` never reaches the model. And the views read the market's
+IRM address from the registered params: a market registered without one earns no interest, and
+the projection says so.
+
+What the views deliberately leave to the client: the pause, the fee-terms activation, the
+per-type borrow switch and the transport are read from the controller's existing getters; a
+pending terms change is known from the timelock's events, not from a snapshot differing from the
+current terms (a snapshot lags every change until the account's next checkpoint); a packet's
+consumption from `usedOperations(id)`, its queued, expired or retriable state from the watcher.
 
 **Settlement is loan-token only.** No exit converts the fee: an uncovered withdraw refuses
 (`InsufficientRemainingCollateral`), the user pays in RLUSD — to the subaccount, where `repay`
@@ -976,15 +1044,15 @@ to the line in exact arithmetic — a starting point, not a quote: the split rou
 down, the debt is re-read from shares after the repayment and the cover rounds up, so the exact
 minimum comes from checking the post-repayment state and stepping the payment up until
 `ceil((D' + 2F') × 1.155 / LLTV) ≤ V` (for `D = 100`, `F = 7`, `V = 130` in base units the formula
-says 26 and 27 is needed; the position view planned for the release does this on-chain). The
+says 26 and 27 is needed; `previewWithdraw` does this on-chain). The
 alternative is to withdraw less. Pinned by `testOverlapTopUpOnTheSubaccountPaysTheFeeProRata`,
 `testExitGateIsStricterThanMorphoHealth`, `testExitGateFollowsTheMarketLltv` and
 `testExitGateValuesTheRemainderRoundedDown`, `testCoverGateIsStricterThanMorphoHealthOnBorrow` and
 `testBorrowGateCountsTheFeeAndTheSuppliedCredit`. Front-end requirements, in the spirit of the wallet
 invariant: quote the required cover and the remaining value for the requested amount (the
-refusal carries both); offer the two ways out — a top-up sized against the post-repayment state as
-above, or a smaller withdrawal — and quote `D + F` plus headroom for in-flight interest to settle
-both claims through
+refusal carries both, `previewWithdraw` quotes them beforehand); offer the two ways out — the
+top-up `previewWithdraw` returns, or a smaller withdrawal (`getLoanLimits`) — and quote
+`previewRepay`'s closing amount plus headroom for in-flight interest to settle both claims through
 `repay` (the surplus returns to the PA); say that RLUSD sent to the subaccount is split pro rata
 between debt and fee, and that the refused packet stays unconsumed and retriable. The design
 path, for the record: the first gate covered the fee alone, at three times the collectible on the

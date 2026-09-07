@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, stdError} from "forge-std/Test.sol";
 import {IControlledAccount} from "../../../contracts/userInterfaces/IControlledAccount.sol";
 import {IPersonalAccountsFacet} from "../../../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
 import {ISubaccount} from "../../../contracts/userInterfaces/ISubaccount.sol";
@@ -55,10 +55,13 @@ import {MockReentrantToken} from "../../../contracts/mock/MockReentrantToken.sol
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {MorphoMath} from "../../../contracts/smartAccounts/library/MorphoMath.sol";
 import {MockOft} from "../../../contracts/mock/MockOft.sol";
 import {MockAssetManager} from "../../../contracts/mock/MockAssetManager.sol";
 import {MockMorpho} from "../../../contracts/mock/MockMorpho.sol";
 import {MockOracle} from "../../../contracts/mock/MockOracle.sol";
+import {MockIrm} from "../../../contracts/mock/MockIrm.sol";
 import {MockFreezableToken} from "../../../contracts/mock/MockFreezableToken.sol";
 import {MockLzEndpoint} from "../../../contracts/mock/MockLzEndpoint.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
@@ -117,6 +120,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     address private lzEndpoint;
     MockMorpho private morpho;
     MockOracle private oracle;
+    MockIrm private irm;
     uint32 private originEid;
     bytes32 private originPeer;
     uint32 private dstEid;
@@ -150,6 +154,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the fee fixtures' 1000 RLUSD on 100 FXRP sit at 50% LTV, inside Morpho's line and the
         // cover gate; the gate tests that reason at 1 FXRP = 2 RLUSD set that price themselves
         oracle = new MockOracle(2e49);
+        // a rate-zero IRM: interest arrives only where a test sets a rate or queues it
+        irm = new MockIrm();
         originEid = 30295; // Flare
         originPeer = bytes32(uint256(uint160(makeAddr("flareSideAdapter"))));
 
@@ -2243,6 +2249,472 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(rlusd.balanceOf(makeAddr("dest")), 100e18);
     }
 
+    //
+    // the read surface: quotes computed by the code the actions enforce
+    //
+
+    function testGetLoanPositionMatchesACheckpointInTheSameBlock() public {
+        // the projection is what a checkpoint in this block stores: Morpho's debt brought forward
+        // at the rate model's rate, the fee's running period priced at the snapshotted terms.
+        // 1000 borrowed at ~5% a year, 100 days on: the view's debt and fee equal the stored ones
+        // after checkpointFee, and a second read in the same block repeats them
+        address subaccount = _borrowedSubaccount(1000e18);
+        irm.setRate(1585489599);
+        vm.warp(vm.getBlockTimestamp() + 100 days);
+
+        ILoanSubaccountRemote.LoanPosition memory projected =
+            ILoanSubaccountRemote(subaccount).getLoanPosition();
+        assertGt(projected.debt, 1000e18);
+        assertGt(projected.feeDebtX18, 0);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (uint256 principal, uint256 feeDebtX18, uint256 collectible, , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, projected.debt);
+        assertEq(feeDebtX18, projected.feeDebtX18);
+        assertEq(collectible, projected.feeDebtX18 / 1e18);
+
+        ILoanSubaccountRemote.LoanPosition memory again =
+            ILoanSubaccountRemote(subaccount).getLoanPosition();
+        assertEq(again.debt, projected.debt);
+        assertEq(again.feeDebtX18, projected.feeDebtX18);
+    }
+
+    function testGetLoanPositionReportsBalancesPriceCoverAndHealth() public {
+        // the position's plain facts: collateral in and beside the position, loan tokens waiting
+        // for repay, the price, value, LLTV, the gate's demand and Morpho's health factor -
+        // and a dead oracle reported as zeros, the cover unchanged
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _depositPayload());
+
+        ILoanSubaccountRemote.LoanPosition memory p =
+            ILoanSubaccountRemote(subaccount).getLoanPosition();
+        assertEq(p.collateral, 100e6);
+        assertEq(p.debt, 0);
+        assertEq(p.requiredCover, 0);
+        assertEq(p.morphoHealthFactor, type(uint256).max);
+
+        _deliver(subaccount, 2, 0, _borrowPayload(
+            bytes32("op-2"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 500e18
+        ));
+        fxrp.mint(subaccount, 5e6);
+        rlusd.mint(subaccount, 3e18);
+        p = ILoanSubaccountRemote(subaccount).getLoanPosition();
+        assertEq(p.collateral, 100e6);
+        assertEq(p.idleCollateral, 5e6);
+        assertEq(p.idleLoanToken, 3e18);
+        assertEq(p.debt, 500e18);
+        assertEq(p.feeDebtX18, 0);
+        assertEq(p.oraclePrice, 2e49);
+        assertEq(p.collateralValue, 2000e18);
+        assertEq(p.lltv, 0.77e18);
+        assertEq(p.requiredCover, 750e18);
+        // 2000 x 0.77 / 500
+        assertEq(p.morphoHealthFactor, 3.08e18);
+
+        oracle.setPriceReverts(true);
+        p = ILoanSubaccountRemote(subaccount).getLoanPosition();
+        assertEq(p.oraclePrice, 0);
+        assertEq(p.collateralValue, 0);
+        assertEq(p.morphoHealthFactor, 0);
+        assertEq(p.requiredCover, 750e18);
+    }
+
+    function testGetLoanLimitsBorrowBoundIsExact() public {
+        // 100 FXRP in the position, 20 idle, 30 with the packet: 150 FXRP = 300 RLUSD carry
+        // 300 x 0.77 / 1.155 = 200 under the cover - one unit more is refused, the bound
+        // executes with the credit supplied, and sitting at the cover nothing more is allowed
+        address subaccount = _createConfiguredSubaccount();
+        oracle.setPrice(2e48);
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _depositPayload());
+        fxrp.mint(subaccount, 20e6);
+        bytes32 dest = bytes32(uint256(uint160(makeAddr("dest"))));
+
+        ILoanSubaccountRemote.LoanLimits memory limits =
+            ILoanSubaccountRemote(subaccount).getLoanLimits(30e6);
+        assertEq(limits.maxBorrowByCover, 200e18);
+        assertEq(limits.maxWithdraw, 100e6);
+        assertEq(limits.marketLiquidity, 1e30);
+
+        uint256 snapshot = vm.snapshotState();
+        fxrp.mint(subaccount, 30e6);
+        _deliverExpectRevert(
+            subaccount, 2, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 200e18 + 1),
+            _uncovered(_requiredCover(200e18 + 1, 0), 300e18)
+        );
+        vm.revertToState(snapshot);
+
+        fxrp.mint(subaccount, 30e6);
+        _deliver(subaccount, 2, 30e6, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 200e18));
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 150e6);
+        limits = ILoanSubaccountRemote(subaccount).getLoanLimits(0);
+        assertEq(limits.maxBorrowByCover, 0);
+        assertEq(limits.maxWithdraw, 0);
+    }
+
+    function testGetLoanLimitsWithdrawBoundIsExactAndLiquidityIsSeparate() public {
+        // 100 borrowed on 200 FXRP a year ago: the cover 1.5 x (100 + 14) = 171 RLUSD keeps 85.5
+        // FXRP, so 114.5 may leave - one unit more is refused. The pool's liquidity is its own
+        // bound: with 150 supplied against 100 borrowed, 50 remain, and Morpho refuses 51 where
+        // the cover would have allowed it
+        address subaccount = _createConfiguredSubaccount();
+        oracle.setPrice(2e48);
+        fxrp.mint(subaccount, 200e6);
+        bytes32 dest = bytes32(uint256(uint160(makeAddr("dest"))));
+        _deliver(subaccount, 1, 200e6, _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 100e18));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.setTotalSupplyAssets(_marketId(), 150e18);
+
+        ILoanSubaccountRemote.LoanLimits memory limits =
+            ILoanSubaccountRemote(subaccount).getLoanLimits(0);
+        assertEq(limits.maxWithdraw, 114.5e6);
+        assertEq(limits.marketLiquidity, 50e18);
+        assertGt(limits.maxBorrowByCover, 51e18);
+
+        uint256 snapshot = vm.snapshotState();
+        bytes memory tooMuch = _withdrawPayload(bytes32("op-w"), 114.5e6 + 1);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, tooMuch);
+        bytes memory refusal = _uncovered(171e18, _valueOf(85.5e6 - 1));
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(refusal);
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        _deliverWithValue(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 114.5e6), RETURN_MIN_VALUE);
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        vm.revertToState(snapshot);
+
+        (bytes memory borrowMessage, bytes32 borrowGuid) = _composeMessage(
+            subaccount, 3, 0, _borrowPayload(bytes32("op-3"), DESTINATION_KIND_EVM, dest, 51e18)
+        );
+        vm.prank(lzEndpoint);
+        vm.expectRevert(bytes("insufficient liquidity"));
+        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), borrowGuid, borrowMessage, executor, "");
+        _deliver(subaccount, 3, 0, _borrowPayload(bytes32("op-3"), DESTINATION_KIND_EVM, dest, 50e18));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-3")));
+    }
+
+    function testPreviewRepayMatchesRepay() public {
+        // the expected allocation is the actual one when the collector accepts: a partial
+        // payment's pro-rata split, then a closing top-up's fee, debt and surplus
+        _configureSettings();
+        (address parent, address subaccount) = _borrowedPairWithFee("rPreviewRepayOwner");
+        rlusd.mint(subaccount, 30e18);
+        ILoanSubaccountRemote.RepayPreview memory q =
+            ILoanSubaccountRemote(subaccount).previewRepay(100e18);
+        assertEq(q.feePaid, uint256(130e18) * 70e18 / 1070e18);
+        assertEq(q.debtPaid, 130e18 - q.feePaid);
+        assertEq(q.surplus, 0);
+        assertEq(q.closingTopUp, 1070e18 - 30e18);
+
+        rlusd.mint(subaccount, 100e18);
+        uint256 collectorBefore = rlusd.balanceOf(makeAddr("feeCollector"));
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), q.debtPaid);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")) - collectorBefore, q.feePaid);
+        (uint256 principal, , uint256 collectible, , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, q.debtAfter);
+        assertEq(collectible, q.collectibleAfter);
+        assertEq(rlusd.balanceOf(parent), 0);
+
+        q = ILoanSubaccountRemote(subaccount).previewRepay(principal + collectible + 1e18);
+        assertEq(q.closingTopUp, principal + collectible);
+        assertEq(q.feePaid, collectible);
+        assertEq(q.debtPaid, principal);
+        assertEq(q.surplus, 1e18);
+        assertEq(q.debtAfter, 0);
+        assertEq(q.collectibleAfter, 0);
+        rlusd.mint(subaccount, principal + collectible + 1e18);
+        collectorBefore = rlusd.balanceOf(makeAddr("feeCollector"));
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), q.debtPaid);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")) - collectorBefore, q.feePaid);
+        assertEq(rlusd.balanceOf(parent), q.surplus);
+        (principal, , collectible, , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 0);
+        assertEq(collectible, 0);
+    }
+
+    function testPreviewRepayIsExpectedNotGuaranteedUnderAFrozenCollector() public {
+        // the documented caveat, pinned: the preview assumes the fee transfer succeeds; with the
+        // collector frozen, repay defers the share to the debt instead, so the actual fee paid
+        // is zero and the debt repaid is the whole payment
+        _configureSettings();
+        uint256 typeB = 2;
+        MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.loanToken = address(frozenRlusd);
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        _setDefaultFeeTerms(address(controller), typeB);
+        vm.stopPrank();
+        address subaccount = controller.createSubaccount("rFrozenPreviewOwner", typeB);
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-frz"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        frozenRlusd.mint(subaccount, 100e18);
+        frozenRlusd.setFrozen(makeAddr("feeCollector"), true);
+
+        ILoanSubaccountRemote.RepayPreview memory q = ILoanSubaccountRemote(subaccount).previewRepay(0);
+        assertEq(q.feePaid, uint256(100e18) * 70e18 / 1070e18);
+        assertEq(q.debtPaid, 100e18 - q.feePaid);
+
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18);
+        assertEq(frozenRlusd.balanceOf(makeAddr("feeCollector")), 0);
+        (, , uint256 collectible, , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 70e18);
+    }
+
+    function testPreviewWithdrawMinimumTopUpIsExact() public {
+        // the overlap scenario: 92 of 100 FXRP out is refused at 16 against 36; the preview's
+        // minimum top-up, repaid, makes the same packet pass, and one unit less does not
+        _configureSettings();
+        oracle.setPrice(2e48);
+        (, address subaccount) = _parentAndSubaccount("rMinTopUpOwner");
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _externalRepay(subaccount, 90e18);
+
+        ILoanSubaccountRemote.WithdrawPreview memory w =
+            ILoanSubaccountRemote(subaccount).previewWithdraw(92e6);
+        assertFalse(w.coverSatisfied);
+        assertEq(w.requiredCover, _requiredCover(ILoanSubaccountRemote(subaccount).getLoanPosition().debt, 7e18));
+        assertEq(w.remainingValue, 16e18);
+        assertGt(w.minimumTopUp, 9e18);
+        assertLt(w.minimumTopUp, 10e18);
+
+        bytes memory payload = _withdrawPayload(bytes32("op-w"), 92e6);
+        uint256 snapshot = vm.snapshotState();
+        rlusd.mint(subaccount, w.minimumTopUp - 1);
+        ILoanSubaccountRemote(subaccount).repay();
+        assertFalse(ILoanSubaccountRemote(subaccount).previewWithdraw(92e6).coverSatisfied);
+        ILoanSubaccountRemote.WithdrawPreview memory short_ =
+            ILoanSubaccountRemote(subaccount).previewWithdraw(92e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
+        vm.deal(lzEndpoint, RETURN_MIN_VALUE);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(_uncovered(short_.requiredCover, short_.remainingValue));
+        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        vm.revertToState(snapshot);
+
+        rlusd.mint(subaccount, w.minimumTopUp);
+        ILoanSubaccountRemote(subaccount).repay();
+        assertTrue(ILoanSubaccountRemote(subaccount).previewWithdraw(92e6).coverSatisfied);
+        _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+    }
+
+    function testViewsWithoutTheOracle() public {
+        // the repay preview needs no oracle, like repay; the position reports the dead oracle as
+        // zeros; nothing owed passes the withdraw preview oracle-free and the whole collateral may
+        // leave; with debt, only closing both claims reopens the exit and nothing may be borrowed
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _depositPayload());
+        rlusd.mint(subaccount, 4e18);
+        oracle.setPriceReverts(true);
+
+        ILoanSubaccountRemote.RepayPreview memory q = ILoanSubaccountRemote(subaccount).previewRepay(0);
+        assertEq(q.surplus, 4e18);
+        assertEq(q.closingTopUp, 0);
+        ILoanSubaccountRemote.WithdrawPreview memory w = ILoanSubaccountRemote(subaccount).previewWithdraw(50e6);
+        assertTrue(w.coverSatisfied);
+        assertEq(w.requiredCover, 0);
+        assertEq(w.remainingValue, 0);
+        assertEq(w.minimumTopUp, 0);
+        ILoanSubaccountRemote.LoanLimits memory limits = ILoanSubaccountRemote(subaccount).getLoanLimits(0);
+        assertEq(limits.maxWithdraw, 100e6);
+        assertEq(limits.maxBorrowByCover, 0);
+
+        oracle.setPriceReverts(false);
+        _deliver(subaccount, 2, 0, _borrowPayload(
+            bytes32("op-2"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
+        oracle.setPriceReverts(true);
+        w = ILoanSubaccountRemote(subaccount).previewWithdraw(1);
+        assertFalse(w.coverSatisfied);
+        assertEq(w.requiredCover, 150e18);
+        assertEq(w.remainingValue, 0);
+        // the 4 idle already count: closing needs the debt less them
+        assertEq(w.minimumTopUp, 100e18 - 4e18);
+        assertEq(w.minimumTopUp, ILoanSubaccountRemote(subaccount).previewRepay(0).closingTopUp);
+        limits = ILoanSubaccountRemote(subaccount).getLoanLimits(0);
+        assertEq(limits.maxWithdraw, 0);
+        assertEq(limits.maxBorrowByCover, 0);
+    }
+
+    function testPreviewRepayNeedsNoRateModelWhenDebtFree() public {
+        // shares-first, like repay: a debt closed outside the rails leaves a fee owed and zero
+        // shares; with the rate model dead the position views revert (every debt-bearing action
+        // would) but the repay preview still quotes the fee-only settlement and the surplus, and
+        // repay delivers exactly that
+        _configureSettings();
+        (address parent, address subaccount) = _parentAndSubaccount("rDeadIrmRepayOwner");
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-borrow"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
+        ));
+        _externalRepay(subaccount, 1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        irm.setReverts(true);
+
+        vm.expectRevert(bytes("IRM reverted"));
+        ILoanSubaccountRemote(subaccount).getLoanPosition();
+
+        rlusd.mint(subaccount, 75e18);
+        ILoanSubaccountRemote.RepayPreview memory q = ILoanSubaccountRemote(subaccount).previewRepay(0);
+        assertEq(q.feePaid, 70e18);
+        assertEq(q.debtPaid, 0);
+        assertEq(q.surplus, 5e18);
+        assertEq(q.closingTopUp, 0);
+
+        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
+        assertEq(rlusd.balanceOf(parent), 5e18);
+    }
+
+    function testProjectionRevertsWhereCanonicalAccrualWould() public {
+        // the projection adds interest into uint128 totals as canonical accrual does: a pool at
+        // the uint128 ceiling with any interest due makes both the view and the checkpoint revert,
+        // instead of the view quoting a position no accrual can reach
+        address subaccount = _borrowedSubaccount(1000e18);
+        irm.setRate(1585489599);
+        morpho.setTotalSupplyAssets(_marketId(), type(uint128).max);
+        vm.warp(vm.getBlockTimestamp() + 1 days);
+
+        uint256 interest = MorphoMath.wMulDown(1000e18, MorphoMath.wTaylorCompounded(1585489599, 1 days));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                SafeCast.SafeCastOverflowedUintDowncast.selector, 128, uint256(type(uint128).max) + interest
+            )
+        );
+        ILoanSubaccountRemote(subaccount).getLoanPosition();
+        // the mock's accrual adds into its uint128 supply total and overflows the same way
+        vm.expectRevert(stdError.arithmeticError);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+    }
+
+    function testProjectedDebtWithoutARateModel() public {
+        // a market registered without a rate model earns nothing: the view's debt stays the
+        // principal over a year, and the checkpoint agrees
+        _configureSettings();
+        uint256 typeB = 2;
+        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        marketB.marketParams.irm = address(0);
+        morpho.createMarket(marketB.marketParams);
+        vm.startPrank(governance);
+        controller.setSubaccountImplementation(typeB, address(loanChainImpl));
+        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        _setDefaultFeeTerms(address(controller), typeB);
+        vm.stopPrank();
+        address subaccount = controller.createSubaccount("rNoIrmOwner", typeB);
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM,
+            bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+
+        ILoanSubaccountRemote.LoanPosition memory p = ILoanSubaccountRemote(subaccount).getLoanPosition();
+        assertEq(p.debt, 100e18);
+        assertEq(p.feeDebtX18 / 1e18, 7e18);
+        ILoanSubaccountRemote(subaccount).checkpointFee();
+        (uint256 principal, , uint256 collectible, , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 100e18);
+        assertEq(collectible, 7e18);
+    }
+
+    function testPreviewBorrowMatchesTheGate() public {
+        // the borrow preview is the gate's verdict for a borrow: 100 FXRP in the position, 20
+        // idle, 30 with the packet = 300 RLUSD of cover. 200 passes exactly (debt after 200, cover
+        // 300); 200 plus one unit fails, and the delivery is refused with the preview's numbers
+        address subaccount = _createConfiguredSubaccount();
+        oracle.setPrice(2e48);
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 1, 100e6, _depositPayload());
+        fxrp.mint(subaccount, 20e6);
+        bytes32 dest = bytes32(uint256(uint160(makeAddr("dest"))));
+
+        ILoanSubaccountRemote.BorrowPreview memory fits =
+            ILoanSubaccountRemote(subaccount).previewBorrow(200e18, 30e6);
+        assertTrue(fits.coverSatisfied);
+        assertEq(fits.requiredCover, 300e18);
+        assertEq(fits.collateralValue, 300e18);
+        assertEq(fits.debtAfter, 200e18);
+        assertEq(fits.marketLiquidity, 1e30);
+        ILoanSubaccountRemote.BorrowPreview memory tooMuch =
+            ILoanSubaccountRemote(subaccount).previewBorrow(200e18 + 1, 30e6);
+        assertFalse(tooMuch.coverSatisfied);
+        assertEq(tooMuch.debtAfter, 200e18 + 1);
+        assertEq(tooMuch.requiredCover, _requiredCover(200e18 + 1, 0));
+
+        fxrp.mint(subaccount, 30e6);
+        _deliverExpectRevert(
+            subaccount, 2, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 200e18 + 1),
+            _uncovered(tooMuch.requiredCover, tooMuch.collateralValue)
+        );
+        _deliver(subaccount, 2, 30e6, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 200e18));
+        assertEq(ILoanSubaccountRemote(subaccount).getLoanPosition().debt, fits.debtAfter);
+    }
+
+    function testLiquidationPriceIsMorphosEdge() public {
+        // the lowest price at which Morpho still holds the position healthy, both floors included:
+        // 100 borrowed on 100 FXRP needs 129.87 RLUSD of value, so 1.2987 RLUSD per FXRP. The
+        // threshold is probed through the mock's canonical health check with a zero-amount
+        // withdrawal - a mock-only probe: canonical Morpho rejects a zero amount before it checks
+        // health, so on the real market the same check is reached with any positive amount. At
+        // that price the check passes and the health factor reads at least 1; one unit below, it
+        // refuses and the factor reads below 1. Debt-free the price is zero; debt with no
+        // collateral makes it the maximum
+        morpho.setHealthCheckDisabled(false);
+        address subaccount = _createConfiguredSubaccount();
+        oracle.setPrice(2e48);
+        fxrp.mint(subaccount, 100e6);
+        assertEq(ILoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice, 0);
+        _deliver(subaccount, 1, 100e6, _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        ));
+        uint256 price = ILoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice;
+        assertEq(
+            price,
+            Math.mulDiv(Math.mulDiv(100e18, 1e18, 0.77e18, Math.Rounding.Ceil), 1e36, 100e6, Math.Rounding.Ceil)
+        );
+
+        oracle.setPrice(price);
+        assertGe(ILoanSubaccountRemote(subaccount).getLoanPosition().morphoHealthFactor, 1e18);
+        vm.prank(subaccount);
+        morpho.withdrawCollateral(_defaultMarket().marketParams, 0, subaccount, subaccount);
+
+        oracle.setPrice(price - 1);
+        assertLt(ILoanSubaccountRemote(subaccount).getLoanPosition().morphoHealthFactor, 1e18);
+        vm.prank(subaccount);
+        vm.expectRevert(bytes("insufficient collateral"));
+        morpho.withdrawCollateral(_defaultMarket().marketParams, 0, subaccount, subaccount);
+
+        // debt left with no collateral (the health check switched off to strip it): liquidatable
+        // at any price
+        morpho.setHealthCheckDisabled(true);
+        vm.prank(subaccount);
+        morpho.withdrawCollateral(_defaultMarket().marketParams, 100e6, subaccount, subaccount);
+        assertEq(ILoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice, type(uint256).max);
+    }
+
     function testWithdrawBeyondCollateralRevertsAtMorpho() public {
         // the account passes the signed amount through; Morpho's own bound (an underflow in
         // canonical Morpho, a require in the mock) rejects more than the position holds
@@ -4061,7 +4533,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
                 loanToken: address(rlusd),
                 collateralToken: address(fxrp),
                 oracle: address(oracle),
-                irm: makeAddr("irm"),
+                irm: address(irm),
                 lltv: 0.77e18
             })
         });
@@ -4600,14 +5072,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     /// The gate's refusal, as the delivery reverts with it.
     function _uncovered(
-        uint256 _requiredCover,
-        uint256 _remainingValue
+        uint256 _required,
+        uint256 _remaining
     )
         private pure
         returns (bytes memory)
     {
         return abi.encodeWithSelector(
-            ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _requiredCover, _remainingValue
+            ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _required, _remaining
         );
     }
 }

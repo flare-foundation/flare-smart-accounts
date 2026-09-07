@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
@@ -20,6 +21,7 @@ import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/IBridgin
 import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
+import {IIrm} from "../interface/IIrm.sol";
 import {IOracle} from "../interface/IOracle.sol";
 import {MorphoMath} from "../library/MorphoMath.sol";
 import {LoanMath} from "../library/LoanMath.sol";
@@ -49,6 +51,18 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  */
 contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
+
+    /// @dev The market's borrow side brought to the current block, and this account's position
+    /// on it, as the read surface needs them: the accrued totals, the pool's remaining liquidity,
+    /// the account's shares, collateral and live debt.
+    struct MarketView {
+        uint256 shares;
+        uint256 collateral;
+        uint256 totalBorrowAssets;
+        uint256 totalBorrowShares;
+        uint256 liquidity;
+        uint256 debt;
+    }
 
     /// @dev WAD fixed point, the fee carry's precision (the fee formulas themselves live in
     /// {LoanMath}, shared with the read surface).
@@ -181,6 +195,115 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
             feeSnapshotFloor,
             feeSnapshotSpread
         );
+    }
+
+    /// @inheritdoc ILoanSubaccountRemote
+    function getLoanPosition()
+        external view
+        returns (LoanPosition memory _position)
+    {
+        ILoanMarketsFacet.Market memory market = _myMarket();
+        MarketView memory view_ = _marketView(market);
+        _position.collateral = view_.collateral;
+        _position.idleCollateral = IERC20(market.marketParams.collateralToken).balanceOf(address(this));
+        _position.idleLoanToken = IERC20(market.marketParams.loanToken).balanceOf(address(this));
+        _position.debt = view_.debt;
+        _position.feeDebtX18 = _projectedFeeX18(view_.debt);
+        _position.oraclePrice = _oraclePrice(market);
+        _position.collateralValue =
+            Math.mulDiv(view_.collateral, _position.oraclePrice, ORACLE_PRICE_SCALE);
+        _position.lltv = market.marketParams.lltv;
+        _position.requiredCover =
+            LoanMath.requiredCover(view_.debt, _position.feeDebtX18 / WAD, market.marketParams.lltv);
+        _position.morphoHealthFactor = view_.debt == 0
+            ? type(uint256).max
+            : Math.mulDiv(Math.mulDiv(_position.collateralValue, market.marketParams.lltv, WAD), WAD, view_.debt);
+        _position.liquidationPrice = _liquidationPrice(view_.debt, view_.collateral, market.marketParams.lltv);
+    }
+
+    /// @inheritdoc ILoanSubaccountRemote
+    function getLoanLimits(
+        uint256 _additionalCollateral
+    )
+        external view
+        returns (LoanLimits memory _limits)
+    {
+        ILoanMarketsFacet.Market memory market = _myMarket();
+        MarketView memory view_ = _marketView(market);
+        uint256 collectible = _projectedFeeX18(view_.debt) / WAD;
+        uint256 price = _oraclePrice(market);
+        _limits.marketLiquidity = view_.liquidity;
+        _limits.maxWithdraw = _maxWithdraw(view_, collectible, price, market.marketParams.lltv);
+        uint256 supplied = view_.collateral
+            + IERC20(market.marketParams.collateralToken).balanceOf(address(this))
+            + _additionalCollateral;
+        _limits.maxBorrowByCover = _maxBorrow(
+            view_, collectible, Math.mulDiv(supplied, price, ORACLE_PRICE_SCALE), market.marketParams.lltv
+        );
+    }
+
+    /// @inheritdoc ILoanSubaccountRemote
+    function previewRepay(
+        uint256 _additionalLoanToken
+    )
+        external view
+        returns (RepayPreview memory _preview)
+    {
+        ILoanMarketsFacet.Market memory market = _myMarket();
+        // shares-first, as repay is: a debt-free account's preview reads no rate model, so it
+        // stays available where repay does - the fee-only settlement and the surplus recovery
+        // of an account whose market's IRM has died
+        MarketView memory view_;
+        if (_borrowSharesOf(market) != 0) {
+            view_ = _marketView(market);
+        }
+        uint256 collectible = _projectedFeeX18(view_.debt) / WAD;
+        uint256 idle = IERC20(market.marketParams.loanToken).balanceOf(address(this));
+        _preview = _simulateRepay(view_, collectible, idle + _additionalLoanToken);
+        uint256 owed = view_.debt + collectible;
+        _preview.closingTopUp = owed > idle ? owed - idle : 0;
+    }
+
+    /// @inheritdoc ILoanSubaccountRemote
+    function previewWithdraw(
+        uint256 _amount
+    )
+        external view
+        returns (WithdrawPreview memory _preview)
+    {
+        ILoanMarketsFacet.Market memory market = _myMarket();
+        MarketView memory view_ = _marketView(market);
+        uint256 collectible = _projectedFeeX18(view_.debt) / WAD;
+        uint256 lltv = market.marketParams.lltv;
+        _preview.requiredCover = LoanMath.requiredCover(view_.debt, collectible, lltv);
+        _preview.remainingValue = _remainingValue(view_.collateral, _amount, _oraclePrice(market));
+        _preview.coverSatisfied =
+            _preview.requiredCover == 0 || _preview.remainingValue >= _preview.requiredCover;
+        if (!_preview.coverSatisfied) {
+            uint256 idle = IERC20(market.marketParams.loanToken).balanceOf(address(this));
+            _preview.minimumTopUp = _minimumTopUp(view_, collectible, idle, _preview.remainingValue, lltv);
+        }
+    }
+
+    /// @inheritdoc ILoanSubaccountRemote
+    function previewBorrow(
+        uint256 _amount,
+        uint256 _additionalCollateral
+    )
+        external view
+        returns (BorrowPreview memory _preview)
+    {
+        ILoanMarketsFacet.Market memory market = _myMarket();
+        MarketView memory view_ = _marketView(market);
+        uint256 supplied = view_.collateral
+            + IERC20(market.marketParams.collateralToken).balanceOf(address(this))
+            + _additionalCollateral;
+        _preview.collateralValue = Math.mulDiv(supplied, _oraclePrice(market), ORACLE_PRICE_SCALE);
+        _preview.debtAfter = _debtAfterBorrow(view_, _amount);
+        _preview.requiredCover =
+            LoanMath.requiredCover(_preview.debtAfter, _projectedFeeX18(view_.debt) / WAD, market.marketParams.lltv);
+        _preview.coverSatisfied = _preview.collateralValue >= _preview.requiredCover;
+        _preview.marketLiquidity = view_.liquidity;
     }
 
     /// @dev The subaccount's action set (see {ComposeReceiverAccountBase._dispatch}).
@@ -561,18 +684,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
             _forgiveFeeDust();
             return;
         }
-        uint256 collateral = _collateralOf(_market);
-        uint256 remaining = collateral > _collateralOut ? collateral - _collateralOut : 0;
-        uint256 remainingValue = 0;
-        if (remaining > 0) {
-            uint256 price = 0;
-            try IOracle(_market.marketParams.oracle).price() returns (uint256 _price) {
-                price = _price;
-            } catch {
-                price = 0;
-            }
-            remainingValue = Math.mulDiv(remaining, price, ORACLE_PRICE_SCALE);
-        }
+        uint256 remainingValue =
+            _remainingValue(_collateralOf(_market), _collateralOut, _oraclePrice(_market));
         require(
             remainingValue >= requiredCover,
             InsufficientRemainingCollateral(requiredCover, remainingValue)
@@ -732,5 +845,282 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
             IMorpho(_market.morpho).market(marketId);
         _fullDebt = MorphoMath.toAssetsUp(_borrowShares, totalBorrowAssets, totalBorrowShares);
+    }
+
+    /// @dev The market oracle's price, zero when the oracle is dead, reverting or answers zero -
+    /// the gate's own treatment, so a quote reads the collateral the way the gate will.
+    function _oraclePrice(
+        ILoanMarketsFacet.Market memory _market
+    )
+        private view
+        returns (uint256)
+    {
+        try IOracle(_market.marketParams.oracle).price() returns (uint256 _price) {
+            return _price;
+        } catch {
+            return 0;
+        }
+    }
+
+    /// @dev The market brought forward to this block the way Morpho's own accrual will bring it -
+    /// the rate model's view rate compounded over the time since the market's last update, added
+    /// to the borrow and supply totals within their uint128 bounds (a market without a rate model
+    /// earns nothing) - and this account's shares, collateral and the debt those shares represent
+    /// on the accrued totals. Reverts where the rate model does: every debt-bearing action would.
+    function _marketView(
+        ILoanMarketsFacet.Market memory _market
+    )
+        private view
+        returns (MarketView memory _view)
+    {
+        bytes32 marketId = MorphoMath.marketId(_market.marketParams);
+        (, uint128 shares, uint128 collateral) = IMorpho(_market.morpho).position(marketId, address(this));
+        IMorpho.Market memory market;
+        (
+            market.totalSupplyAssets,
+            market.totalSupplyShares,
+            market.totalBorrowAssets,
+            market.totalBorrowShares,
+            market.lastUpdate,
+            market.fee
+        ) = IMorpho(_market.morpho).market(marketId);
+        uint256 totalBorrowAssets = market.totalBorrowAssets;
+        uint256 totalSupplyAssets = market.totalSupplyAssets;
+        uint256 elapsed = block.timestamp - market.lastUpdate;
+        if (elapsed != 0 && _market.marketParams.irm != address(0)) {
+            uint256 rate = IIrm(_market.marketParams.irm).borrowRateView(_market.marketParams, market);
+            uint256 interest =
+                MorphoMath.wMulDown(totalBorrowAssets, MorphoMath.wTaylorCompounded(rate, elapsed));
+            // canonical accrual adds into uint128 totals and reverts past them: so does the
+            // projection, rather than quoting a position the accrual could not reach
+            totalBorrowAssets = SafeCast.toUint128(totalBorrowAssets + interest);
+            totalSupplyAssets = SafeCast.toUint128(totalSupplyAssets + interest);
+        }
+        _view.shares = shares;
+        _view.collateral = collateral;
+        _view.totalBorrowAssets = totalBorrowAssets;
+        _view.totalBorrowShares = market.totalBorrowShares;
+        _view.liquidity = totalSupplyAssets > totalBorrowAssets ? totalSupplyAssets - totalBorrowAssets : 0;
+        _view.debt = MorphoMath.toAssetsUp(shares, totalBorrowAssets, market.totalBorrowShares);
+    }
+
+    /// @dev The fee as a checkpoint in this block would leave it: the carry plus the running
+    /// period priced at the snapshotted terms against `_liveDebt` ({LoanMath.feeDeltaX18}, zero
+    /// with no principal or no elapsed time - exactly {_checkpointFee}'s arithmetic).
+    function _projectedFeeX18(
+        uint256 _liveDebt
+    )
+        private view
+        returns (uint256)
+    {
+        return flareDebtX18
+            + LoanMath.feeDeltaX18(
+                feePrincipal, _liveDebt, block.timestamp - feeLastCheckpoint, feeSnapshotFloor, feeSnapshotSpread
+            );
+    }
+
+    /// @dev The largest withdrawal the cover passes: the collateral above the amount that, at
+    /// `_price`, is worth the cover (rounded up so the floor-valued remainder still covers). The
+    /// whole collateral when nothing is owed; nothing under a dead oracle otherwise.
+    function _maxWithdraw(
+        MarketView memory _view,
+        uint256 _collectible,
+        uint256 _price,
+        uint256 _lltv
+    )
+        private pure
+        returns (uint256)
+    {
+        uint256 required = LoanMath.requiredCover(_view.debt, _collectible, _lltv);
+        if (required == 0) {
+            return _view.collateral;
+        }
+        if (_price == 0) {
+            return 0;
+        }
+        uint256 keep = Math.mulDiv(required, ORACLE_PRICE_SCALE, _price, Math.Rounding.Ceil);
+        return _view.collateral > keep ? _view.collateral - keep : 0;
+    }
+
+    /// @dev The lowest oracle price at which Morpho's health check still passes: its value floors
+    /// twice (the collateral's value, then that value at the LLTV), so the price is the smallest
+    /// that keeps the floored value at or above `ceil(debt / LLTV)`. Zero when debt-free; the
+    /// maximum value with debt and no collateral.
+    function _liquidationPrice(
+        uint256 _debt,
+        uint256 _collateral,
+        uint256 _lltv
+    )
+        private pure
+        returns (uint256)
+    {
+        if (_debt == 0) {
+            return 0;
+        }
+        if (_collateral == 0) {
+            return type(uint256).max;
+        }
+        uint256 minimumValue = Math.mulDiv(_debt, WAD, _lltv, Math.Rounding.Ceil);
+        return Math.mulDiv(minimumValue, ORACLE_PRICE_SCALE, _collateral, Math.Rounding.Ceil);
+    }
+
+    /// @dev The largest further borrow the cover passes against `_value` of collateral. The
+    /// closed form - the claim the value covers, less the debt and the fee's weight - ignores
+    /// Morpho's share rounding on the way in and out, so the exact bound is found by bisection on
+    /// the post-borrow debt as {_supplyAndBorrow} will see it: zero passes (the position is
+    /// covered, or the closed form would be zero) and two past the closed form fails (one beyond
+    /// what a share of rounding can add; were it ever to pass, the result would be a passing,
+    /// non-maximal amount, never an unsafe one).
+    function _maxBorrow(
+        MarketView memory _view,
+        uint256 _collectible,
+        uint256 _value,
+        uint256 _lltv
+    )
+        private pure
+        returns (uint256)
+    {
+        uint256 allowedClaim = Math.mulDiv(_value, _lltv, LoanMath.EXIT_HEADROOM);
+        uint256 owed = _view.debt + LoanMath.FEE_WEIGHT * _collectible;
+        if (allowedClaim <= owed) {
+            return 0;
+        }
+        uint256 low = 0;
+        uint256 high = allowedClaim - owed + 2;
+        while (high - low > 1) {
+            uint256 mid = (low + high) / 2;
+            if (LoanMath.requiredCover(_debtAfterBorrow(_view, mid), _collectible, _lltv) <= _value) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        return low;
+    }
+
+    /// @dev The debt after borrowing `_more` on the accrued market: Morpho rounds the new shares
+    /// up on the way in and the debt up on the way out.
+    function _debtAfterBorrow(
+        MarketView memory _view,
+        uint256 _more
+    )
+        private pure
+        returns (uint256)
+    {
+        uint256 sharesUp = MorphoMath.toSharesUp(_more, _view.totalBorrowAssets, _view.totalBorrowShares);
+        return MorphoMath.toAssetsUp(
+            _view.shares + sharesUp, _view.totalBorrowAssets + _more, _view.totalBorrowShares + sharesUp
+        );
+    }
+
+    /// @dev {repay}'s allocation of `_payment`, assuming every fee transfer succeeds: with live
+    /// shares, the pro-rata fee share first when the payment is short of debt plus fee, then the
+    /// debt (closed by shares when the rest covers it, otherwise repaid by assets with Morpho's
+    /// rounding), then the tail - the collectible from what is left, a reservation for the rest,
+    /// the surplus to the parent only once debt-free.
+    function _simulateRepay(
+        MarketView memory _view,
+        uint256 _collectible,
+        uint256 _payment
+    )
+        private pure
+        returns (RepayPreview memory _preview)
+    {
+        uint256 balance = _payment;
+        uint256 collectible = _collectible;
+        uint256 debt = _view.debt;
+        if (_view.shares != 0 && balance != 0) {
+            if (balance < debt + collectible) {
+                uint256 share = LoanMath.feeShare(balance, debt, collectible);
+                _preview.feePaid = share;
+                collectible -= share;
+                balance -= share;
+            }
+            if (balance >= debt) {
+                _preview.debtPaid = debt;
+                debt = 0;
+            } else {
+                _preview.debtPaid = balance;
+                uint256 repaidShares =
+                    MorphoMath.toSharesDown(balance, _view.totalBorrowAssets, _view.totalBorrowShares);
+                debt = MorphoMath.toAssetsUp(
+                    _view.shares - repaidShares,
+                    _view.totalBorrowAssets - balance,
+                    _view.totalBorrowShares - repaidShares
+                );
+            }
+            balance -= _preview.debtPaid;
+        }
+        if (balance != 0 && collectible != 0) {
+            uint256 paid = Math.min(collectible, balance);
+            _preview.feePaid += paid;
+            collectible -= paid;
+            balance -= paid;
+            balance -= Math.min(collectible, balance);
+        }
+        if (balance != 0 && debt == 0) {
+            _preview.surplus = balance;
+        }
+        _preview.debtAfter = debt;
+        _preview.collectibleAfter = collectible;
+    }
+
+    /// @dev The smallest top-up whose {repay} (with `_idle` already on the account) leaves a
+    /// position the cover passes at `_valueLeft`: a binary search over the top-up, since
+    /// every unit paid shrinks both claims; closing both claims (debt plus collectible less the
+    /// idle balance) always suffices, so the search is bounded.
+    function _minimumTopUp(
+        MarketView memory _view,
+        uint256 _collectible,
+        uint256 _idle,
+        uint256 _valueLeft,
+        uint256 _lltv
+    )
+        private pure
+        returns (uint256)
+    {
+        uint256 owed = _view.debt + _collectible;
+        uint256 high = owed > _idle ? owed - _idle : 0;
+        uint256 low = 0;
+        while (low < high) {
+            uint256 mid = (low + high) / 2;
+            if (_coveredAfterRepay(_view, _collectible, _idle + mid, _valueLeft, _lltv)) {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+        return low;
+    }
+
+    /// @dev Whether the position {_simulateRepay} leaves after `_payment` is covered by
+    /// `_valueLeft`.
+    function _coveredAfterRepay(
+        MarketView memory _view,
+        uint256 _collectible,
+        uint256 _payment,
+        uint256 _valueLeft,
+        uint256 _lltv
+    )
+        private pure
+        returns (bool)
+    {
+        RepayPreview memory outcome = _simulateRepay(_view, _collectible, _payment);
+        uint256 required = LoanMath.requiredCover(outcome.debtAfter, outcome.collectibleAfter, _lltv);
+        return required == 0 || _valueLeft >= required;
+    }
+
+    /// @dev The value, in loan tokens, of the collateral left after `_collateralOut` at `_price`,
+    /// rounded down; nothing when nothing is left.
+    function _remainingValue(
+        uint256 _collateral,
+        uint256 _collateralOut,
+        uint256 _price
+    )
+        private pure
+        returns (uint256)
+    {
+        uint256 remaining = _collateral > _collateralOut ? _collateral - _collateralOut : 0;
+        return Math.mulDiv(remaining, _price, ORACLE_PRICE_SCALE);
     }
 }

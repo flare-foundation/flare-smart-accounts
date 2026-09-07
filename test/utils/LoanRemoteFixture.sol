@@ -25,6 +25,7 @@ import {MockFreezableToken} from "../../contracts/mock/MockFreezableToken.sol";
 import {MockOft} from "../../contracts/mock/MockOft.sol";
 import {MockMorpho} from "../../contracts/mock/MockMorpho.sol";
 import {MockOracle} from "../../contracts/mock/MockOracle.sol";
+import {MockIrm} from "../../contracts/mock/MockIrm.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
 import {
@@ -41,7 +42,9 @@ import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiver
  * diamond with its loan facets, one registered market (RLUSD/FXRP, health check ON - the unit
  * suite in `LoanSubaccountRemote.t.sol` turns it off for its over-leveraged fee fixtures), one
  * `LoanSubaccountRemote` proxy under a parent address, and the endpoint's compose queue. FXRP is
- * a `MockCallbackToken`, so a scenario can fire a callback from inside a collateral move.
+ * a `MockCallbackToken`, so a scenario can fire a callback from inside a collateral move; the
+ * market's IRM is a `MockIrm` at rate zero, so interest arrives only where a scenario sets a rate
+ * or queues it.
  */
 abstract contract LoanRemoteFixture is FacetsDeploy {
     uint32 internal constant ORIGIN_EID = 30295;
@@ -56,6 +59,7 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
     MintableERC20 internal loanToken;
     MockMorpho internal morpho;
     MockOracle internal oracle;
+    MockIrm internal irm;
     MockOft internal oft;
     MockLzEndpoint internal endpoint;
     address internal owner;
@@ -83,6 +87,7 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         loanToken = new MockFreezableToken("RLUSD", "RLUSD", 18);
         morpho = new MockMorpho();
         oracle = new MockOracle(2e48);
+        irm = new MockIrm();
         endpoint = new MockLzEndpoint(DESTINATION_EID);
         oft = new MockOft(fxrp, RETURN_VALUE);
         oft.setEndpoint(address(endpoint));
@@ -167,7 +172,7 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
             address(_token),
             address(fxrp),
             address(oracle),
-            makeAddr("irm"),
+            address(irm),
             0.77e18
         );
         morpho.createMarket(params);

@@ -104,6 +104,135 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
 interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
+     * @notice The position as the front end needs it, projected to the current block: Morpho's
+     * debt brought forward the way its accrual will bring it (the market's rate model over the
+     * time since the market's last update), the fee's current period priced at the snapshotted
+     * terms. Every field is a quote for the observed block - the contract recomputes at delivery.
+     * @param collateral Collateral in the Morpho position, in collateral-token base units.
+     * @param idleCollateral Collateral on the account, not in the position: the deposit rail, the
+     * deposit action or the next borrow supplies it; a withdrawal leaves it where it is, so it is
+     * not withdrawable position collateral.
+     * @param idleLoanToken Loan tokens on the account: repay fuel, a reserved fee or a retained
+     * surplus, all of which the next {repay} consumes.
+     * @param debt The live Morpho debt, interest to this block included.
+     * @param feeDebtX18 The fee payable now - the running period projected to this block - at
+     * WAD precision (base units x 1e18); the whole units, `feeDebtX18 / 1e18`, are the
+     * collectible.
+     * @param oraclePrice The market oracle's price (1e36 scale); zero when the oracle is dead
+     * or answers zero - the gate then values the collateral at nothing.
+     * @param collateralValue `collateral` at that price, in loan tokens.
+     * @param lltv The market's liquidation LTV (WAD).
+     * @param requiredCover The cover gate's demand on the position as it stands, in loan tokens.
+     * @param morphoHealthFactor Morpho's distance to liquidation, `collateralValue x lltv / debt`
+     * (WAD): above 1e18 healthy, 1e18 on Morpho's line; the maximum value when debt-free; zero
+     * when the oracle is dead with live debt. Flare's cover is the stricter line - compare
+     * `collateralValue` with `requiredCover` for that one.
+     * @param liquidationPrice The lowest oracle price (1e36 scale) at which Morpho still holds
+     * the position healthy, both of its floor steps included: one unit below it the position is
+     * liquidatable. Zero when debt-free (never liquidatable), the maximum value when there is
+     * debt and no collateral (liquidatable at any price).
+     */
+    struct LoanPosition {
+        uint256 collateral;
+        uint256 idleCollateral;
+        uint256 idleLoanToken;
+        uint256 debt;
+        uint256 feeDebtX18;
+        uint256 oraclePrice;
+        uint256 collateralValue;
+        uint256 lltv;
+        uint256 requiredCover;
+        uint256 morphoHealthFactor;
+        uint256 liquidationPrice;
+    }
+
+    /**
+     * @notice What the cover gate and the market allow next, projected to the current block.
+     * @param maxBorrowByCover The largest further borrow the cover gate passes once the idle
+     * collateral and `additionalCollateral` are supplied with it (Morpho's own rounding
+     * included); zero under a dead oracle. The cover check only: the pool's liquidity
+     * (`marketLiquidity`), the pause, the borrow switch and the transport are separate
+     * conditions.
+     * @param marketLiquidity The loan tokens the pool can still lend: its supply total minus its
+     * borrow total, both brought to this block. Morpho refuses a borrow above it.
+     * @param maxWithdraw The largest withdrawal the cover gate passes on the position as it
+     * stands: the whole collateral when nothing is owed, zero under a dead oracle otherwise. The
+     * cover check only; the pause and the transport are separate conditions.
+     */
+    struct LoanLimits {
+        uint256 maxBorrowByCover;
+        uint256 marketLiquidity;
+        uint256 maxWithdraw;
+    }
+
+    /**
+     * @notice What a {repay} would do now with the loan tokens already on the account plus a
+     * top-up - the EXPECTED allocation: a fee transfer the collector's token refuses is deferred
+     * or reserved at execution instead, so the fee then stays owed and the debt takes its share.
+     * Oracle-free, like {repay} itself. The payment allocated is the loan tokens on the account
+     * plus the top-up.
+     * @param feePaid The fee collected: the pro-rata share of a payment short of debt plus fee,
+     * the whole collectible otherwise.
+     * @param debtPaid The Morpho repayment.
+     * @param surplus Pushed to the parent - only once the debt is closed; anything else that is
+     * left stays on the account (a reserved fee, or the remainder of a partial payment).
+     * @param debtAfter The Morpho debt afterwards, Morpho's rounding included.
+     * @param collectibleAfter The fee still payable afterwards.
+     * @param closingTopUp The top-up that closes both claims now: debt plus collectible, less
+     * what is already on the account.
+     */
+    struct RepayPreview {
+        uint256 feePaid;
+        uint256 debtPaid;
+        uint256 surplus;
+        uint256 debtAfter;
+        uint256 collectibleAfter;
+        uint256 closingTopUp;
+    }
+
+    /**
+     * @notice Whether a withdrawal of a given amount passes the cover gate now, and what
+     * reopens it if not. The cover check only: an amount above the collateral, the pause and the
+     * transport are Morpho's and the delivery's own refusals.
+     * @param coverSatisfied True when the cover check passes the withdrawal on the position as
+     * it stands - the check, not a promise of execution.
+     * @param requiredCover The cover the gate demands, in loan tokens.
+     * @param remainingValue The collateral left after the withdrawal at the oracle's price;
+     * zero under a dead oracle.
+     * @param minimumTopUp The smallest loan-token top-up whose {repay}, together with the loan
+     * tokens already on the account, makes the withdrawal pass - the expected allocation, see
+     * {previewRepay}; zero when it already passes. Closing both claims always suffices.
+     */
+    struct WithdrawPreview {
+        bool coverSatisfied;
+        uint256 requiredCover;
+        uint256 remainingValue;
+        uint256 minimumTopUp;
+    }
+
+    /**
+     * @notice Whether a borrow of a given amount, with the idle collateral and a packet's
+     * collateral supplied first, passes the cover gate now - the cover check only; the pool's
+     * liquidity is reported beside it, the pause, the borrow switch and the transport are
+     * separate conditions, and the amount is not otherwise validated.
+     * @param coverSatisfied True when the post-borrow position passes the cover check.
+     * @param requiredCover The cover the gate demands of the post-borrow position, in loan
+     * tokens.
+     * @param collateralValue The supplied collateral - in the position, idle and the packet's -
+     * at the oracle's price; zero under a dead oracle.
+     * @param debtAfter The Morpho debt after the borrow, its share rounding included.
+     * @param marketLiquidity The loan tokens the pool can still lend; Morpho refuses a borrow
+     * above it.
+     */
+    struct BorrowPreview {
+        bool coverSatisfied;
+        uint256 requiredCover;
+        uint256 collateralValue;
+        uint256 debtAfter;
+        uint256 marketLiquidity;
+    }
+
+    /**
      * @notice Emitted when a borrow action executes.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id, now consumed.
@@ -138,7 +267,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
         uint256 amount,
         bytes32 guid
     );
-
 
     /**
      * @notice Emitted when a withdraw action executes; the withdrawn collateral is bridged
@@ -348,7 +476,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
      */
     error NothingToDeposit();
 
-
     /**
      * @notice Reverts if the OFT's live peer for the origin chain no longer matches the pinned
      * one; the return leg fails closed instead of bridging toward an unknown remote OApp.
@@ -394,7 +521,6 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
         uint256 requiredCover,
         uint256 remainingValue
     );
-
 
     /**
      * @notice Reverts on a borrow with an unsupported destination kind (the Wormhole-to-XRPL
@@ -504,4 +630,60 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
             uint64 _feeFloor,
             uint64 _feeSpread
         );
+
+    /**
+     * @notice The position projected to the current block - see {LoanPosition}. Reverts with the
+     * market's rate model when it does, and where canonical accrual would overflow (a dead IRM
+     * blocks every debt-bearing action anyway); a dead oracle is reported, not thrown.
+     */
+    function getLoanPosition()
+        external view
+        returns (LoanPosition memory);
+
+    /**
+     * @notice The cover gate's and the pool's bounds on the next borrow and withdrawal - see
+     * {LoanLimits}.
+     * @param _additionalCollateral Collateral a borrow packet would bring, counted as supplied.
+     */
+    function getLoanLimits(
+        uint256 _additionalCollateral
+    )
+        external view
+        returns (LoanLimits memory);
+
+    /**
+     * @notice The expected outcome of a {repay} over the loan tokens on the account plus
+     * `_additionalLoanToken` - see {RepayPreview}. Oracle-free, and shares-first like {repay}: a
+     * debt-free account's preview reads no rate model either.
+     * @param _additionalLoanToken The top-up to preview; zero previews the idle balance alone.
+     */
+    function previewRepay(
+        uint256 _additionalLoanToken
+    )
+        external view
+        returns (RepayPreview memory);
+
+    /**
+     * @notice Whether a withdrawal of `_amount` passes the cover gate now, and the smallest
+     * top-up whose {repay} would make it pass - see {WithdrawPreview}.
+     * @param _amount The collateral to withdraw, in collateral-token base units.
+     */
+    function previewWithdraw(
+        uint256 _amount
+    )
+        external view
+        returns (WithdrawPreview memory);
+
+    /**
+     * @notice Whether a borrow of `_amount` passes the cover gate now, once the idle collateral
+     * and `_additionalCollateral` are supplied - see {BorrowPreview}.
+     * @param _amount The loan tokens to borrow.
+     * @param _additionalCollateral Collateral the borrow packet would bring, counted as supplied.
+     */
+    function previewBorrow(
+        uint256 _amount,
+        uint256 _additionalCollateral
+    )
+        external view
+        returns (BorrowPreview memory);
 }

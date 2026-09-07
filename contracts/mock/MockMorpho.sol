@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IMorpho} from "../smartAccounts/interface/IMorpho.sol";
+import {IIrm} from "../smartAccounts/interface/IIrm.sol";
 import {IOracle} from "../smartAccounts/interface/IOracle.sol";
 import {MorphoMath} from "../smartAccounts/library/MorphoMath.sol";
 import {MintableERC20} from "./MintableERC20.sol";
@@ -13,8 +14,10 @@ import {MintableERC20} from "./MintableERC20.sol";
 /**
  * @title MockMorpho
  * @notice Behavioral Morpho mock with per-market positions and totals, virtual-share
- * conversions, queued interest and over-repay reverts (as real Morpho's share-math underflow
- * does), so the repay clamp is exercised against real share math instead of stubbed values.
+ * conversions, interest (compounded from the market's IRM when it has code, as canonical
+ * accrual does, plus test-queued amounts), a supply total that bounds borrowing as canonical
+ * liquidity does, and over-repay reverts (as real Morpho's share-math underflow does), so the
+ * repay clamp is exercised against real share math instead of stubbed values.
  * `borrow` and `withdrawCollateral` run the canonical health check - accrue, read the market
  * oracle, require `collateral · price / 1e36 · lltv >= debt` while borrow shares are live - so a
  * dead oracle or an under-collateralized position reverts here as it does in Morpho; the check
@@ -26,6 +29,7 @@ contract MockMorpho is IMorpho {
     using SafeERC20 for IERC20;
 
     struct MarketState {
+        uint128 totalSupplyAssets;
         uint128 totalBorrowAssets;
         uint128 totalBorrowShares;
         uint128 lastUpdate;
@@ -38,6 +42,9 @@ contract MockMorpho is IMorpho {
 
     uint256 private constant ORACLE_PRICE_SCALE = 1e36;
     uint256 private constant WAD = 1e18;
+    /// @dev The supply every market starts with: effectively unbounded liquidity unless a test
+    /// lowers it with `setTotalSupplyAssets`.
+    uint128 private constant DEFAULT_SUPPLY = 1e30;
 
     /// @notice Interest waiting to be applied on the next `accrueInterest` call, per market.
     mapping(bytes32 marketId => uint256 assets) public pendingInterest;
@@ -46,12 +53,23 @@ contract MockMorpho is IMorpho {
     /// @notice Skips the canonical health check in `borrow` and `withdrawCollateral`.
     bool public healthCheckDisabled;
     mapping(bytes32 marketId => MarketState) private _markets;
+    mapping(bytes32 marketId => MarketParams) private _params;
     mapping(bytes32 marketId => mapping(address account => PositionState)) private _positions;
 
     /// @notice Creates a market, as real Morpho's permissionless `createMarket` does; the
-    /// settings validation requires a non-zero `lastUpdate`.
+    /// settings validation requires a non-zero `lastUpdate`. The params are kept for the accrual's
+    /// IRM call.
     function createMarket(MarketParams calldata marketParams) external {
-        _markets[_id(marketParams)].lastUpdate = uint128(block.timestamp);
+        bytes32 id = _id(marketParams);
+        _markets[id].lastUpdate = uint128(block.timestamp);
+        _markets[id].totalSupplyAssets = DEFAULT_SUPPLY;
+        _params[id] = marketParams;
+    }
+
+    /// @notice Sets a market's supply total: canonical Morpho lends only up to it, so a lower
+    /// value stands in for a thin pool.
+    function setTotalSupplyAssets(bytes32 marketId, uint128 assets) external {
+        _markets[marketId].totalSupplyAssets = assets;
     }
 
     /// @notice Queues interest on a market's debt, applied on the next `accrueInterest`.
@@ -159,6 +177,8 @@ contract MockMorpho is IMorpho {
         m.totalBorrowShares += uint128(sharesUp);
         _positions[id][onBehalf].borrowShares += uint128(sharesUp);
         _requireHealthy(marketParams, id, onBehalf);
+        // canonical: the pool lends only what it holds
+        require(m.totalBorrowAssets <= m.totalSupplyAssets, "insufficient liquidity");
         // stands in for market liquidity leaving the pool
         MintableERC20(marketParams.loanToken).mint(receiver, assets);
         return (assets, sharesUp);
@@ -222,7 +242,7 @@ contract MockMorpho is IMorpho {
         returns (uint128, uint128, uint128, uint128, uint128, uint128)
     {
         MarketState storage m = _markets[id];
-        return (0, 0, m.totalBorrowAssets, m.totalBorrowShares, m.lastUpdate, 0);
+        return (m.totalSupplyAssets, 0, m.totalBorrowAssets, m.totalBorrowShares, m.lastUpdate, 0);
     }
 
     /// @dev Canonical accounting: interest accrues first, a debt-free position cannot be
@@ -262,9 +282,25 @@ contract MockMorpho is IMorpho {
     function _accrue(bytes32 id) private {
         require(!accrueInterestReverts, "IRM reverted");
         MarketState storage m = _markets[id];
-        m.totalBorrowAssets += SafeCast.toUint128(pendingInterest[id]);
+        uint256 interest = pendingInterest[id];
         pendingInterest[id] = 0;
+        // canonical `_accrueInterest`: with an IRM, the borrow total compounds at its rate over
+        // the elapsed time (third-order Taylor), and the supply total grows by the same interest
+        MarketParams memory params = _params[id];
+        uint256 elapsed = block.timestamp - m.lastUpdate;
+        if (elapsed != 0 && params.irm.code.length != 0) {
+            uint256 rate = IIrm(params.irm).borrowRate(params, _marketView(id));
+            interest += MorphoMath.wMulDown(m.totalBorrowAssets, MorphoMath.wTaylorCompounded(rate, elapsed));
+        }
+        m.totalBorrowAssets += SafeCast.toUint128(interest);
+        m.totalSupplyAssets += SafeCast.toUint128(interest);
         m.lastUpdate = uint128(block.timestamp);
+    }
+
+    /// @dev The market's totals as the canonical `Market` struct the IRM is handed.
+    function _marketView(bytes32 id) private view returns (IMorpho.Market memory) {
+        MarketState storage m = _markets[id];
+        return IMorpho.Market(m.totalSupplyAssets, 0, m.totalBorrowAssets, m.totalBorrowShares, m.lastUpdate, 0);
     }
 
     /// @dev Canonical `_isHealthy`: the collateral's oracle value at the market's LLTV must

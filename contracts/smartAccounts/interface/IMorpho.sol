@@ -18,6 +18,18 @@ interface IMorpho {
         uint256 lltv;
     }
 
+    /// @dev The market's totals as canonical Morpho stores them - the six words `market(id)`
+    /// returns, in that order, and the second argument of the interest rate model's rate
+    /// functions.
+    struct Market {
+        uint128 totalSupplyAssets;
+        uint128 totalSupplyShares;
+        uint128 totalBorrowAssets;
+        uint128 totalBorrowShares;
+        uint128 lastUpdate;
+        uint128 fee;
+    }
+
     /**
      * @notice Supplies collateral on behalf of an account.
      * @param marketParams The market to supply collateral to.

@@ -4,13 +4,14 @@ pragma solidity ^0.8.27;
 import {Test} from "forge-std/Test.sol";
 import {IMorpho} from "../../../contracts/smartAccounts/interface/IMorpho.sol";
 import {IOracle} from "../../../contracts/smartAccounts/interface/IOracle.sol";
+import {IIrm} from "../../../contracts/smartAccounts/interface/IIrm.sol";
 import {MorphoMath} from "../../../contracts/smartAccounts/library/MorphoMath.sol";
 import {MockMorpho} from "../../../contracts/mock/MockMorpho.sol";
 import {MockRawReturner} from "../../../contracts/mock/MockRawReturner.sol";
 
 /**
  * @title MorphoConformanceTest
- * @notice Pins our hand-written Morpho Blue mirror (`IMorpho`, `IOracle`) and arithmetic
+ * @notice Pins our hand-written Morpho Blue mirror (`IMorpho`, `IIrm`, `IOracle`) and arithmetic
  * (`MorphoMath`) to
  * the canonical `morpho-blue` v1.0.0 (commit 55d2d99304fb3fb930c688462ae2ccabb1d533ad), whose
  * source is GPL-2.0-or-later and therefore deliberately not a dependency of this MIT repository.
@@ -92,6 +93,9 @@ contract MorphoConformanceTest is Test {
         assertEq(IMorpho.position.selector, bytes4(0x93c52062));
         assertEq(IMorpho.market.selector, bytes4(0x5c60e39a));
         assertEq(IOracle.price.selector, bytes4(0xa035b1fe));
+        // the rate model's two entry points take `MarketParams` and the six-word `Market`
+        assertEq(IIrm.borrowRateView.selector, bytes4(0x8c00bf6b));
+        assertEq(IIrm.borrowRate.selector, bytes4(0x9451fed4));
         // the mock's extra entry point, called by tests the way scripts call Morpho
         assertEq(MockMorpho.createMarket.selector, bytes4(0x8c1358a2));
     }
@@ -104,6 +108,37 @@ contract MorphoConformanceTest is Test {
         });
         assertEq(MorphoMath.marketId(params), LIVE_MARKET_ID);
         assertEq(keccak256(abi.encode(params)), LIVE_MARKET_ID);
+    }
+
+    function testMarketStructIsTheCanonicalReturnSchema() public pure {
+        // the `Market` struct decodes exactly the six words canonical `market(id)` returns, in
+        // their order, and encodes back to them - what the rate model is handed
+        bytes memory raw = abi.encode(
+            uint128(1), uint128(2), uint128(3), uint128(4), uint128(5), uint128(6)
+        );
+        IMorpho.Market memory decoded = abi.decode(raw, (IMorpho.Market));
+        assertEq(decoded.totalSupplyAssets, 1);
+        assertEq(decoded.totalSupplyShares, 2);
+        assertEq(decoded.totalBorrowAssets, 3);
+        assertEq(decoded.totalBorrowShares, 4);
+        assertEq(decoded.lastUpdate, 5);
+        assertEq(decoded.fee, 6);
+        assertEq(abi.encode(decoded), raw);
+    }
+
+    function testCompoundingMatchesUpstreamVectors() public pure {
+        // (per-second WAD rate, seconds) -> upstream MathLib.wTaylorCompounded, the three-term
+        // Taylor expansion each term rounded down; and wMulDown on the resulting factor
+        assertEq(MorphoMath.wTaylorCompounded(0, 365 days), 0);
+        assertEq(MorphoMath.wTaylorCompounded(0.05e18, 365 days), 653400420622696800000000000000000000);
+        assertEq(MorphoMath.wTaylorCompounded(0.05e18, 1 days), 13446263520000000000000000000);
+        assertEq(MorphoMath.wTaylorCompounded(3170979198, 365 days), 105166666653548106);
+        assertEq(MorphoMath.wTaylorCompounded(3170979198, 12), 38051751099);
+        assertEq(MorphoMath.wTaylorCompounded(1e16, 1e8), 166667166667666666666666666666666666);
+        // 5% a year as a per-second rate: 1000 of debt earns 51.27 over the year
+        assertEq(MorphoMath.wTaylorCompounded(1585489599, 365 days), 51270833327093113);
+        assertEq(MorphoMath.wMulDown(1000e18, 51270833327093113), 51270833327093113000);
+        assertEq(MorphoMath.wMulDown(3, 1e18 - 1), 2);
     }
 
     function testSharesMathMatchesUpstreamVectors() public pure {

@@ -11,9 +11,9 @@ import {MorphoMath} from "../../contracts/smartAccounts/library/MorphoMath.sol";
  * @notice Property tests over the Flare fee arithmetic of `LoanSubaccountRemote`, each stated as
  * the spec's formula computed here independently of the account: the pro-rata split of an
  * underfunded repayment, the covering repayment, the accrual over three periods with a terms
- * change in between (priced at the snapshotted terms, never compounding) and the cover gate on
- * the withdraw and on the borrow. The health check is on; every position opens within the
- * fixture's 10,000 FXRP of collateral at 2 RLUSD.
+ * change in between (priced at the snapshotted terms, never compounding), the cover gate on
+ * the withdraw and on the borrow, and the read surface against the actions it quotes. The health
+ * check is on; every position opens within the fixture's 10,000 FXRP of collateral at 2 RLUSD.
  * @dev The assertions sit in small helpers because `forge coverage` compiles without via-ir.
  */
 contract LoanFeeFuzzTest is LoanRemoteFixture {
@@ -40,6 +40,8 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
     /// `(D + FEE_WEIGHT * F) * EXIT_HEADROOM / LLTV`, rounded up.
     uint256 private constant EXIT_HEADROOM = 1.155e18;
     uint256 private constant FEE_WEIGHT = 2;
+    /// @dev A per-second rate of about 200% a year: the upper bound of the fuzzed rate model.
+    uint256 private constant MAX_RATE = 2e18 / uint256(365 days);
 
     function setUp() public {
         _setUpRemoteFixture();
@@ -188,6 +190,146 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         _assertBorrowOutcome(success, data, terms);
     }
 
+    /// The position view is what a checkpoint in the same block stores: for any terms, rate model
+    /// rate and elapsed time, `getLoanPosition().debt` and `.feeDebtX18` equal the principal and fee
+    /// `checkpointFee` then records, and Morpho's own accrual agrees on the debt.
+    function testFuzzPositionViewMatchesACheckpoint(
+        uint256 _debtSeed,
+        uint64 _feeFloor,
+        uint64 _feeSpread,
+        uint64 _rate,
+        uint32 _elapsed
+    )
+        public
+    {
+        _setTerms(1, uint64(bound(_feeFloor, 0, WAD)), uint64(bound(_feeSpread, 0, WAD)));
+        _open(bound(_debtSeed, 1e18, MAX_DEBT));
+        irm.setRate(bound(_rate, 0, MAX_RATE));
+        vm.warp(block.timestamp + bound(_elapsed, 0, 2 * YEAR));
+
+        ILoanSubaccountRemote.LoanPosition memory projected = account.getLoanPosition();
+        account.checkpointFee();
+
+        (uint256 principal, uint256 feeDebtX18, uint256 collectible, , , ) = account.getLoanFeeState();
+        assertEq(principal, projected.debt);
+        assertEq(feeDebtX18, projected.feeDebtX18);
+        assertEq(collectible, projected.feeDebtX18 / WAD);
+        assertEq(_debt(), projected.debt);
+    }
+
+    /// The withdraw preview is the gate's verdict: covered iff the delivery executes, and a refusal
+    /// carries exactly the preview's two numbers. When refused, the preview's minimum top-up, repaid,
+    /// makes the same withdrawal pass, and one unit less leaves it refused.
+    function testFuzzPreviewWithdrawAgreesWithTheGate(
+        uint256 _debtSeed,
+        uint256 _amount,
+        uint64 _rate,
+        uint32 _elapsed,
+        uint16 _priceMantissa,
+        uint8 _priceExponent
+    )
+        public
+    {
+        _open(bound(_debtSeed, 1e18, MAX_DEBT));
+        irm.setRate(bound(_rate, 0, MAX_RATE));
+        vm.warp(block.timestamp + bound(_elapsed, 1, 2 * YEAR));
+        oracle.setPrice(bound(_priceMantissa, 1_000, 9_999) * 10 ** bound(_priceExponent, 27, 46));
+        uint256 amount = bound(_amount, 1, _collateral());
+        ILoanSubaccountRemote.WithdrawPreview memory preview = account.previewWithdraw(amount);
+
+        (bool success, bytes memory data) = _tryWithdrawAt(2, bytes32("exit"), amount);
+
+        if (preview.coverSatisfied) {
+            assertTrue(success);
+            return;
+        }
+        _assertRefused(success, data, preview.requiredCover, preview.remainingValue, _collateral());
+        _assertMinimumTopUpIsExact(amount, preview.minimumTopUp);
+    }
+
+    /// The borrow preview is the gate's verdict for a borrow with a packet's credit: cover satisfied
+    /// iff the delivery executes; a refusal is Morpho's where its line binds first, else the gate's
+    /// with exactly the preview's numbers.
+    function testFuzzPreviewBorrowAgreesWithTheGate(
+        uint256 _debtSeed,
+        uint256 _moreSeed,
+        uint64 _rate,
+        uint32 _elapsed,
+        uint16 _priceMantissa,
+        uint8 _priceExponent,
+        uint64 _credit
+    )
+        public
+    {
+        _open(bound(_debtSeed, 1e18, MAX_DEBT));
+        irm.setRate(bound(_rate, 0, MAX_RATE));
+        vm.warp(block.timestamp + bound(_elapsed, 1, 2 * YEAR));
+        oracle.setPrice(bound(_priceMantissa, 1_000, 9_999) * 10 ** bound(_priceExponent, 27, 46));
+        uint256 more = bound(_moreSeed, 1, MAX_DEBT);
+        uint256 credit = bound(_credit, 0, 10_000e6);
+        ILoanSubaccountRemote.BorrowPreview memory preview = account.previewBorrow(more, credit);
+        BorrowTerms memory terms =
+            BorrowTerms(_debt(), preview.debtAfter, preview.requiredCover, preview.collateralValue);
+        fxrp.mint(address(account), credit);
+
+        (bool success, bytes memory data) = _tryBorrowWith(2, bytes32("more"), credit, more);
+
+        assertEq(preview.coverSatisfied, preview.collateralValue >= preview.requiredCover);
+        _assertBorrowOutcome(success, data, terms);
+    }
+
+    /// Both limits are exact to the unit: the largest borrow the cover allows executes with its
+    /// credit while one unit more is refused, and the largest withdrawal executes while one unit more
+    /// is refused - for any accrued debt, fee, price and credit.
+    function testFuzzLoanLimitsAreExact(
+        uint256 _debtSeed,
+        uint64 _rate,
+        uint32 _elapsed,
+        uint16 _priceMantissa,
+        uint8 _priceExponent,
+        uint64 _credit
+    )
+        public
+    {
+        _open(bound(_debtSeed, 1e18, MAX_DEBT));
+        irm.setRate(bound(_rate, 0, MAX_RATE));
+        vm.warp(block.timestamp + bound(_elapsed, 0, 2 * YEAR));
+        oracle.setPrice(bound(_priceMantissa, 1_000, 9_999) * 10 ** bound(_priceExponent, 27, 46));
+        uint256 credit = bound(_credit, 0, 10_000e6);
+        ILoanSubaccountRemote.LoanLimits memory limits = account.getLoanLimits(credit);
+
+        _assertBorrowLimitIsExact(limits.maxBorrowByCover, credit);
+        _assertWithdrawLimitIsExact(limits.maxWithdraw);
+    }
+
+    /// The repay preview is the repayment: for any idle balance and top-up, the fee collected, the
+    /// debt repaid, the surplus pushed and the state left behind equal the preview's.
+    function testFuzzPreviewRepayAgreesWithRepay(
+        uint256 _debtSeed,
+        uint64 _feeFloor,
+        uint32 _elapsed,
+        uint256 _idleSeed,
+        uint256 _topUpSeed,
+        uint64 _rate
+    )
+        public
+    {
+        (uint256 debt, , ) = _accrueFloorOnly(_debtSeed, _feeFloor, _elapsed);
+        irm.setRate(bound(_rate, 0, MAX_RATE));
+        vm.warp(block.timestamp + bound(_elapsed, 0, YEAR));
+        uint256 idle = bound(_idleSeed, 0, 2 * debt);
+        uint256 topUp = bound(_topUpSeed, idle == 0 ? 1 : 0, 2 * debt);
+        loanToken.mint(address(account), idle);
+        ILoanSubaccountRemote.RepayPreview memory preview = account.previewRepay(topUp);
+        loanToken.mint(address(account), topUp);
+        uint256 collectorBefore = loanToken.balanceOf(collector);
+        uint256 parentBefore = loanToken.balanceOf(parent);
+
+        uint256 repaid = account.repay();
+
+        _assertRepayOutcome(preview, repaid, collectorBefore, parentBefore);
+    }
+
     /// Opens a position of `_debtSeed` under a floor-only fee and lets it accrue for `_elapsed`, so
     /// the fee is exactly floor * D * t / YEAR in WAD and no interest disturbs the share math.
     function _accrueFloorOnly(
@@ -215,7 +357,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
     /// snapshots `_next`.
     function _accrueAndCheckpoint(
         uint256 _principal,
-        Period memory _period,
+        Period memory _span,
         Terms memory _priced,
         Terms memory _next
     )
@@ -223,12 +365,12 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         returns (uint256 _liveDebt)
     {
         bytes32 marketId = MorphoMath.marketId(params);
-        morpho.addPendingInterest(marketId, _period.interest);
-        vm.warp(block.timestamp + _period.elapsed);
+        morpho.addPendingInterest(marketId, _span.interest);
+        vm.warp(block.timestamp + _span.elapsed);
         // the live debt the account must find once it accrues Morpho: the state plus the queued interest
         _liveDebt = _liveDebtAfterAccrual(marketId);
         (, uint256 feeBefore, , , , ) = account.getLoanFeeState();
-        uint256 expected = _expectedDelta(_principal, _liveDebt, _period.elapsed, _priced);
+        uint256 expected = _expectedDelta(_principal, _liveDebt, _span.elapsed, _priced);
 
         account.checkpointFee();
 
@@ -248,8 +390,20 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         private
         returns (bool _success, bytes memory _data)
     {
+        return _tryWithdrawAt(2, bytes32("exit"), _amount);
+    }
+
+    /// Delivers a withdraw of `_amount` under `_id` as packet `_nonce`, returning the raw outcome.
+    function _tryWithdrawAt(
+        uint64 _nonce,
+        bytes32 _id,
+        uint256 _amount
+    )
+        private
+        returns (bool _success, bytes memory _data)
+    {
         (bytes memory message, bytes32 guid) =
-            _queue(address(account), 2, 0, _withdraw(bytes32("exit"), _amount, RETURN_VALUE));
+            _queue(address(account), _nonce, 0, _withdraw(_id, _amount, RETURN_VALUE));
         // solhint-disable-next-line avoid-low-level-calls
         (_success, _data) = address(endpoint).call{value: RETURN_VALUE}(
             abi.encodeCall(endpoint.deliver, (address(oft), address(account), guid, message))
@@ -268,6 +422,90 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         (_success, _data) = address(endpoint).call(
             abi.encodeCall(endpoint.deliver, (address(oft), address(account), guid, message))
         );
+    }
+
+    /// A borrow of `_maxBorrow` with `_credit` supplied executes; one unit more is refused (by the
+    /// gate, or by Morpho where its line is lower still).
+    function _assertBorrowLimitIsExact(
+        uint256 _maxBorrow,
+        uint256 _credit
+    )
+        private
+    {
+        uint256 snapshot = vm.snapshotState();
+        fxrp.mint(address(account), _credit);
+        (bool tooMuch, ) = _tryBorrowWith(3, bytes32("limit+1"), _credit, _maxBorrow + 1);
+        assertFalse(tooMuch);
+        vm.revertToState(snapshot);
+        if (_maxBorrow == 0) {
+            return;
+        }
+        snapshot = vm.snapshotState();
+        fxrp.mint(address(account), _credit);
+        (bool success, ) = _tryBorrowWith(3, bytes32("limit"), _credit, _maxBorrow);
+        assertTrue(success);
+        vm.revertToState(snapshot);
+    }
+
+    /// A withdrawal of `_maxWithdraw` executes; one unit more is refused (unless it is everything).
+    function _assertWithdrawLimitIsExact(
+        uint256 _maxWithdraw
+    )
+        private
+    {
+        uint256 collateral = _collateral();
+        if (_maxWithdraw < collateral) {
+            uint256 snapshot = vm.snapshotState();
+            (bool tooMuch, ) = _tryWithdrawAt(3, bytes32("limit+1"), _maxWithdraw + 1);
+            assertFalse(tooMuch);
+            vm.revertToState(snapshot);
+        }
+        if (_maxWithdraw == 0) {
+            return;
+        }
+        (bool success, ) = _tryWithdrawAt(3, bytes32("limit"), _maxWithdraw);
+        assertTrue(success);
+    }
+
+    /// Delivers a borrow of `_amount` under `_id` as packet `_nonce`, crediting `_credit` FXRP already
+    /// minted to the account.
+    function _tryBorrowWith(
+        uint64 _nonce,
+        bytes32 _id,
+        uint256 _credit,
+        uint256 _amount
+    )
+        private
+        returns (bool _success, bytes memory _data)
+    {
+        (bytes memory message, bytes32 guid) = _queue(address(account), _nonce, _credit, _borrow(_id, _amount));
+        // solhint-disable-next-line avoid-low-level-calls
+        (_success, _data) = address(endpoint).call(
+            abi.encodeCall(endpoint.deliver, (address(oft), address(account), guid, message))
+        );
+    }
+
+    /// After a repay of `_minimumTopUp` the withdrawal passes; after one unit less it is refused.
+    function _assertMinimumTopUpIsExact(
+        uint256 _amount,
+        uint256 _minimumTopUp
+    )
+        private
+    {
+        if (_minimumTopUp > 1) {
+            uint256 snapshot = vm.snapshotState();
+            loanToken.mint(address(account), _minimumTopUp - 1);
+            account.repay();
+            assertFalse(account.previewWithdraw(_amount).coverSatisfied);
+            (bool refused, ) = _tryWithdrawAt(3, bytes32("short"), _amount);
+            assertFalse(refused);
+            vm.revertToState(snapshot);
+        }
+        loanToken.mint(address(account), _minimumTopUp);
+        account.repay();
+        assertTrue(account.previewWithdraw(_amount).coverSatisfied);
+        (bool success, ) = _tryWithdrawAt(4, bytes32("reopened"), _amount);
+        assertTrue(success);
     }
 
     /// The gate's two sides from the spec's formula: the cover for the checkpointed live debt and
@@ -363,6 +601,23 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
             assertEq(_debt(), _terms.debtAfter);
             assertTrue(account.usedOperations(bytes32("more")));
         }
+    }
+
+    function _assertRepayOutcome(
+        ILoanSubaccountRemote.RepayPreview memory _preview,
+        uint256 _repaid,
+        uint256 _collectorBefore,
+        uint256 _parentBefore
+    )
+        private view
+    {
+        assertEq(_repaid, _preview.debtPaid);
+        assertEq(loanToken.balanceOf(collector) - _collectorBefore, _preview.feePaid);
+        assertEq(loanToken.balanceOf(parent) - _parentBefore, _preview.surplus);
+        (uint256 principal, , uint256 collectible, , , ) = account.getLoanFeeState();
+        assertEq(principal, _preview.debtAfter);
+        assertEq(collectible, _preview.collectibleAfter);
+        assertEq(_debt(), _preview.debtAfter);
     }
 
     /// The account's debt as Morpho will report it after accruing the queued interest.

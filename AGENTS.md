@@ -320,9 +320,9 @@ Dependencies are managed through Soldeer (`foundry.toml [dependencies]`).
 
 `morpho-blue` is deliberately **not** a dependency: its interfaces and libraries are GPL-2.0-or-later and this
 repository is MIT. The Morpho surface the accounts use is our own code (`contracts/smartAccounts/interface/IMorpho.sol`,
-`contracts/smartAccounts/interface/IOracle.sol`, `contracts/smartAccounts/library/MorphoMath.sol`), pinned to upstream
-v1.0.0 by `test/unit/smartAccounts/MorphoConformance.t.sol` (selectors, return schemas, the live market id,
-share-math vectors). Do not add a Morpho import anywhere.
+`IIrm.sol`, `IOracle.sol` and `contracts/smartAccounts/library/MorphoMath.sol`), pinned to upstream v1.0.0 by
+`test/unit/smartAccounts/MorphoConformance.t.sol` (selectors, return schemas, the live market id, share-math and
+compounding vectors). Do not add a Morpho import anywhere.
 
 ### Proxy storage layouts
 
