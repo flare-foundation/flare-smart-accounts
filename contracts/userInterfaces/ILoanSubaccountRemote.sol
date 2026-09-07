@@ -13,7 +13,15 @@ import {ISubaccount} from "./ISubaccount.sol";
 /// `destination`. The fee terms are the
 /// type's current terms at delivery (the front end warns while a change is pending in the
 /// timelock and keeps deadlines short; see the spec). It is a debt increase: pause-gated and
-/// subject to the per-type borrow switch, both of which revert retriably. The operation id
+/// subject to the per-type borrow switch, both of which revert retriably. **The cover gate**
+/// applies to the post-borrow position: its collateral (the supplied credit included), at the
+/// market oracle's price, must cover `1.155 / LLTV` of the new debt plus twice the collectible
+/// fee - the same rule as the withdraw's, Morpho's own liquidation line with a headroom, so it
+/// implies Morpho's health check - or the delivery reverts retriably
+/// (`InsufficientRemainingCollateral`) with nothing supplied or disbursed. Morpho's check runs
+/// first, inside its borrow, so a borrow past Morpho's own line (or under a dead oracle) fails
+/// there with Morpho's error instead; and unlike the withdraw, a borrow has no oracle-free
+/// route - it needs the oracle back. The operation id
 /// must be non-zero and globally unique per subaccount across the actions that carry one (the
 /// borrow and the withdraw); clients
 /// retrying an expired intent must reuse its id only for the same intent with a fresh
@@ -373,14 +381,14 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     );
 
     /**
-     * @notice Reverts a withdraw action that would leave the position uncovered: the
+     * @notice Reverts a withdraw or borrow action that would leave the position uncovered: the
      * collateral remaining after it, at the market oracle's price, would be worth less than
      * `1.155 / LLTV` of the live debt plus twice the collectible fee (a dead or zero-priced
      * oracle values it at nothing). Retriable: repay - loan tokens to the account and {repay} -
-     * or sign a smaller withdrawal, then retry.
-     * @param requiredCover The remaining collateral value the gate demands, in loan tokens.
-     * @param remainingValue The value the withdrawal would have left, in loan tokens; zero
-     * under a dead or zero-priced oracle.
+     * or sign a smaller withdrawal or borrow, then retry.
+     * @param requiredCover The collateral value the gate demands, in loan tokens.
+     * @param remainingValue The value the action would have left, in loan tokens; zero under
+     * a dead or zero-priced oracle.
      */
     error InsufficientRemainingCollateral(
         uint256 requiredCover,

@@ -150,6 +150,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
             successfulBorrows++;
             _checkEvents(beforeCall, logs, true);
             _checkBaseline();
+            if (!_exitCovered()) {
+                checks.exitSecurity = false;
+            }
             if (
                 !account.usedOperations(operationId) ||
                 loanToken.balanceOf(parent) !=
@@ -594,7 +597,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
         }
     }
 
-    /// The exit gate's reference: the collateral left, at the oracle's price, covers
+    /// The cover gate's reference: the collateral left, at the oracle's price, covers
     /// `(D + 2F) x 1.155 / LLTV` (rounded up) for the live debt and the collectible; with
     /// nothing owed, no cover is required.
     function _exitCovered(

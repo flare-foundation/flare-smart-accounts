@@ -11,9 +11,9 @@ import {MorphoMath} from "../../contracts/smartAccounts/library/MorphoMath.sol";
  * @notice Property tests over the Flare fee arithmetic of `LoanSubaccountRemote`, each stated as
  * the spec's formula computed here independently of the account: the pro-rata split of an
  * underfunded repayment, the covering repayment, the accrual over three periods with a terms
- * change in between (priced at the snapshotted terms, never compounding) and the exit gate. The
- * health check is on; every position stays within the fixture's 10,000 FXRP of collateral at
- * 2 RLUSD.
+ * change in between (priced at the snapshotted terms, never compounding) and the cover gate on
+ * the withdraw and on the borrow. The health check is on; every position opens within the
+ * fixture's 10,000 FXRP of collateral at 2 RLUSD.
  * @dev The assertions sit in small helpers because `forge coverage` compiles without via-ir.
  */
 contract LoanFeeFuzzTest is LoanRemoteFixture {
@@ -25,6 +25,13 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
     struct Period {
         uint256 elapsed;
         uint256 interest;
+    }
+
+    struct BorrowTerms {
+        uint256 debtBefore;
+        uint256 debtAfter;
+        uint256 required;
+        uint256 value;
     }
 
     /// @dev Below the market's 77% of the fixture's 20,000 RLUSD of collateral value.
@@ -153,6 +160,34 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         }
     }
 
+    /// A second borrow passes the cover gate iff the collateral, at the oracle's price (rounded
+    /// down), is worth at least `(D' + 2F) x 1.155 / LLTV` (rounded up) for the post-borrow debt D',
+    /// Morpho's share rounding included: interest queued before the borrow makes the share price
+    /// non-integral, and half the sizes sit within two units of the cover. Morpho's health check
+    /// runs first, inside its borrow, so an unhealthy borrow fails there and a healthy but uncovered
+    /// one fails at the gate with exact arguments; either refusal rolls the whole delivery back.
+    function testFuzzBorrowGateTracksThePosition(
+        uint256 _debtSeed,
+        uint256 _moreSeed,
+        uint96 _interest,
+        uint16 _priceMantissa,
+        uint8 _priceExponent
+    )
+        public
+    {
+        _open(bound(_debtSeed, 1e18, MAX_DEBT));
+        vm.warp(block.timestamp + YEAR);
+        account.checkpointFee();
+        oracle.setPrice(bound(_priceMantissa, 1_000, 9_999) * 10 ** bound(_priceExponent, 27, 46));
+        morpho.addPendingInterest(MorphoMath.marketId(params), bound(_interest, 0, _debt() / 10));
+        uint256 more = _borrowSize(_moreSeed);
+        BorrowTerms memory terms = _borrowTerms(more);
+
+        (bool success, bytes memory data) = _tryBorrow(more);
+
+        _assertBorrowOutcome(success, data, terms);
+    }
+
     /// Opens a position of `_debtSeed` under a floor-only fee and lets it accrue for `_elapsed`, so
     /// the fee is exactly floor * D * t / YEAR in WAD and no interest disturbs the share math.
     function _accrueFloorOnly(
@@ -221,6 +256,20 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         );
     }
 
+    /// Delivers a message-only borrow of `_more` to the parent under the id "more".
+    function _tryBorrow(
+        uint256 _more
+    )
+        private
+        returns (bool _success, bytes memory _data)
+    {
+        (bytes memory message, bytes32 guid) = _queue(address(account), 2, 0, _borrow(bytes32("more"), _more));
+        // solhint-disable-next-line avoid-low-level-calls
+        (_success, _data) = address(endpoint).call(
+            abi.encodeCall(endpoint.deliver, (address(oft), address(account), guid, message))
+        );
+    }
+
     /// The gate's two sides from the spec's formula: the cover for the checkpointed live debt and
     /// collectible, and the value the withdrawal would leave at the oracle's price.
     function _gateTerms(
@@ -237,6 +286,83 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         _remaining = _collateralBefore > _amount
             ? Math.mulDiv(_collateralBefore - _amount, oracle.price(), 1e36)
             : 0;
+    }
+
+    /// Half the seeds size the borrow uniformly, the other half within two units of what the cover
+    /// allows on top of the accrued debt and twice the collectible (`value x LLTV / 1.155 - D - 2F`),
+    /// so the boundary and Morpho's rounding around it are hit.
+    function _borrowSize(
+        uint256 _seed
+    )
+        private view
+        returns (uint256)
+    {
+        if (_seed % 2 == 0) {
+            return bound(_seed, 1, MAX_DEBT);
+        }
+        (, , uint256 collectible, , , ) = account.getLoanFeeState();
+        uint256 owed = _liveDebtAfterAccrual(MorphoMath.marketId(params)) + FEE_WEIGHT * collectible;
+        uint256 line = Math.mulDiv(Math.mulDiv(_collateral(), oracle.price(), 1e36), params.lltv, EXIT_HEADROOM);
+        if (line <= owed + 2) {
+            return 1;
+        }
+        uint256 candidate = line - owed - 2 + (_seed % 5);
+        return bound(candidate, 1, MAX_DEBT);
+    }
+
+    /// The borrow gate's terms from the spec's formula: the debt before (raw, what a refused
+    /// delivery leaves), the post-borrow debt as Morpho will round it after accruing the queued
+    /// interest (`toSharesUp` on the way in, `toAssetsUp` on the way out), the cover for that debt
+    /// and the checkpointed collectible, and the collateral's value at the oracle's price.
+    function _borrowTerms(
+        uint256 _more
+    )
+        private view
+        returns (BorrowTerms memory _terms)
+    {
+        bytes32 id = MorphoMath.marketId(params);
+        (, uint128 shares, ) = morpho.position(id, address(account));
+        (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) = morpho.market(id);
+        uint256 assets = totalBorrowAssets + morpho.pendingInterest(id);
+        uint256 sharesUp = MorphoMath.toSharesUp(_more, assets, totalBorrowShares);
+        _terms.debtBefore = _debt();
+        _terms.debtAfter = MorphoMath.toAssetsUp(shares + sharesUp, assets + _more, totalBorrowShares + sharesUp);
+        (, , uint256 collectible, , , ) = account.getLoanFeeState();
+        assertGt(collectible, 0);
+        _terms.required = Math.mulDiv(
+            _terms.debtAfter + FEE_WEIGHT * collectible, EXIT_HEADROOM, params.lltv, Math.Rounding.Ceil
+        );
+        _terms.value = Math.mulDiv(_collateral(), oracle.price(), 1e36);
+    }
+
+    /// Morpho's line first (`value x LLTV >= debt`, its own message), then the cover, then success.
+    function _assertBorrowOutcome(
+        bool _success,
+        bytes memory _data,
+        BorrowTerms memory _terms
+    )
+        private view
+    {
+        if (Math.mulDiv(_terms.value, params.lltv, WAD) < _terms.debtAfter) {
+            assertFalse(_success);
+            assertEq(_data, abi.encodeWithSignature("Error(string)", "insufficient collateral"));
+            assertEq(_debt(), _terms.debtBefore);
+            assertFalse(account.usedOperations(bytes32("more")));
+        } else if (_terms.value < _terms.required) {
+            assertFalse(_success);
+            assertEq(
+                _data,
+                abi.encodeWithSelector(
+                    ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _terms.required, _terms.value
+                )
+            );
+            assertEq(_debt(), _terms.debtBefore);
+            assertFalse(account.usedOperations(bytes32("more")));
+        } else {
+            assertTrue(_success);
+            assertEq(_debt(), _terms.debtAfter);
+            assertTrue(account.usedOperations(bytes32("more")));
+        }
     }
 
     /// The account's debt as Morpho will report it after accruing the queued interest.

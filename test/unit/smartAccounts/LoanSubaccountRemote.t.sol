@@ -143,11 +143,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         lzEndpoint = address(new MockLzEndpoint(dstEid));
         fxrpOft.setEndpoint(lzEndpoint);
         morpho = new MockMorpho();
-        // the fee and gate tests exercise the account's arithmetic under leverage a real
-        // market would not allow; the canonical-Morpho tests switch the health check back on
+        // the mock's canonical health check stays off by default (the fee tests never lean on
+        // it); the Morpho-interplay tests switch it on
         morpho.setHealthCheckDisabled(true);
-        // Morpho oracle convention: 1 FXRP (6 decimals) = 2 RLUSD (18 decimals)
-        oracle = new MockOracle(2e48);
+        // Morpho oracle convention, 1e36-scaled: 1 FXRP (6 decimals) = 20 RLUSD (18 decimals), so
+        // the fee fixtures' 1000 RLUSD on 100 FXRP sit at 50% LTV, inside Morpho's line and the
+        // cover gate; the gate tests that reason at 1 FXRP = 2 RLUSD set that price themselves
+        oracle = new MockOracle(2e49);
         originEid = 30295; // Flare
         originPeer = bytes32(uint256(uint160(makeAddr("flareSideAdapter"))));
 
@@ -1608,7 +1610,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         morpho.addPendingInterest(_marketId(), 60e18);
 
-        _deliver(subaccount, 2, 0, _borrowPayload(
+        // the packet brings 100 FXRP more, so the doubled debt stays under the cover
+        // (200 FXRP = 4000 RLUSD against 1.5 x (2060 + 2 x 10) = 3120)
+        fxrp.mint(subaccount, 100e6);
+        _deliver(subaccount, 2, 100e6, _borrowPayload(
             bytes32("op-2"), DESTINATION_KIND_EVM,
             bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
         ));
@@ -1854,6 +1859,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the exit gate: while the remaining collateral covers 1.5x the debt plus twice the
         // collectible fee, a withdrawal collects nothing - the position IS the fee's security
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         (, address subaccount) = _parentAndSubaccount("rSecuredOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
@@ -1887,6 +1893,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the collateral; debt and fee are paid in loan tokens through repay, then the same
         // packet passes
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         (, address subaccount) = _parentAndSubaccount("rStrippingOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
@@ -1926,6 +1933,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the escape is repay - settle debt and fee through the subaccount, then the same
         // packet passes with nothing owed, oracle-free
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         (, address subaccount) = _parentAndSubaccount("rDeadOracleGateOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
@@ -1961,6 +1969,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // same refusal with the id unconsumed, and the same escape - once nothing is owed the
         // retried packet passes without ever reading the still-zero oracle
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         (, address subaccount) = _parentAndSubaccount("rZeroPriceGateOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
@@ -2032,6 +2041,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // FXRP in the position - with nothing collectible, the debt alone sets the cover
         morpho.setHealthCheckDisabled(false);
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         (, address subaccount) = _parentAndSubaccount("rMorphoHealthOwner");
         fxrp.mint(subaccount, 1000e6);
         _deliver(subaccount, 1, 1000e6, _borrowPayload(
@@ -2074,6 +2084,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // to pass with the loan still open
         morpho.setHealthCheckDisabled(false);
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         (, address subaccount) = _parentAndSubaccount("rOverlapOwner");
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
@@ -2130,11 +2141,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertGt(borrowShares, 0);
     }
 
-    function testMorphoEnforcesPositionHealthOnBorrow() public {
-        // 100 FXRP = 200 RLUSD of collateral carries at most 154 RLUSD at LLTV 77%: a borrow
-        // beyond it reverts at Morpho (retriable, id unconsumed), one within it executes
+    function testCoverGateIsStricterThanMorphoHealthOnBorrow() public {
+        // the borrow side of the gate: 100 FXRP = 200 RLUSD carry at most 154 RLUSD at Morpho's
+        // 77% LLTV but only 133.33 under the cover (1.5 x D <= 200). Morpho's check runs first,
+        // inside its borrow: 1000 reverts there; 134 passes Morpho and is refused by the gate
+        // (cover 201 > 200) with nothing supplied or disbursed and the id unconsumed; 133 executes
         morpho.setHealthCheckDisabled(false);
         address subaccount = _createConfiguredSubaccount();
+        oracle.setPrice(2e48);
         fxrp.mint(subaccount, 100e6);
         bytes32 dest = bytes32(uint256(uint160(makeAddr("dest"))));
 
@@ -2142,13 +2156,91 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             subaccount, 1, _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 1000e18),
             bytes("insufficient collateral")
         );
+        _deliverExpectRevert(
+            subaccount, 1, _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 134e18),
+            _uncovered(201e18, 200e18)
+        );
         assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertEq(fxrp.balanceOf(subaccount), 100e6);
+        assertEq(rlusd.balanceOf(makeAddr("dest")), 0);
 
         _deliver(
             subaccount, 1, 100e6,
-            _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 150e18)
+            _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 133e18)
         );
         assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertEq(rlusd.balanceOf(makeAddr("dest")), 133e18);
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+    }
+
+    function testBorrowGateCountsTheFeeAndTheSuppliedCredit() public {
+        // the gate on a second borrow counts the fee twice and the credit the packet brings: 100
+        // borrowed on 100 FXRP (200 RLUSD) a year ago owes 7 of fee; a packet bringing 100 FXRP
+        // more (400 RLUSD in all) may add at most 152.67 - 1.5 x (100 + b + 14) <= 400. 153 is
+        // refused with the whole delivery rolled back (the credit stays idle, the id unconsumed),
+        // 152 executes, supplying the credit with it
+        _configureSettings();
+        oracle.setPrice(2e48);
+        (, address subaccount) = _parentAndSubaccount("rBorrowFeeOwner");
+        bytes32 dest = bytes32(uint256(uint160(makeAddr("dest"))));
+        fxrp.mint(subaccount, 100e6);
+        _deliver(
+            subaccount, 1, 100e6, _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 100e18)
+        );
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        fxrp.mint(subaccount, 100e6);
+
+        _deliverExpectRevert(
+            subaccount, 2, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 153e18),
+            _uncovered(_requiredCover(253e18, 7e18), 400e18)
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+        assertEq(fxrp.balanceOf(subaccount), 100e6);
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+        assertEq(rlusd.balanceOf(makeAddr("dest")), 100e18);
+
+        _deliver(
+            subaccount, 2, 100e6, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 152e18)
+        );
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        (, , collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 200e6);
+        assertEq(rlusd.balanceOf(makeAddr("dest")), 252e18);
+        (uint256 principal, , uint256 collectible, , , ) =
+            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 252e18);
+        assertEq(collectible, 7e18);
+    }
+
+    function testDeadOracleBlocksBorrowAtMorphoThenAtTheGate() public {
+        // canonical Morpho reads the oracle inside borrow, so a dead oracle refuses there first;
+        // the gate's own refusal, valuing the collateral at nothing, is observable with Morpho's
+        // check switched off. Either way nothing is supplied, the id stays unconsumed and the
+        // same packet borrows once the oracle answers again
+        morpho.setHealthCheckDisabled(false);
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        bytes memory payload = _borrowPayload(
+            bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))), 100e18
+        );
+        oracle.setPriceReverts(true);
+
+        _deliverExpectRevert(subaccount, 1, payload, bytes("oracle reverted"));
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertEq(fxrp.balanceOf(subaccount), 100e6);
+
+        morpho.setHealthCheckDisabled(true);
+        _deliverExpectRevert(subaccount, 1, payload, _uncovered(_requiredCover(100e18, 0), 0));
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertEq(fxrp.balanceOf(subaccount), 100e6);
+
+        oracle.setPriceReverts(false);
+        _deliver(subaccount, 1, 100e6, payload);
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertEq(rlusd.balanceOf(makeAddr("dest")), 100e18);
     }
 
     function testWithdrawBeyondCollateralRevertsAtMorpho() public {
@@ -2174,6 +2266,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // remaining value == the required cover passes uncollected (>=); half an FXRP less in
         // the remainder is refused - a >=/> regression flips exactly this pair
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         (, address subaccount) = _parentAndSubaccount("rExactSecurityOwner");
         fxrp.mint(subaccount, 200e6);
         _deliver(subaccount, 1, 200e6, _borrowPayload(
@@ -2240,6 +2333,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // left) passes - both healthy at Morpho, whose line there is 200
         morpho.setHealthCheckDisabled(false);
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         uint256 typeB = 2;
         ILoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
@@ -2406,6 +2500,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the stateful chain single tests cannot catch: secured exits, price moves, more
         // accrual, then a refused exit reopened by repay - the ledger must be exact throughout
         _configureSettings();
+        oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         (, address subaccount) = _parentAndSubaccount("rSequenceOwner");
         fxrp.mint(subaccount, 300e6);
         _deliver(subaccount, 1, 300e6, _borrowPayload(
@@ -2516,13 +2611,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
 
         // the elapsed year is priced at the 7% SNAPSHOT (fee 70, cover 1.5 x (1000 + 140) =
-        // 1710 against the 120 that 60 FXRP are worth): the uncovered exit is refused and the
+        // 1710 against the 1200 that 60 FXRP are worth): the uncovered exit is refused and the
         // idle 20 is untouched - it is not fee fuel
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 40e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 3, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(_uncovered(1710e18, 120e18));
+        vm.expectRevert(_uncovered(1710e18, 1200e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -2671,12 +2766,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         frozenRlusd.setFrozen(subaccount, true);
 
-        // 2 FXRP left = 4 RLUSD against the 1710 the 1000 debt and the 70 fee need: refused
+        // 2 FXRP left = 40 RLUSD against the 1710 the 1000 debt and the 70 fee need: refused
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 98e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(_uncovered(1710e18, 4e18));
+        vm.expectRevert(_uncovered(1710e18, 40e18));
         ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
@@ -3083,7 +3178,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function testBorrowingDisabledLeavesExitsOpen() public {
         // the switch stops exactly one thing - new debt; every exit stays open on the sunset
-        // pool: composed withdrawal (the 70 FXRP = 140 RLUSD left cover the 1.5 x 50 the gate
+        // pool: composed withdrawal (the 70 FXRP = 1400 RLUSD left cover the 1.5 x 50 the gate
         // wants), repayment, and recovery of the surplus
         address subaccount = _borrowedSubaccount(50e18);
         vm.prank(governance);
@@ -3251,7 +3346,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 70e6);
 
-        // 70 FXRP = 140 RLUSD carries 107.8 at LLTV 77%: the signed 100 is healthy and executes
+        // 70 FXRP = 1400 RLUSD carry the signed 100 at Morpho (1078 allowed) and at the cover gate
+        // (150 needed): it executes
         address destination = makeAddr("exchangeDeposit");
         vm.expectEmit();
         emit ILoanSubaccountRemote.LoanOpened(
@@ -3789,8 +3885,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // withdraw: message-only out, atomic on arrival - the receiver withdraws the
         // collateral and bridges it home in the same execution, under the signed return
-        // options, paid by the delivered compose value (the 60 FXRP = 120 RLUSD left cover the
-        // 1.5 x 50 the exit gate wants)
+        // options, paid by the delivered compose value (the 60 FXRP = 1200 RLUSD left cover the
+        // 1.5 x 50 the cover gate wants)
         vm.prank(parentPersonalAccount);
         ILoanSubaccount(sender).withdraw{value: 0.01 ether}(
             40e6, bytes32("op-w"), deadline,

@@ -113,7 +113,10 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * bridging core's guards: paused reverts, a configured route that is not suspended required,
      * live peer re-checked. `_extraOptions` must be type-3 options carrying both the destination
      * `lzReceive` gas and the `lzCompose` gas. `msg.value` must cover the LayerZero fee; the
-     * excess is refunded to the parent.
+     * excess is refunded to the parent. On the loan chain the borrow is also refused, retriably,
+     * when the post-borrow position would fall under the cover gate
+     * (`InsufficientRemainingCollateral`) - the same rule that gates {withdraw}: the collateral
+     * must be worth `1.155 / LLTV` of the debt plus twice the collectible Flare fee.
      * @param _collateralAmount FXRP to bridge and supply as collateral; may be zero, at most
      * the account's balance.
      * @param _borrowAmount Loan-token amount to borrow and disburse; non-zero.

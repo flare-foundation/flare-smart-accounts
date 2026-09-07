@@ -231,7 +231,7 @@ Formatting style:
 - Never run `forge fmt` (or Prettier) over `.sol` files; format Solidity by hand to these conventions.
 - Every `if`, `else`, `for` and `while` body goes in braces on its own lines, even a lone `return`: a
   brace-less body silently runs a later second statement unconditionally, and `forge coverage` line reports
-  cannot show an untaken early return that shares its line with the condition.
+  cannot show an early return that was never taken when it shares its line with the condition.
 
 Example:
 
