@@ -22,6 +22,9 @@ export interface PinnedBaseFacet {
 
 export interface PinnedEthereumAddresses {
   controllerAddress: string;
+  controllerRuntimeCodeHash: string;
+  /** `DiamondArgs.owner` of the pinned bootstrap: the diamond's owner until it is transferred. */
+  initialOwner: string;
   baseFacets: Map<string, PinnedBaseFacet>;
 }
 
@@ -93,6 +96,8 @@ export function loadPinnedEthereumAddresses(): PinnedEthereumAddresses {
   });
   cachedAddresses = {
     controllerAddress: parsePinnedConstant(source, "MASTER_ACCOUNT_CONTROLLER", "address"),
+    controllerRuntimeCodeHash: parsePinnedConstant(source, "MASTER_ACCOUNT_CONTROLLER_RUNTIME_CODE_HASH", "bytes32"),
+    initialOwner: parsePinnedConstant(source, "INITIAL_OWNER", "address"),
     baseFacets: new Map([
       ["DiamondCutFacet", baseFacet("DIAMOND_CUT_FACET")],
       ["DiamondLoupeFacet", baseFacet("DIAMOND_LOUPE_FACET")],

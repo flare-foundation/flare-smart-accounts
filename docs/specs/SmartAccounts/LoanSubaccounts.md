@@ -1440,16 +1440,20 @@ storage-lineage gate below is the third member of this family.
   **Personal Account lineage is not fresh** on any of the four (beacons set), and its layout is
   unchanged, as the rule requires and the validator's v2.0.0 reference enforces;
 
-- post-cut verification: loupe/selector layout, owner, and ERC-165 answers checked against
-  the expected Ethereum facet set (the bootstrap itself already verifies init-code hashes,
-  CREATE2 addresses, and runtime code against the pinned Flare fixtures, in CI and at
-  deploy time);
+- post-cut verification, `pnpm verify_diamond ethereum <cut-file>`: the loupe exposes exactly the
+  recorded facets' selectors both ways, every facet's code is its artifact's (modulo metadata),
+  the owner is the expected one, the four ERC-165 flags answer true, and the pinned controller
+  and base facets match by address and code hash, all read at one block (the bootstrap itself
+  already verifies init-code hashes, CREATE2 addresses and
+  runtime code against the pinned Flare fixtures, in CI and at deploy time; the cut wrapper runs
+  the post-cut check itself when it executes the cut);
 - a signed ownership-control rehearsal from the historical owner EOA before anything
   depends on the deployment;
-- a pre-cut verification that the fresh diamond still has the pinned initial owner and the
-  exact base selector mapping (the cut checker already recognizes the pinned base facets as
-  intentional reuse, verified against the Flare runtime hashes, instead of proposing to
-  replace them with current-source builds);
+- pre-cut verification, `pnpm verify_diamond ethereum --pre-cut`: the fresh diamond is pristine -
+  the pinned initial owner, exactly the three pinned base facets with their canonical selectors,
+  no ERC-165 flag set yet, code hashing to the pins (the cut checker already recognizes the
+  pinned base facets as intentional reuse instead of proposing to replace them with
+  current-source builds);
 - per-action `lzCompose` gas profiling against the real Morpho, oracle and token contracts
   — the test fixture's option values are illustrative headroom for the mock path, not
   production configuration;

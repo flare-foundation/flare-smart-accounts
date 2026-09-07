@@ -91,3 +91,10 @@ void test("rejects path aliases and non-canonical casings", () => {
   assert.throws(() => validateContractName("ownershipfacet"), /canonical spelling/);
   assert.throws(() => validateContractName("MASTERACCOUNTCONTROLLER"), /canonical spelling/);
 });
+
+void test("exposes the pinned initial owner and the controller's runtime code hash", () => {
+  const pins = loadPinnedEthereumAddresses();
+  assert.equal(pins.initialOwner, "0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA".toLowerCase());
+  assert.match(pins.controllerRuntimeCodeHash, /^0x[0-9a-f]{64}$/);
+  assert.equal(pins.controllerAddress, ADDRESS.toLowerCase());
+});
