@@ -1390,17 +1390,28 @@ storage-lineage gate below is the third member of this family.
 
 ### Release checklist
 
-**Before the first Ethereum cut, still to be built and rehearsed:**
+**Before the first Ethereum cut.** Three kinds of item: tooling that is built and is run at the
+moment named, work still to be built or rehearsed, and premises that hold in source or on a fork
+but must be confirmed against the live contracts, together with the order of activation.
 
-- **implementation registration as a verified gate**: `setSubaccountImplementation(1, …)`
-  and `setPersonalAccountImplementation(…)` must register exactly the reviewed
-  `LoanSubaccountRemote` and `PersonalAccountRemote` artifacts (runtime hashes verified
-  before the timelocked calls, `implementationForType(1)` and the PA beacon's
-  `implementation()` asserted after them), and this must complete before any account is
-  advertised, funded, or the cross-chain route is enabled. The setters check only that
-  code exists; a wrong but `initialize`-compatible registration would let permissionless
-  creation materialize frozen proxies with the wrong storage layout, and initialization
-  cannot be replayed;
+**Built - run at the named moment:**
+
+- pre-cut verification, `pnpm verify_diamond ethereum --pre-cut`: the fresh diamond is pristine -
+  the pinned initial owner, exactly the three pinned base facets with their canonical selectors,
+  no ERC-165 flag set yet, code hashing to the pins (the cut checker already recognizes the
+  pinned base facets as intentional reuse instead of proposing to replace them with
+  current-source builds);
+- post-cut verification, `pnpm verify_diamond ethereum <cut-file>`: the loupe exposes exactly the
+  recorded facets' selectors both ways, every facet's code is its artifact's (modulo metadata),
+  the owner is the expected one, the four ERC-165 flags answer true, and the pinned controller
+  and base facets match by address and code hash, all read at one block, with the responders of
+  `facets()`, `supportsInterface` and `owner()` authenticated from the diamond's own dispatch
+  storage and the cut file's deleted selectors checked to have no dispatch entry left - under a
+  cut file's `deleteAllOldMethods` the expected facets are the cut's own instead of the record's
+  and `deleteSelectorSigs` is ignored, its dispatch-entry check included, exactly as the executor
+  ignores it. (The bootstrap itself already verifies init-code hashes, CREATE2 addresses and
+  runtime code against the pinned Flare fixtures, in CI and at deploy time; the cut wrapper runs
+  the post-cut check itself when it executes the cut.)
 - **the chain-local storage-lineage gate**: every implementation in a proxy's chain-local
   upgrade lineage must preserve that proxy's storage layout (cross-chain layouts may
   differ — the chains share only the address — but a chain's lineage may not). The account
@@ -1439,54 +1450,28 @@ storage-lineage gate below is the third member of this family.
   freshness from that; the bootstrap has not run), so the re-laid subaccount layouts are safe; the
   **Personal Account lineage is not fresh** on any of the four (beacons set), and its layout is
   unchanged, as the rule requires and the validator's v2.0.0 reference enforces;
-
-- post-cut verification, `pnpm verify_diamond ethereum <cut-file>`: the loupe exposes exactly the
-  recorded facets' selectors both ways, every facet's code is its artifact's (modulo metadata),
-  the owner is the expected one, the four ERC-165 flags answer true, and the pinned controller
-  and base facets match by address and code hash, all read at one block (the bootstrap itself
-  already verifies init-code hashes, CREATE2 addresses and
-  runtime code against the pinned Flare fixtures, in CI and at deploy time; the cut wrapper runs
-  the post-cut check itself when it executes the cut);
-- a signed ownership-control rehearsal from the historical owner EOA before anything
-  depends on the deployment;
-- pre-cut verification, `pnpm verify_diamond ethereum --pre-cut`: the fresh diamond is pristine -
-  the pinned initial owner, exactly the three pinned base facets with their canonical selectors,
-  no ERC-165 flag set yet, code hashing to the pins (the cut checker already recognizes the
-  pinned base facets as intentional reuse instead of proposing to replace them with
-  current-source builds);
-- per-action `lzCompose` gas profiling against the real Morpho, oracle and token contracts
-  — the test fixture's option values are illustrative headroom for the mock path, not
-  production configuration;
-- **the canonical-Morpho premises of the cover gate**: the gate implies Morpho's health check
-  (`1.155 × (D + 2F) ≥ D`, cover rounded up, collateral value rounded down), so on the real
-  market Morpho's own refusal must never bind first on a withdrawal, and on a borrow it runs
-  first inside `borrow` and the gate is the binding limit whenever it passed (so a borrow can
-  fail with Morpho's own error, never only ours); with live debt a dead oracle is refused by the
-  gate itself on a withdrawal (on a borrow Morpho refuses first, and a borrow has no oracle-free
-  route back); with `D = 0` and collectible `F = 0` the withdrawal passes the gate oracle-free
-  (debt-free with an unpaid fee still reads the oracle), which then
-  needs canonical `withdrawCollateral` to skip the oracle too with zero borrow shares
-  (`_isHealthy` returns early). `MockMorpho` models both behind a switch (the fee fixtures run
-  over-leveraged with it off; dedicated tests run with it on), so the interplay is pinned at
-  the unit level; what remains is verifying both against the canonical Morpho source and the
-  real market in the integration harness before launch;
-- **fee terms configured before any route opens**: `registerLoanMarket`, then the one
-  `setLoanFeeTerms` call (the activation — borrowing reverts until it executes); verify all
-  three fields before enabling the forward route;
-- **the Ethereum FXRP OFT's decimals**: `token().decimals()` must equal its `sharedDecimals()`
-  (6) on the loan chain — the no-dust argument (`minAmountLD == amountLD`) rests on it on both
-  chains; `setComposeTransport` fails closed otherwise, so confirm the representation before
-  the transport is queued;
-- **FAssets' zero-fee executor**: the zero-value redeem-home passes the controller's executor to
-  `redeemAmount` with zero value; verify against the deployed asset manager that a named
-  executor with a zero fee is accepted (the vendored interfaces do not say) — if it is not,
-  every zero-value bridge-back would terminal-skip after its TTL and fall back to the
-  fee-paying public rail;
 - **operator chain checks**: the implementation deploy scripts refuse the wrong chain family
   (a remote implementation registered on Flare would corrupt every Personal Account's storage),
   and every deploy and cut flow — the `check_cut` preview included — verifies that the RPC's
   chain id matches the named network before acting, so a mis-set `<NETWORK>_RPC_URL` fails
   instead of retargeting the flow;
+
+**Still to be built or rehearsed:**
+
+- **implementation registration as a verified gate**: `setSubaccountImplementation(1, …)`
+  and `setPersonalAccountImplementation(…)` must register exactly the reviewed
+  `LoanSubaccountRemote` and `PersonalAccountRemote` artifacts (runtime hashes verified
+  before the timelocked calls, `implementationForType(1)` and the PA beacon's
+  `implementation()` asserted after them), and this must complete before any account is
+  advertised, funded, or the cross-chain route is enabled. The setters check only that
+  code exists; a wrong but `initialize`-compatible registration would let permissionless
+  creation materialize frozen proxies with the wrong storage layout, and initialization
+  cannot be replayed;
+- a signed ownership-control rehearsal from the historical owner EOA before anything
+  depends on the deployment;
+- per-action `lzCompose` gas profiling against the real Morpho, oracle and token contracts
+  — the test fixture's option values are illustrative headroom for the mock path, not
+  production configuration;
 - **the fee-activation runbook rehearsed** once on a testnet diamond with a non-zero timelock;
 - **the real Endpoint/OFT compose-delivery integration harness** for every action, in both
   directions (the local sender→codec→receiver tests run each
@@ -1496,6 +1481,47 @@ storage-lineage gate below is the third member of this family.
   receiver tests on both chains (the Flare redeem-home and the loan-chain withdraw), and the
   wire-level `lzReceive → sendCompose → lzCompose` path with delivered compose value, zero and
   non-zero, is exactly what the harness must add).
+
+**To confirm on the live contracts, and the order of activation:**
+
+- **the canonical-Morpho premises of the cover gate**: the gate implies Morpho's health check
+  (`1.155 × (D + 2F) ≥ D`, cover rounded up, collateral value rounded down), so on the real
+  market Morpho's own refusal must never bind first on a withdrawal, while on a borrow both
+  errors are reachable: Morpho's check runs first inside its own `borrow`, so an amount past
+  Morpho's line fails with Morpho's error, and the band between our cover and that line passes
+  Morpho and is refused by the gate alone (134 RLUSD on collateral worth 200 at LLTV 77%: Morpho
+  allows 154, our cover is 201); with live debt a dead oracle is refused by the
+  gate itself on a withdrawal (on a borrow Morpho refuses first, and a borrow has no oracle-free
+  route back); with `D = 0` and collectible `F = 0` the withdrawal passes the gate oracle-free
+  (debt-free with an unpaid fee still reads the oracle), which then
+  needs canonical `withdrawCollateral` to skip the oracle too with zero borrow shares
+  (`_isHealthy` returns early). `MockMorpho` runs the canonical health check (`_isHealthy` over
+  the oracle at the market's LLTV, skipped with zero borrow shares) unless a test switches it
+  off: the fuzz, invariant and adversarial suites run with it on; the unit fixture switches it
+  off because its fee tests never lean on it (their positions - 1000 RLUSD on 100 FXRP at
+  1 FXRP = 20 RLUSD - sit at 50% LTV, inside both lines) and switches it back on in the tests
+  that pin the order of refusals: the gate before Morpho on a withdrawal, both errors reachable
+  on a borrow, the dead-oracle order on each action, the oracle-free debt-free exit, the LLTV the
+  gate follows and the liquidation price. The views' agreement with the actions
+  (`getLoanPosition` against a checkpoint in the same block, each preview against its own cover
+  check, the exact minimum top-up) is pinned by the fuzz properties, which run with the check on.
+  So the interplay is pinned at the unit level; what remains is verifying both against the
+  canonical Morpho source and the real market in the integration harness before launch;
+- **fee terms configured before any route opens**: `registerLoanMarket`, then the one
+  `setLoanFeeTerms` call (the activation — borrowing reverts until it executes); verify all
+  three fields before enabling the forward route;
+- **the Ethereum FXRP OFT's decimals**: `token().decimals()` must equal its `sharedDecimals()`
+  (6) on the loan chain — the no-dust argument (`minAmountLD == amountLD`) rests on it on both
+  chains; `setComposeTransport` fails closed otherwise, so confirm the representation before
+  the transport is queued (read on Ethereum mainnet 2026-09-03: the FXRP token is the OFT
+  itself and `decimals() == sharedDecimals() == 6`; the Flare adapter's is still to be read);
+- **FAssets' zero-fee executor**: the zero-value redeem-home passes the controller's executor to
+  `redeemAmount` with zero value; verify against the deployed asset manager that a named
+  executor with a zero fee is accepted (the vendored interfaces do not say; the source rule,
+  read 2026-09-03 in the FAssets repository 40 commits past `v1.3.0`, accepts it - the deployed
+  asset manager's version is still to be confirmed) — if it is not,
+  every zero-value bridge-back would terminal-skip after its TTL and fall back to the
+  fee-paying public rail;
 - **Each route is enabled last, and only once its remote side exists.** `setBridgeRoute`
   reads the adapter's live peer for the destination endpoint, so it cannot be set before the
   adapter's peer is wired; until the type is pointed at a live route its forward moves revert
