@@ -104,13 +104,18 @@ Comment such a test with why the guard is unreachable in production. Two caveats
 mis-attributes branch arms inside modifiers (an arm can read as never taken while a test does
 exercise it), and it reports 0/0 branches for files that have none.
 
-For TypeScript changes:
+For TypeScript or deployment-tooling changes:
 
 ```bash
 pnpm lint:check
 pnpm format:check
 pnpm typecheck
+pnpm test:tooling
 ```
+
+`test:tooling` runs the node tests beside the deployment utilities (`deployment/utils/*.test.ts`), the verifier
+CLI's own test against a fake JSON-RPC server (`deployment/scripts/verify-diamond.test.ts`) and the cut wrapper's
+shell scenarios (`deployment/scripts/execute-diamond-cut.test.sh`); CI runs it too.
 
 ## Project Structure
 
@@ -301,7 +306,7 @@ There are two valid ways to prepare the `facets` list:
 
 Do not rely only on the source import graph, since internal libraries, interfaces, compiler settings, and embedded creation code can change facet bytecode.
 
-After a cut, run `pnpm verify_diamond <network> [cut-file-name]` to read the diamond back: it checks that the loupe exposes exactly the recorded facets' artifact selectors (less the cut file's `deleteSelectorSigs`), that no stale or orphan selector or facet is live, that every facet has code, that the four ERC-165 flags answer true and `0xffffffff` false, and the owner (`--expect-owner`, else the pinned initial owner on Ethereum, else the chain config's `governance`). On Ethereum it also checks the record and the on-chain code against the pinned controller and base facets. `--pre-cut` verifies the bootstrapped Ethereum diamond is pristine before its first cut: the pinned owner, exactly the three pinned base facets with their canonical selectors, no flag set. Every expected facet's on-chain code must also be the artifact's functional code (the planner's `REUSE` verdict: identical modulo the facet's own metadata trailer; a change in the embedded proxy creation code's metadata counts as a change) from a source still in the repository, and the diamond's own code the controller artifact's where no pin covers it. A cut file with `deleteAllOldMethods` narrows the expected surface to its own facets. The dispatch table is also read straight from the diamond's storage for the selectors the verifier itself calls, so a facet that lies about the layout cannot pass (the diamond's code, which is what the pins or the artifact comparison authenticate, is what reads that table), and a cut file's deleted selectors must have no dispatch entry left. The cut file must target the record's one controller. The cut wrapper runs the post-cut check itself when the cut file has `"execute": true`. All reads are made at one block; `VERIFY_BLOCK_TAG=finalized` makes it a finalized one.
+After a cut, run `pnpm verify_diamond <network> [cut-file-name]` to read the diamond back: it checks that the loupe exposes exactly the recorded facets' artifact selectors (less the cut file's `deleteSelectorSigs`), that no stale or orphan selector or facet is live, that every facet has code, that the four ERC-165 flags answer true and `0xffffffff` false, and the owner (`--expect-owner`, else the pinned initial owner on Ethereum, else the chain config's `governance`). On Ethereum it also checks the record and the on-chain code against the pinned controller and base facets. `--pre-cut` verifies the bootstrapped Ethereum diamond is pristine before its first cut: the pinned owner, exactly the three pinned base facets with their canonical selectors, no flag set. Every expected facet's on-chain code must also be the artifact's functional code (the planner's `REUSE` verdict: identical modulo the facet's own metadata trailer; a change in the embedded proxy creation code's metadata counts as a change) from a source still in the repository, and the diamond's own code the controller artifact's where no pin covers it. A cut file with `deleteAllOldMethods` narrows the expected surface to its own facets. The dispatch table is also read straight from the diamond's storage for the selectors the verifier itself calls, so a facet that lies about the layout cannot pass (the diamond's code, which is what the pins or the artifact comparison authenticate, is what reads that table), and a cut file's deleted selectors must have no dispatch entry left. The cut file must target the record's one controller. The cut wrapper runs the post-cut check itself when the cut file has `"execute": true`. All reads are made at one block; `VERIFY_BLOCK_TAG=finalized` makes it a finalized one. The checks live in `deployment/utils/diamond-verifier.ts` behind a chain reader and a repository reader, so `pnpm test:tooling` drives them against a fake chain (a forged loupe answer, a wrong runtime, both deletion modes, the pre-cut state, a wrong cut target, one failing fixture per check), runs the CLI itself against a fake JSON-RPC server (exit 1 on a failed check, every read at the resolved block, the chain-id guard) and runs the wrapper against stubbed `forge` and `npx` (the execute flag is validated before forge runs; verification follows an executed cut only and only after a successful forge run, under the staging name for a staging network; a failing verification fails the wrapper).
 
 Before executing a cut, run `pnpm check_cut <network> [cut-file-name]` to preview the full cut plan. It reports three sections:
 
