@@ -5,6 +5,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {FAssetRedeemComposer} from "../../contracts/composer/implementation/FAssetRedeemComposer.sol";
 import {FAssetRedeemerAccount} from "../../contracts/composer/implementation/FAssetRedeemerAccount.sol";
 import {FAssetRedeemComposerProxy} from "../../contracts/composer/proxy/FAssetRedeemComposerProxy.sol";
+import {IOwnableWithTimelock} from "../../contracts/userInterfaces/IOwnableWithTimelock.sol";
 
 // solhint-disable no-console
 contract DeployComposer is Script {
@@ -65,14 +66,31 @@ contract DeployComposer is Script {
             params.executor = payable(vm.parseJsonAddress(config, ".composerExecutor"));
             params.timelockDurationSeconds = vm.parseJsonUint(config, ".timelockDurationSeconds");
 
+            // mirrors `OwnableWithTimelock.MAX_TIMELOCK_DURATION_SECONDS`, which is internal:
+            // a longer duration makes the arming call revert, so it is caught before anything
+            // is deployed rather than after the composer is live
+            require(
+                params.timelockDurationSeconds <= 7 days,
+                "timelockDurationSeconds above the 7 day maximum"
+            );
+
+            // Governance owns the composer from its first block whenever it is configured:
+            // every setting is applied by `initialize`, so the deployer never needs the role.
+            // The other order - deployer as owner, arm the timelock, then hand over - would
+            // queue the transfer, because `transferOwnership` is guarded too, leaving the
+            // deployer owning the composer (and able to cancel that handover) until someone
+            // executed it. Arming the timelock is instead governance's own first call,
+            // immediate because the duration starts at zero; it is printed below.
+            address initialOwner =
+                params.governance != address(0) ? params.governance : deployer;
+
             // 2. Deploy Redeemer Account Implementation
             redeemerAccountImpl = new FAssetRedeemerAccount();
 
             // 3. Deploy Composer Proxy (initializes the composer)
-            // Initialize with deployer as owner to allow setup
             composerProxy = new FAssetRedeemComposerProxy(
                 address(composerImpl),
-                deployer,
+                initialOwner,
                 params.endpoint,
                 params.trustedSourceOApp,
                 params.assetManager,
@@ -86,14 +104,19 @@ contract DeployComposer is Script {
 
             composer = FAssetRedeemComposer(address(composerProxy));
 
-            // 4. Set Timelock Duration
-            console2.log("Setting timelock duration...");
-            composer.setTimelockDuration(params.timelockDurationSeconds);
-
-            // 5. Transfer ownership to governance
-            if (params.governance != address(0) && params.governance != deployer) {
-                console2.log("Transferring ownership to governance...");
-                composer.transferOwnership(params.governance);
+            // 4. Arm the timelock. Only the owner can: the deployer does it directly when
+            // no governance address is configured, otherwise it is governance's own first
+            // call and the script prints exactly what to send.
+            if (initialOwner == deployer) {
+                console2.log("Setting timelock duration...");
+                composer.setTimelockDuration(params.timelockDurationSeconds);
+            } else {
+                console2.log("Owner is governance; timelock NOT armed yet.");
+                console2.log("  governance must call setTimelockDuration on:", address(composer));
+                console2.log("  seconds: ", params.timelockDurationSeconds);
+                console2.log("  calldata:", vm.toString(
+                    abi.encodeCall(IOwnableWithTimelock.setTimelockDuration, (params.timelockDurationSeconds))
+                ));
             }
         }
 

@@ -34,6 +34,7 @@ contract FAssetRedeemComposerTest is Test {
     FAssetRedeemComposer private composer;
 
     address private owner;
+    address private newOwner;
     address private endpoint;
     address private trustedSourceOApp;
     address private assetManager;
@@ -47,6 +48,7 @@ contract FAssetRedeemComposerTest is Test {
 
     function setUp() public {
         owner = makeAddr("owner");
+        newOwner = makeAddr("new owner");
         endpoint = makeAddr("endpoint");
         trustedSourceOApp = makeAddr("trustedSourceOApp");
         assetManager = makeAddr("assetManager");
@@ -1234,6 +1236,179 @@ contract FAssetRedeemComposerTest is Test {
         vm.prank(owner);
         vm.expectRevert(IOwnableWithTimelock.TimelockValueNotAllowed.selector);
         composer.upgradeToAndCall{value: 1}(address(newImpl), "");
+    }
+
+    // --- OwnableWithTimelock: transferOwnership ---
+
+    function testTransferOwnershipDirectWhenZero() public {
+        // duration 0 disarms the timelock for every guarded call, transfers included
+        vm.prank(owner);
+        composer.transferOwnership(newOwner);
+        assertEq(composer.owner(), newOwner);
+    }
+
+    function testTransferOwnershipRevertZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0))
+        );
+        composer.transferOwnership(address(0));
+    }
+
+    function testTransferOwnershipRevertNonOwner() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Ownable.OwnableUnauthorizedAccount.selector,
+                address(this)
+            )
+        );
+        composer.transferOwnership(newOwner);
+    }
+
+    function testTransferOwnershipQueuedOnceActive() public {
+        // the point of the guard: with the timelock armed, taking the owner role is no longer
+        // a single atomic transaction - it queues publicly and waits like everything else
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+        bytes memory encodedCall = abi.encodeWithSelector(
+            Ownable.transferOwnership.selector,
+            newOwner
+        );
+
+        vm.prank(owner);
+        vm.expectEmit();
+        emit IOwnableWithTimelock.CallTimelocked(
+            encodedCall, keccak256(encodedCall), vm.getBlockTimestamp() + 1 hours
+        );
+        composer.transferOwnership(newOwner);
+
+        assertEq(composer.owner(), owner, "ownership moved without the delay");
+        assertEq(
+            composer.getExecuteTimelockedCallTimestamp(encodedCall),
+            vm.getBlockTimestamp() + 1 hours
+        );
+
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        composer.executeTimelockedCall(encodedCall);
+        assertEq(composer.owner(), newOwner, "ownership did not move on execution");
+    }
+
+    function testTransferOwnershipQueueCanBeCancelled() public {
+        // cancelling is what the waiting window is for: the outgoing owner keeps that power
+        // until the transfer executes
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+        bytes memory encodedCall = abi.encodeWithSelector(
+            Ownable.transferOwnership.selector,
+            newOwner
+        );
+
+        vm.prank(owner);
+        composer.transferOwnership(newOwner);
+        vm.prank(owner);
+        composer.cancelTimelockedCall(encodedCall);
+
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        vm.expectRevert(IOwnableWithTimelock.TimelockInvalidSelector.selector);
+        composer.executeTimelockedCall(encodedCall);
+        assertEq(composer.owner(), owner, "cancelled transfer still applied");
+    }
+
+    function testTransferOwnershipMovesTheOwnerRole() public {
+        // after execution the role really has moved: the new owner governs, the old one cannot
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+        bytes memory encodedCall = abi.encodeWithSelector(
+            Ownable.transferOwnership.selector,
+            newOwner
+        );
+        vm.prank(owner);
+        composer.transferOwnership(newOwner);
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        composer.executeTimelockedCall(encodedCall);
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, owner)
+        );
+        composer.setTimelockDuration(2 days);
+
+        vm.prank(newOwner);
+        composer.setTimelockDuration(2 days); // queues under the new owner
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        composer.executeTimelockedCall(
+            abi.encodeWithSelector(IOwnableWithTimelock.setTimelockDuration.selector, 2 days)
+        );
+        assertEq(composer.getTimelockDurationSeconds(), 2 days);
+    }
+
+    function testTransferOwnershipZeroAddressRejectedAtExecution() public {
+        // queueing validates nothing, exactly as for every other guarded setter; the zero
+        // target is refused when the queued call runs, and the role stays put
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+        bytes memory encodedCall = abi.encodeWithSelector(
+            Ownable.transferOwnership.selector,
+            address(0)
+        );
+
+        vm.prank(owner);
+        composer.transferOwnership(address(0)); // queues without complaint
+
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        vm.expectRevert(
+            abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0))
+        );
+        composer.executeTimelockedCall(encodedCall);
+        assertEq(composer.owner(), owner);
+    }
+
+    function testTransferQueuedBeforeAnotherSurvivesItAndStillMoves() public {
+        // queued calls are keyed by calldata alone and carry no proposer, so a transfer queued
+        // before an earlier one executes is not cleared by it: afterwards anyone can execute
+        // the stale one and the role moves again, out of the new owner's hands
+        address third = makeAddr("third owner");
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+        bytes memory first = abi.encodeWithSelector(Ownable.transferOwnership.selector, newOwner);
+        bytes memory second = abi.encodeWithSelector(Ownable.transferOwnership.selector, third);
+
+        vm.startPrank(owner);
+        composer.transferOwnership(newOwner);
+        composer.transferOwnership(third);
+        vm.stopPrank();
+
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        composer.executeTimelockedCall(first);
+        assertEq(composer.owner(), newOwner);
+
+        composer.executeTimelockedCall(second);
+        assertEq(composer.owner(), third, "the queued transfer did not survive the first");
+    }
+
+    function testTheNewOwnerCanCancelATransferTheOldOneQueued() public {
+        // the other half of the same policy: the survivor is cancellable, and cancelling is
+        // the incoming owner's own immediate power - which is why the handover procedure is to
+        // clear the queue during the transfer's own waiting window
+        address third = makeAddr("third owner");
+        vm.prank(owner);
+        composer.setTimelockDuration(1 hours);
+        bytes memory first = abi.encodeWithSelector(Ownable.transferOwnership.selector, newOwner);
+        bytes memory second = abi.encodeWithSelector(Ownable.transferOwnership.selector, third);
+
+        vm.startPrank(owner);
+        composer.transferOwnership(newOwner);
+        composer.transferOwnership(third);
+        vm.stopPrank();
+
+        vm.warp(vm.getBlockTimestamp() + 1 hours);
+        composer.executeTimelockedCall(first);
+
+        vm.prank(newOwner);
+        composer.cancelTimelockedCall(second);
+        vm.expectRevert(IOwnableWithTimelock.TimelockInvalidSelector.selector);
+        composer.executeTimelockedCall(second);
+        assertEq(composer.owner(), newOwner, "the cancelled transfer still applied");
     }
 
     // --- OwnableWithTimelock: setTimelockDuration ---

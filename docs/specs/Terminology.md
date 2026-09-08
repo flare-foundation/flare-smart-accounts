@@ -18,7 +18,7 @@ Roles and concepts referenced across the spec.
 
 **Pauser / Unpauser** — two separate role sets in [`Pause.State`](../../contracts/smartAccounts/library/Pause.sol), managed by `onlyOwnerWithTimelock`, except that removing an unpauser is immediate. Pausers can call `pause()` immediately (no timelock); unpausers can call `unpause()`. The sets are independent (an address can be in one, the other, both, or neither); splitting the roles lets an emergency responder freeze state without necessarily granting them the ability to re-open it.
 
-**Owner** — the diamond's `LibDiamond.contractOwner` (for Smart Accounts) or the OpenZeppelin `Ownable` owner (for the composer). The role guarded by `onlyOwner` and `onlyOwnerWithTimelock`. Transferable via `OwnershipFacet.transferOwnership` (Smart Accounts) or `Ownable.transferOwnership` (composer).
+**Owner** — the diamond's `LibDiamond.contractOwner` (for Smart Accounts) or the OpenZeppelin `Ownable` owner (for the composer). The role guarded by `onlyOwner` and `onlyOwnerWithTimelock`. Transferable via `OwnershipFacet.transferOwnership` (Smart Accounts, immediate) or `OwnableWithTimelock.transferOwnership` (composer, timelocked like every other guarded owner call).
 
 **Composer** — the [`FAssetRedeemComposer`](../../contracts/composer/implementation/FAssetRedeemComposer.sol). Trusted by every `FAssetRedeemerAccount` (composer-only `redeemFAsset` and `setMaxAllowances`).
 
