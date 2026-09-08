@@ -288,8 +288,15 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
   - `test/invariants/`: stateful invariant campaigns, bounded and with a fixed seed; a smoke test pins that every
     handler path executes.
   - `test/fuzz/`: property tests, each stated as the spec's formula computed independently of the contract.
+  - `test/integration/`: suites against real deployed contracts on a pinned mainnet fork. They skip themselves
+    unless the network they need is configured, so an offline run is inert rather than failing;
+    `LoanSubaccountRemoteMorphoFork.t.sol` needs `ETHEREUM_RPC_URL` to name an endpoint that serves state at its
+    pinned block (an archive read), and runs with
+    `ETHEREUM_RPC_URL=<url> forge test --match-path "test/integration/*"`.
   - `test/utils/`: fixtures, handlers and harnesses shared by the suites. Mocks live in `contracts/mock/`. Both are
-    excluded from the coverage figure.
+    excluded from the coverage figure. `LoanForkFixture` is `LoanRemoteFixture` with the loan market's real
+    contracts behind it (canonical Morpho Blue, the live FXRP/RLUSD market, its oracle and adaptive rate model,
+    the real tokens); only the delivery rail stays mocked.
 - Test files are named `<ContractName>.t.sol`; a suite that is not about one contract names its subject
   (`LoanFeeFuzz.t.sol`).
 - Test contracts are named `<ContractName>Test`.

@@ -76,7 +76,7 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         _grantRemoteRoles();
     }
 
-    function _setUpRemoteDependencies() private {
+    function _setUpRemoteDependencies() internal virtual {
         owner = makeAddr("remote owner");
         parent = makeAddr("remote parent");
         collector = makeAddr("fee collector");
@@ -175,13 +175,18 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
             address(irm),
             0.77e18
         );
-        morpho.createMarket(params);
+        _ensureMarket();
         vm.prank(owner);
         IILoanMarketsFacet(address(controller)).registerLoanMarket(
             _type,
             ILoanMarketsFacet.Market(address(morpho), params)
         );
         _setTerms(_type, 0.07e18, 0.01e18);
+    }
+
+    /// @dev Creates the market the fixture is about; a fork suite inherits a live one instead.
+    function _ensureMarket() internal virtual {
+        morpho.createMarket(params);
     }
 
     function _setTerms(

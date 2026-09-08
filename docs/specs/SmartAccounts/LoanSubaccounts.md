@@ -1474,7 +1474,9 @@ but must be confirmed against the live contracts, together with the order of act
   production configuration;
 - **the fee-activation runbook rehearsed** once on a testnet diamond with a non-zero timelock;
 - **the real Endpoint/OFT compose-delivery integration harness** for every action, in both
-  directions (the local sender→codec→receiver tests run each
+  directions. The market half of the integration evidence is in the repository already
+  (`test/integration/LoanSubaccountRemoteMorphoFork.t.sol`, above); what this adds is the wire
+  hop, which that suite deliberately leaves mocked (the local sender→codec→receiver tests run each
   sender's bytes — borrow, deposit, the atomic withdraw with its real return
   send, remote-PA execute, and the loan-chain redeem-home — through the canonical codec into the
   real receivers, everything but the wire hop; non-zero compose value is covered by the
@@ -1505,8 +1507,20 @@ but must be confirmed against the live contracts, together with the order of act
   gate follows and the liquidation price. The views' agreement with the actions
   (`getLoanPosition` against a checkpoint in the same block, each preview against its own cover
   check, the exact minimum top-up) is pinned by the fuzz properties, which run with the check on.
-  So the interplay is pinned at the unit level; what remains is verifying both against the
-  canonical Morpho source and the real market in the integration harness before launch;
+  So the interplay is pinned at the unit level, and
+  `test/integration/LoanSubaccountRemoteMorphoFork.t.sol` carries it onto the market itself: the
+  account, the gate and the five views driven over canonical Morpho Blue and the live FXRP/RLUSD
+  market at a pinned block. What that suite pins there: the debt projection equals what canonical
+  `accrueInterest` writes at the same timestamp, under the market's own adaptive rate model and
+  again after an external borrow moves utilization; the borrow bound, the withdrawal bound and the
+  minimum top-up are each exact to the unit at the live price, with a partial repayment leaving the
+  position still borrowing; each preview's numbers are the numbers the gate refuses with; the
+  market's free liquidity binds where cover does not, and Morpho refuses past its own line and past
+  its liquidity with its own errors; the quoted liquidation price is the edge the health factor
+  crosses; and with the feed taken away the withdrawal is refused by the gate, a borrow is refused
+  by Morpho, while repayment stays oracle-free and the debt-free exit still passes. What it does
+  not carry is the wire hop, which is the harness below, and the real feed's own expiry, whose
+  timing belongs to the feed;
 - **fee terms configured before any route opens**: `registerLoanMarket`, then the one
   `setLoanFeeTerms` call (the activation — borrowing reverts until it executes); verify all
   three fields before enabling the forward route;
