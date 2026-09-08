@@ -195,6 +195,7 @@
     "selectors",
     "selfdestruct",
     "settleable",
+    "shellcheck",
     "Slither",
     "sload",
     "soldeer",

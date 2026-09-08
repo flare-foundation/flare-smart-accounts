@@ -57,6 +57,9 @@ mkdir -p "$OUTPUT_DIR"
 # truthy non-boolean that the post-cut hook below would not recognise, so anything else is
 # rejected before the script runs. A read or parse error aborts here too.
 CUT_FILE="deployment/cuts/${NETWORK}/${CUT_JSON}.json"
+# the single quotes are the point: the node script is JavaScript, and its template literals must
+# reach node unexpanded rather than being substituted by the shell first
+# shellcheck disable=SC2016
 EXECUTED=$(node -e '
   const c = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
   if (c.execute !== undefined && typeof c.execute !== "boolean") {

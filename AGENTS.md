@@ -118,6 +118,16 @@ pnpm test:tooling
 CLI's own test against a fake JSON-RPC server (`deployment/scripts/verify-diamond.test.ts`) and the cut wrapper's
 shell scenarios (`deployment/scripts/execute-diamond-cut.test.sh`); CI runs it too.
 
+For shell scripts:
+
+```bash
+shellcheck deployment/scripts/*.sh scripts/*.sh
+```
+
+CI runs the same check (the shared `lint-shell` component) and fails the pipeline on any finding, informational
+ones included. Silence a deliberate one with a `# shellcheck disable=SC<code>` directive above the line and a
+comment saying why; never by loosening the job.
+
 ## Project Structure
 
 ```text
