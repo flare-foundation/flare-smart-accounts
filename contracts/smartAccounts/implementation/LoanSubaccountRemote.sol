@@ -161,18 +161,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         returns (uint256 _amount)
     {
         ILoanMarketsFacet.Market memory market = _myMarket();
-        // defending an indebted position survives a pause, like repayment; a debt-free
-        // deposit is new exposure and waits out the pause
-        if (_borrowSharesOf(market) == 0) {
-            _checkNotPaused();
-        }
-
-        IERC20 fxrp = IERC20(market.marketParams.collateralToken);
-        _amount = fxrp.balanceOf(address(this));
+        _checkDepositAllowed(market);
+        _amount = _supplyBalance(market);
         require(_amount > 0, NothingToDeposit());
-
-        fxrp.forceApprove(market.morpho, _amount);
-        IMorpho(market.morpho).supplyCollateral(market.marketParams, _amount, address(this), "");
         emit IdleFxrpDeposited(_parentAccount(), _amount);
     }
 
@@ -397,7 +388,9 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         );
         _markOperationUsed(operationId);
 
-        uint256 supplied = _supplyAndBorrow(destinationKind, destination, borrowAmount);
+        ILoanMarketsFacet.Market memory market = _myMarket();
+        uint256 supplied = _supplyBalance(market);
+        _borrowTo(market, destinationKind, destination, borrowAmount);
         emit LoanOpened(
             _parentAccount(),
             operationId,
@@ -424,70 +417,73 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         private
     {
         require(_bridgedAmount > 0, ZeroAmount());
-        if (IPauseFacet(controllerAddress).isPaused()) {
-            require(_borrowSharesOf(_myMarket()) > 0, IPauseFacet.IsPaused());
-        }
-
-        uint256 supplied = _supplyAndBorrow(0, bytes32(0), 0);
+        ILoanMarketsFacet.Market memory market = _myMarket();
+        _checkDepositAllowed(market);
+        // the credit already sits on the account (the OFT delivered it a transaction ago), so
+        // it goes in with whatever else is here; the rail may already have deposited it (the
+        // accepted race), in which case nothing is left to supply and that is fine
+        uint256 supplied = _supplyBalance(market);
         emit CollateralDeposited(_parentAccount(), supplied, _guid);
     }
 
-    /// @dev The asset moves of the borrow and deposit actions, separated from the decodes to
-    /// keep stack depth flat: supply the whole idle FXRP balance (if any), then borrow and
-    /// disburse (if any). Returns the amount supplied.
-    function _supplyAndBorrow(
-        uint8 _destinationKind,
-        bytes32 _destination,
-        uint256 _borrowAmount
+    /// @dev Supplies the account's whole FXRP balance as collateral and returns the amount, zero
+    /// when nothing is here. Every FXRP on this account is the user's own and has one route, the
+    /// position: a packet's freshly delivered credit, a skipped packet's credit, a direct send -
+    /// there is no distinction to draw, so all of it goes in. The permissionless rail may have
+    /// put a credit into the position before its packet is delivered (the accepted race),
+    /// leaving nothing to supply; a message-only borrow arrives with nothing idle by design.
+    function _supplyBalance(
+        ILoanMarketsFacet.Market memory _market
     )
         private
         returns (uint256 _supplied)
     {
-        ILoanMarketsFacet.Market memory market = _myMarket();
-        IERC20 fxrp = IERC20(market.marketParams.collateralToken);
-        // every FXRP on this account is the user's own and has one route, the position: the
-        // packet's credit and any residue (a skipped packet's credit, a direct send) that would
-        // otherwise wait for the permissionless rail all go in. That rail can also have
-        // deposited the credit before delivery (the accepted race), leaving nothing idle; the
-        // borrow below is authorized against the position as it stands, within its deadline
-        // and Morpho's health check
+        IERC20 fxrp = IERC20(_market.marketParams.collateralToken);
         _supplied = fxrp.balanceOf(address(this));
         if (_supplied > 0) {
-            fxrp.forceApprove(market.morpho, _supplied);
-            IMorpho(market.morpho).supplyCollateral(
-                market.marketParams, _supplied, address(this), ""
+            fxrp.forceApprove(_market.morpho, _supplied);
+            IMorpho(_market.morpho).supplyCollateral(
+                _market.marketParams, _supplied, address(this), ""
             );
         }
-        if (_borrowAmount > 0) {
-            // only the EVM/ERC-20 form is implemented; the Wormhole-to-XRPL kind is reserved
-            require(
-                _destinationKind == DESTINATION_KIND_EVM,
-                UnsupportedDestinationKind(_destinationKind)
-            );
-            // a clean zero-padded, non-zero EVM address that is not this account (the
-            // proceeds could only repay the new debt); the parent Personal Account - the
-            // user's own compose-driven account on this chain - is a valid target
-            address destinationAddress = address(uint160(uint256(_destination)));
-            require(
-                uint256(_destination) >> 160 == 0 &&
-                    destinationAddress != address(0) &&
-                    destinationAddress != address(this),
-                InvalidDestination()
-            );
-            // fee checkpoint before, re-sync after: an unsynced new principal would read
-            // as market interest at the next checkpoint
-            _checkpointFee(market);
-            (uint256 assetsBorrowed, ) = IMorpho(market.morpho).borrow(
-                market.marketParams, _borrowAmount, 0, address(this), address(this)
-            );
-            _syncFeePrincipal(market);
-            // the cover gate on the position as it now stands - the supplied collateral, the
-            // new debt: a borrow past it reverts, retriably, before anything is disbursed.
-            // Morpho's own health check ran inside the borrow; the gate implies it, so it is
-            // the binding one whenever Morpho passed
-            _requirePositionCovered(market, 0);
-            IERC20(market.marketParams.loanToken).safeTransfer(destinationAddress, assetsBorrowed);
-        }
+    }
+
+    /// @dev Borrows `_amount` on the position as it stands and sends it to the destination.
+    /// The fee is checkpointed before and its principal re-synced after (an unsynced new
+    /// principal would read as market interest at the next checkpoint), and the cover gate runs
+    /// on the resulting position before anything leaves: a borrow past it reverts, retriably,
+    /// with nothing sent. Morpho's own health check ran inside the borrow; the gate implies
+    /// it, so it is the binding one whenever Morpho passed.
+    function _borrowTo(
+        ILoanMarketsFacet.Market memory _market,
+        uint8 _destinationKind,
+        bytes32 _destination,
+        uint256 _amount
+    )
+        private
+    {
+        // only the EVM/ERC-20 form is implemented; the Wormhole-to-XRPL kind is reserved
+        require(
+            _destinationKind == DESTINATION_KIND_EVM,
+            UnsupportedDestinationKind(_destinationKind)
+        );
+        // a clean zero-padded, non-zero EVM address that is not this account (the proceeds
+        // could only repay the new debt); the parent Personal Account - the user's own
+        // compose-driven account on this chain - is a valid target
+        address destinationAddress = address(uint160(uint256(_destination)));
+        require(
+            uint256(_destination) >> 160 == 0 &&
+                destinationAddress != address(0) &&
+                destinationAddress != address(this),
+            InvalidDestination()
+        );
+        _checkpointFee(_market);
+        (uint256 assetsBorrowed, ) = IMorpho(_market.morpho).borrow(
+            _market.marketParams, _amount, 0, address(this), address(this)
+        );
+        _syncFeePrincipal(_market);
+        _requirePositionCovered(_market, 0);
+        IERC20(_market.marketParams.loanToken).safeTransfer(destinationAddress, assetsBorrowed);
     }
 
     /// @dev The atomic withdrawal: withdraws collateral and bridges the withdrawn amount home
@@ -855,6 +851,23 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         );
     }
 
+    /// @dev The pause rule shared by the two collateral deposits: defending an indebted position
+    /// survives a pause, like repayment, while a debt-free deposit is new exposure and waits it
+    /// out. Debt increases and withdrawals never route through here - they stop outright. The
+    /// pause is read first, on every deposit: unpaused - the common case - that is one
+    /// controller read and no position read, and a controller that cannot answer the pause
+    /// question refuses every deposit, indebted or not, the same fail-closed posture as
+    /// {_checkNotPaused}.
+    function _checkDepositAllowed(
+        ILoanMarketsFacet.Market memory _market
+    )
+        private view
+    {
+        if (IPauseFacet(controllerAddress).isPaused()) {
+            require(_borrowSharesOf(_market) > 0, IPauseFacet.IsPaused());
+        }
+    }
+
     /// @dev The account's live borrow shares and the assets needed to close them, using
     /// Morpho's rounded-up share conversion with virtual offsets ({MorphoMath}, pinned to
     /// upstream `SharesMathLib`).
@@ -991,7 +1004,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// @dev The largest further borrow the cover passes against `_value` of collateral. The
     /// closed form - the claim the value covers, less the debt and the fee's weight - ignores
     /// Morpho's share rounding on the way in and out, so the exact bound is found by bisection on
-    /// the post-borrow debt as {_supplyAndBorrow} will see it: zero passes (the position is
+    /// the post-borrow debt as {_borrowTo} will see it: zero passes (the position is
     /// covered, or the closed form would be zero) and two past the closed form fails (one beyond
     /// what a share of rounding can add; were it ever to pass, the result would be a passing,
     /// non-maximal amount, never an unsafe one).

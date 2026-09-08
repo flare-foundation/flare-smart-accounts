@@ -1239,6 +1239,35 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
     }
 
+    function testDepositsConsultThePauseBeforeThePosition() public {
+        // the defensive rule reads the pause first, on every deposit: a controller that cannot
+        // answer the pause question refuses both deposits even for an indebted position - fail
+        // closed, like every other gate - rather than letting the position read decide alone.
+        // No production path reaches this (the pause facet is cut with the rest), so the getter
+        // is made to answer as a diamond without that facet would. The position read is made to
+        // revert too, distinctly: the pause error surfacing proves the position was never asked
+        address subaccount = _borrowedSubaccount(500e18);
+        fxrp.mint(subaccount, 30e6);
+        bytes memory noPauseFacet =
+            abi.encodeWithSelector(FunctionNotFound.selector, IPauseFacet.isPaused.selector);
+        vm.mockCallRevert(
+            address(controller), abi.encodeWithSelector(IPauseFacet.isPaused.selector), noPauseFacet
+        );
+        vm.mockCallRevert(
+            address(morpho),
+            abi.encodeWithSelector(IMorpho.position.selector, _marketId(), subaccount),
+            abi.encodeWithSignature("Error(string)", "position read before the pause")
+        );
+
+        vm.expectRevert(noPauseFacet);
+        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        _deliverExpectRevert(subaccount, 2, _depositPayload(), noPauseFacet);
+
+        vm.clearMockedCalls();
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+    }
+
     function testExternalLiquidationTurnsBalanceIntoSurplus() public {
         // debt is read live from Morpho on every check - nothing is cached, so an external
         // liquidation is visible to the very next call: the position is closed, repay has
