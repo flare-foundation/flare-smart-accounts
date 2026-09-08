@@ -98,15 +98,20 @@ contract LoanFeeHandler is LoanRemoteFixture {
     }
 
     /// Advances at most 30 days and queues at most 1% debt interest; the clock cannot overflow.
+    /// Interest is queued only when time actually passed: Morpho's accrual is a pure function
+    /// of elapsed time, so interest at zero elapsed is a state the real market cannot be in -
+    /// and one the account's checkpoint rightly assumes away when it re-syncs the principal
+    /// from stored totals in the same second (the zero-elapsed branch of `_checkpointFee`).
     function advanceTime(
         uint32 _elapsed,
         uint96 _interest
     )
         external
     {
-        vm.warp(block.timestamp + bound(_elapsed, 0, 30 days));
+        uint256 elapsed = bound(_elapsed, 0, 30 days);
+        vm.warp(block.timestamp + elapsed);
         uint256 debt = _debt();
-        if (debt != 0) {
+        if (debt != 0 && elapsed != 0) {
             morpho.addPendingInterest(
                 MorphoMath.marketId(params),
                 bound(_interest, 0, debt / 100)
