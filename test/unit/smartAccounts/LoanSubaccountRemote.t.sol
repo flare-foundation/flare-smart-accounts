@@ -72,6 +72,7 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
+    ACTION_CANCEL,
     DESTINATION_KIND_EVM,
     DESTINATION_KIND_XRPL_WORMHOLE
 } from "../../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
@@ -4400,6 +4401,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 90e6);
 
 
+        // the cancellation: message-only, and on arrival the id it names is consumed, so a
+        // borrow carrying that id can never execute afterwards
+        vm.prank(parentPersonalAccount);
+        ILoanSubaccount(sender).cancel{value: 0.01 ether}(bytes32("op-c"), "");
+        (amountLD, payload) = _lastSentCompose();
+        assertEq(amountLD, 0);
+        _deliver(subaccount, 7, 0, payload);
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-c")));
+
         // the Personal Account's transfer: sent by a Flare PersonalAccount through
         // executeUserOp, decoded by a parent created behind the same beacon
         address destination = makeAddr("userChosen");
@@ -4505,6 +4515,99 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             abi.encodeWithSelector(FunctionNotFound.selector, IBridgeRoutesFacet.getFxrpOft.selector)
         );
         IBridgeRoutesFacet(address(minimal)).getFxrpOft();
+    }
+
+    function testLzComposeCancelConsumesTheIdAndStopsTheBorrowItNames() public {
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+
+        vm.expectEmit(true, false, false, true, subaccount);
+        emit ILoanSubaccountRemote.LoanActionCancelled(
+            parentPersonalAccount, bytes32("op-1"), _guidFor(1)
+        );
+        _deliver(subaccount, 1, 0, _cancelPayload(bytes32("op-1")));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+
+        // the borrow that id authorized is now a duplicate: it finalizes without executing
+        _deliver(
+            subaccount, 2, 0,
+            _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, _borrowDestination(), 50e18)
+        );
+        (, uint128 shares, uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(shares, 0, "no debt was taken");
+        assertEq(collateral, 0, "and no collateral was supplied");
+        assertEq(fxrp.balanceOf(subaccount), 100e6, "the credit stays idle for the fixed rails");
+    }
+
+    function testLzComposeCancelAfterTheOriginalExecutedChangesNothing() public {
+        // the race the front end is warned about: the borrow lands first, so the cancellation
+        // finds the id consumed and finalizes quietly - no revert, no event, nothing moved
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliver(
+            subaccount, 1, 100e6,
+            _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, _borrowDestination(), 50e18)
+        );
+        (, uint128 sharesBefore, uint128 collateralBefore) = morpho.position(_marketId(), subaccount);
+
+        vm.recordLogs();
+        _deliver(subaccount, 2, 0, _cancelPayload(bytes32("op-1")));
+        assertEq(vm.getRecordedLogs().length, 0, "a lost race says nothing");
+
+        (, uint128 shares, uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(shares, sharesBefore);
+        assertEq(collateral, collateralBefore);
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+    }
+
+    function testLzComposeCancelIsIdempotentAndNotPauseGated() public {
+        // revoking an authority is not new exposure, so a pause does not hold it back; and a
+        // second delivery of the same cancellation is quiet rather than reverting
+        address subaccount = _createConfiguredSubaccount();
+        _pauseController();
+        _deliver(subaccount, 1, 0, _cancelPayload(bytes32("op-1")));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+
+        vm.recordLogs();
+        _deliver(subaccount, 2, 0, _cancelPayload(bytes32("op-1")));
+        assertEq(vm.getRecordedLogs().length, 0, "the second one says nothing");
+    }
+
+    function testLzComposeCancelRejectsZeroIdAndComposeValue() public {
+        address subaccount = _createConfiguredSubaccount();
+        _deliverExpectRevert(
+            subaccount, 1, _cancelPayload(bytes32(0)),
+            abi.encodePacked(IComposeReceiverAccountBase.InvalidOperationId.selector)
+        );
+        // it moves nothing and forwards nothing, so it takes no compose value either
+        (bytes memory message, bytes32 guid) =
+            _composeMessage(subaccount, 2, 0, _cancelPayload(bytes32("op-1")));
+        vm.deal(lzEndpoint, 1 ether);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
+        ILoanSubaccountRemote(subaccount).lzCompose{value: 1 ether}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+    }
+
+    function testLzComposeCancelNeedsNoMarketAndNoTerms() public {
+        // the cancellation reads no market and no fee terms, so it executes on a type with
+        // neither registered nor activated - and the borrow it stops still duplicate-skips
+        // there, since the terminal gates run before the market lookup
+        _configureTransport();
+        address subaccount = address(_deploySubaccount());
+        fxrp.mint(subaccount, 100e6);
+
+        _deliver(subaccount, 1, 0, _cancelPayload(bytes32("op-1")));
+        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+
+        _deliver(
+            subaccount, 2, 100e6,
+            _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, _borrowDestination(), 50e18)
+        );
+        assertEq(fxrp.balanceOf(subaccount), 100e6, "finalized as a duplicate, nothing supplied");
+        assertEq(rlusd.balanceOf(parentPersonalAccount), 0, "nothing borrowed");
     }
 
     //
@@ -5018,6 +5121,20 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         returns (uint256)
     {
         return Math.mulDiv(_fxrp, oracle.storedPrice(), 1e36);
+    }
+
+    function _borrowDestination() private view returns (bytes32) {
+        return bytes32(uint256(uint160(parentPersonalAccount)));
+    }
+
+    function _cancelPayload(
+        bytes32 _operationId
+    )
+        private
+        pure
+        returns (bytes memory)
+    {
+        return abi.encode(PAYLOAD_VERSION_1, ACTION_CANCEL, abi.encode(_operationId));
     }
 
     function _depositPayload()

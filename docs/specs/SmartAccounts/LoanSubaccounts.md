@@ -163,12 +163,12 @@ Integration note: the XRP proof's `proofOwner` must be requested as zero or **th
 Personal Account's address** — the asset manager sees the parent as the caller, not the
 subaccount the FXRP came from.
 
-## The loan instructions: `borrow`, `depositCollateral` and `withdraw`
+## The loan instructions: `borrow`, `depositCollateral`, `withdraw` and `cancel`
 
 The forward moves are the **loan
 instructions**: `borrow(collateralAmount, borrowAmount, destinationKind, destination,
 operationId, deadline, extraOptions)`, `depositCollateral(amount, extraOptions)` and
-`withdraw(amount, operationId, deadline, options)`: typed methods that
+`withdraw(amount, operationId, deadline, options)` and `cancel(operationId, extraOptions)`: typed methods that
 build the compose payload
 **on-chain** and bridge it to this account's own address on the loan chain, where the
 loan-chain twin executes it on arrival (supply as collateral, borrow, disburse; deposit
@@ -209,7 +209,7 @@ redemption fee and would go stale for every in-flight withdrawal at once; the re
 bought inside `returnOptions` stays best-effort on the second leg, since the Flare redeem-home
 accepts zero value by design — the executor goes unpaid, never a custody change.
 
-The three are separate instructions with separate actions — a borrow always increases debt
+The four are separate instructions with separate actions — a borrow always increases debt
 (`borrowAmount` non-zero), `depositCollateral` never does — so each carries exactly the
 fields it needs and its own pause rule (a deposit is the defensive move, and carries neither an
 operation id nor a deadline; see the loan-chain section).
@@ -219,8 +219,8 @@ side — donations, strands from skipped deliveries — stays behind for the cle
 loan chain the action then supplies its credit together with whatever is idle there, since that
 account's FXRP has one route anyway; see the loan-chain section.) A **zero collateral amount is a
 message-only send** (verified against the live adapter): a borrow against existing
-collateral, or a withdraw, which never carries tokens. Only the cleanup moves keep
-whole-balance semantics, because sweeping everything is what cleanup means. All three
+collateral, a withdraw, or a cancel, none of which carries tokens. Only the cleanup moves keep
+whole-balance semantics, because sweeping everything is what cleanup means. All four
 instructions share one bridging core in the contract, so the guards are identical by
 construction: a paused
 controller blocks it, the type's pinned bridge route names the destination, and the OFT's live peer
@@ -231,7 +231,7 @@ is re-checked against the pinned one on every call. What differs is authorizatio
   user's XRPL signature. This is the instruction-destination rule below, in contract form.
 - **The payload schema is shared with the loan-chain account**, not opaque: the constants
   (`PAYLOAD_VERSION_1`, `ACTION_BORROW`, `ACTION_DEPOSIT_COLLATERAL`,
-  `ACTION_WITHDRAW`, `DESTINATION_KIND_*`) are imported
+  `ACTION_WITHDRAW`, `ACTION_CANCEL`, `DESTINATION_KIND_*`) are imported
   from the loan-chain interfaces, so the tags cannot drift apart. The per-action tuple layouts
   are duplicated by construction (the sender encodes, the receiver decodes) and are held equal
   by tests: byte-equality of every sender payload against an independently built one, and a
@@ -285,7 +285,7 @@ side):
 - **A real Endpoint/OFT compose-delivery simulation** belongs to the loan-chain-side test suite
   as a regression test; the live-adapter verification recorded here is evidence, not a test.
   Still open for the wire hop (a real `EndpointV2` and the OFT's `lzReceive → sendCompose`),
-  and it must cover all the actions (borrow, deposit, the atomic withdraw with its return leg, remote-PA execute) — the remote-PA case with a
+  and it must cover all the actions (borrow, deposit, the atomic withdraw with its return leg, cancel, remote-PA execute) — the remote-PA case with a
   native drop into the real beacon proxy followed by a value-carrying batch, since unit tests fund
   the remote PA with `vm.deal` and never exercise the executor's gas-limited drop. Covered
   locally: a sender→codec→receiver test runs the bytes the Flare senders hand to `send` through
@@ -316,7 +316,7 @@ The defining difference on the loan chain: **nothing is parent-driven.** The par
 Personal Account has no local key on the loan chain — instructions exist only on Flare, and
 its loan-chain presence is the compose-driven remote Personal Account described below. Every authorized action
 arrives as an authenticated LayerZero compose payload sent by this same account on Flare
-(`borrow`, `depositCollateral`, `withdraw`), with no exception: the subaccount has no
+(`borrow`, `depositCollateral`, `withdraw`, `cancel`), with no exception: the subaccount has no
 parent-callable method at all (the parent-signed fee payment `payLoanFee` existed pre-cut and
 was removed; see the resolved decisions).
 Everything else is permissionless movement along fixed rails, the same invariant as
@@ -489,14 +489,36 @@ address itself commits to the pool:
   instruction that can never succeed (bad `returnOptions`), never to change the amount or the
   destination of one that might still land. The id is the user's idempotency key across an
   asynchronous hop Flare cannot deduplicate (two valid XRPL transactions are two packets), which is
-  why it stays and why there is no cancel action yet: a stuck packet stops being executable
-  once its deadline has passed (the deadline itself is inclusive), and an explicit
-  `cancel(operationId)` on top of the ids is the shape for early finality, a planned follow-up
-  (a cancel keyed by the LayerZero GUID was rejected — it races the packet it targets). Front-end duties
+  why it stays. A stuck packet stops being executable once its deadline has passed (the deadline
+  itself is inclusive), and **`cancel(operationId)`** is early finality on top of the ids, built
+  on the same key (a cancel keyed by the LayerZero GUID was rejected — it races the packet it
+  targets, and the id is what the user already holds). It is message-only and the one action that
+  withdraws an authority instead of using one: on arrival it consumes the id and does nothing
+  else — no market read, no fee terms, no borrow switch, nothing moved — so on the loan chain it
+  is not pause-gated and it carries no deadline of its own. On Flare it travels the ordinary
+  instruction path, which the pause closes like every other instruction (the controller's
+  instruction facets and the bridge send both check it): a Flare-only pause with the loan chain
+  live is the one state in which the user cannot revoke a parked packet; there the loan
+  chain's own pause suspends the borrow but cancels nothing, so the order is: pause the loan
+  chain, restore Flare when safe, submit and confirm the cancellation while the loan chain stays
+  paused, then resume — unpausing it earlier makes the latent packet executable again. Sending it
+  is **not**
+  cancellation: the two packets race, an original that lands first executes normally and the
+  cancellation then finds the id consumed and finalizes quietly without an event. A client
+  therefore resolves a sent cancellation by whichever arrives — `LoanActionCancelled`, or the
+  original action's own execution event — and either one ends the instruction's live state.
+  Cancelling an id that was never issued simply burns it, which is what makes a re-send
+  harmless. The motivating case is a borrow parked by a failed health check after a price
+  drop, which any collateral landing — the user's own deposit or the permissionless rail — would
+  otherwise make executable again; a deadline cap at the sender was considered for the same
+  problem and rejected, since cancellation answers it precisely and a cap would expire
+  legitimate packets during an outage. Front-end duties
   that follow: generate and persist one id per logical intent; reconstruct ids and GUIDs from the
   Flare-side events after local state loss; reuse an id only for the same economic intent; show
-  an instruction as live until it executes or its deadline passes; never mint a fresh id merely
-  because delivery status is uncertain. The terminal gates run before the
+  an instruction as live until it executes, its deadline passes, or its cancellation is
+  confirmed; never mint a fresh id merely because delivery status is uncertain; and once a
+  cancellation has been signed for an id, retire that id for good — never reissue under it, since
+  the cancellation carries no deadline and a late delivery would burn the renewed instruction. The terminal gates run before the
   borrow switch and the market lookup, so a duplicate or expired packet finalizes even on a
   sunset pool or an unregistered market.
 - **Deadlines expire stale intent**: an old queued action completes without effect instead of
@@ -538,6 +560,12 @@ address itself commits to the pool:
   execution, not against its bridged credit specifically. The events carry the amount actually
   supplied in the execution. (Pre-cut history: the supply was first capped at the packet's own
   amount and failed closed below it, when the signed sweep could still take a credit elsewhere.)
+- **`ACTION_CANCEL`** consumes the operation id it names and does nothing else — no market read,
+  no fee terms, no borrow switch, nothing moved — so it needs neither a registered market nor
+  activated terms, and is not pause-gated on the loan chain. An id already consumed finalizes it
+  quietly; an id never issued is simply burned. It carries no deadline and refuses compose value
+  like every action but the withdraw. See the operation-id section for what sending one does and
+  does not mean.
 - **`ACTION_WITHDRAW`** is the atomic withdrawal: it withdraws collateral from the account's own
   position and bridges it back to the account's own Flare address **in the same
   execution**, with the redeem-home compose — no idle window between the two, so the redeposit
@@ -1149,6 +1177,8 @@ terms accrue zero, and debt presupposes the borrow gate passed).
   uint64 deadline, uint256 amount, uint256 minComposeValue, bytes returnOptions)`.
 - Deposit-collateral action data: empty (`bytes("")`; the operation id and deadline it once
   carried were dropped pre-cut, 2026-09-04).
+- Cancel action data: `abi.encode(bytes32 operationId)`, under `ACTION_CANCEL = 5` (4, the
+  retired sweep-to-origin action, is never reused).
 - `WithdrawOptions` (Flare, signed): `{bytes destinationOptions; bytes returnOptions;
   uint256 minComposeValue;}`.
 - Skip reasons: 1 = duplicate, 2 = expired (3, the retired signed-terms skip, is never
@@ -1233,7 +1263,7 @@ Flare only,
 core over its type's route, the permissionless `sweepRedeem`, the redeem-home compose —
 [`IBridgingSubaccount`](../../../contracts/userInterfaces/IBridgingSubaccount.sol)). The four
 implementations then hold only what is theirs: `PersonalAccount` its controller-driven methods,
-`PersonalAccountRemote` the signed batch execution, `LoanSubaccount` the three typed loan
+`PersonalAccountRemote` the signed batch execution, `LoanSubaccount` the four typed loan
 instruction encoders, `LoanSubaccountRemote` the Morpho actions and the fee engine. A Flare-local
 subaccount type (a vault subaccount) would extend `SubaccountBase` alone; a new bridging type,
 `BridgingSubaccountBase`. The storage rule the bases follow is in the pre-first-cut invariants.

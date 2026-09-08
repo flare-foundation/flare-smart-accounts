@@ -13,6 +13,7 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
+    ACTION_CANCEL,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanSubaccountRemote.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
@@ -321,6 +322,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
             _executeWithdraw(_actionData, _guid);
         } else if (_action == ACTION_DEPOSIT_COLLATERAL) {
             _executeDepositCollateral(_guid, _amountLD);
+        } else if (_action == ACTION_CANCEL) {
+            _executeCancel(_actionData, _guid);
         } else {
             revert UnsupportedAction(_action);
         }
@@ -336,6 +339,27 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         returns (bool)
     {
         return _action == ACTION_WITHDRAW;
+    }
+
+    /// @dev Consumes an operation id so the borrow or withdraw packet carrying it can never
+    /// execute. Deliberately minimal: no pause check (revoking an authority is not new
+    /// exposure), no deadline (a late cancellation is unnecessary or still correct), no market
+    /// or terms read, nothing moved. An id already consumed - the original executed first, or
+    /// this cancellation was delivered twice - finalizes without an event rather than
+    /// reverting, so a lost race cannot leave the packet retriable forever.
+    function _executeCancel(
+        bytes memory _actionData,
+        bytes32 _guid
+    )
+        private
+    {
+        bytes32 operationId = abi.decode(_actionData, (bytes32));
+        require(operationId != bytes32(0), InvalidOperationId());
+        if (_operationUsed(operationId)) {
+            return;
+        }
+        _markOperationUsed(operationId);
+        emit LoanActionCancelled(_parentAccount(), operationId, _guid);
     }
 
     /// @dev Supplies the whole idle FXRP balance (if any) as collateral and borrows on the

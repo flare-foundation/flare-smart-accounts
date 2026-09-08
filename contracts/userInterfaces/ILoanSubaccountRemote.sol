@@ -77,6 +77,21 @@ uint8 constant ACTION_WITHDRAW = 2;
 /// position); a debt-free deposit is new exposure and waits out the pause.
 uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
 
+/// @dev Cancel action: `actionData` is `abi.encode(bytes32 operationId)`. Message-only, and the
+/// one action that withdraws an authority instead of using one: it consumes the id so the packet
+/// that carried it can never execute, and does nothing else - no market read, no fee terms, no
+/// borrow switch, no collateral or debt moves. It is not pause-gated (revoking an authority is
+/// not new exposure) and carries no deadline of its own (a late cancellation is either
+/// unnecessary or still correct). Sending one is NOT cancellation: the two packets race, and an
+/// original that arrives first executes normally, after which the cancellation finds the id
+/// consumed and finalizes quietly without an event - so a client resolves a sent cancellation
+/// by whichever arrives, {LoanActionCancelled} or the original action's own execution event,
+/// and either ends the instruction's live state. Cancelling an id that was never issued is
+/// allowed and simply burns it, which is what makes the action idempotent and its delivery
+/// terminal on the first attempt.
+/// Action id 4 is retired (the removed sweep-to-origin) and is never reused.
+uint8 constant ACTION_CANCEL = 5;
+
 /// @dev The destination is an EVM address (cleanly zero-padded into the `bytes32`), paid by a
 /// plain ERC-20 transfer — typically an exchange deposit address, or the user's own
 /// loan-chain Personal Account (the parent, a functional compose-driven account). It may not
@@ -280,6 +295,20 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
         address indexed parentPersonalAccount,
         bytes32 operationId,
         uint256 amount,
+        bytes32 guid
+    );
+
+    /**
+     * @notice Emitted when a cancel action consumes an operation id, so the borrow or withdraw
+     * packet carrying that id can no longer execute. Absent when the id was already consumed -
+     * the original won the race, or the cancellation was delivered twice.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param operationId The operation id now consumed.
+     * @param guid The LayerZero message id the cancellation arrived with.
+     */
+    event LoanActionCancelled(
+        address indexed parentPersonalAccount,
+        bytes32 operationId,
         bytes32 guid
     );
 

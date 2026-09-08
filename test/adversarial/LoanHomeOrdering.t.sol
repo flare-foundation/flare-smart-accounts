@@ -4,6 +4,8 @@ pragma solidity ^0.8.27;
 import {LoanHomeFixture} from "../utils/LoanHomeFixture.sol";
 import {ILoanSubaccount} from "../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {ISubaccount} from "../../contracts/userInterfaces/ISubaccount.sol";
+import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
+import {ACTION_CANCEL} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
 import {
     IBridgingSubaccount,
     REDEEM_HOME_TTL
@@ -332,6 +334,55 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
             _homeWithdrawOptions()
         );
         vm.stopPrank();
+        assertEq(parent.balance, BRIDGE_FEE);
+        assertEq(oft.lastValue(), 0);
+        assertEq(address(oft).balance, 0);
+    }
+
+    /// @notice The cancellation is message-only and carries nothing but the id it burns: no
+    /// FXRP leaves, no deadline travels, and the payload is exactly the one word.
+    function testCancelSendsOnlyTheIdItBurns() public {
+        fxrp.mint(address(account), 50e6);
+        vm.deal(parent, BRIDGE_FEE);
+        vm.prank(parent);
+        account.cancel{value: BRIDGE_FEE}(bytes32("op-c"), "");
+
+        (
+            uint32 eid,
+            bytes32 destination,
+            uint256 amount,
+            ,
+            ,
+            bytes memory payload,
+
+        ) = oft.lastSendParam();
+        assertEq(eid, REMOTE_EID);
+        assertEq(destination, bytes32(uint256(uint160(address(account)))));
+        assertEq(amount, 0, "no tokens ride with a cancellation");
+        (uint8 version, uint8 action, bytes memory actionData) =
+            abi.decode(payload, (uint8, uint8, bytes));
+        assertEq(version, PAYLOAD_VERSION_1);
+        assertEq(action, ACTION_CANCEL);
+        assertEq(actionData, abi.encode(bytes32("op-c")), "the id is the whole instruction");
+        // the staged collateral is untouched and the fee is exactly the quote
+        assertEq(fxrp.balanceOf(address(account)), 50e6);
+        assertEq(oft.lastValue(), BRIDGE_FEE);
+        assertEq(parent.balance, 0);
+    }
+
+    /// @notice Only the parent may burn an id, and a zero id is refused before the bridge fee.
+    function testCancelIsParentOnlyAndRejectsAZeroIdBeforeTheBridgeFee() public {
+        vm.deal(parent, BRIDGE_FEE);
+        vm.prank(parent);
+        vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
+        account.cancel{value: BRIDGE_FEE}(bytes32(0), "");
+
+        address stranger = makeAddr("stranger");
+        vm.deal(stranger, BRIDGE_FEE);
+        vm.prank(stranger);
+        vm.expectRevert(ISubaccount.OnlyParent.selector);
+        account.cancel{value: BRIDGE_FEE}(bytes32("op-c"), "");
+
         assertEq(parent.balance, BRIDGE_FEE);
         assertEq(oft.lastValue(), 0);
         assertEq(address(oft).balance, 0);

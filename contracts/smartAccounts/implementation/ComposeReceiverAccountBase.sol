@@ -80,7 +80,7 @@ abstract contract ComposeReceiverAccountBase is
         external view
         returns (bool)
     {
-        return _getComposeReceiverState().usedOperations[_operationId];
+        return _operationUsed(_operationId);
     }
 
     /// @dev The account's action set: executes `_action` or reverts `UnsupportedAction`.
@@ -100,6 +100,17 @@ abstract contract ComposeReceiverAccountBase is
         internal
     {
         _getComposeReceiverState().usedOperations[_operationId] = true;
+    }
+
+    /// @dev Whether an operation id has already been consumed - by an executed action, a
+    /// terminal skip, or a cancellation.
+    function _operationUsed(
+        bytes32 _operationId
+    )
+        internal view
+        returns (bool)
+    {
+        return _getComposeReceiverState().usedOperations[_operationId];
     }
 
     /// @dev The full authentication checklist: the caller must be the endpoint, the sender
@@ -149,7 +160,7 @@ abstract contract ComposeReceiverAccountBase is
         internal view
         returns (uint8 _reason)
     {
-        if (_getComposeReceiverState().usedOperations[_operationId]) {
+        if (_operationUsed(_operationId)) {
             return SKIP_REASON_DUPLICATE;
         }
         if (block.timestamp > _deadline) {

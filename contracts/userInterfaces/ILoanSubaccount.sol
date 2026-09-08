@@ -75,6 +75,22 @@ interface ILoanSubaccount is IBridgingSubaccount {
     );
 
     /**
+     * @notice Emitted when a cancellation is sent to this account's loan-chain twin. Sending it
+     * is not cancellation: the two packets race, and the loan chain's {LoanActionCancelled} is
+     * what says the id was actually consumed.
+     * @param parentPersonalAccount The parent Personal Account address.
+     * @param operationId The operation id the cancellation names.
+     * @param destinationEid The LayerZero endpoint id of the loan chain.
+     * @param guid The LayerZero message id of the cancellation.
+     */
+    event LoanCancelInstructionSent(
+        address indexed parentPersonalAccount,
+        bytes32 operationId,
+        uint32 destinationEid,
+        bytes32 guid
+    );
+
+    /**
      * @notice Emitted when a withdraw instruction is sent to this account's loan-chain twin.
      * @param parentPersonalAccount The parent Personal Account address.
      * @param operationId The user-chosen operation id.
@@ -185,6 +201,36 @@ interface ILoanSubaccount is IBridgingSubaccount {
         bytes32 _operationId,
         uint64 _deadline,
         WithdrawOptions calldata _options
+    )
+        external payable;
+
+    /**
+     * @notice The cancel instruction: a message-only send that consumes `_operationId` on the
+     * loan chain, so a borrow or withdraw packet carrying that id can never execute.
+     * @dev Restricted to the parent Personal Account. The motivating case is a borrow parked by
+     * a failed health check after a price drop, which any collateral landing - the user's own
+     * deposit or the permissionless rail - would otherwise make executable again. Sending this
+     * is not cancellation: the two packets race, an original that lands first executes
+     * normally and the cancellation then finalizes silently - so a client resolves a sent
+     * cancellation by whichever arrives, the loan chain's
+     * {ILoanSubaccountRemote.LoanActionCancelled} or the original action's own execution event,
+     * either of which ends the instruction's live state; and an id a cancellation was signed
+     * for is retired for good. It carries no deadline (a late
+     * cancellation is unnecessary or still correct). On the loan chain it is not pause-gated;
+     * here it travels the ordinary instruction path, which a Flare pause closes like every
+     * other instruction (the controller's instruction facets and the bridge send both check
+     * it), so a parked packet cannot be revoked from a paused Flare. In that state the loan
+     * chain's own pause suspends the borrow but cancels nothing, so the order is: pause the loan
+     * chain, restore Flare when safe, submit and confirm the cancellation while the loan chain
+     * stays paused, then resume - unpausing it earlier makes the latent packet executable again.
+     * Burning an unissued id is allowed and makes a re-send harmless.
+     * @param _operationId The operation id to consume; must be non-zero.
+     * @param _extraOptions LayerZero options for the cancel message (gas only - it moves no
+     * tokens and needs no compose value).
+     */
+    function cancel(
+        bytes32 _operationId,
+        bytes calldata _extraOptions
     )
         external payable;
 

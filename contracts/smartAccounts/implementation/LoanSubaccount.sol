@@ -7,6 +7,7 @@ import {
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
+    ACTION_CANCEL,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanSubaccountRemote.sol";
 import {BridgingSubaccountBase} from "./BridgingSubaccountBase.sol";
@@ -128,5 +129,25 @@ contract LoanSubaccount is ILoanSubaccount, BridgingSubaccountBase {
         emit WithdrawInstructionSent(
             _parentAccount(), _operationId, _amount, destinationEid, guid
         );
+    }
+
+    /// @inheritdoc ILoanSubaccount
+    function cancel(
+        bytes32 _operationId,
+        bytes calldata _extraOptions
+    )
+        external payable
+        onlyParent
+        nonReentrant
+    {
+        // no deadline to check and nothing to size: the whole instruction is the id it burns
+        require(_operationId != bytes32(0), InvalidLoanInstruction());
+        bytes memory payload = abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_CANCEL,
+            abi.encode(_operationId)
+        );
+        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(0, _extraOptions, payload);
+        emit LoanCancelInstructionSent(_parentAccount(), _operationId, destinationEid, guid);
     }
 }
