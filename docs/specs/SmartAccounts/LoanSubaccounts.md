@@ -1069,9 +1069,37 @@ the account (`LoanFeeReserved`), still counted by the gate, until a later `repay
 settlement mode — the fee deducted from the withdrawn collateral at the market oracle's price
 under a signed cap — was built and removed (2026-09-02): it only ever served users who had closed
 outside the rails or underfunded `repay`, and it was the one place a price moved funds. Removing
-it takes the oracle out of every money path (it survives only in the gate's comparison, where a
-wrong price can refuse an exit but never take from it), drops a payload field, four errors and
-an event, and leaves the collector holding RLUSD only.
+it takes the oracle out of every money path — it survives only in the gate's comparison — drops a
+payload field, four errors and an event, and leaves the collector holding RLUSD only.
+
+That is not the same as the price being harmless, and the scope matters. **Debt-free, with only a
+fee outstanding**, the exposure is Flare's claim and nothing else: too low, and the gate refuses an
+exit the position could have afforded, which is conservative and retriable; too high, and the
+residue clears the three-times bar nominally, then normalizes to less than the fee — an
+under-secured exit that has already happened. Nothing else catches that case, because with zero
+borrow shares Morpho's health check consults no price at all, so the gate is the only thing
+standing there.
+
+**With live debt the price does reach the user**, through Morpho rather than through this contract:
+too high and they borrow more than the collateral really supports, with the correction arriving as
+a liquidation of that collateral; too low and a sound position becomes liquidatable. That is the
+market's own exposure, shared by every borrower on it, and the gate — strictly tighter than
+Morpho's check at this market's ratio — narrows it rather than adding to it.
+
+**The fee-only case is accepted, not defended** — the same junior-claim risk the cover already
+carries, arriving by another route. What bounds it is that the gate reads the market's own oracle,
+so for a debt-bearing position the price risk is Morpho's too and not something this contract can
+hold a different opinion about; the part that is ours alone is the debt-free fee claim.
+
+The obstacle to defending it is data, not coherence. A refusal-only check is perfectly sensible in
+principle — the gate never liquidates anything, it only permits or refuses, so it could keep
+Morpho's valuation and simply decline to act on a price it distrusts. But
+[`IOracle`](../../../contracts/smartAccounts/interface/IOracle.sol) exposes `price()` and nothing
+else, with no timestamp and no round data, so observing staleness at all means reaching past
+Morpho's oracle into the underlying feeds or standing up a second source. What is accepted is the
+cost of acquiring that signal, plus the availability a refusal would trade away, weighed against a
+junior claim. What follows is operational, not structural: the production oracle's freshness and
+manipulation resistance are a launch prerequisite, not a property this contract verifies.
 
 **Stricter than Morpho by design (Morpho allows, the gate refuses).** With live debt the band
 `D / LLTV ≤ V < (D + 2F) × 1.155 / LLTV` of remainders passes Morpho's health check but fails
