@@ -42,10 +42,10 @@ execution** — leaving one open while drafting is fine, starting with one open 
 | `coston2` | 114 | live | **to resolve** | **to resolve** | **to resolve** |
 | `coston2-staging` | 114 | live | **to resolve** | **to resolve** | **to resolve** |
 
-> **Coston2 carries a known exception.** Seven Personal Accounts registered before the proxy
-> creation code was frozen sit at addresses the current derivation does not reproduce, so their
-> subaccounts and their own cross-chain messages resolve differently per chain. Settle that before
-> resolving Coston2's rows. See the audit's SA-02.
+> **Coston2 carries a known exception, and it is settled — see step A2.** Seven Personal
+> Accounts registered before the proxy creation code was frozen sit at addresses the current
+> derivation does not reproduce, so their subaccounts and their own cross-chain messages resolve
+> differently per chain. They are migrated as part of the Coston2 deployment, not before it.
 
 ## Shared procedure: a timelocked governance call
 
@@ -116,6 +116,24 @@ Moved selectors are repointed by including the new facet, never by listing them 
 Pass `--expect-owner` explicitly. Its default is the chain config's `governance`, which is the zero
 address on `coston2-staging` and therefore checks nothing, and on Ethereum the default is the pinned
 historical owner, which stops being correct the moment ownership is transferred.
+
+**Coston2 only — the seven pre-freeze registrations.** Decided 2026-09-09: the seven accounts
+registered before the proxy creation code was frozen are cleared here, in this cut, by a
+separately reviewed migration initializer for exactly those owners — never a public method, since
+a permissionless reset lets anyone trigger it before an owner is ready.
+
+1. **Settle everything tied to the legacy addresses first**, not just their balances. They hold
+   FXRP (about 10 each). Also check for an outstanding collateral reservation, because a mint
+   completed after the migration names the legacy address as its minter while the deposit resolves
+   the canonical one, and that mint can then never be deposited; and for redemption or vault
+   claims and any instruction still in flight. Confirm the inventory is empty before continuing.
+2. **Execute the cut** with the initializer.
+3. **Read back** that each of the seven owners resolves to its canonical address, and that
+   creating one materializes there.
+
+Clearing a registration stops the ordinary route: instructions keyed by the XRPL owner resolve the
+canonical account from then on. The legacy proxy still trusts the controller, so anything left
+behind is recoverable only by a separate governance action — which is the work step 1 avoids.
 
 ### A3. The unpauser migration, immediately after the cut
 
