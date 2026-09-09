@@ -61,6 +61,10 @@ record when it stopped.
 
 ## Part A — an existing deployment
 
+What each network needs and why is the spec's
+[Deployment section](../docs/specs/SmartAccounts/LoanSubaccounts.md#deployment); this part is the
+order to do it in and the evidence for each step.
+
 ### A0. Inventory queued governance before touching anything
 
 List every outstanding timelocked call on the diamond, in particular any queued

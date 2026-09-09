@@ -1377,11 +1377,20 @@ Account.
   immediate; a removal queued before the cut must be cancelled and redone directly — see
   [Pause](./Pause.md#upgrading-to-the-immediate-unpauser-removal)) in a cut plan
   (`deployment/cuts/<network>/cuts-<date>.json`, verified with `pnpm check_cut`, executed with
-  `pnpm diamond_cut`) deploys it from the artifact as part of the cut flow. The implementation
-  is deployed with `pnpm deploy_loan_subaccount_implementation <network>` (Flare-family
-  networks only — the script refuses Ethereum) and registered by
-  governance with the timelocked
-  `setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, <address>)`.
+  `pnpm diamond_cut`) deploys it from the artifact as part of the cut flow. **Two implementations
+  must also be deployed and registered, and neither is part of the cut.** The loan subaccount:
+  `pnpm deploy_loan_subaccount_implementation <network>` (Flare-family networks only — the script
+  refuses Ethereum), registered by governance with the timelocked
+  `setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, <address>)`. And **the home `PersonalAccount`
+  itself**: `pnpm deploy_personal_account_implementation <network>`, registered with the timelocked
+  `setPersonalAccountImplementation(<address>)`. Replacing `PersonalAccountsFacet` does not change
+  the code behind existing Personal Account proxies — the beacon keeps serving whatever
+  `PersonalAccounts` records, and only that call moves it — so an existing network that skips the
+  second registration has accounts with neither `sendCrossChainUserOp` nor `redeemFromSubaccount`:
+  parent-signed remote operations cannot start at all, and a returned redeem-home compose or a
+  public `sweepRedeem` at or above the FAssets minimum reverts on the missing selector, recoverable
+  only through another timelocked upgrade. The ordered sequence, and the verification each step
+  needs before the next, is [`deployment/RUNBOOK.md`](../../../deployment/RUNBOOK.md).
 
 ### Ethereum bootstrap
 
