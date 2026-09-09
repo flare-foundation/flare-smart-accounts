@@ -25,6 +25,7 @@ const STRANGER = "0x000000000000000000000000000000000000bad0";
 const OWNER = "rTestXrplOwner1111111111111111111";
 const ETHEREUM = 1;
 const FLARE = 14;
+const SEPOLIA = 11155111;
 
 function fakeCode(name: string): Buffer {
   // no CBOR trailer, so the comparison works on the bytes as they are
@@ -196,6 +197,30 @@ void test("an implementation on the wrong chain family is refused, in both direc
   flareOnEthereum.beaconImpl = OTHER_IMPL;
   const result = await verifyImplementation(inputs(flareOnEthereum, { contract: "PersonalAccount" }));
   assert.deepEqual(failed(result.checks), ["chain: PersonalAccount belongs on ethereum (chain 1)"]);
+  // nor on Sepolia: the check used to be `chainId !== 1`, which read both home implementations
+  // as the correct family there. Refusal is by loan-chain family, and the reason says so
+  for (const contract of ["PersonalAccount", "LoanSubaccount"] as const) {
+    const homeOnSepolia = new FakeChain(contract);
+    // stage `pre` wants the registry - beacon or subaccount type, per contract - not yet pointing
+    // at the implementation, so the chain check is the only failure this fixture can produce
+    homeOnSepolia.beaconImpl = OTHER_IMPL;
+    homeOnSepolia.typeImpl = OTHER_IMPL;
+    const onSepolia = await verifyImplementation(
+      inputs(homeOnSepolia, { contract, network: "sepolia", chainId: SEPOLIA })
+    );
+    assert.deepEqual(failed(onSepolia.checks), [`chain: ${contract} belongs on sepolia (chain ${SEPOLIA})`]);
+    assert.match(
+      actualOf(onSepolia.checks, `chain: ${contract} belongs on sepolia (chain ${SEPOLIA})`),
+      /flare lineage/
+    );
+  }
+  // while a remote implementation on Sepolia is where it belongs
+  const remoteOnSepolia = new FakeChain();
+  remoteOnSepolia.beaconImpl = OTHER_IMPL;
+  assert.deepEqual(
+    failed((await verifyImplementation(inputs(remoteOnSepolia, { network: "sepolia", chainId: SEPOLIA }))).checks),
+    []
+  );
   // each on its own chain passes
   const flareHome = new FakeChain("PersonalAccount");
   flareHome.beaconImpl = OTHER_IMPL;

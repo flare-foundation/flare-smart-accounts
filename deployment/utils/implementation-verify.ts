@@ -46,9 +46,14 @@ export type Stage = "pre" | "queued" | "live";
 /** The ERC-1967 beacon slot, `keccak256("eip1967.proxy.beacon") - 1`, where BeaconProxy keeps it. */
 export const BEACON_SLOT = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
 
-/** The chain ids of the Flare family, as the deploy scripts enumerate them. */
+/**
+ * The two chain families, as `deployment/scripts/DeployNetworks.sol` enumerates them: the Flare
+ * family where the home accounts live, and the loan chains - Ethereum, and Sepolia as its testnet
+ * - where the remote accounts live. Each side refuses the OTHER family rather than allowing only
+ * its own, because a local development chain has no fixed id.
+ */
 export const FLARE_FAMILY_CHAIN_IDS = [14, 19, 16, 114];
-const ETHEREUM_CHAIN_ID = 1;
+export const LOAN_CHAIN_IDS = [1, 11155111];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 /** One materialized account's identity, as its own getters report it. */
@@ -162,13 +167,16 @@ export async function verifyImplementation(inputs: VerificationInputs): Promise<
 
   // 2. the chain family: the Flare accounts and the remote accounts lay out storage for
   // different proxy lineages, and each looks like a legitimate artifact on the other's chain
+  // Refused by family, not by one chain id: the home check used to be `!== 1`, which let both
+  // home implementations read as the correct family on Sepolia
   const onFlareFamily = FLARE_FAMILY_CHAIN_IDS.includes(inputs.chainId);
-  const belongs = spec.family === "flare" ? inputs.chainId !== ETHEREUM_CHAIN_ID : !onFlareFamily;
+  const onLoanChain = LOAN_CHAIN_IDS.includes(inputs.chainId);
+  const belongs = spec.family === "flare" ? !onLoanChain : !onFlareFamily;
   checks.push(
     check(
       `chain: ${inputs.contract} belongs on ${inputs.network} (chain ${inputs.chainId})`,
       belongs,
-      spec.family === "flare" ? "not Ethereum" : "not a Flare-family chain",
+      spec.family === "flare" ? "not a loan chain" : "not a Flare-family chain",
       belongs ? "correct family" : `${inputs.contract} lays out the ${spec.family} lineage's storage`
     )
   );

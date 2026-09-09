@@ -33,6 +33,7 @@ import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol"
 import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
 import {ReaderFacet} from "../../contracts/smartAccounts/facets/ReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
+import {DeployNetworks} from "./DeployNetworks.sol";
 
 // solhint-disable no-console
 // solhint-disable-next-line max-line-length
@@ -96,35 +97,23 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
             vm.foundryVersionAtLeast("1.5.0"),
             "forge >= 1.5.0 required: config struct decoding relies on declared field order"
         );
-        // Ethereum is reproduced from pinned historical bytes, never deployed from current
-        // source: the generic deployment would derive different addresses and its recorder
-        // would overwrite the pinned deployment records
+        // never on a loan chain. Ethereum is reproduced from pinned historical bytes, not
+        // deployed from current source - the generic deployment would derive different
+        // addresses and its recorder would overwrite the pinned records - and Sepolia follows
+        // it. Refused by family: this script also deploys both home implementations whatever
+        // `_fullDeploy` says, and Ethereum alone used to be refused, so a misdirected RPC would
+        // have deployed and recorded them on Sepolia
         require(
-            block.chainid != 1,
-            "Ethereum uses the pinned bootstrap (DeployEthereumController), never this script"
+            !DeployNetworks.isLoanChain(block.chainid),
+            "loan chains use the pinned bootstrap (DeployEthereumController), never this script"
         );
 
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
         string memory configFile = "deployment/chain-config/";
-        string memory network;
-        uint256 chainId = block.chainid;
-
-        if (chainId == 14) {
-            network = "flare";
-        } else if (chainId == 19) {
-            network = "songbird";
-        } else if (chainId == 16) {
-            network = "coston";
-        } else if (chainId == 114) {
-            network = "coston2";
-        } else if (chainId == 1) {
-            network = "ethereum";
-        } else {
-            network = "scdev";
-        }
-        _requireExpectedNetwork(network, _expectedNetwork);
+        string memory network = DeployNetworks.networkName(block.chainid);
+        DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -518,21 +507,6 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
                 "BridgeRoutesFacet.sol: ",
                 vm.toString(address(bridgeRoutesFacet))
             )
-        );
-    }
-
-    /// @dev The wrapper picks the RPC by network name while this script derives the network
-    /// from the chain id; the two must agree, or a mis-set RPC variable would silently
-    /// retarget the whole flow to another chain.
-    function _requireExpectedNetwork(
-        string memory _derived,
-        string calldata _expected
-    )
-        private pure
-    {
-        require(
-            keccak256(bytes(_derived)) == keccak256(bytes(_expected)),
-            string.concat("RPC chain is ", _derived, ", not the named network ", _expected)
         );
     }
 }
