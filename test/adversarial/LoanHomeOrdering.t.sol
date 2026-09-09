@@ -13,6 +13,8 @@ import {
 import {IPauseFacet} from "../../contracts/userInterfaces/facets/IPauseFacet.sol";
 import {ITimelockFacet} from "../../contracts/userInterfaces/facets/ITimelockFacet.sol";
 import {Errors} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/Errors.sol";
+import {IComposeReceiverAccountBase} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
+import {MockOft} from "../../contracts/mock/MockOft.sol";
 
 /**
  * @title LoanHomeOrderingTest
@@ -386,5 +388,42 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         assertEq(parent.balance, BRIDGE_FEE);
         assertEq(oft.lastValue(), 0);
         assertEq(address(oft).balance, 0);
+    }
+
+    /**
+     * @dev The homebound half of the same hazard the loan chain has: the withdrawal's arrival is a
+     * composed message, and the Flare side authenticates it against whatever `setFxrpOft` currently
+     * names, derived live rather than stored. So rotating the adapter under a packet that is
+     * already queued kills that packet here too. What differs is the recovery: on Flare the FXRP
+     * the old adapter credited is redeemable by anyone through `sweepRedeem`, which reads the
+     * balance and needs no compose at all, so the user's assets still reach XRPL.
+     *
+     * As on the loan chain, the sender check is the first of two barriers: the GUID embeds the
+     * adapter, so removing the sender check leaves `WrongGuid` refusing the same packet.
+     */
+    function testRotatingTheAdapterKillsAQueuedRedeemHomeButNotTheRedemption() public {
+        fxrp.mint(address(account), 100e6);
+        (bytes memory message, bytes32 guid) = _queueHome(1, 100e6);
+
+        MockOft rotated = new MockOft(fxrp, BRIDGE_FEE);
+        rotated.setEndpoint(address(endpoint));
+        rotated.setPeer(REMOTE_EID, remotePeer);
+        vm.prank(owner);
+        controller.setFxrpOft(address(rotated));
+
+        // the queued packet is refused on the sender the rotation replaced
+        vm.expectRevert(
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongComposeSender.selector, address(oft))
+        );
+        _deliverHome(message, guid, EXECUTOR_FEE);
+        assertEq(fxrp.balanceOf(address(account)), 100e6, "and the credited FXRP is still sitting here");
+
+        // the compose-free path is unaffected, so the redemption still happens
+        _expectHomeRedemption(100e6, 2 * EXECUTOR_FEE);
+        (uint256 amount, uint256 redeemed) = account.sweepRedeem{value: 2 * EXECUTOR_FEE}();
+        assertEq(amount, 100e6);
+        assertEq(redeemed, 100e6);
+        _assertHomeRequest(1, 100e6);
+        assertEq(fxrp.balanceOf(address(account)), 0, "the rotation cost the instruction, not the funds");
     }
 }

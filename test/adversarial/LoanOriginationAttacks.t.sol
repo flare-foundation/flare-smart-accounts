@@ -20,6 +20,8 @@ import {SubaccountProxy} from "../../contracts/smartAccounts/proxy/SubaccountPro
 import {MockFreezableToken} from "../../contracts/mock/MockFreezableToken.sol";
 import {ILoanSubaccountRemote} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
 import {IComposeReceiverAccountBase} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
+import {IComposeTransportFacet} from "../../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
+import {IIComposeTransportFacet} from "../../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
 import {IILoanMarketsFacet} from "../../contracts/smartAccounts/interface/IILoanMarketsFacet.sol";
 import {ILoanMarketsFacet} from "../../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
 import {IPauseFacet} from "../../contracts/userInterfaces/facets/IPauseFacet.sol";
@@ -600,6 +602,45 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         assertEq(loanToken.balanceOf(collector), 70e18);
     }
 
+    /**
+     * @dev Rotating the OFT under a packet that is already queued. The endpoint holds the compose
+     * until someone executes it, so a rotation between `sendCompose` and `lzCompose` leaves a
+     * packet whose sender is no longer the configured one. It must not execute - the whole point
+     * of pinning the OFT is that a different one cannot deliver instructions - and the FXRP it
+     * carried, already credited by the old OFT, must stay recoverable rather than strand.
+     *
+     * The sender check is the first of two barriers, not the only one: the GUID embeds the OFT as
+     * the packet's receiver, so a rotated configuration refuses the packet twice over. Verified by
+     * removing the sender check, which leaves `WrongGuid` refusing it instead.
+     */
+    function testRotatingTheOftKillsAQueuedPacketWithoutStrandingItsCollateral() public {
+        fxrp.mint(address(account), 1_000e6);
+        (bytes memory message, bytes32 guid) = _queue(address(account), 7, 1_000e6, _deposit());
+
+        MockOft rotated = new MockOft(fxrp, RETURN_VALUE);
+        rotated.setEndpoint(address(endpoint));
+        rotated.setPeer(ORIGIN_EID, originPeer);
+        vm.prank(owner);
+        IIComposeTransportFacet(address(controller)).setComposeTransport(
+            IComposeTransportFacet.Transport(address(endpoint), address(rotated), ORIGIN_EID, originPeer)
+        );
+
+        // the queued packet is refused on the first thing the rotation changed: who sent it
+        vm.expectRevert(
+            abi.encodeWithSelector(IComposeReceiverAccountBase.WrongComposeSender.selector, address(oft))
+        );
+        endpoint.deliver(address(oft), address(account), guid, message);
+        assertEq(_collateral(), 0, "and nothing was supplied");
+
+        // the collateral is not lost, only that instruction. `depositIdleFxrp` is permissionless
+        // and reads the balance, so what the old OFT credited still goes in - and it needs no
+        // packet at all, which is the point: inventing a second packet here would assert against
+        // a credit no OFT ever delivered
+        uint256 recovered = ILoanSubaccountRemote(address(account)).depositIdleFxrp();
+        assertEq(recovered, 1_000e6, "the stranded credit is recoverable");
+        assertEq(_collateral(), 1_000e6, "and it is supplied to the market");
+    }
+
     function _queueMalformedAndReject(
         bytes memory _message,
         bytes memory _error
@@ -787,4 +828,5 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         assertEq(address(receiver).balance, 0);
         assertFalse(account.usedOperations(bytes32("parent failure")));
     }
+
 }
