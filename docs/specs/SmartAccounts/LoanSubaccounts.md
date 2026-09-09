@@ -957,17 +957,22 @@ tokens against the same collateral.
   counted twice as the junior claim it is. The three regimes it fixes: a fresh loan (`F ≈ 0`) is
   gated at `1.5 D` where Morpho would allow `1.3 D`; a debt-free position at `3F`, the fee's own
   cover (deliberately not liquidation-proof — the accepted junior-claim risk); a live loan in
-  between. For `D = 1000`, `F = 70`: Morpho allows the collateral down to 1299, the gate keeps
-  1710; debt repaid, 210. On the borrow side the same numbers read as a borrowing limit: a fresh
-  position may borrow up to `V × LLTV / 1.155` of its collateral value — two thirds at 77%,
-  where Morpho alone allowed 77% — and with the position sitting at the cover nothing more can
-  be borrowed, where without the borrow gate another 316.7 could have been. The rule implies
-  Morpho's health check (`1.155 × (D + 2F) ≥ D`), so Morpho's own refusal never binds on the
-  withdraw path; on the borrow path Morpho's check runs first, inside its `borrow`, and the gate
-  is the binding one whenever Morpho passed. With nothing owed (`D = 0`, `F = 0`) the gate reads
-  no oracle. A zero or dead oracle values the collateral at nothing, so the action is refused —
-  the escape is settling through `repay`, after which a retried withdrawal passes with nothing
-  owed, oracle-free (a borrow needs the oracle back: Morpho reads it too).
+  between. Measured against the real market: a liquidation closing the whole debt at Morpho's
+  edge takes `lltv × LIF` of the collateral, about 82.7% at this market's 77% and ~1.0741, so
+  roughly 17% is left standing under the fee claim, while a price low enough to exhaust the
+  collateral writes the shortfall off as bad debt and leaves the claim unsecured
+  (`test/integration/LoanSubaccountRemoteMorphoFork.t.sol`). For `D = 1000`, `F = 70`: Morpho
+  allows the collateral down to 1299, the gate keeps 1710; debt repaid, 210. On the borrow side
+  the same numbers read as a borrowing limit: a fresh position may borrow up to
+  `V × LLTV / 1.155` of its collateral value — two thirds at 77%, where Morpho alone allowed 77%
+  — and with the position sitting at the cover nothing more can be borrowed, where without the
+  borrow gate another 316.7 could have been. The rule implies Morpho's health check
+  (`1.155 × (D + 2F) ≥ D`), so Morpho's own refusal never binds on the withdraw path; on the
+  borrow path Morpho's check runs first, inside its `borrow`, and the gate is the binding one
+  whenever Morpho passed. With nothing owed (`D = 0`, `F = 0`) the gate reads no oracle. A zero
+  or dead oracle values the collateral at nothing, so the action is refused — the escape is
+  settling through `repay`, after which a retried withdrawal passes with nothing owed,
+  oracle-free (a borrow needs the oracle back: Morpho reads it too).
 - **`withdraw` (the atomic bridge-home)**, in this exact order: the hard argument checks
   (zero amount, zero id) → the delivery-value floor → duplicate/expired skip → pause gate →
   checkpoint (with a live fee principal; zero principal has nothing to accrue) →

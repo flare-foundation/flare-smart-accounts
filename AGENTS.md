@@ -293,7 +293,9 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
     unless the network they need is configured, so an offline run is inert rather than failing;
     `LoanSubaccountRemoteMorphoFork.t.sol` needs `ETHEREUM_RPC_URL` to name an endpoint that serves state at its
     pinned block (an archive read), and runs with
-    `ETHEREUM_RPC_URL=<url> forge test --match-path "test/integration/*"`.
+    `ETHEREUM_RPC_URL=<url> forge test --match-path "test/integration/*"`. Most free tiers prune that far back;
+    `https://eth-pokt.nodies.app` served it on 2026-09-09, and `cast block <FORK_BLOCK> --rpc-url <url>` plus one
+    `eth_call` at that block is the quickest way to test a candidate before running the suite.
   - `test/utils/`: fixtures, handlers and harnesses shared by the suites. Mocks live in `contracts/mock/`. Both are
     excluded from the coverage figure. `LoanForkFixture` is `LoanRemoteFixture` with the loan market's real
     contracts behind it (canonical Morpho Blue, the live FXRP/RLUSD market, its oracle and adaptive rate model,

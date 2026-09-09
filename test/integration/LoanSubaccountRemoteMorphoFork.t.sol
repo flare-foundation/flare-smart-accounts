@@ -7,6 +7,9 @@ import {IMorpho} from "../../contracts/smartAccounts/interface/IMorpho.sol";
 import {IOracle} from "../../contracts/smartAccounts/interface/IOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {MorphoMath} from "../../contracts/smartAccounts/library/MorphoMath.sol";
+import {LoanMath} from "../../contracts/smartAccounts/library/LoanMath.sol";
 
 /// @dev Canonical Morpho's liquidation entry, which the MIT mirror has no reason to declare: it
 /// is used here only to make Morpho's own health check judge the quoted liquidation price.
@@ -27,7 +30,11 @@ interface IMorphoLiquidate {
  * @notice The loan account against the real FXRP/RLUSD market on canonical Morpho Blue, at a
  * pinned block. The unit suites prove the arithmetic against a mock whose rate a test chose;
  * these prove the same arithmetic against Morpho's own adaptive model, its share rounding, its
- * liquidity and its oracle - the premises the cover gate and the five views rest on.
+ * liquidity and its oracle - the premises the cover gate and the five views rest on. Canonical
+ * liquidation is here for the same reason (SA-04): the boundary and what it leaves behind, both
+ * of Morpho's input modes, collateral exhaustion into bad debt, self-liquidation past the cover
+ * gate, and the fee state a real liquidation leaves stale. A mock cannot answer those - it has
+ * no incentive factor and no bad-debt path - so they are asserted against Morpho or not at all.
  *
  * One property of the real market shapes the suite: the oracle's feed goes stale some hours past
  * the pinned block, and `price()` then reverts. A test that needs a live price therefore warps at
@@ -43,6 +50,10 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     uint256 private constant ORACLE_WINDOW = 6 hours;
     /// @dev Morpho's oracle scale: `loanAmount = collateral * price / 1e36`.
     uint256 private constant ORACLE_PRICE_SCALE = 1e36;
+    /// @dev Canonical Morpho's liquidation incentive inputs (`Morpho.sol`, `ConstantsLib.sol`):
+    /// `LIF = min(1.15, 1 / (1 - 0.3 · (1 - lltv)))`, which at this market's 77% is ~1.0741.
+    uint256 private constant LIQUIDATION_CURSOR = 0.3e18;
+    uint256 private constant MAX_LIQUIDATION_INCENTIVE_FACTOR = 1.15e18;
 
     function setUp() public {
         _setUpForkFixture();
@@ -355,6 +366,352 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         assertEq(_collateral(), collateralBefore - 1e6, "one unit below the quote Morpho seizes collateral");
     }
 
+    /**
+     * @dev The junior claim's premise, on the real market. A liquidation that closes the whole
+     * debt at Morpho's own edge does not take the whole collateral, so the Flare fee still has
+     * something to stand on afterwards. The residue is the incentive's complement: at the edge
+     * the debt is 77% of the collateral's value and the liquidator takes that times ~1.0741, so
+     * about 17% of the collateral stays behind. Nothing in the accounts enforces this - it is
+     * Morpho's arithmetic - which is exactly why it is asserted against Morpho rather than
+     * restated in a comment.
+     */
+    function testFullDebtLiquidationAtTheEdgeLeavesCollateralForTheFeeClaim() public onlyForked {
+        _openOnTheRealMarket(COLLATERAL, 5_000e18);
+        vm.warp(block.timestamp + ORACLE_WINDOW);
+        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
+
+        uint256 collateralBefore = _collateral();
+        uint256 feeBefore = ILoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18;
+        assertGt(feeBefore, 0, "a fee accrued over the warp, so there is a claim to secure");
+
+        // accrue first, so the totals read here are the ones the liquidation itself will use,
+        // and the two conversions below can be computed rather than inferred from its return
+        morpho.accrueInterest(params);
+        (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) = morpho.market(_marketId());
+        uint128 shares = _shares();
+        uint256 sharesDown = Math.mulDiv(
+            shares,
+            uint256(totalBorrowAssets) + MorphoMath.VIRTUAL_ASSETS,
+            uint256(totalBorrowShares) + MorphoMath.VIRTUAL_SHARES
+        );
+        uint256 sharesUp = MorphoMath.toAssetsUp(shares, totalBorrowAssets, totalBorrowShares);
+        (uint256 seized, uint256 repaid) = _liquidateRepayingShares(shares);
+
+        assertEq(_debt(), 0, "the whole debt is closed");
+        assertEq(_collateral(), collateralBefore - seized, "and only the seized collateral left");
+        assertGt(_collateral(), 0, "a full-debt liquidation at the edge leaves collateral behind");
+
+        // canonical Morpho rounds these two apart, and in opposite directions: the seizure is
+        // computed from the shares rounded DOWN to assets, the payment from the same shares
+        // rounded UP. Taking the reference from the returned payment would fold the second
+        // rounding into the first and only pass because the collateral's six decimals hide it
+        uint256 incentive = _liquidationIncentiveFactor();
+        assertGt(sharesUp, sharesDown, "the two conversions differ here, so which feeds which matters");
+        assertEq(repaid, sharesUp, "the payment is the repaid shares rounded up");
+        assertEq(
+            seized,
+            Math.mulDiv(Math.mulDiv(sharesDown, incentive, WAD), ORACLE_PRICE_SCALE, edge - 1),
+            "and the seizure is the shares rounded down, times the incentive, quoted at the price"
+        );
+        // and the residue as a share of the collateral: 1 - lltv x LIF, about 17.3% here
+        assertApproxEqRel(
+            _collateral(),
+            Math.mulDiv(collateralBefore, WAD - Math.mulDiv(MARKET_LLTV, incentive, WAD), WAD),
+            0.01e18,
+            "the residue is the incentive's complement"
+        );
+        // the claim survives the liquidation: still owed, and still with collateral under it
+        ILoanSubaccountRemote.LoanPosition memory after_ =
+            ILoanSubaccountRemote(address(account)).getLoanPosition();
+        assertGe(after_.feeDebtX18, feeBefore, "the fee claim is untouched by the liquidation");
+        assertGt(after_.collateralValue, 0, "and it is no longer a junior claim on nothing");
+    }
+
+    /**
+     * @dev The other end of the same scale: a price far enough below the edge that seizing every
+     * unit of collateral cannot cover the debt. Canonical Morpho then writes the shortfall off as
+     * bad debt rather than leaving a dust position, so the account is left owing nothing and
+     * holding nothing - and the Flare fee, whose only security was that collateral, becomes an
+     * unsecured claim. That is the accepted junior-claim risk, pinned here with real numbers.
+     */
+    function testCollateralExhaustionRealizesBadDebtAndUnsecuresTheFee() public onlyForked {
+        _openOnTheRealMarket(COLLATERAL, 5_000e18);
+        vm.warp(block.timestamp + ORACLE_WINDOW);
+        uint256 debtBefore = _debt();
+        uint256 incentive = _liquidationIncentiveFactor();
+
+        // a price at which the whole collateral, after the incentive, is worth less than the debt
+        uint256 exhausting =
+            Math.mulDiv(Math.mulDiv(debtBefore, incentive, WAD), ORACLE_PRICE_SCALE, COLLATERAL) / 2;
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(exhausting));
+
+        (uint256 seized, uint256 repaid) = _liquidateSeizing(_collateral());
+        assertEq(seized, COLLATERAL, "the liquidator took every unit of collateral");
+        assertLt(repaid, debtBefore, "and it did not cover the debt");
+
+        assertEq(_collateral(), 0, "no collateral left");
+        assertEq(_shares(), 0, "and no shares: Morpho wrote the shortfall off rather than leaving dust");
+        ILoanSubaccountRemote.LoanPosition memory position =
+            ILoanSubaccountRemote(address(account)).getLoanPosition();
+        assertEq(position.debt, 0, "the account reports the written-off debt as gone");
+        assertEq(position.collateralValue, 0);
+        assertGt(position.feeDebtX18, 0, "the fee claim outlives the collateral that secured it");
+    }
+
+    /**
+     * @dev The boundary the exhaustion test above sits far below, and it separates three regimes
+     * rather than two. Found by closing on the flip rather than assumed, to a single wei of
+     * price. One wei above, Morpho refuses to seize the whole collateral, because the repayment
+     * it implies exceeds the debt, and closing the debt outright leaves collateral with the
+     * lenders whole. At the boundary the seizure just fits and costs them exactly one wei. Below,
+     * the write-off grows. So exhaustion and bad debt are not separated by a price: crossing the
+     * line is what starts the loss, and the loss starts at its smallest.
+     */
+    function testTheExhaustionBoundaryIsWhereTheLendersLossBegins() public onlyForked {
+        _openOnTheRealMarket(COLLATERAL, 5_000e18);
+        vm.warp(block.timestamp + ORACLE_WINDOW);
+        uint256 collateral = _collateral();
+        // accrue first: the liquidation would, and an estimate off by six hours of interest is
+        // off by far more than the bracket below is wide
+        morpho.accrueInterest(params);
+        uint256 debtBefore = _debt();
+        // one wei of quoted collateral value, expressed as a price step
+        uint256 step = Math.ceilDiv(ORACLE_PRICE_SCALE, collateral);
+        uint256 estimate =
+            Math.mulDiv(Math.mulDiv(debtBefore, _liquidationIncentiveFactor(), WAD), ORACLE_PRICE_SCALE, collateral);
+
+        // bracket the flip, then close on it: seizing everything reverts above and succeeds below
+        uint256 allowed = estimate - 10_000 * step;
+        uint256 refused = estimate + 10_000 * step;
+        assertFalse(_seizingEverythingReverts(allowed), "the bracket's low end must allow the seizure");
+        assertTrue(_seizingEverythingReverts(refused), "and its high end must refuse it");
+        while (refused - allowed > 1) {
+            uint256 mid = allowed + (refused - allowed) / 2;
+            if (_seizingEverythingReverts(mid)) {
+                refused = mid;
+            } else {
+                allowed = mid;
+            }
+        }
+        assertEq(refused - allowed, 1, "the two prices are one wei apart: this is the boundary itself");
+
+        // the lenders' loss is the honest measure of a write-off: `repaid` rounds up, so equal
+        // repaid figures do not mean every share was covered. With interest already accrued in
+        // this block, any fall in the supply total is bad debt and nothing else
+        uint256 supplyBefore = _totalSupplyAssets();
+
+        // above it: the collateral is worth more debt than exists, so Morpho will not take it
+        // all, and closing the debt outright leaves the rest of the collateral behind
+        uint256 snapshot = vm.snapshotState();
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(refused));
+        _liquidateRepayingShares(_shares());
+        assertGt(_collateral(), 0, "above the boundary a full-debt liquidation still leaves collateral");
+        assertEq(_shares(), 0, "with the debt closed");
+        assertEq(_totalSupplyAssets(), supplyBefore, "and the lenders lose nothing");
+        vm.revertToState(snapshot);
+
+        // at it: the seizure just fits, and the loss it leaves is the smallest there is
+        snapshot = vm.snapshotState();
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(allowed));
+        (uint256 seized, ) = _liquidateSeizing(collateral);
+        assertEq(seized, collateral, "the whole collateral went");
+        assertEq(_collateral(), 0);
+        assertEq(_shares(), 0, "and the remainder was written off rather than left as dust");
+        uint256 lossAtBoundary = supplyBefore - _totalSupplyAssets();
+        assertEq(lossAtBoundary, 1, "one wei: the boundary is where the loss begins, not where it is zero");
+        vm.revertToState(snapshot);
+
+        // one wei of quoted value under it: the same seizure falls further short
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(allowed - step));
+        (, uint256 shortRepaid) = _liquidateSeizing(collateral);
+        assertLt(shortRepaid, debtBefore, "below the boundary the seizure no longer covers the debt");
+        assertEq(_collateral(), 0);
+        assertEq(_shares(), 0);
+        assertGt(
+            supplyBefore - _totalSupplyAssets(),
+            lossAtBoundary,
+            "and the write-off grows as the price falls"
+        );
+    }
+
+    /**
+     * @dev Both of canonical Morpho's liquidation input modes, and what separates them. Each
+     * conversion rounds against the liquidator on its own - naming shares floors the seizure,
+     * naming a seizure ceils the shares - but the pair is not a round trip: asking for the
+     * seizure that naming the shares produced repays slightly *less*, because that seizure was
+     * already floored to whole base units of a six-decimal token. The gap is bounded by what one
+     * such unit is worth and it favours the liquidator, so the choice of mode is worth a fraction
+     * of a cent. Pinned because the residue the fee claim relies on comes out of these same
+     * conversions.
+     */
+    function testTheTwoLiquidationInputModesDifferOnlyBySubUnitRounding() public onlyForked {
+        _openOnTheRealMarket(COLLATERAL, 5_000e18);
+        vm.warp(block.timestamp + ORACLE_WINDOW);
+        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
+        uint128 half = _shares() / 2;
+
+        uint256 snapshot = vm.snapshotState();
+        (uint256 seizedByShares, uint256 repaidByShares) = _liquidateRepayingShares(half);
+        uint256 collateralLeft = _collateral();
+        uint256 debtLeft = _debt();
+        vm.revertToState(snapshot);
+
+        // the same seizure, asked for the other way round
+        (uint256 seizedByAssets, uint256 repaidByAssets) = _liquidateSeizing(seizedByShares);
+        assertEq(seizedByAssets, seizedByShares, "the seizure asked for is the seizure taken");
+        assertEq(_collateral(), collateralLeft, "so the borrower keeps the same collateral either way");
+        assertGt(_debt(), 0, "a partial liquidation leaves the position open");
+
+        assertLe(repaidByAssets, repaidByShares, "naming the seizure repays no more than naming the shares");
+        assertGe(_debt(), debtLeft, "which leaves the borrower owing a shade more, not less");
+        // the whole of the difference is the seizure being floored to whole base units of a
+        // six-decimal collateral token, so one such unit, quoted at the price, bounds it
+        assertLt(
+            repaidByShares - repaidByAssets,
+            Math.mulDiv(1, edge - 1, ORACLE_PRICE_SCALE),
+            "and the difference is under one unit of collateral: rounding, not a discount"
+        );
+    }
+
+    /**
+     * @dev What a real liquidation does to the fee state, with the market moving underneath it.
+     * The fee is charged on `feePrincipal`, snapshotted at the last checkpoint; a liquidation
+     * repays debt without going through the account, so the principal is left describing a debt
+     * that no longer exists. The stored state is stale until someone calls the permissionless
+     * `checkpointFee`, while the views project past it - so a caller reading `getLoanFeeState`
+     * alone would under-report, which is the distinction this pins.
+     */
+    function testFeeStateGoesStaleAfterALiquidationUntilCheckpoint() public onlyForked {
+        _openOnTheRealMarket(COLLATERAL, 5_000e18);
+        // another borrower moves utilization, so the interest arriving is the adaptive model's
+        _whaleBorrow(200_000e18);
+        vm.warp(block.timestamp + ORACLE_WINDOW);
+
+        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
+        _liquidateRepayingShares(_shares() / 2);
+
+        (uint256 principal, uint256 storedFeeX18, , uint64 lastCheckpoint, uint64 floorRate, ) =
+            ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        assertGt(
+            principal,
+            _debtFromCanonicalRepayment(),
+            "the fee principal still describes the pre-liquidation debt"
+        );
+        uint256 projected = ILoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18;
+        assertGt(projected, storedFeeX18, "the projection is ahead of the stored state");
+
+        // the reconciliation is permissionless and needs no privileged caller
+        vm.prank(makeAddr("anyone"));
+        ILoanSubaccountRemote(address(account)).checkpointFee();
+
+        (uint256 reconciled, uint256 feeAfterX18, , , , ) =
+            ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        // the expectation is computed here rather than read back, because the projection and the
+        // checkpoint run the same code: comparing them would pass a build that suppressed both.
+        // With the principal above the live debt the interest term clamps to zero, leaving the
+        // floor over the period since the last checkpoint
+        assertEq(
+            feeAfterX18 - storedFeeX18,
+            Math.mulDiv(principal * floorRate, vm.getBlockTimestamp() - lastCheckpoint, LoanMath.YEAR),
+            "the checkpoint folds in exactly the floor on the stale principal"
+        );
+        assertEq(feeAfterX18, projected, "and it is what the view projected in the same block");
+        assertEq(
+            reconciled,
+            _debtFromCanonicalRepayment(),
+            "and re-snapshots the principal on the debt Morpho itself would charge"
+        );
+    }
+
+    /**
+     * @dev Checkpointing at once versus letting it wait - the comparison SA-04 asks for, and the
+     * reason a front end has to watch for liquidations rather than leave the account to notice.
+     * The floor is priced on `feePrincipal`, and a liquidation leaves that describing a debt that
+     * no longer exists, so every second before the checkpoint is billed at the old size. The
+     * delayed figure is asserted exactly: with the principal above the live debt the market
+     * interest term clamps to zero, which leaves the floor alone.
+     */
+    function testCheckpointingLateAfterALiquidationCostsMoreThanCheckpointingAtOnce() public onlyForked {
+        _openOnTheRealMarket(COLLATERAL, 5_000e18);
+        vm.warp(block.timestamp + ORACLE_WINDOW);
+        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
+        _liquidateRepayingShares(_shares() / 2);
+
+        (uint256 stalePrincipal, uint256 feeAtLiquidation, , uint64 lastCheckpoint, uint64 floorRate, ) =
+            ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        uint256 waited = 1 hours;
+
+        // checkpoint at once, then let the same hour pass on the reconciled principal
+        uint256 snapshot = vm.snapshotState();
+        ILoanSubaccountRemote(address(account)).checkpointFee();
+        uint256 feeAfterFirst = _billTheFirstPeriod(stalePrincipal, feeAtLiquidation, lastCheckpoint, floorRate);
+        vm.warp(vm.getBlockTimestamp() + waited);
+        uint256 feeIfPrompt = _billTheSecondPeriod(feeAfterFirst, waited);
+        vm.revertToState(snapshot);
+
+        // or let the hour pass first, with the principal still describing the closed debt
+        vm.warp(vm.getBlockTimestamp() + waited);
+        ILoanSubaccountRemote(address(account)).checkpointFee();
+        (, uint256 feeIfLate, , , , ) = ILoanSubaccountRemote(address(account)).getLoanFeeState();
+
+        // the late checkpoint prices its whole period - everything since the last one, not just
+        // the hour waited - at the floor on the principal it still held
+        assertEq(
+            feeIfLate - feeAtLiquidation,
+            Math.mulDiv(stalePrincipal * floorRate, vm.getBlockTimestamp() - lastCheckpoint, LoanMath.YEAR),
+            "the whole period is billed at the floor on the pre-liquidation principal"
+        );
+        assertLt(feeIfPrompt, feeIfLate, "and the prompt path's same hour on the live debt costs less");
+        assertLe(
+            feeIfLate - feeIfPrompt,
+            Math.mulDiv(stalePrincipal * floorRate, waited, LoanMath.YEAR),
+            "the delay costs at most that hour at the stale size - the two differ in nothing else"
+        );
+    }
+
+    /**
+     * @dev The accepted junior-claim risk, demonstrated rather than asserted in prose: once the
+     * position is liquidatable, the user can take their own collateral out through Morpho, past
+     * the cover gate that exists to keep the fee secured. The same collateral cannot leave
+     * through the account's own withdrawal in that state. Morpho's health condition is the only
+     * thing standing in the way, and it is not ours to set.
+     */
+    function testSelfLiquidationTakesCollateralPastTheCoverGate() public onlyForked {
+        _openOnTheRealMarket(COLLATERAL, 5_000e18);
+        vm.warp(block.timestamp + ORACLE_WINDOW);
+        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
+
+        // the rail refuses: unhealthy on Morpho's line is far past our own cover requirement
+        ILoanSubaccountRemote.WithdrawPreview memory refused =
+            ILoanSubaccountRemote(address(account)).previewWithdraw(1e6);
+        assertFalse(refused.coverSatisfied, "the cover gate refuses a withdrawal in this state");
+        _deliverExpectingRefusal(
+            9, _withdraw(bytes32("blocked"), 1e6, 0), RETURN_VALUE, refused.requiredCover, refused.remainingValue
+        );
+
+        // the borrower is the liquidator: the RLUSD it borrowed is already sitting on `parent`
+        uint256 collateralBefore = _collateral();
+        deal(RLUSD, parent, 10_000e18);
+        vm.startPrank(parent);
+        IERC20(RLUSD).approve(MORPHO, type(uint256).max);
+        (uint256 seized, ) = IMorphoLiquidate(MORPHO).liquidate(params, address(account), 0, _shares() / 2, "");
+        vm.stopPrank();
+
+        assertGt(seized, 1e6, "and takes out more than the withdrawal that was just refused");
+        assertEq(_collateral(), collateralBefore - seized);
+        assertEq(IERC20(FXRP).balanceOf(parent), seized, "the collateral is the user's own again");
+        assertGt(
+            ILoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18,
+            0,
+            "with the fee still owed against what is left"
+        );
+    }
+
     // helpers below the tests they serve
     // solhint-disable-next-line ordering
     function _repayWith(uint256 _amount) private {
@@ -378,6 +735,94 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         (assetsRepaid, ) = IMorpho(MORPHO).repay(params, 0, shares, address(account), "");
         vm.stopPrank();
         vm.revertToState(snapshot);
+    }
+
+    /// @dev Would seizing the entire collateral at `_price` be refused? Asked under a snapshot,
+    /// so the position is left exactly as it was and the answer can be asked repeatedly.
+    function _seizingEverythingReverts(
+        uint256 _price
+    )
+        private
+        returns (bool _reverted)
+    {
+        uint256 snapshot = vm.snapshotState();
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(_price));
+        address probe = makeAddr("boundary probe");
+        deal(RLUSD, probe, 100_000_000e18);
+        vm.startPrank(probe);
+        IERC20(RLUSD).approve(MORPHO, type(uint256).max);
+        try IMorphoLiquidate(MORPHO).liquidate(params, address(account), _collateral(), 0, "") {
+            _reverted = false;
+        } catch {
+            _reverted = true;
+        }
+        vm.stopPrank();
+        vm.revertToState(snapshot);
+    }
+
+    /// @dev Checkpoints again and asserts the period just closed: this one is billed on the
+    /// reconciled principal, with the interest the position really earned over it, so a build
+    /// that skipped the second checkpoint - or priced it on the stale principal - fails here.
+    function _billTheSecondPeriod(
+        uint256 _feeBefore,
+        uint256 _elapsed
+    )
+        private
+        returns (uint256 _feeNow)
+    {
+        (uint256 principal, , , , uint64 floorRate, uint64 spreadRate) =
+            ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        // accrue on the market first, so the interest below is Morpho's own figure
+        morpho.accrueInterest(params);
+        uint256 liveDebt = _debt();
+        uint256 interestX18 = (liveDebt > principal ? liveDebt - principal : 0) * WAD;
+        ILoanSubaccountRemote(address(account)).checkpointFee();
+        (, _feeNow, , , , ) = ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        assertEq(
+            _feeNow - _feeBefore,
+            Math.max(
+                Math.mulDiv(principal * floorRate, _elapsed, LoanMath.YEAR),
+                interestX18 + Math.mulDiv(principal * spreadRate, _elapsed, LoanMath.YEAR)
+            ) - interestX18,
+            "the second period is billed on the reconciled principal and the interest it earned"
+        );
+    }
+
+    /// @dev A third party liquidates by naming the borrow shares to repay; Morpho decides the
+    /// seizure. Returns Morpho's own `(seizedAssets, repaidAssets)`.
+    function _liquidateRepayingShares(
+        uint128 _shareCount
+    )
+        private
+        returns (uint256 _seized, uint256 _repaid)
+    {
+        return _liquidateAs(makeAddr("share liquidator"), 0, _shareCount);
+    }
+
+    /// @dev The other input mode: the liquidator names the collateral to seize.
+    function _liquidateSeizing(
+        uint256 _seizedAssets
+    )
+        private
+        returns (uint256 _seized, uint256 _repaid)
+    {
+        return _liquidateAs(makeAddr("asset liquidator"), _seizedAssets, 0);
+    }
+
+    function _liquidateAs(
+        address _liquidator,
+        uint256 _seizedAssets,
+        uint128 _shareCount
+    )
+        private
+        returns (uint256 _seized, uint256 _repaid)
+    {
+        deal(RLUSD, _liquidator, 10_000_000e18);
+        vm.startPrank(_liquidator);
+        IERC20(RLUSD).approve(MORPHO, type(uint256).max);
+        (_seized, _repaid) =
+            IMorphoLiquidate(MORPHO).liquidate(params, address(account), _seizedAssets, _shareCount, "");
+        vm.stopPrank();
     }
 
     /// @dev Moves utilization by opening a large position of its own on the real market.
@@ -424,5 +869,37 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         );
         assertEq(_debt(), debtBefore, "a refused action must change nothing");
         assertEq(_collateral(), collateralBefore, "a refused action must change nothing");
+    }
+
+    /// @dev The period a checkpoint just billed, when the principal sits above the live debt:
+    /// the market interest term clamps to zero, leaving the floor alone. Returns the fee now.
+    function _billTheFirstPeriod(
+        uint256 _principal,
+        uint256 _feeBefore,
+        uint64 _lastCheckpoint,
+        uint64 _floorRate
+    )
+        private view
+        returns (uint256 _feeNow)
+    {
+        (, _feeNow, , , , ) = ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        assertEq(
+            _feeNow - _feeBefore,
+            Math.mulDiv(_principal * _floorRate, vm.getBlockTimestamp() - _lastCheckpoint, LoanMath.YEAR),
+            "the first period is the floor on the pre-liquidation principal"
+        );
+    }
+
+    /// @dev The market's supply total, which is what a write-off comes out of.
+    function _totalSupplyAssets() private view returns (uint256) {
+        (uint128 totalSupplyAssets, , , , , ) = morpho.market(_marketId());
+        return totalSupplyAssets;
+    }
+
+    /// @dev Canonical Morpho's incentive factor for this market's LLTV, computed the way
+    /// `Morpho.liquidate` computes it rather than pasted as a number.
+    function _liquidationIncentiveFactor() private pure returns (uint256) {
+        uint256 factor = Math.mulDiv(WAD, WAD, WAD - Math.mulDiv(LIQUIDATION_CURSOR, WAD - MARKET_LLTV, WAD));
+        return factor < MAX_LIQUIDATION_INCENTIVE_FACTOR ? factor : MAX_LIQUIDATION_INCENTIVE_FACTOR;
     }
 }

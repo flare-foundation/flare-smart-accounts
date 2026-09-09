@@ -22,8 +22,18 @@ import {MintableERC20} from "./MintableERC20.sol";
  * oracle, require `collateral · price / 1e36 · lltv >= debt` while borrow shares are live - so a
  * dead oracle or an under-collateralized position reverts here as it does in Morpho; the check
  * is switchable for tests that exercise the account's arithmetic under leverage a real market
- * would not allow. Liquidation eligibility is intentionally not modeled. Ids and share
- * conversions come from {MorphoMath}, the same code the accounts run.
+ * would not allow.
+ *
+ * Its liquidation entries are money-flow simulations rather than Morpho's `liquidate`, and are
+ * named so: they accrue first and refuse a debt-free position, but no health condition gates
+ * them, no oracle or liquidation incentive converts seized collateral into repaid shares (a
+ * partial seizes pro rata, a full seizes all of it), and bad debt is never realized. That is
+ * enough for what the accounts actually observe - a debt that shrank without their involvement,
+ * leaving `feePrincipal` stale - which is what the adversarial suite drives them for. Canonical
+ * liquidation itself is judged where it can be: against real Morpho on the fork suite,
+ * `test/integration/LoanSubaccountRemoteMorphoFork.t.sol`.
+ *
+ * Ids and share conversions come from {MorphoMath}, the same code the accounts run.
  */
 contract MockMorpho is IMorpho {
     using SafeERC20 for IERC20;
