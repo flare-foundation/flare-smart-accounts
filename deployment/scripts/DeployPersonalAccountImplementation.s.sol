@@ -7,7 +7,12 @@ import {DeployNetworks} from "./DeployNetworks.sol";
 
 // solhint-disable no-console
 contract DeployPersonalAccountImplementation is Script {
-    function run(string calldata _expectedNetwork, bool _staging) external {
+    function run(
+        string calldata _expectedNetwork,
+        bool _staging
+    )
+        external
+    {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         // the Flare Personal Account lays out storage for the Flare PA proxy lineage; the loan

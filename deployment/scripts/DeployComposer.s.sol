@@ -27,7 +27,11 @@ contract DeployComposer is Script {
     FAssetRedeemComposerProxy private composerProxy;
     FAssetRedeemComposer private composer;
 
-    function run(bool _onlyImpl) external {
+    function run(
+        bool _onlyImpl
+    )
+        external
+    {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
@@ -125,7 +129,11 @@ contract DeployComposer is Script {
         _logDeploymentInfo(_onlyImpl);
     }
 
-    function _logDeploymentInfo(bool _onlyImpl) internal view {
+    function _logDeploymentInfo(
+        bool _onlyImpl
+    )
+        internal view
+    {
         // Logs formatted for save-deployed-addresses.ts
         console2.log(
             string.concat(

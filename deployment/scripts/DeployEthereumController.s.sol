@@ -26,7 +26,9 @@ import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
  */
 // solhint-disable no-console
 contract DeployEthereumController is Script {
-    function run() external {
+    function run()
+        external
+    {
         require(block.chainid == 1, "the pinned bootstrap runs on Ethereum (chain id 1) only");
         console2.log("NETWORK: ethereum");
 

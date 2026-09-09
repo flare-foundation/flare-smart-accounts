@@ -623,7 +623,12 @@ contract ExecuteDiamondCut is Script {
         );
     }
 
-    function _toHex(bytes4 _selector) internal pure returns (string memory) {
+    function _toHex(
+        bytes4 _selector
+    )
+        internal pure
+        returns (string memory)
+    {
         bytes memory b = abi.encodePacked(_selector);
         bytes memory hexChars = "0123456789abcdef";
         bytes memory str = new bytes(8);
@@ -634,7 +639,12 @@ contract ExecuteDiamondCut is Script {
         return string(str);
     }
 
-    function _toHexBytes(bytes memory _data) internal pure returns (string memory) {
+    function _toHexBytes(
+        bytes memory _data
+    )
+        internal pure
+        returns (string memory)
+    {
         bytes memory hexChars = "0123456789abcdef";
         bytes memory str = new bytes(_data.length * 2);
         for (uint256 i = 0; i < _data.length; i++) {

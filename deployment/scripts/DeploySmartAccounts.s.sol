@@ -87,7 +87,13 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
-    function run(string calldata _expectedNetwork, bool _fullDeploy, bool _staging) external {
+    function run(
+        string calldata _expectedNetwork,
+        bool _fullDeploy,
+        bool _staging
+    )
+        external
+    {
         // The VaultConfig/AgentVaultConfig decodes below rely on forge >= 1.5
         // encoding JSON objects in the declared field order of the matching
         // struct (foundry-rs/foundry#11612); older versions encode members
@@ -394,7 +400,9 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
         });
     }
 
-    function _deploySmartAccountsFacets() internal {
+    function _deploySmartAccountsFacets()
+        internal
+    {
         agentVaultsFacet = new AgentVaultsFacet();
         executorsFacet = new ExecutorsFacet();
         instructionFeesFacet = new InstructionFeesFacet();
@@ -429,7 +437,9 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
         smartAccountsFacets[13] = _addFacet(address(bridgeRoutesFacet), "BridgeRoutesFacet");
     }
 
-    function _logSmartAccountsFacetAddresses() internal view {
+    function _logSmartAccountsFacetAddresses()
+        internal view
+    {
         console2.log("Smart Accounts Facet Addresses:");
         console2.log(
             string.concat(

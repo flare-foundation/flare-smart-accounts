@@ -9,7 +9,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 contract DeployMyERC4626 is Script {
     MyERC4626 private depositVault;
 
-    function run() external {
+    function run()
+        external
+    {
         vm.startBroadcast();
         depositVault = new MyERC4626(
             IERC20(0x0b6A3645c240605887a5532109323A3E12273dc7),

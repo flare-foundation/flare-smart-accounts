@@ -20,19 +20,34 @@ pragma solidity ^0.8.27;
  */
 library DeployNetworks {
     /// @notice A chain the home accounts (`PersonalAccount`, `LoanSubaccount`) belong on.
-    function isFlareFamily(uint256 _chainId) internal pure returns (bool) {
+    function isFlareFamily(
+        uint256 _chainId
+    )
+        internal pure
+        returns (bool)
+    {
         return _chainId == 14 || _chainId == 19 || _chainId == 16 || _chainId == 114;
     }
 
     /// @notice A chain the remote accounts (`PersonalAccountRemote`, `MorphoLoanSubaccountRemote`)
     /// belong on: Ethereum, and Sepolia as its testnet.
-    function isLoanChain(uint256 _chainId) internal pure returns (bool) {
+    function isLoanChain(
+        uint256 _chainId
+    )
+        internal pure
+        returns (bool)
+    {
         return _chainId == 1 || _chainId == 11155111;
     }
 
     /// @notice The network name a chain id records under. A chain in neither family is the
     /// local development chain, `scdev`.
-    function networkName(uint256 _chainId) internal pure returns (string memory) {
+    function networkName(
+        uint256 _chainId
+    )
+        internal pure
+        returns (string memory)
+    {
         if (_chainId == 14) {
             return "flare";
         } else if (_chainId == 19) {

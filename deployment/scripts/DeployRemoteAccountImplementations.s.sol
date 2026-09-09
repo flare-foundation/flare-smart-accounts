@@ -10,7 +10,12 @@ import {
 
 // solhint-disable no-console
 contract DeployRemoteAccountImplementations is Script {
-    function run(string calldata _expectedNetwork, bool _staging) external {
+    function run(
+        string calldata _expectedNetwork,
+        bool _staging
+    )
+        external
+    {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         // the remote implementations lay out storage for the loan chain's proxy lineages; a copy
