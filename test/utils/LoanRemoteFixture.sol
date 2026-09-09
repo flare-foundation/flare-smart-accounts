@@ -211,6 +211,11 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         return IComposeTransportFacet.Transport(address(endpoint), address(oft), ORIGIN_EID, originPeer);
     }
 
+    // the deadlines below read `vm.getBlockTimestamp()` rather than `block.timestamp`: via-IR
+    // evaluates the latter once per test function, so a builder called after a warp would stamp
+    // a deadline from before it and the packet would arrive already expired - silently taking
+    // the terminal-skip path instead of the one the test meant to exercise
+    // solhint-disable-next-line ordering
     function _borrow(
         bytes32 _id,
         uint256 _amount
@@ -223,7 +228,7 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
             ACTION_BORROW,
             abi.encode(
                 _id,
-                uint64(block.timestamp + 1 hours),
+                uint64(vm.getBlockTimestamp() + 1 hours),
                 DESTINATION_KIND_EVM,
                 bytes32(uint256(uint160(parent))),
                 _amount,
@@ -243,7 +248,7 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         return abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
-            abi.encode(_id, uint64(block.timestamp + 1 hours), _amount, _floor, bytes(hex"0003"))
+            abi.encode(_id, uint64(vm.getBlockTimestamp() + 1 hours), _amount, _floor, bytes(hex"0003"))
         );
     }
 
