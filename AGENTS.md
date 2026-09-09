@@ -289,7 +289,12 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
   - `test/invariants/`: stateful invariant campaigns, bounded and with a fixed seed; a smoke test pins that every
     handler path executes.
   - `test/fuzz/`: property tests, each stated as the spec's formula computed independently of the contract.
-  - `test/integration/`: suites against real deployed contracts on a pinned mainnet fork. They skip themselves
+  - `test/integration/`: suites against contracts we did not write — either real deployed ones on a pinned mainnet
+    fork, or canonical ones deployed locally. `LoanSubaccountRemoteCanonicalCompose.t.sol` is the second kind: it
+    runs the loan account against LayerZero's own `MessagingComposer` (`contracts/mock/CanonicalComposeEndpoint.sol`
+    is that contract verbatim plus an `eid` getter), because the compose queue's rules are relied on rather than
+    implemented. Both files are `--skip`ped by `pnpm coverage`: LayerZero's composer does not compile with the
+    optimizer disabled, which is how `forge coverage` builds. The fork suites skip themselves
     unless the network they need is configured, so an offline run is inert rather than failing;
     `LoanSubaccountRemoteMorphoFork.t.sol` needs `ETHEREUM_RPC_URL` to name an endpoint that serves state at its
     pinned block (an archive read), and runs with

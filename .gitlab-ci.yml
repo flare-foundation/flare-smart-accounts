@@ -272,7 +272,7 @@ coverage:
   - forge install --no-git
   - forge build
   script:
-  - forge coverage --report summary --report lcov --no-match-test 'testProxyCreationCode(LengthMatchesFreshCompilation|MatchesFreshCompilationModuloMetadata)'
+  - pnpm coverage:forge
   artifacts:
     expire_in: 30 days
     paths:
