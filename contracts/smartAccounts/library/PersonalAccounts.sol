@@ -25,9 +25,14 @@ library PersonalAccounts {
     /**
      * @notice Frozen `PersonalAccountProxy` creation bytecode used for per-account CREATE2 derivation.
      *
-     * Equal to `type(PersonalAccountProxy).creationCode` as compiled at commit `2abb115` (the
-     * source commit used for the live Flare deployment on 2026-02-13). Burned in as a constant
-     * so the CREATE2 input is invariant across rebuilds.
+     * Equal to `type(PersonalAccountProxy).creationCode` as compiled at commit `2abb115` with
+     * solc 0.8.30 (the source commit used for the live Flare deployment on 2026-02-13). Burned in
+     * as a constant so the CREATE2 input is invariant across rebuilds.
+     *
+     * A current build differs in the CBOR metadata trailer alone — the compiler is now 0.8.35 and
+     * the proxy's own source has since been reformatted — so reproducing these exact bytes needs
+     * those historical inputs. What must keep holding is that the functional bytes still match the
+     * proxy source, which the tests named below assert on every pipeline.
      *
      * Why not `type(PersonalAccountProxy).creationCode`:
      *   Solc resolves that constant at compile time and inlines the proxy's full creation bytecode,
