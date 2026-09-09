@@ -447,17 +447,10 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         uint256 feeBefore = ILoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18;
         assertGt(feeBefore, 0, "a fee accrued over the warp, so there is a claim to secure");
 
-        // accrue first, so the totals read here are the ones the liquidation itself will use,
-        // and the two conversions below can be computed rather than inferred from its return
+        // accrue first, so the totals the conversions read are the ones the liquidation will use
         morpho.accrueInterest(params);
-        (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) = morpho.market(_marketId());
         uint128 shares = _shares();
-        uint256 sharesDown = Math.mulDiv(
-            shares,
-            uint256(totalBorrowAssets) + MorphoMath.VIRTUAL_ASSETS,
-            uint256(totalBorrowShares) + MorphoMath.VIRTUAL_SHARES
-        );
-        uint256 sharesUp = MorphoMath.toAssetsUp(shares, totalBorrowAssets, totalBorrowShares);
+        (uint256 sharesDown, uint256 sharesUp) = _assetsForShares(shares);
         (uint256 seized, uint256 repaid) = _liquidateRepayingShares(shares);
 
         assertEq(_debt(), 0, "the whole debt is closed");
@@ -484,10 +477,12 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
             "the residue is the incentive's complement"
         );
         // the claim survives the liquidation: still owed, and still with collateral under it
-        ILoanSubaccountRemote.LoanPosition memory after_ =
-            ILoanSubaccountRemote(address(account)).getLoanPosition();
-        assertGe(after_.feeDebtX18, feeBefore, "the fee claim is untouched by the liquidation");
-        assertGt(after_.collateralValue, 0, "and it is no longer a junior claim on nothing");
+        {
+            ILoanSubaccountRemote.LoanPosition memory after_ =
+                ILoanSubaccountRemote(address(account)).getLoanPosition();
+            assertGe(after_.feeDebtX18, feeBefore, "the fee claim is untouched by the liquidation");
+            assertGt(after_.collateralValue, 0, "and it is no longer a junior claim on nothing");
+        }
     }
 
     /**
@@ -931,6 +926,24 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         );
         assertEq(_debt(), debtBefore, "a refused action must change nothing");
         assertEq(_collateral(), collateralBefore, "a refused action must change nothing");
+    }
+
+    /// @dev What canonical Morpho converts `_shareCount` to, both ways, off the accrued totals:
+    /// it computes a seizure from the assets rounded DOWN and the payment from the same shares
+    /// rounded UP, so the two are separate numbers and the test asserts each against its own.
+    function _assetsForShares(
+        uint128 _shareCount
+    )
+        private view
+        returns (uint256 _down, uint256 _up)
+    {
+        (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) = morpho.market(_marketId());
+        _down = Math.mulDiv(
+            _shareCount,
+            uint256(totalBorrowAssets) + MorphoMath.VIRTUAL_ASSETS,
+            uint256(totalBorrowShares) + MorphoMath.VIRTUAL_SHARES
+        );
+        _up = MorphoMath.toAssetsUp(_shareCount, totalBorrowAssets, totalBorrowShares);
     }
 
     /// @dev The period a checkpoint just billed, when the principal sits above the live debt:
