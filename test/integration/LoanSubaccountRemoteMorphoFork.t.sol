@@ -367,6 +367,68 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     }
 
     /**
+     * @dev SA-06's accepted risk, measured on the real market. The cover gate values collateral
+     * at the market's own oracle and `IOracle` is `price()` alone - no round, no timestamp - so a
+     * price that is stale high, or manipulated high, is simply believed. The gate then permits a
+     * withdrawal it would refuse at the true price, and the Flare fee is left standing on
+     * collateral worth less than `requiredCover`.
+     *
+     * This is not a disagreement with Morpho: both read the same feed, so Morpho's own health
+     * check is fooled identically and the position stays borrowable. That is why the acceptance
+     * is a judgement about the feed rather than something the gate can defend, and why the
+     * mitigation is an off-chain review of the oracle, recorded before launch.
+     */
+    function testAStaleHighOracleLetsTheFeeClaimExitUnderSecured() public onlyForked {
+        _openOnTheRealMarket(COLLATERAL, 5_000e18);
+        vm.warp(block.timestamp + ORACLE_WINDOW);
+        uint256 truePrice = IOracle(MARKET_ORACLE).price();
+        uint256 honestMax = ILoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw;
+        assertGt(honestMax, 0, "some withdrawal is allowed at the true price");
+
+        // the feed prints twice the real price - stale from a spike, or pushed there
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(2 * truePrice));
+        uint256 inflatedMax = ILoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw;
+        assertGt(inflatedMax, honestMax, "the inflated price buys a larger exit");
+
+        // that same withdrawal, delivered at the honest price, is refused by the gate itself -
+        // asserted on the packet rather than on the preview, since the preview is a separate path
+        // and a broken gate would still quote correctly. Asked here rather than after the fact,
+        // because once the exit has happened every further withdrawal is refused anyway
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(truePrice));
+        ILoanSubaccountRemote.WithdrawPreview memory honest =
+            ILoanSubaccountRemote(address(account)).previewWithdraw(inflatedMax);
+        assertFalse(honest.coverSatisfied, "the true price does not support it");
+        _deliverExpectingRefusal(
+            9,
+            _withdraw(bytes32("honest"), inflatedMax, 0),
+            RETURN_VALUE,
+            honest.requiredCover,
+            honest.remainingValue
+        );
+
+        // the very same withdrawal under the inflated price is not refused at all: it executes
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(2 * truePrice));
+        _deliver(10, 0, _withdraw(bytes32("stale-high"), inflatedMax, 0), RETURN_VALUE);
+        assertEq(_collateral(), COLLATERAL - inflatedMax, "the collateral left on the inflated price");
+
+        // back at the true price, what remains no longer covers what the gate demands
+        vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(truePrice));
+        ILoanSubaccountRemote.LoanPosition memory position =
+            ILoanSubaccountRemote(address(account)).getLoanPosition();
+        assertGt(position.feeDebtX18, 0, "there is a fee claim to leave under-secured");
+        assertLt(
+            position.collateralValue,
+            position.requiredCover,
+            "the position the gate just permitted is under its own cover requirement"
+        );
+        assertGt(
+            position.requiredCover - position.collateralValue,
+            1e18,
+            "and the shortfall is real value, not a rounding edge"
+        );
+    }
+
+    /**
      * @dev The junior claim's premise, on the real market. A liquidation that closes the whole
      * debt at Morpho's own edge does not take the whole collateral, so the Flare fee still has
      * something to stand on afterwards. The residue is the incentive's complement: at the edge
