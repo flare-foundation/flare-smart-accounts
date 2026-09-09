@@ -1268,6 +1268,90 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 100e6);
     }
 
+    function testBorrowRefusesAnyDeliveredComposeValue() public {
+        // the borrow does not opt into compose value, so the base rejects a delivery carrying
+        // any - one wei is enough. Pinned on the borrow specifically because the floor field
+        // now lives in its payload: were `ACTION_BORROW` ever added to `_acceptsComposeValue`
+        // without also handling the native, an EVM disbursement with a zero floor would be
+        // allowed to arrive with value that this path never spends and the account cannot
+        // recover. This assertion is what fails first if that happens
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        (bytes memory message, bytes32 guid) = _composeMessage(
+            subaccount, 1, 100e6,
+            _borrowPayload(
+                bytes32("op-1"), DESTINATION_KIND_EVM,
+                bytes32(uint256(uint160(makeAddr("dest")))), 300e18
+            )
+        );
+
+        vm.deal(lzEndpoint, 1 ether);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
+        ILoanSubaccountRemote(subaccount).lzCompose{value: 1}(
+            address(fxrpOft), guid, message, executor, ""
+        );
+    }
+
+    function testBorrowRefusesADeliveryValueFloorOnTheEvmKind() public {
+        // the floor is reserved for a kind that pays for its own onward delivery; the EVM
+        // disbursement spends nothing here, so a payload naming one is malformed. The Flare
+        // sender refuses the same instruction before the bridge fee, so this can only arrive
+        // hand-built - which is exactly what the frozen schema has to be pinned against
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        _deliverExpectRevert(
+            subaccount, 1,
+            _borrowPayloadWithFloor(bytes32("op-1"), _soon(), DESTINATION_KIND_EVM, _dest(), 1),
+            ILoanSubaccountRemote.UnexpectedDeliveryValueFloor.selector
+        );
+    }
+
+    function testBorrowFloorIsCheckedBeforeEveryConsumingBranch() public {
+        // the floor comes before every branch that finalizes the packet, exactly as in the
+        // withdraw. Two orderings are pinned here, because both are silent if it slips:
+        // it precedes the destination-kind judgement (which happens downstream at the
+        // disbursement), so an underfunded packet is refused for the missing value; and it
+        // precedes the terminal gates, so an underfunded delivery of an ALREADY-CONSUMED id
+        // reverts and stays retriable instead of being finalized as a duplicate skip
+        address subaccount = _createConfiguredSubaccount();
+        bytes32 operationId = bytes32("op-1");
+        fxrp.mint(subaccount, 100e6);
+        _deliverExpectRevert(
+            subaccount, 1,
+            _borrowPayloadWithFloor(
+                operationId, _soon(), DESTINATION_KIND_XRPL_WORMHOLE, _dest(), 1 ether
+            ),
+            abi.encodeWithSelector(ILoanSubaccountRemote.InsufficientDeliveryValue.selector, 1 ether)
+        );
+
+        // consume the id with a real borrow, then re-deliver the underfunded packet: the floor
+        // still refuses it, rather than the terminal gate skipping it away
+        _deliver(subaccount, 2, 100e6, _borrowPayload(
+            operationId, DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))), 300e18
+        ));
+        _deliverExpectRevert(
+            subaccount, 3,
+            _borrowPayloadWithFloor(
+                operationId, _soon(), DESTINATION_KIND_XRPL_WORMHOLE, _dest(), 1 ether
+            ),
+            abi.encodeWithSelector(ILoanSubaccountRemote.InsufficientDeliveryValue.selector, 1 ether)
+        );
+    }
+
+    function testBorrowRejectsTheRetiredFiveWordPayload() public {
+        // `abi.decode` tolerates trailing data for a static tuple, so a round trip alone would
+        // still pass against a stale five-word decoder. This pins the other direction: the
+        // six-word schema is required, and the retired shape no longer decodes
+        address subaccount = _createConfiguredSubaccount();
+        fxrp.mint(subaccount, 100e6);
+        (bytes memory message, bytes32 guid) =
+            _composeMessage(subaccount, 1, 100e6, _borrowPayloadFiveWords(bytes32("op-1"), _soon(), _dest()));
+        vm.prank(lzEndpoint);
+        vm.expectRevert();
+        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+    }
+
     function testExternalLiquidationTurnsBalanceIntoSurplus() public {
         // debt is read live from Morpho on every check - nothing is cached, so an external
         // liquidation is visible to the very next call: the position is closed, repay has
@@ -4374,7 +4458,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(sender, 100e6);
         vm.prank(parentPersonalAccount);
         ILoanSubaccount(sender).borrow{value: 0.01 ether}(
-            100e6, 50e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(parentPersonalAccount))),
+            100e6, 50e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(parentPersonalAccount))), 0,
             bytes32("op-b"), deadline, ""
         );
         (uint256 amountLD, bytes memory payload) = _lastSentCompose();
@@ -4988,6 +5072,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
     }
 
+    /// An hour out - the deadline the payload builders use.
+    function _soon() private returns (uint64) {
+        return uint64(vm.getBlockTimestamp() + 1 hours);
+    }
+
+    /// The stock disbursement destination for the payload-shape tests.
+    function _dest() private returns (bytes32) {
+        return bytes32(uint256(uint160(makeAddr("dest"))));
+    }
+
     function _borrowPayload(
         bytes32 _operationId,
         uint8 _destinationKind,
@@ -5200,7 +5294,46 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         return abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_BORROW,
-            abi.encode(_operationId, _deadline, _destinationKind, _destination, _borrowAmount)
+            abi.encode(
+                _operationId, _deadline, _destinationKind, _destination, _borrowAmount, uint256(0)
+            )
+        );
+    }
+
+    /// A borrow payload naming a delivery-value floor - which no kind V1 supports may do.
+    function _borrowPayloadWithFloor(
+        bytes32 _operationId,
+        uint64 _deadline,
+        uint8 _destinationKind,
+        bytes32 _destination,
+        uint256 _minComposeValue
+    )
+        private pure
+        returns (bytes memory)
+    {
+        return abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_BORROW,
+            abi.encode(
+                _operationId, _deadline, _destinationKind, _destination, uint256(500e18),
+                _minComposeValue
+            )
+        );
+    }
+
+    /// The retired five-word borrow payload, for the pin that the decoder rejects it.
+    function _borrowPayloadFiveWords(
+        bytes32 _operationId,
+        uint64 _deadline,
+        bytes32 _destination
+    )
+        private pure
+        returns (bytes memory)
+    {
+        return abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_BORROW,
+            abi.encode(_operationId, _deadline, DESTINATION_KIND_EVM, _destination, uint256(500e18))
         );
     }
 

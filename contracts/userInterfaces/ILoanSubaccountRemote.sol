@@ -5,7 +5,9 @@ import {IComposeReceiverAccountBase} from "./IComposeReceiverAccountBase.sol";
 import {ISubaccount} from "./ISubaccount.sol";
 
 /// @dev Borrow action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`. The market is not a
+/// uint8 destinationKind, bytes32 destination, uint256 borrowAmount, uint256 minComposeValue)`.
+/// The floor is reserved for a destination kind that pays for its own onward delivery;
+/// `DESTINATION_KIND_EVM` must leave it zero ({UnexpectedDeliveryValueFloor}). The market is not a
 /// payload field: the account type fixes it (write-once), so the subaccount address itself
 /// commits to the pool. The account's whole idle FXRP balance - the authenticated bridged amount
 /// (the codec's `amountLD`) plus any residue - becomes collateral (a zero amount with nothing idle
@@ -559,6 +561,15 @@ interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
     error UnsupportedDestinationKind(
         uint8 destinationKind
     );
+
+    /**
+     * @notice Reverts on a borrow that names a delivery-value floor for a destination kind that
+     * spends no compose value on this chain. Every kind V1 supports disburses without spending
+     * value, so the floor must be zero; the field is reserved in the frozen payload for a kind
+     * that pays for its own onward delivery. The Flare sender refuses the same instruction
+     * before any bridge fee is paid.
+     */
+    error UnexpectedDeliveryValueFloor();
 
     /**
      * @notice Reverts on a borrow disbursement destination that is not a clean zero-padded

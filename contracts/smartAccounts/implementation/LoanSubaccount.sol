@@ -33,6 +33,7 @@ contract LoanSubaccount is ILoanSubaccount, BridgingSubaccountBase {
         uint256 _borrowAmount,
         uint8 _destinationKind,
         bytes32 _destination,
+        uint256 _minComposeValue,
         bytes32 _operationId,
         uint64 _deadline,
         bytes calldata _extraOptions
@@ -43,7 +44,8 @@ contract LoanSubaccount is ILoanSubaccount, BridgingSubaccountBase {
     {
         // mirror the remote static checks before paying the bridge fee. V1 supports only a
         // clean, non-zero EVM destination other than this subaccount (the parent - the user's
-        // own loan-chain account - is a valid target)
+        // own loan-chain account - is a valid target), and that destination spends no compose
+        // value on arrival, so it may not name a delivery-value floor
         {
             address destinationAddress = address(uint160(uint256(_destination)));
             require(
@@ -51,6 +53,7 @@ contract LoanSubaccount is ILoanSubaccount, BridgingSubaccountBase {
                     _deadline >= block.timestamp &&
                     _borrowAmount > 0 &&
                     _destinationKind == DESTINATION_KIND_EVM &&
+                    _minComposeValue == 0 &&
                     uint256(_destination) >> 160 == 0 &&
                     destinationAddress != address(0) &&
                     destinationAddress != address(this),
@@ -60,7 +63,9 @@ contract LoanSubaccount is ILoanSubaccount, BridgingSubaccountBase {
         bytes memory payload = abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_BORROW,
-            abi.encode(_operationId, _deadline, _destinationKind, _destination, _borrowAmount)
+            abi.encode(
+                _operationId, _deadline, _destinationKind, _destination, _borrowAmount, _minComposeValue
+            )
         );
         (uint32 destinationEid, bytes32 guid) =
             _bridgeToSelf(_collateralAmount, _extraOptions, payload);

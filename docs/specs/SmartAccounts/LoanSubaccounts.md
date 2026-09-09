@@ -167,7 +167,7 @@ subaccount the FXRP came from.
 
 The forward moves are the **loan
 instructions**: `borrow(collateralAmount, borrowAmount, destinationKind, destination,
-operationId, deadline, extraOptions)`, `depositCollateral(amount, extraOptions)` and
+minComposeValue, operationId, deadline, extraOptions)`, `depositCollateral(amount, extraOptions)` and
 `withdraw(amount, operationId, deadline, options)` and `cancel(operationId, extraOptions)`: typed methods that
 build the compose payload
 **on-chain** and bridge it to this account's own address on the loan chain, where the
@@ -536,7 +536,8 @@ address itself commits to the pool:
 - **`ACTION_BORROW`** supplies **the account's whole idle FXRP balance** (the packet's credit
   and any residue — every FXRP on this account is the user's own and has one route, the
   position) as collateral, if any, and borrows `borrowAmount` (non-zero) against the account's own position,
-  paying the destination — EVM kind only, clean zero-padded address, Wormhole kind reserved. As a
+  paying the destination — EVM kind only, clean zero-padded address, Wormhole kind reserved, and
+  with it the payload's `minComposeValue`, which that kind must leave at zero. As a
   debt increase it is pause-gated, subject to the per-type borrow switch, and gated on the fee:
   unconfigured fee terms revert retriably (`FeeTermsNotConfigured`), the loan is priced at the
   type's terms current at delivery (see the front-end requirement under The Flare fee), and the
@@ -1171,8 +1172,18 @@ terms accrue zero, and debt presupposes the borrow gate passed).
 
 **The frozen V1 wire schemas (exact types and ordering):**
 
-- Borrow action data, unchanged from before the fee: `abi.encode(bytes32 operationId,
-  uint64 deadline, uint8 destinationKind, bytes32 destination, uint256 borrowAmount)`.
+- Borrow action data: `abi.encode(bytes32 operationId, uint64 deadline, uint8 destinationKind,
+  bytes32 destination, uint256 borrowAmount, uint256 minComposeValue)`. The floor is **reserved**:
+  every kind V1 supports disburses without spending compose value on the loan chain, so
+  `DESTINATION_KIND_EVM` requires it to be zero and both sides refuse a non-zero one (the Flare
+  sender with `InvalidLoanInstruction` before the bridge fee, the loan chain with
+  `UnexpectedDeliveryValueFloor`). It exists so a kind that pays for its own onward delivery —
+  the reserved Wormhole-to-XRPL one — can be enabled by upgrading the implementations and setting
+  governance parameters, rather than by changing the wire schema. That is a reduction in what a
+  later change has to move, not a guarantee that no other signed field will be needed. Its
+  meaning, once such a kind exists, is the withdraw's, and it is enforced the same way: checked
+  before every branch that finalizes the packet, so an underfunded delivery reverts retriably
+  instead of consuming the instruction.
 - Withdraw action data, unchanged from before the fee: `abi.encode(bytes32 operationId,
   uint64 deadline, uint256 amount, uint256 minComposeValue, bytes returnOptions)`.
 - Deposit-collateral action data: empty (`bytes("")`; the operation id and deadline it once

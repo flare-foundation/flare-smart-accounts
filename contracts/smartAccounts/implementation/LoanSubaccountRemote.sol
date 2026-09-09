@@ -323,6 +323,12 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// @dev The withdraw action spends compose value in the same call - the return leg's
     /// LayerZero fee, with the excess pushed to the parent - so it opts in; every
     /// other action must not carry value (a mistaken delivery stays retriable without it).
+    /// @dev Adding `ACTION_BORROW` here is what enables a destination kind that pays for its own
+    /// onward delivery, and it must account for the native in three places, not one: a
+    /// SUCCESSFUL EVM disbursement would then be allowed to carry value it never spends (this
+    /// path leaves native untouched, and the account has no rail to recover it, so that value
+    /// must be refused or refunded), a terminal skip already sweeps to the parent, and whatever
+    /// the onward delivery leaves unspent must go the same way.
     function _acceptsComposeValue(
         uint8 _action
     )
@@ -367,14 +373,28 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
             uint64 deadline,
             uint8 destinationKind,
             bytes32 destination,
-            uint256 borrowAmount
-        ) = abi.decode(_actionData, (bytes32, uint64, uint8, bytes32, uint256));
+            uint256 borrowAmount,
+            uint256 minComposeValue
+        ) = abi.decode(_actionData, (bytes32, uint64, uint8, bytes32, uint256, uint256));
         require(borrowAmount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
+        // the floor is reserved for a kind that pays for its own onward delivery; the EVM
+        // disbursement spends nothing here, so naming one is a malformed instruction (the
+        // Flare sender refuses it too, before the bridge fee)
+        if (destinationKind == DESTINATION_KIND_EVM) {
+            require(minComposeValue == 0, UnexpectedDeliveryValueFloor());
+        }
+        // the signed delivery floor comes before every consuming branch, as in the withdraw:
+        // delivery is permissionless and the value unauthenticated, so a below-floor delivery
+        // must revert and stay retriable rather than consume the packet with the prepaid value
+        // undelivered. No kind V1 supports carries value, so today this can only refuse a
+        // packet naming a floor for a kind that is unsupported anyway
+        require(msg.value >= minComposeValue, InsufficientDeliveryValue(minComposeValue));
         // terminal gates come first, so a duplicate or expired delivery finalizes even when
         // borrowing is disabled or the market is not yet registered, instead of reverting
-        // forever
+        // forever; its value must not strand on an account with no native rail
         if (_skipped(operationId, deadline, _guid)) {
+            _sweepValueToParent(msg.value);
             return;
         }
         // a debt increase respects the pause and the per-type borrow switch

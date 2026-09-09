@@ -110,7 +110,8 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * @notice Reverts on a loan instruction whose arguments cannot execute on the loan chain:
      * a zero operation id or a deadline already passed (borrow and withdraw), a zero borrow,
      * deposit or withdrawal amount, a borrow disbursement that is not a clean non-zero EVM address other than
-     * this account, or a withdraw with a zero delivery-value floor. Checked here, before any
+     * this account, a borrow naming a delivery-value floor for a destination kind that cannot
+     * spend value, or a withdraw with a zero delivery-value floor. Checked here, before any
      * bridge fee is paid.
      */
     error InvalidLoanInstruction();
@@ -139,6 +140,18 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * @param _destinationKind The disbursement destination kind (`DESTINATION_KIND_*`).
      * @param _destination The disbursement destination (a clean zero-padded EVM address for
      * `DESTINATION_KIND_EVM`).
+     * @param _minComposeValue The delivery-value floor for a destination kind that spends
+     * compose value on the loan chain, in the loan chain's native token. Reserved: every kind V1
+     * supports disburses without spending value, so `DESTINATION_KIND_EVM` requires zero and a
+     * non-zero floor is refused here, before any bridge fee. It exists in the frozen V1 payload
+     * to reduce what enabling a kind that does pay for its own onward delivery has to move -
+     * implementations and governed parameters rather than the wire schema. It does not
+     * guarantee that: a floor protects delivery funding and settles nothing about quote
+     * validity, a spending cap, or an XRPL destination tag, so a kind needing any of those
+     * still arrives as a new payload version. Its meaning, once such a kind
+     * exists, is the withdraw's: the loan chain refuses any delivery of this borrow - execution
+     * and terminal skip alike - carrying less than this, so a front-run with less cannot consume
+     * the packet and burn the prepaid value.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
      * Keep it short (under an hour): the loan is priced at the type's fee terms current at
@@ -151,6 +164,7 @@ interface ILoanSubaccount is IBridgingSubaccount {
         uint256 _borrowAmount,
         uint8 _destinationKind,
         bytes32 _destination,
+        uint256 _minComposeValue,
         bytes32 _operationId,
         uint64 _deadline,
         bytes calldata _extraOptions

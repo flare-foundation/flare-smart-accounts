@@ -226,7 +226,8 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
                 uint64(block.timestamp + 1 hours),
                 DESTINATION_KIND_EVM,
                 bytes32(uint256(uint160(parent))),
-                _amount
+                _amount,
+                uint256(0)
             )
         );
     }

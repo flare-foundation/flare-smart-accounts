@@ -2114,7 +2114,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            amount, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, extraOptions
+            amount, 500e18, DESTINATION_KIND_EVM, destination, 0, bytes32("op-1"), deadline,
+            extraOptions
         );
 
         // exactly the signed amount left; the adapter locked it; no standing approval remains
@@ -2138,7 +2139,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ACTION_BORROW,
                 abi.encode(
                     bytes32("op-1"), deadline, DESTINATION_KIND_EVM, destination,
-                    uint256(500e18)
+                    uint256(500e18), uint256(0)
                 )
             )
         );
@@ -2156,7 +2157,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))),
+            0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))), 0,
             bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
 
@@ -2176,12 +2177,13 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.deal(personalAccount, messagingFee);
         vm.prank(personalAccount);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(personalAccount))),
+            0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(personalAccount))), 0,
             bytes32("op-1"), uint64(block.timestamp + 1 hours), ""
         );
         (,,,,, bytes memory composeMsgSent,) = fxrpOft.lastSendParam();
         (, , bytes memory actionData) = abi.decode(composeMsgSent, (uint8, uint8, bytes));
-        (, , , bytes32 destination, ) = abi.decode(actionData, (bytes32, uint64, uint8, bytes32, uint256));
+        (, , , bytes32 destination, , ) =
+            abi.decode(actionData, (bytes32, uint64, uint8, bytes32, uint256, uint256));
         assertEq(destination, bytes32(uint256(uint160(personalAccount))));
     }
 
@@ -2366,7 +2368,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // nothing to collateralize or borrow
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            100e6, 0, DESTINATION_KIND_EVM, destination, bytes32("op-1"), deadline, ""
+            100e6, 0, DESTINATION_KIND_EVM, destination, 0, bytes32("op-1"), deadline, ""
         );
         // deposit: zero amount (it carries no operation id and no deadline to check)
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
@@ -2375,21 +2377,28 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // the subaccount itself
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, 2, destination, bytes32("op-1"), deadline, ""
+            0, 300e18, 2, destination, 0, bytes32("op-1"), deadline, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, DESTINATION_KIND_EVM, bytes32(0), bytes32("op-1"), deadline, ""
+            0, 300e18, DESTINATION_KIND_EVM, bytes32(0), 0, bytes32("op-1"), deadline, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(subaccount))),
+            0, 300e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(subaccount))), 0,
             bytes32("op-1"), deadline, ""
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         ILoanSubaccount(subaccount).borrow{value: messagingFee}(
-            0, 300e18, DESTINATION_KIND_EVM, destination | bytes32(uint256(1) << 200),
+            0, 300e18, DESTINATION_KIND_EVM, destination | bytes32(uint256(1) << 200), 0,
             bytes32("op-1"), deadline, ""
+        );
+        // the EVM disbursement spends no compose value on arrival, so naming a delivery-value
+        // floor is malformed - the field is reserved in the frozen payload for a kind that pays
+        // for its own onward delivery
+        vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
+        ILoanSubaccount(subaccount).borrow{value: messagingFee}(
+            0, 300e18, DESTINATION_KIND_EVM, destination, 1, bytes32("op-1"), deadline, ""
         );
         // a zero withdrawal
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
@@ -2444,7 +2453,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             data: abi.encodeCall(
                 ILoanSubaccount.borrow,
                 (
-                    100e6, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"),
+                    100e6, 500e18, DESTINATION_KIND_EVM, destination, 0, bytes32("op-1"),
                     deadline, _canonicalLoanOptions()
                 )
             )
@@ -2460,7 +2469,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
                 ACTION_BORROW,
                 abi.encode(
                     bytes32("op-1"), deadline, DESTINATION_KIND_EVM, destination,
-                    uint256(500e18)
+                    uint256(500e18), uint256(0)
                 )
             )
         );
@@ -2498,7 +2507,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             data: abi.encodeCall(
                 ILoanSubaccount.borrow,
                 (
-                    loanAmount, 500e18, DESTINATION_KIND_EVM, destination, bytes32("op-1"),
+                    loanAmount, 500e18, DESTINATION_KIND_EVM, destination, 0, bytes32("op-1"),
                     deadline, _canonicalLoanOptions()
                 )
             )
