@@ -25,6 +25,8 @@ contract PinnedInitCodeTest is Test {
     /// these exact Personal Account and loan subaccount addresses on every chain. Computed
     /// from the frozen proxy creation codes; any drift in the derivation inputs breaks this.
     string private constant GOLDEN_XRPL_OWNER = "rGoldenVectorXrplOwner";
+    /// @dev The live Coston2 controller, for the SA-02 divergence vector below.
+    address private constant COSTON2_CONTROLLER = 0x434936d47503353f06750Db1A444DBDC5F0AD37c;
     address private constant GOLDEN_PERSONAL_ACCOUNT = 0x3A5AE0e715593e617b74B0f4705C3934b0116B3c;
     /// @dev Re-derived 2026-09-09 for the release-build refreeze (pre-deployment; previously
     /// re-derived for the `implementationForType` and `SubaccountProxy` renames). The Personal
@@ -141,6 +143,77 @@ contract PinnedInitCodeTest is Test {
         );
     }
 
+    function testCoston2LegacyAccountsDivergeFromTheFrozenDerivation() public pure {
+        // The real SA-02 vector. These seven Coston2 Personal Accounts were created inside the
+        // ~21-hour window between the drift cut (block 30,673,186) and the frozen-code cut
+        // (block 30,706,139) on 2026-05-18/19, while rebuilt proxy creation code still drifted.
+        // Their registered addresses are therefore NOT what the frozen derivation produces, so
+        // their own chain resolves them from the registry while every other chain resolves the
+        // canonical address, so the same owner's loan subaccount is a different address depending
+        // on which side you ask - which is the harm, and what the last assertion below pins.
+        //
+        // The owner strings are read from each account's own `xrplOwner()` on chain, not copied
+        // from the audit report: the report has a typo in two of them (a dropped `b` and an `H`
+        // for an `X`), and a fixture built from those would compute the wrong canonical address
+        // and pass for the wrong reason. Both columns were re-read from the live controller on
+        // 2026-09-09: every owner resolves to the registered address below, and every account's
+        // own `xrplOwner()` returns the string beside it.
+        //
+        // This records the state BEFORE the migration. Coston2's deployment cut migrates these
+        // seven (`deployment/RUNBOOK.md`, step A2), after which the registry returns the
+        // canonical column and the divergence is gone - so when that runs, this fixture becomes
+        // the historical record and the assertion worth having is the opposite one.
+        // cspell:disable
+        string[7] memory owners = [
+            "r9kDHXyZtWdrSS9kqrKDyVZpBL1cNPUMDp",
+            "rffefbMdSErjUx7yypqFBLqG9KAiWF7oAS",
+            "rMWwsp6niSFQgcz3qFXHouBYKRC68uFkiE",
+            "rnjaMZk1WnhrAybKiSDG76g4nAJMJZqQTE",
+            "rPqPX9YqvZbaRQFDT727w5VK4WQYBdCawy",
+            "riWhZWop39qCFCbGN8jVczP8RESZdbxPA",
+            "rKtZkxRAdjyr7GGDqZ9SdcgXNwjMAdKuvx"
+        ];
+        // cspell:enable
+        address[7] memory registered = [
+            0xD2802Df078aa70cAd5e2Af91b636D9E858d1f82c,
+            0xfe42AfE6DB37fDe64169c1265496221E72e31310,
+            0x761e930e5A236C2C77AE61851Be5e3bBB57b6859,
+            0x73cF1052Cb71b6EA23C19b3b31910D44E42064Ac,
+            0x256962b5Dbbb4c338D4AC9A83608701438CC714D,
+            0x60B626f0cBfc2884cFfb2D6c4856a5Dc6137C84E,
+            0xbE6Bd4ee2967156699aD675F484529a90f6f9244
+        ];
+        address[7] memory canonical = [
+            0x17B8436c8C3750fCa14e19D4ce7231a1277E48F8,
+            0x3897a3bc14Dc2e64493A7a2A60Ae0D7797F0b768,
+            0xA97967A5D61e636c4cE1c437dbB63a826d7c6AA6,
+            0x2E5dA7Ff9d99a9E1c5A18a915E32b56DBd5DCb2d,
+            0x57ea8cd1A443d587c7111692D77C1e26b5f20dEb,
+            0x71e4DD5a7a9bcCC04790ddc3c6D154dd50BA6eb7,
+            0x089AEa01C5b4139aFbe01d019E1ac638663EF8dA
+        ];
+
+        for (uint256 i = 0; i < owners.length; i++) {
+            address computed = Create2.computeAddress(
+                PinnedControllerInitCode.SALT,
+                keccak256(
+                    abi.encodePacked(
+                        PersonalAccounts.PROXY_CREATION_CODE,
+                        abi.encode(COSTON2_CONTROLLER, owners[i])
+                    )
+                ),
+                PinnedControllerInitCode.SINGLETON_FACTORY
+            );
+            assertEq(computed, canonical[i], "canonical Personal Account drifted");
+            assertNotEq(computed, registered[i], "this owner is no longer a divergence case");
+            assertNotEq(
+                _coston2Subaccount(computed),
+                _coston2Subaccount(registered[i]),
+                "the two parents must derive different subaccounts"
+            );
+        }
+    }
+
     function _create(bytes memory _initCode) private returns (address _deployed) {
         // plain CREATE: the runtime hash is address-independent, so the CREATE2 factory is
         // not needed to verify what the pinned bytes deploy
@@ -200,5 +273,19 @@ contract PinnedInitCodeTest is Test {
             }
         }
         return false;
+    }
+
+    /// @dev The loan subaccount `_parent` derives on the Coston2 controller.
+    function _coston2Subaccount(address _parent) private pure returns (address) {
+        return Create2.computeAddress(
+            PinnedControllerInitCode.SALT,
+            keccak256(
+                abi.encodePacked(
+                    Subaccounts.PROXY_CREATION_CODE,
+                    abi.encode(COSTON2_CONTROLLER, _parent, SUBACCOUNT_TYPE_LOAN)
+                )
+            ),
+            PinnedControllerInitCode.SINGLETON_FACTORY
+        );
     }
 }
