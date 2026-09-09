@@ -308,7 +308,7 @@ registers its **own** implementation for the loan type. Flare registers
 [`LoanSubaccount`](../../../contracts/smartAccounts/implementation/LoanSubaccount.sol) (FAssets
 redemption pushed to the parent, the forward bridge); the loan chain (Ethereum, at
 launch) registers
-[`LoanSubaccountRemote`](../../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol).
+[`MorphoLoanSubaccountRemote`](../../../contracts/smartAccounts/implementation/MorphoLoanSubaccountRemote.sol).
 The implementation never enters the CREATE2 derivation, so the registration choice cannot move
 the address (a test pins this).
 
@@ -358,7 +358,7 @@ The account's configuration lives in two facets, both cut **only on the remote d
   the asymmetry is acceptable because on Flare the pause already gates every outbound move and
   the inbound redeem-home is harmless in direction.
 - **The loan markets**
-  ([`LoanMarketsFacet`](../../../contracts/smartAccounts/facets/LoanMarketsFacet.sol)), the
+  ([`MorphoLoanMarketsFacet`](../../../contracts/smartAccounts/facets/MorphoLoanMarketsFacet.sol)), the
   per-type binding: the timelocked `registerLoanMarket(type, market)` binds a subaccount type to
   one Morpho contract and market, **write-once** (see below). `collateralToken` must be the
   transport OFT's token — enforced, so the transport is configured first — while the loan token
@@ -417,7 +417,7 @@ multi-origin `acceptedOrigins[srcEid]` design deferred under Multiple remote cha
 Adding a remote chain is a deployment of existing bytecode plus governance, with nothing changing
 in what users sign or what clients build: bootstrap the diamond there from the pinned init code,
 cut the remote facet set, `setComposeTransport`, register the pool under a new type (the same
-`LoanSubaccountRemote` if it is Morpho; a new implementation otherwise), `setLoanFeeTerms`; then
+`MorphoLoanSubaccountRemote` if it is Morpho; a new implementation otherwise), `setLoanFeeTerms`; then
 on Flare `setSubaccountImplementation(type, <the Flare LoanSubaccount>)`, `setBridgeRoute` and
 `setSubaccountTypeRoute` — the route last, once the remote side exists. Clearing a route (zero
 peer) fails every type pointed at it and every user operation naming it closed until it is set
@@ -771,7 +771,7 @@ Three product decisions shape everything below:
 
 ### Terms and their lifecycle
 
-Per subaccount type, in [`LoanMarkets`](../../../contracts/smartAccounts/library/LoanMarkets.sol):
+Per subaccount type, in [`MorphoLoanMarkets`](../../../contracts/smartAccounts/library/MorphoLoanMarkets.sol):
 `feeFloor` and `feeSpread` (annual WAD rates, `1e18 = 100%`, each **enforced ≤ `1e18`** at set
 time, so no snapshotted rate can overflow the accrual math — a bad snapshot could not be
 repaired by changing the global terms, since the account computes at its stored terms first)
@@ -961,7 +961,7 @@ tokens against the same collateral.
   edge takes `lltv × LIF` of the collateral, about 82.7% at this market's 77% and ~1.0741, so
   roughly 17% is left standing under the fee claim, while a price low enough to exhaust the
   collateral writes the shortfall off as bad debt and leaves the claim unsecured
-  (`test/integration/LoanSubaccountRemoteMorphoFork.t.sol`). For `D = 1000`, `F = 70`: Morpho
+  (`test/integration/MorphoLoanSubaccountRemoteFork.t.sol`). For `D = 1000`, `F = 70`: Morpho
   allows the collateral down to 1299, the gate keeps 1710; debt repaid, 210. On the borrow side
   the same numbers read as a borrowing limit: a fresh position may borrow up to
   `V × LLTV / 1.155` of its collateral value — two thirds at 77%, where Morpho alone allowed 77%
@@ -1201,9 +1201,9 @@ linear base field (slot 0, `controllerAddress`; every other base field is namesp
 storage rule below), append-only; the frozen proxy and CREATE2 addresses are untouched. The loan chain is not
 deployed, so the fee **ships before the first live position** — no lazy-migration semantics
 needed. The fee touches **three coordinated surfaces**, and activation verifies the
-reviewed version of every one before any route opens: the remote `LoanSubaccountRemote`
+reviewed version of every one before any route opens: the remote `MorphoLoanSubaccountRemote`
 (accrual, gates, collection), the Flare `LoanSubaccount` (the extended borrow/withdraw
-payload encoders), and `LoanMarketsFacet` (the timelocked terms setter and the activation
+payload encoders), and `MorphoLoanMarketsFacet` (the timelocked terms setter and the activation
 marker). Activation order, distinguishing the two chains: on the remote diamond, the compose
 transport first (market registration already requires it), then the verified remote
 implementation, then `registerLoanMarket`, then `setLoanFeeTerms` (the activation; borrowing
@@ -1268,9 +1268,9 @@ as an authenticated LayerZero compose message sent by this same account on Flare
 subaccount's self-to-self trick applied to the PA family.
 
 **Naming.** Four words, one axis each. *Loan* is business-specific and stays only on what
-exists for the loan (`LoanSubaccount`, `LoanSubaccountRemote`, `LoanMarketsFacet`); *Remote*
+exists for the loan (`LoanSubaccount`, `MorphoLoanSubaccountRemote`, `MorphoLoanMarketsFacet`); *Remote*
 is location seen from Flare, the non-Flare implementation at the same address
-(`PersonalAccountRemote`, `LoanSubaccountRemote`); *Compose* is the ingress authentication
+(`PersonalAccountRemote`, `MorphoLoanSubaccountRemote`); *Compose* is the ingress authentication
 mechanism (`ComposeReceiverAccountBase` — and only that ingress, since the subaccounts also
 have parent-driven and public rails); *Bridging* is the Flare-side surface every type that
 bridges FXRP to its remote twin shares (`BridgingSubaccountBase`); *CrossChain* is the Flare-side send
@@ -1320,7 +1320,7 @@ core over its type's route, the permissionless `sweepRedeem`, the redeem-home co
 [`IBridgingSubaccount`](../../../contracts/userInterfaces/IBridgingSubaccount.sol)). The four
 implementations then hold only what is theirs: `PersonalAccount` its controller-driven methods,
 `PersonalAccountRemote` the signed batch execution, `LoanSubaccount` the four typed loan
-instruction encoders, `LoanSubaccountRemote` the Morpho actions and the fee engine. A Flare-local
+instruction encoders, `MorphoLoanSubaccountRemote` the Morpho actions and the fee engine. A Flare-local
 subaccount type (a vault subaccount) would extend `SubaccountBase` alone; a new bridging type,
 `BridgingSubaccountBase`. The storage rule the bases follow is in the pre-first-cut invariants.
 
@@ -1441,7 +1441,7 @@ diamond is owned by the historical `DiamondArgs.owner` EOA
 (`0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA`) — confirm that key is still controlled
 before relying on an Ethereum deployment. The Ethereum cut installs `SubaccountsFacet`,
 `TimelockFacet`, `PauseFacet`, `PersonalAccountsFacet` (the PA beacon and creation surface for the
-remote Personal Accounts), `ComposeTransportFacet` and `LoanMarketsFacet` through the standard cut flow, with
+remote Personal Accounts), `ComposeTransportFacet` and `MorphoLoanMarketsFacet` through the standard cut flow, with
 [`EthereumControllerInit`](../../../contracts/smartAccounts/facets/EthereumControllerInit.sol) as the
 cut's init: `MasterAccountControllerInit` is Flare-specific and is skipped, so this sets the four
 ERC-165 interface flags and nothing else (the executor, payment-proof and instruction-fee settings
@@ -1471,7 +1471,7 @@ gaining `minComposeValue` and `returnOptions` (the fee's signed bounds — borro
 a withdraw FXRP cap — were added and removed again inside the same pre-cut window), and the
 removal of the sweep-deposit action (id 4 retired, never reused; ids 1–3 unchanged). An environment that had
 shipped the old scheme would need a new payload version instead. The settings storage namespaces
-are fresh — `smartAccounts.ComposeTransport.State` and `smartAccounts.LoanMarkets.State` on the
+are fresh — `smartAccounts.ComposeTransport.State` and `smartAccounts.MorphoLoanMarkets.State` on the
 loan chain, and on Flare `smartAccounts.BridgeRoutes.State`, which replaced the earlier
 `smartAccounts.LoanBridgeSettings.State` outright (never cut, verified 2026-09-03 against the
 complete `DiamondCut` history of the controller — 3 cuts on flare, 3 on songbird, 8 on coston2,
@@ -1555,7 +1555,7 @@ but must be confirmed against the live contracts, together with the order of act
 
 - **implementation registration as a verified gate**: `setSubaccountImplementation(1, …)`
   and `setPersonalAccountImplementation(…)` must register exactly the reviewed
-  `LoanSubaccountRemote` and `PersonalAccountRemote` artifacts (runtime hashes verified
+  `MorphoLoanSubaccountRemote` and `PersonalAccountRemote` artifacts (runtime hashes verified
   before the timelocked calls, `implementationForType(1)` and the PA beacon's
   `implementation()` asserted after them), and this must complete before any account is
   advertised, funded, or the cross-chain route is enabled. The setters check only that
@@ -1570,7 +1570,7 @@ but must be confirmed against the live contracts, together with the order of act
 - **the fee-activation runbook rehearsed** once on a testnet diamond with a non-zero timelock;
 - **the real Endpoint/OFT compose-delivery integration harness** for every action, in both
   directions. The market half of the integration evidence is in the repository already
-  (`test/integration/LoanSubaccountRemoteMorphoFork.t.sol`, above); what this adds is the wire
+  (`test/integration/MorphoLoanSubaccountRemoteFork.t.sol`, above); what this adds is the wire
   hop, which that suite deliberately leaves mocked (the local sender→codec→receiver tests run each
   sender's bytes — borrow, deposit, the atomic withdraw with its real return
   send, remote-PA execute, and the loan-chain redeem-home — through the canonical codec into the
@@ -1603,7 +1603,7 @@ but must be confirmed against the live contracts, together with the order of act
   (`getLoanPosition` against a checkpoint in the same block, each preview against its own cover
   check, the exact minimum top-up) is pinned by the fuzz properties, which run with the check on.
   So the interplay is pinned at the unit level, and
-  `test/integration/LoanSubaccountRemoteMorphoFork.t.sol` carries it onto the market itself: the
+  `test/integration/MorphoLoanSubaccountRemoteFork.t.sol` carries it onto the market itself: the
   account, the gate and the five views driven over canonical Morpho Blue and the live FXRP/RLUSD
   market at a pinned block. What that suite pins there: the debt projection equals what canonical
   `accrueInterest` writes at the same timestamp, under the market's own adaptive rate model and
@@ -1654,7 +1654,7 @@ deliberately not built.
 - ~~`payLoanFee`~~ — removed (2026-09-04). It was kept for two reasons, both gone: as the escape for an RLUSD-frozen subaccount (false - Ethereum RLUSD checks the spender in `transferFrom`/`approve`, and the subaccount is the spender), and as the fee-only payment that keeps the loan whole, which the team does not want to offer (the fee is presented with the debt as one obligation). Pro-rata `repay` pays the fee on the default route and in full once the debt is closed, and the overlap band is crossed by a pro-rata top-up. With it go the remote subaccount's last parent-only method, the approve/call/approve(0) batch, `NothingCollectible`, and the `_forgiveFeeDust` sub-unit guard that only a partial fee-only payment could reach.
 - ~~The deposit's operation id and deadline~~ — dropped (2026-09-04). Both were functionally inert on a deposit: it only adds the user's own collateral, which the permissionless `depositIdleFxrp` can do with the same tokens anyway, so a re-issued deposit is harmless (a new packet; a delivered compose cannot replay), an expired one would only have left the credit for the rail, and the id's retire-a-parked-packet use belongs to borrow and withdraw. They were kept for the uniform envelope and FE correlation (the GUID serves); `depositCollateral(amount, extraOptions)` now sends an empty action payload, `CollateralDeposited` and `CollateralDepositInstructionSent` lost their id. The borrow and the withdraw keep both fields (see the operation-id decision below).
 - ~~The operation id on borrow and withdraw, and a cancel action~~ — resolved (2026-09-04): keep the id; a cancel was first deferred, then planned the same day as its own follow-up (`cancel(operationId)` on top of the ids, for early finality — the motivating case is a borrow parked by a failed health check after a price drop, which a rescue deposit large enough to restore health would make executable again). The id is the idempotency key for the two actions with effects to prevent (a re-issued intent under the same id is deduplicated on the remote; Flare cannot tell two valid XRPL transactions apart), with first-success-wins semantics on reuse. Deadlines alone were rejected (an original and a re-issued packet can both execute before expiry), and a GUID-keyed cancel was rejected (it races the packet it targets and drops the double-submit protection). The deposit keeps neither field (see above).
-- ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `LoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`.
+- ~~Split `LoanChainSettingsFacet`~~ — resolved: `ComposeTransportFacet` (the general compose transport, timelocked set, immediate owner-only clear with a cancel-then-rotate runbook) and `MorphoLoanMarketsFacet` (write-once markets, borrow switch); creation moved to the generic `createPersonalAccount` on `PersonalAccountsFacet`.
 - ~~`LoanBridgeSettingsFacet`, one global destination~~ — resolved: the Flare end became the type-generic `BridgeRoutesFacet` — one FXRP adapter (`setFxrpOft`, re-validating every route on rotation), one pinned peer per remote chain (`setBridgeRoute`), and the chain each bridging subaccount type lives on (`setSubaccountTypeRoute`, write-once — the type IS that identity, and its instructions carry no destination; `setSubaccountTypeRouteSuspended` is the reversible per-type stop); the Personal Account's `sendCrossChainUserOp` names its `destinationEid`, allowlisted by the registry. A new remote chain is a deployment plus governance. Multiple accepted origins on a remote transport (relay hops) were deliberately left for a later, additive change — see Multiple remote chains.
 - ~~Grace-period public fallback for the default relays~~ — resolved by removing the relays: the parent Personal Account is the redeemer and defaults directly on the asset manager through `executeUserOp` (still `notPaused`; the appointed executor's direct path is the pause-time trigger, as before). The planned one-click-withdrawal subaccount type dissolves the same way, into a Personal Account multicall — do not build it.
 - ~~Native payability~~ — resolved the other way: no `receive()` and no native exit on the Flare subaccount (no protocol flow leaves native on it — the bridge refunds its caller, redemption outcomes land on the parent, and the compose value of its own bridge-back is forwarded within the same call); native landing without a call (pre-deployment funding of the predicted address, a force-send) strands — accepted; a beacon upgrade can add an exit if it ever matters.

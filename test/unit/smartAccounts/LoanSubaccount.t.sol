@@ -55,7 +55,7 @@ import {
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM
-} from "../../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+} from "../../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {PA_ACTION_EXECUTE} from "../../../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IMemoInstructionsFacet} from "../../../contracts/userInterfaces/facets/IMemoInstructionsFacet.sol";

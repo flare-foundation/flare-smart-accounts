@@ -9,9 +9,9 @@ import {IDiamondCut} from "../../contracts/diamond/interfaces/IDiamondCut.sol";
 import {NotContractOwner} from "../../contracts/diamond/libraries/LibDiamond.sol";
 import {IIPauseFacet} from "../../contracts/smartAccounts/interface/IIPauseFacet.sol";
 import {IIComposeTransportFacet} from "../../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
-import {IILoanMarketsFacet} from "../../contracts/smartAccounts/interface/IILoanMarketsFacet.sol";
+import {IIMorphoLoanMarketsFacet} from "../../contracts/smartAccounts/interface/IIMorphoLoanMarketsFacet.sol";
 import {IComposeTransportFacet} from "../../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
-import {ILoanMarketsFacet} from "../../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
+import {IMorphoLoanMarketsFacet} from "../../contracts/userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 import {IPauseFacet} from "../../contracts/userInterfaces/facets/IPauseFacet.sol";
 import {ITimelockFacet} from "../../contracts/userInterfaces/facets/ITimelockFacet.sol";
 
@@ -145,10 +145,10 @@ contract QueuedPauseMigrationTest is LoanRemoteFixture {
     /// Proves pause does not cancel a fee-terms proposal or move its ETA; its exact terms can
     /// execute permissionlessly after the original delay while the controller stays paused.
     function testQueuedFeeTermsSurvivePause() public {
-        ILoanMarketsFacet.FeeTerms memory original = controller.getLoanFeeTerms(
+        IMorphoLoanMarketsFacet.FeeTerms memory original = controller.getLoanFeeTerms(
             1
         );
-        ILoanMarketsFacet.FeeTerms memory proposed = ILoanMarketsFacet.FeeTerms({
+        IMorphoLoanMarketsFacet.FeeTerms memory proposed = IMorphoLoanMarketsFacet.FeeTerms({
                 feeFloor: 0.12e18,
                 feeSpread: 0.03e18,
                 feeRecipient: makeAddr("queued collector")
@@ -156,7 +156,7 @@ contract QueuedPauseMigrationTest is LoanRemoteFixture {
         vm.prank(owner);
         controller.setTimelockDuration(2 days);
         bytes memory queued = abi.encodeCall(
-            IILoanMarketsFacet.setLoanFeeTerms,
+            IIMorphoLoanMarketsFacet.setLoanFeeTerms,
             (1, proposed)
         );
         vm.prank(owner);
@@ -168,7 +168,7 @@ contract QueuedPauseMigrationTest is LoanRemoteFixture {
 
         vm.prank(owner);
         controller.pause();
-        ILoanMarketsFacet.FeeTerms memory pending = controller.getLoanFeeTerms(
+        IMorphoLoanMarketsFacet.FeeTerms memory pending = controller.getLoanFeeTerms(
             1
         );
         assertTrue(controller.isPaused());
@@ -184,7 +184,7 @@ contract QueuedPauseMigrationTest is LoanRemoteFixture {
 
         vm.warp(allowedAfter);
         controller.executeTimelockedCall(queued);
-        ILoanMarketsFacet.FeeTerms memory applied = controller.getLoanFeeTerms(
+        IMorphoLoanMarketsFacet.FeeTerms memory applied = controller.getLoanFeeTerms(
             1
         );
         assertEq(applied.feeFloor, proposed.feeFloor);

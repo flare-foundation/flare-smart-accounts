@@ -242,7 +242,7 @@ before proceeding. A diamond with the right owner and no pauser is not configure
 ### B5. Remote implementations
 
 `pnpm deploy_remote_account_implementations ethereum`, then register `PersonalAccountRemote` and
-type-1 `LoanSubaccountRemote` through the same three-stage verification and timelocked procedure as
+type-1 `MorphoLoanSubaccountRemote` through the same three-stage verification and timelocked procedure as
 A4 and A5, then freeze both lineages exactly as A6 describes.
 
 ### B6. Transport and market

@@ -12,7 +12,7 @@ import {IInstructionFeesFacet} from "./facets/IInstructionFeesFacet.sol";
 import {IInstructionsFacet} from "./facets/IInstructionsFacet.sol";
 import {IComposeTransportFacet} from "./facets/IComposeTransportFacet.sol";
 import {ISubaccountsFacet} from "./facets/ISubaccountsFacet.sol";
-import {ILoanMarketsFacet} from "./facets/ILoanMarketsFacet.sol";
+import {IMorphoLoanMarketsFacet} from "./facets/IMorphoLoanMarketsFacet.sol";
 import {IBridgeRoutesFacet} from "./facets/IBridgeRoutesFacet.sol";
 import {IMemoInstructionsFacet} from "./facets/IMemoInstructionsFacet.sol";
 import {IPaymentProofsFacet} from "./facets/IPaymentProofsFacet.sol";
@@ -39,7 +39,7 @@ interface IMasterAccountController is
     IInstructionsFacet,
     IComposeTransportFacet,
     ISubaccountsFacet,
-    ILoanMarketsFacet,
+    IMorphoLoanMarketsFacet,
     IBridgeRoutesFacet,
     IMemoInstructionsFacet,
     IPauseFacet,

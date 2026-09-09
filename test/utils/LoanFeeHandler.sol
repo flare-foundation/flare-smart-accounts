@@ -6,11 +6,11 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LoanRemoteFixture} from "./LoanRemoteFixture.sol";
 import {MockFreezableToken} from "../../contracts/mock/MockFreezableToken.sol";
 import {MorphoMath} from "../../contracts/smartAccounts/library/MorphoMath.sol";
-import {ILoanMarketsFacet} from "../../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
+import {IMorphoLoanMarketsFacet} from "../../contracts/userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 
 /**
  * @title LoanFeeHandler
- * @notice The invariant campaign's state machine over one `LoanSubaccountRemote`: bounded time,
+ * @notice The invariant campaign's state machine over one `MorphoLoanSubaccountRemote`: bounded time,
  * interest, borrow, repay, external repayment, liquidation, withdraw, fee-terms, pause, freeze and
  * deposit actions, each checked against a reference computed here (the spec's accrual formula, the
  * emitted events, the balances) and recorded in sticky flags the invariants read.
@@ -361,7 +361,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
         if (_feeStateHash() != oldState) {
             checks.elapsedTerms = false;
         }
-        ILoanMarketsFacet.FeeTerms memory stored = controller.getLoanFeeTerms(
+        IMorphoLoanMarketsFacet.FeeTerms memory stored = controller.getLoanFeeTerms(
             1
         );
         if (
@@ -675,7 +675,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
     }
 
     function _checkBaseline() private {
-        ILoanMarketsFacet.FeeTerms memory terms = controller.getLoanFeeTerms(1);
+        IMorphoLoanMarketsFacet.FeeTerms memory terms = controller.getLoanFeeTerms(1);
         (
             uint256 principal,
             ,

@@ -16,7 +16,7 @@ import {
     PersonalAccountRemote
 } from "../../../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
 import {ComposeTransportFacet} from "../../../contracts/smartAccounts/facets/ComposeTransportFacet.sol";
-import {LoanMarketsFacet} from "../../../contracts/smartAccounts/facets/LoanMarketsFacet.sol";
+import {MorphoLoanMarketsFacet} from "../../../contracts/smartAccounts/facets/MorphoLoanMarketsFacet.sol";
 import {
     IPersonalAccountRemote,
     PA_ACTION_EXECUTE
@@ -106,8 +106,8 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
             IDiamond.FacetCutAction.Add
         );
         settingsCut[1] = _buildFacetCut(
-            address(new LoanMarketsFacet()),
-            "LoanMarketsFacet",
+            address(new MorphoLoanMarketsFacet()),
+            "MorphoLoanMarketsFacet",
             IDiamond.FacetCutAction.Add
         );
         vm.prank(governance);

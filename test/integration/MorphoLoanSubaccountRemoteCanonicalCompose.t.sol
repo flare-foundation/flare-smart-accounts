@@ -2,7 +2,10 @@
 pragma solidity ^0.8.27;
 
 import {LoanRemoteFixture} from "../utils/LoanRemoteFixture.sol";
-import {ILoanSubaccountRemote, ACTION_CANCEL} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {
+    IMorphoLoanSubaccountRemote,
+    ACTION_CANCEL
+} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 import {IComposeReceiverAccountBase} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 import {IComposeTransportFacet} from "../../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
@@ -11,7 +14,7 @@ import {CanonicalComposeEndpoint} from "../../contracts/mock/CanonicalComposeEnd
 import {Errors} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/Errors.sol";
 
 /**
- * @title LoanSubaccountRemoteCanonicalComposeTest
+ * @title MorphoLoanSubaccountRemoteCanonicalComposeTest
  * @notice The loan account against canonical LayerZero's own compose queue, not the fixture's
  * mock. `MessagingComposer` is what decides whether a packet may execute, whether a failed one
  * survives to be retried, and whether a delivered one can run twice - and every one of those is
@@ -24,7 +27,7 @@ import {Errors} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/Errors.so
  * market, the oracle and the rate model - because the queue's rules are the subject here; the
  * fork suite is where the market is real.
  */
-contract LoanSubaccountRemoteCanonicalComposeTest is LoanRemoteFixture {
+contract MorphoLoanSubaccountRemoteCanonicalComposeTest is LoanRemoteFixture {
     /// @dev Provisional compose-gas budgets: the measured cost with headroom - see the gas test.
     uint256 private constant BUDGET_DEPOSIT = 350_000;
     uint256 private constant BUDGET_BORROW = 650_000;
@@ -61,7 +64,7 @@ contract LoanSubaccountRemoteCanonicalComposeTest is LoanRemoteFixture {
         (bytes memory cancel, bytes32 cancelGuid) = _queueCanonical(4, 0, _cancelPayload(bytes32("c1")));
         _executeCanonical(cancel, cancelGuid, 0);
         assertTrue(
-            ILoanSubaccountRemote(address(account)).usedOperations(bytes32("c1")),
+            IMorphoLoanSubaccountRemote(address(account)).usedOperations(bytes32("c1")),
             "and the cancel consumed the id it names"
         );
     }
@@ -74,13 +77,13 @@ contract LoanSubaccountRemoteCanonicalComposeTest is LoanRemoteFixture {
         // one unit past what the cover gate allows on this collateral, so our own gate refuses
         // it: the cover is the stricter line, and asking for the exact overshoot keeps Morpho's
         // health check out of the picture rather than leaving which one fired ambiguous
-        uint256 overCover = ILoanSubaccountRemote(address(account)).getLoanLimits(0).maxBorrowByCover + 1;
-        ILoanSubaccountRemote.BorrowPreview memory refused =
-            ILoanSubaccountRemote(address(account)).previewBorrow(overCover, 0);
+        uint256 overCover = IMorphoLoanSubaccountRemote(address(account)).getLoanLimits(0).maxBorrowByCover + 1;
+        IMorphoLoanSubaccountRemote.BorrowPreview memory refused =
+            IMorphoLoanSubaccountRemote(address(account)).previewBorrow(overCover, 0);
         (bytes memory borrow, bytes32 borrowGuid) = _queueCanonical(2, 0, _borrow(bytes32("b1"), overCover));
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientRemainingCollateral.selector,
+                IMorphoLoanSubaccountRemote.InsufficientRemainingCollateral.selector,
                 refused.requiredCover,
                 refused.collateralValue
             )
@@ -177,7 +180,7 @@ contract LoanSubaccountRemoteCanonicalComposeTest is LoanRemoteFixture {
         // OFT's quote, so the whole delivery reverts and the endpoint's entry survives it
         (bytes memory withdraw, bytes32 withdrawGuid) = _queueCanonical(2, 0, _withdraw(bytes32("w1"), 1e6, 0));
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanSubaccountRemote.InsufficientFundsForBridgeHome.selector, RETURN_VALUE)
+            abi.encodeWithSelector(IMorphoLoanSubaccountRemote.InsufficientFundsForBridgeHome.selector, RETURN_VALUE)
         );
         _executeCanonical(withdraw, withdrawGuid, RETURN_VALUE - 1);
         assertEq(

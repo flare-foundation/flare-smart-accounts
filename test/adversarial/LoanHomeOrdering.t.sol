@@ -5,7 +5,7 @@ import {LoanHomeFixture} from "../utils/LoanHomeFixture.sol";
 import {ILoanSubaccount} from "../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {ISubaccount} from "../../contracts/userInterfaces/ISubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
-import {ACTION_CANCEL} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {ACTION_CANCEL} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {
     IBridgingSubaccount,
     REDEEM_HOME_TTL

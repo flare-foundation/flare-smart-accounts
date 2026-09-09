@@ -34,7 +34,7 @@ export const IMPLEMENTATIONS: Record<string, ImplementationSpec> = {
   PersonalAccount: { target: "personalAccountBeacon", family: "flare" },
   PersonalAccountRemote: { target: "personalAccountBeacon", family: "remote" },
   LoanSubaccount: { target: "subaccountType", subaccountType: SUBACCOUNT_TYPE_LOAN, family: "flare" },
-  LoanSubaccountRemote: { target: "subaccountType", subaccountType: SUBACCOUNT_TYPE_LOAN, family: "remote" },
+  MorphoLoanSubaccountRemote: { target: "subaccountType", subaccountType: SUBACCOUNT_TYPE_LOAN, family: "remote" },
 };
 
 /**

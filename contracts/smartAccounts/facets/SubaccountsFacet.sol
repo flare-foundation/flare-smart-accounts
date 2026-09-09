@@ -18,7 +18,7 @@ import {FacetBase} from "./FacetBase.sol";
  * @notice The type-generic subaccount surface: the per-type implementation registry and the
  * creation/prediction route, shared by every subaccount type. The bridging configuration the
  * types share lives on {BridgeRoutesFacet}; loan-specific configuration on the loan chain's
- * {LoanMarketsFacet}.
+ * {MorphoLoanMarketsFacet}.
  */
 contract SubaccountsFacet is IISubaccountsFacet, FacetBase {
 

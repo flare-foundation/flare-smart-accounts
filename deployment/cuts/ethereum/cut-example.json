@@ -6,7 +6,7 @@
     "PauseFacet",
     "PersonalAccountsFacet",
     "ComposeTransportFacet",
-    "LoanMarketsFacet"
+    "MorphoLoanMarketsFacet"
   ],
   "deleteAllOldMethods": false,
   "deleteSelectorSigs": [],

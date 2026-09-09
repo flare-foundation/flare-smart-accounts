@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
-import {ILoanMarketsFacet} from "../../userInterfaces/facets/ILoanMarketsFacet.sol";
+import {IMorphoLoanMarketsFacet} from "../../userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 
 /**
- * @title IILoanMarketsFacet
- * @notice Internal interface for the LoanMarketsFacet contract.
+ * @title IIMorphoLoanMarketsFacet
+ * @notice Internal interface for the MorphoLoanMarketsFacet contract.
  */
-interface IILoanMarketsFacet is ILoanMarketsFacet {
+interface IIMorphoLoanMarketsFacet is IMorphoLoanMarketsFacet {
     /**
      * @notice Registers the market a subaccount type is bound to, write-once: a different
      * market means a new subaccount type. Requires the compose transport (the collateral token
@@ -23,7 +23,7 @@ interface IILoanMarketsFacet is ILoanMarketsFacet {
      */
     function registerLoanMarket(
         uint256 _subaccountType,
-        ILoanMarketsFacet.Market calldata _market
+        IMorphoLoanMarketsFacet.Market calldata _market
     )
         external;
 
@@ -41,7 +41,7 @@ interface IILoanMarketsFacet is ILoanMarketsFacet {
      */
     function setLoanFeeTerms(
         uint256 _subaccountType,
-        ILoanMarketsFacet.FeeTerms calldata _terms
+        IMorphoLoanMarketsFacet.FeeTerms calldata _terms
     )
         external;
 

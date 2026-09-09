@@ -31,7 +31,7 @@ import {MintableERC20} from "./MintableERC20.sol";
  * enough for what the accounts actually observe - a debt that shrank without their involvement,
  * leaving `feePrincipal` stale - which is what the adversarial suite drives them for. Canonical
  * liquidation itself is judged where it can be: against real Morpho on the fork suite,
- * `test/integration/LoanSubaccountRemoteMorphoFork.t.sol`.
+ * `test/integration/MorphoLoanSubaccountRemoteFork.t.sol`.
  *
  * Ids and share conversions come from {MorphoMath}, the same code the accounts run.
  */

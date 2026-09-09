@@ -227,7 +227,7 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * is not cancellation: the two packets race, an original that lands first executes
      * normally and the cancellation then finalizes silently - so a client resolves a sent
      * cancellation by whichever arrives, the loan chain's
-     * {ILoanSubaccountRemote.LoanActionCancelled} or the original action's own execution event,
+     * {IMorphoLoanSubaccountRemote.LoanActionCancelled} or the original action's own execution event,
      * either of which ends the instruction's live state; and an id a cancellation was signed
      * for is retired for good. It carries no deadline (a late
      * cancellation is unnecessary or still correct). On the loan chain it is not pause-gated;

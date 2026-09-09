@@ -9,7 +9,7 @@ import {
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_CANCEL,
     DESTINATION_KIND_EVM
-} from "../../userInterfaces/ILoanSubaccountRemote.sol";
+} from "../../userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {BridgingSubaccountBase} from "./BridgingSubaccountBase.sol";
 
 /**

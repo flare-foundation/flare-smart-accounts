@@ -21,7 +21,7 @@ if [[ "$NETWORK" == *-staging ]]; then
 fi
 
 # only Flare-family networks (and the local dev chain): the Flare-side implementation lays out
-# storage for the Flare proxy lineage - the loan chain gets LoanSubaccountRemote through
+# storage for the Flare proxy lineage - the loan chain gets MorphoLoanSubaccountRemote through
 # deploy-remote-account-implementations.sh - and the forge script refuses Ethereum too
 case "$BASE_NETWORK" in
   flare|songbird|coston|coston2|scdev) ;;

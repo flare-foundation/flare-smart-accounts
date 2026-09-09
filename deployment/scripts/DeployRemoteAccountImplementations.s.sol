@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {LoanSubaccountRemote} from "../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
+import {MorphoLoanSubaccountRemote} from "../../contracts/smartAccounts/implementation/MorphoLoanSubaccountRemote.sol";
 import {
     PersonalAccountRemote
 } from "../../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
@@ -24,15 +24,15 @@ contract DeployRemoteAccountImplementations is Script {
         }
 
         vm.startBroadcast(deployerPrivateKey);
-        LoanSubaccountRemote loanSubaccountRemoteImpl = new LoanSubaccountRemote();
+        MorphoLoanSubaccountRemote loanSubaccountRemoteImpl = new MorphoLoanSubaccountRemote();
         PersonalAccountRemote personalAccountRemoteImpl = new PersonalAccountRemote();
         vm.stopBroadcast();
 
         console2.log(string.concat("NETWORK: ", network));
         console2.log(
             string.concat(
-                "DEPLOYED: LoanSubaccountRemoteImplementation, ",
-                "LoanSubaccountRemote.sol: ",
+                "DEPLOYED: MorphoLoanSubaccountRemoteImplementation, ",
+                "MorphoLoanSubaccountRemote.sol: ",
                 vm.toString(address(loanSubaccountRemoteImpl))
             )
         );

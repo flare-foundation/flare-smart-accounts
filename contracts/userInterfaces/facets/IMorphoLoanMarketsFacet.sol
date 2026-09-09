@@ -10,7 +10,7 @@ import {IMorpho} from "../../smartAccounts/interface/IMorpho.sol";
 uint64 constant MAX_FEE_RATE = 1e18;
 
 /**
- * @title ILoanMarketsFacet
+ * @title IMorphoLoanMarketsFacet
  * @notice Governance-set per-type configuration of the remote loan subaccounts: a write-once
  * Morpho market (a position's market can never change under it, so exits need no registry; a
  * new pool is a new subaccount type), a mutable borrow switch — the routine way to sunset a
@@ -18,7 +18,7 @@ uint64 constant MAX_FEE_RATE = 1e18;
  * OFT's token, for that market and every later transport; the first non-zero fee recipient
  * activates borrowing. Cut only on the loan-chain diamond (Ethereum, at launch).
  */
-interface ILoanMarketsFacet {
+interface IMorphoLoanMarketsFacet {
 
     /// @dev The pool a subaccount type is bound to: a Morpho contract and a market on it.
     /// Write-once per type - positions live in it, so the binding must never change.

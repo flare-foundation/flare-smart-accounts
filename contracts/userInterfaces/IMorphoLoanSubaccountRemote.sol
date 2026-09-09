@@ -105,7 +105,7 @@ uint8 constant DESTINATION_KIND_EVM = 1;
 uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
 
 /**
- * @title ILoanSubaccountRemote
+ * @title IMorphoLoanSubaccountRemote
  * @notice User interface for the loan-chain-side subaccount (Ethereum, at launch), at the same
  * CREATE2 address as its Flare counterpart. Authenticated compose payloads, sent by this same
  * account on Flare, execute the typed actions on the type's write-once Morpho market — so the
@@ -118,7 +118,7 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  * account's own address on Flare - while the one user-chosen destination is a signed
  * borrow's disbursement. It has no native rail.
  */
-interface ILoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
+interface IMorphoLoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccount {
 
     /**
      * @notice The position as the front end needs it, projected to the current block: Morpho's

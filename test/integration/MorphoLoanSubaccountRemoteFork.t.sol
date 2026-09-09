@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {LoanForkFixture} from "../utils/LoanForkFixture.sol";
-import {ILoanSubaccountRemote} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {IMorphoLoanSubaccountRemote} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {IMorpho} from "../../contracts/smartAccounts/interface/IMorpho.sol";
 import {IOracle} from "../../contracts/smartAccounts/interface/IOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -26,7 +26,7 @@ interface IMorphoLiquidate {
 }
 
 /**
- * @title LoanSubaccountRemoteMorphoForkTest
+ * @title MorphoLoanSubaccountRemoteForkTest
  * @notice The loan account against the real FXRP/RLUSD market on canonical Morpho Blue, at a
  * pinned block. The unit suites prove the arithmetic against a mock whose rate a test chose;
  * these prove the same arithmetic against Morpho's own adaptive model, its share rounding, its
@@ -43,7 +43,7 @@ interface IMorphoLiquidate {
  * so the refusal it checks is caused by the oracle dying rather than inherited from a long warp.
  * Where exactly the feed expires is the feed's business and is not asserted here.
  */
-contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
+contract MorphoLoanSubaccountRemoteForkTest is LoanForkFixture {
     /// @dev 10,000 FXRP of collateral, worth about 14,524.7 RLUSD at the pinned price.
     uint256 private constant COLLATERAL = 10_000e6;
     /// @dev A warp the feed answered across every run and endpoint tried; see the note above.
@@ -84,8 +84,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         // let the adaptive model run over a period long enough to matter, then compare the view's
         // projection with what canonical `accrueInterest` actually writes at the same timestamp
         vm.warp(block.timestamp + 30 days);
-        ILoanSubaccountRemote.LoanPosition memory position =
-            ILoanSubaccountRemote(address(account)).getLoanPosition();
+        IMorphoLoanSubaccountRemote.LoanPosition memory position =
+            IMorphoLoanSubaccountRemote(address(account)).getLoanPosition();
         // the feed is long stale by now, which the view reports rather than reverting on; the
         // debt is what this test is about, and projecting it reads no oracle
         assertEq(position.oraclePrice, 0, "the feed is stale after 30 days, as the view reports");
@@ -98,14 +98,14 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
 
     function testProjectedDebtTracksChangedUtilization() public onlyForked {
         _openOnTheRealMarket(COLLATERAL, 1_000e18);
-        uint256 before = ILoanSubaccountRemote(address(account)).getLoanPosition().debt;
+        uint256 before = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().debt;
 
         // a large external borrow moves utilization, which moves the adaptive model's rate; the
         // projection must follow the market rather than a rate captured earlier
         _whaleBorrow(_marketLiquidity() / 2);
 
         vm.warp(block.timestamp + 30 days);
-        uint256 projected = ILoanSubaccountRemote(address(account)).getLoanPosition().debt;
+        uint256 projected = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().debt;
         assertEq(
             projected, _debtFromCanonicalRepayment(), "the projection must follow the market's own rate"
         );
@@ -116,8 +116,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         deal(FXRP, address(account), COLLATERAL);
         _deliver(1, COLLATERAL, _deposit(), 0);
 
-        ILoanSubaccountRemote.LoanLimits memory limits =
-            ILoanSubaccountRemote(address(account)).getLoanLimits(0);
+        IMorphoLoanSubaccountRemote.LoanLimits memory limits =
+            IMorphoLoanSubaccountRemote(address(account)).getLoanLimits(0);
         assertGt(limits.maxBorrowByCover, 0, "the collateral must support some borrow");
         assertLt(limits.maxBorrowByCover, limits.marketLiquidity, "cover must be the binding bound here");
         // the quote is the market's free liquidity, not its size
@@ -131,8 +131,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
 
         // one unit past the bound is refused by our gate, on the real oracle's price, with the
         // numbers previewBorrow quotes for that same amount
-        ILoanSubaccountRemote.BorrowPreview memory over =
-            ILoanSubaccountRemote(address(account)).previewBorrow(limits.maxBorrowByCover + 1, 0);
+        IMorphoLoanSubaccountRemote.BorrowPreview memory over =
+            IMorphoLoanSubaccountRemote(address(account)).previewBorrow(limits.maxBorrowByCover + 1, 0);
         assertFalse(over.coverSatisfied);
         _deliverExpectingRefusal(
             2,
@@ -153,8 +153,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         deal(FXRP, address(account), collateral);
         _deliver(1, collateral, _deposit(), 0);
 
-        ILoanSubaccountRemote.LoanLimits memory limits =
-            ILoanSubaccountRemote(address(account)).getLoanLimits(0);
+        IMorphoLoanSubaccountRemote.LoanLimits memory limits =
+            IMorphoLoanSubaccountRemote(address(account)).getLoanLimits(0);
         uint256 liquidity = limits.marketLiquidity;
         assertGt(limits.maxBorrowByCover, liquidity, "cover must not be the binding bound here");
 
@@ -163,7 +163,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
             _packet(address(account), 2, 0, _borrow(bytes32("drain"), liquidity + 1));
         vm.prank(address(endpoint));
         vm.expectRevert(bytes("insufficient liquidity"));
-        ILoanSubaccountRemote(address(account)).lzCompose(address(oft), guid, message, address(this), "");
+        IMorphoLoanSubaccountRemote(address(account)).lzCompose(address(oft), guid, message, address(this), "");
 
         // and the whole of it borrows, leaving the market fully utilized
         _deliver(3, 0, _borrow(bytes32("all-of-it"), liquidity), 0);
@@ -174,10 +174,10 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     function testPreviewBorrowAgreesWithTheRealMarket() public onlyForked {
         deal(FXRP, address(account), COLLATERAL);
         _deliver(1, COLLATERAL, _deposit(), 0);
-        uint256 amount = ILoanSubaccountRemote(address(account)).getLoanLimits(0).maxBorrowByCover / 2;
+        uint256 amount = IMorphoLoanSubaccountRemote(address(account)).getLoanLimits(0).maxBorrowByCover / 2;
 
-        ILoanSubaccountRemote.BorrowPreview memory preview =
-            ILoanSubaccountRemote(address(account)).previewBorrow(amount, 0);
+        IMorphoLoanSubaccountRemote.BorrowPreview memory preview =
+            IMorphoLoanSubaccountRemote(address(account)).previewBorrow(amount, 0);
         assertTrue(preview.coverSatisfied);
 
         _deliver(2, 0, _borrow(bytes32("half"), amount), 0);
@@ -189,7 +189,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
             (uint256(_collateral()) * IOracle(MARKET_ORACLE).price()) / ORACLE_PRICE_SCALE;
         assertEq(preview.collateralValue, expectedValue, "the preview values the real collateral");
         assertEq(
-            ILoanSubaccountRemote(address(account)).getLoanPosition().collateralValue,
+            IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().collateralValue,
             expectedValue,
             "and so does the position view"
         );
@@ -199,7 +199,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         deal(FXRP, address(account), COLLATERAL);
         _deliver(1, COLLATERAL, _deposit(), 0);
         uint256 collateralValue =
-            ILoanSubaccountRemote(address(account)).getLoanPosition().collateralValue;
+            IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().collateralValue;
 
         // past Morpho's own 77% line its health check refuses first, inside its `borrow`, so the
         // account can fail with the market's error and not only with ours
@@ -208,7 +208,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
             _packet(address(account), 2, 0, _borrow(bytes32("unhealthy"), pastMorpho));
         vm.prank(address(endpoint));
         vm.expectRevert(bytes("insufficient collateral"));
-        ILoanSubaccountRemote(address(account)).lzCompose(address(oft), guid, message, address(this), "");
+        IMorphoLoanSubaccountRemote(address(account)).lzCompose(address(oft), guid, message, address(this), "");
     }
 
     function testPreviewWithdrawMinimumTopUpIsExactWithLiveDebt() public onlyForked {
@@ -216,12 +216,12 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         // inside the oracle's window, so the gate values the remainder at a live price and the
         // boundary this test is about is the cover line, not a dead feed
         vm.warp(block.timestamp + ORACLE_WINDOW);
-        assertGt(ILoanSubaccountRemote(address(account)).getLoanPosition().oraclePrice, 0, "live price");
+        assertGt(IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().oraclePrice, 0, "live price");
 
         // more than the free collateral, so clearing the gate needs a partial repayment
-        uint256 amount = ILoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw + 1_000e6;
-        ILoanSubaccountRemote.WithdrawPreview memory preview =
-            ILoanSubaccountRemote(address(account)).previewWithdraw(amount);
+        uint256 amount = IMorphoLoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw + 1_000e6;
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory preview =
+            IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(amount);
         assertFalse(preview.coverSatisfied, "this withdrawal must not be free to leave");
         assertGt(preview.minimumTopUp, 0);
         assertLt(
@@ -234,8 +234,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         // one unit short of the quoted top-up still fails the gate
         uint256 snapshot = vm.snapshotState();
         _repayWith(preview.minimumTopUp - 1);
-        ILoanSubaccountRemote.WithdrawPreview memory short =
-            ILoanSubaccountRemote(address(account)).previewWithdraw(amount);
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory short =
+            IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(amount);
         assertFalse(short.coverSatisfied);
         _deliverExpectingRefusal(
             9,
@@ -248,7 +248,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
 
         // and the quoted top-up exactly clears it, with debt still live on the real market
         _repayWith(preview.minimumTopUp);
-        assertTrue(ILoanSubaccountRemote(address(account)).previewWithdraw(amount).coverSatisfied);
+        assertTrue(IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(amount).coverSatisfied);
         _deliver(9, 0, _withdraw(bytes32("exact"), amount, 0), RETURN_VALUE);
         assertEq(_collateral(), COLLATERAL - amount);
         assertGt(_shares(), 0, "the position must still be borrowing - this was a partial repayment");
@@ -259,18 +259,18 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         _openOnTheRealMarket(COLLATERAL, 5_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
 
-        uint256 free = ILoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw;
+        uint256 free = IMorphoLoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw;
         assertGt(free, 0);
         assertLt(free, COLLATERAL, "a live borrow must hold some collateral back");
 
         // one unit past the quote is refused, the quote itself leaves
-        ILoanSubaccountRemote.WithdrawPreview memory over =
-            ILoanSubaccountRemote(address(account)).previewWithdraw(free + 1);
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory over =
+            IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(free + 1);
         assertFalse(over.coverSatisfied);
         _deliverExpectingRefusal(
             9, _withdraw(bytes32("over"), free + 1, 0), RETURN_VALUE, over.requiredCover, over.remainingValue
         );
-        assertTrue(ILoanSubaccountRemote(address(account)).previewWithdraw(free).coverSatisfied);
+        assertTrue(IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(free).coverSatisfied);
         _deliver(9, 0, _withdraw(bytes32("exact"), free, 0), RETURN_VALUE);
         assertEq(_collateral(), COLLATERAL - free);
     }
@@ -281,11 +281,11 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         vm.warp(block.timestamp + 45 days);
 
         deal(RLUSD, address(account), 400e18);
-        ILoanSubaccountRemote.RepayPreview memory preview =
-            ILoanSubaccountRemote(address(account)).previewRepay(0);
+        IMorphoLoanSubaccountRemote.RepayPreview memory preview =
+            IMorphoLoanSubaccountRemote(address(account)).previewRepay(0);
 
         uint256 feeBefore = IERC20(RLUSD).balanceOf(collector);
-        ILoanSubaccountRemote(address(account)).repay();
+        IMorphoLoanSubaccountRemote(address(account)).repay();
 
         assertEq(IERC20(RLUSD).balanceOf(collector) - feeBefore, preview.feePaid, "fee share");
         assertEq(
@@ -299,15 +299,15 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         vm.warp(block.timestamp + ORACLE_WINDOW);
         // the price is live right up to the moment the feed is taken away, so the refusal below
         // is caused by the oracle dying and not inherited from a long warp
-        assertGt(ILoanSubaccountRemote(address(account)).getLoanPosition().oraclePrice, 0, "live before");
+        assertGt(IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().oraclePrice, 0, "live before");
         assertTrue(
-            ILoanSubaccountRemote(address(account)).previewWithdraw(1e6).coverSatisfied, "free before"
+            IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(1e6).coverSatisfied, "free before"
         );
 
         vm.mockCallRevert(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), "oracle down");
-        assertEq(ILoanSubaccountRemote(address(account)).getLoanPosition().oraclePrice, 0, "dead after");
-        ILoanSubaccountRemote.WithdrawPreview memory dead =
-            ILoanSubaccountRemote(address(account)).previewWithdraw(1e6);
+        assertEq(IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().oraclePrice, 0, "dead after");
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory dead =
+            IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(1e6);
         assertFalse(dead.coverSatisfied);
         _deliverExpectingRefusal(
             9, _withdraw(bytes32("dead"), 1e6, 0), RETURN_VALUE, dead.requiredCover, dead.remainingValue
@@ -319,13 +319,15 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
             _packet(address(account), 11, 0, _borrow(bytes32("blind"), 1e18));
         vm.prank(address(endpoint));
         vm.expectRevert(bytes("oracle down"));
-        ILoanSubaccountRemote(address(account)).lzCompose(address(oft), borrowGuid, borrowMessage, address(this), "");
+        IMorphoLoanSubaccountRemote(address(account)).lzCompose(
+            address(oft), borrowGuid, borrowMessage, address(this), ""
+        );
 
         // repayment reads no oracle, so the way out stays open with the oracle still dead
-        ILoanSubaccountRemote.RepayPreview memory preview =
-            ILoanSubaccountRemote(address(account)).previewRepay(0);
+        IMorphoLoanSubaccountRemote.RepayPreview memory preview =
+            IMorphoLoanSubaccountRemote(address(account)).previewRepay(0);
         deal(RLUSD, address(account), preview.closingTopUp);
-        ILoanSubaccountRemote(address(account)).repay();
+        IMorphoLoanSubaccountRemote(address(account)).repay();
         assertEq(_debt(), 0, "the debt closes without the oracle");
 
         // debt-free and with nothing collectible, the collateral leaves oracle-free too
@@ -336,7 +338,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     function testLiquidationPriceIsMorphosEdgeOnTheRealMarket() public onlyForked {
         _openOnTheRealMarket(COLLATERAL, 5_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
-        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        uint256 edge = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
         assertGt(edge, 0);
         assertLt(edge, IOracle(MARKET_ORACLE).price(), "the position is not at its edge yet");
 
@@ -351,7 +353,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
 
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge));
         assertGe(
-            ILoanSubaccountRemote(address(account)).getLoanPosition().morphoHealthFactor,
+            IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().morphoHealthFactor,
             WAD,
             "our own figure agrees the position is healthy at the edge"
         );
@@ -382,12 +384,12 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         _openOnTheRealMarket(COLLATERAL, 5_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
         uint256 truePrice = IOracle(MARKET_ORACLE).price();
-        uint256 honestMax = ILoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw;
+        uint256 honestMax = IMorphoLoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw;
         assertGt(honestMax, 0, "some withdrawal is allowed at the true price");
 
         // the feed prints twice the real price - stale from a spike, or pushed there
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(2 * truePrice));
-        uint256 inflatedMax = ILoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw;
+        uint256 inflatedMax = IMorphoLoanSubaccountRemote(address(account)).getLoanLimits(0).maxWithdraw;
         assertGt(inflatedMax, honestMax, "the inflated price buys a larger exit");
 
         // that same withdrawal, delivered at the honest price, is refused by the gate itself -
@@ -395,8 +397,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         // and a broken gate would still quote correctly. Asked here rather than after the fact,
         // because once the exit has happened every further withdrawal is refused anyway
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(truePrice));
-        ILoanSubaccountRemote.WithdrawPreview memory honest =
-            ILoanSubaccountRemote(address(account)).previewWithdraw(inflatedMax);
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory honest =
+            IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(inflatedMax);
         assertFalse(honest.coverSatisfied, "the true price does not support it");
         _deliverExpectingRefusal(
             9,
@@ -413,8 +415,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
 
         // back at the true price, what remains no longer covers what the gate demands
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(truePrice));
-        ILoanSubaccountRemote.LoanPosition memory position =
-            ILoanSubaccountRemote(address(account)).getLoanPosition();
+        IMorphoLoanSubaccountRemote.LoanPosition memory position =
+            IMorphoLoanSubaccountRemote(address(account)).getLoanPosition();
         assertGt(position.feeDebtX18, 0, "there is a fee claim to leave under-secured");
         assertLt(
             position.collateralValue,
@@ -440,11 +442,11 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     function testFullDebtLiquidationAtTheEdgeLeavesCollateralForTheFeeClaim() public onlyForked {
         _openOnTheRealMarket(COLLATERAL, 5_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
-        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        uint256 edge = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
 
         uint256 collateralBefore = _collateral();
-        uint256 feeBefore = ILoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18;
+        uint256 feeBefore = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18;
         assertGt(feeBefore, 0, "a fee accrued over the warp, so there is a claim to secure");
 
         // accrue first, so the totals the conversions read are the ones the liquidation will use
@@ -478,8 +480,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         );
         // the claim survives the liquidation: still owed, and still with collateral under it
         {
-            ILoanSubaccountRemote.LoanPosition memory after_ =
-                ILoanSubaccountRemote(address(account)).getLoanPosition();
+            IMorphoLoanSubaccountRemote.LoanPosition memory after_ =
+                IMorphoLoanSubaccountRemote(address(account)).getLoanPosition();
             assertGe(after_.feeDebtX18, feeBefore, "the fee claim is untouched by the liquidation");
             assertGt(after_.collateralValue, 0, "and it is no longer a junior claim on nothing");
         }
@@ -509,8 +511,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
 
         assertEq(_collateral(), 0, "no collateral left");
         assertEq(_shares(), 0, "and no shares: Morpho wrote the shortfall off rather than leaving dust");
-        ILoanSubaccountRemote.LoanPosition memory position =
-            ILoanSubaccountRemote(address(account)).getLoanPosition();
+        IMorphoLoanSubaccountRemote.LoanPosition memory position =
+            IMorphoLoanSubaccountRemote(address(account)).getLoanPosition();
         assertEq(position.debt, 0, "the account reports the written-off debt as gone");
         assertEq(position.collateralValue, 0);
         assertGt(position.feeDebtX18, 0, "the fee claim outlives the collateral that secured it");
@@ -605,7 +607,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     function testTheTwoLiquidationInputModesDifferOnlyBySubUnitRounding() public onlyForked {
         _openOnTheRealMarket(COLLATERAL, 5_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
-        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        uint256 edge = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
         uint128 half = _shares() / 2;
 
@@ -646,26 +648,26 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         _whaleBorrow(200_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
 
-        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        uint256 edge = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
         _liquidateRepayingShares(_shares() / 2);
 
         (uint256 principal, uint256 storedFeeX18, , uint64 lastCheckpoint, uint64 floorRate, ) =
-            ILoanSubaccountRemote(address(account)).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         assertGt(
             principal,
             _debtFromCanonicalRepayment(),
             "the fee principal still describes the pre-liquidation debt"
         );
-        uint256 projected = ILoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18;
+        uint256 projected = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18;
         assertGt(projected, storedFeeX18, "the projection is ahead of the stored state");
 
         // the reconciliation is permissionless and needs no privileged caller
         vm.prank(makeAddr("anyone"));
-        ILoanSubaccountRemote(address(account)).checkpointFee();
+        IMorphoLoanSubaccountRemote(address(account)).checkpointFee();
 
         (uint256 reconciled, uint256 feeAfterX18, , , , ) =
-            ILoanSubaccountRemote(address(account)).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         // the expectation is computed here rather than read back, because the projection and the
         // checkpoint run the same code: comparing them would pass a build that suppressed both.
         // With the principal above the live debt the interest term clamps to zero, leaving the
@@ -694,17 +696,17 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     function testCheckpointingLateAfterALiquidationCostsMoreThanCheckpointingAtOnce() public onlyForked {
         _openOnTheRealMarket(COLLATERAL, 5_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
-        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        uint256 edge = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
         _liquidateRepayingShares(_shares() / 2);
 
         (uint256 stalePrincipal, uint256 feeAtLiquidation, , uint64 lastCheckpoint, uint64 floorRate, ) =
-            ILoanSubaccountRemote(address(account)).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         uint256 waited = 1 hours;
 
         // checkpoint at once, then let the same hour pass on the reconciled principal
         uint256 snapshot = vm.snapshotState();
-        ILoanSubaccountRemote(address(account)).checkpointFee();
+        IMorphoLoanSubaccountRemote(address(account)).checkpointFee();
         uint256 feeAfterFirst = _billTheFirstPeriod(stalePrincipal, feeAtLiquidation, lastCheckpoint, floorRate);
         vm.warp(vm.getBlockTimestamp() + waited);
         uint256 feeIfPrompt = _billTheSecondPeriod(feeAfterFirst, waited);
@@ -712,8 +714,8 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
 
         // or let the hour pass first, with the principal still describing the closed debt
         vm.warp(vm.getBlockTimestamp() + waited);
-        ILoanSubaccountRemote(address(account)).checkpointFee();
-        (, uint256 feeIfLate, , , , ) = ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(address(account)).checkpointFee();
+        (, uint256 feeIfLate, , , , ) = IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
 
         // the late checkpoint prices its whole period - everything since the last one, not just
         // the hour waited - at the floor on the principal it still held
@@ -740,12 +742,12 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     function testSelfLiquidationTakesCollateralPastTheCoverGate() public onlyForked {
         _openOnTheRealMarket(COLLATERAL, 5_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
-        uint256 edge = ILoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
+        uint256 edge = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
 
         // the rail refuses: unhealthy on Morpho's line is far past our own cover requirement
-        ILoanSubaccountRemote.WithdrawPreview memory refused =
-            ILoanSubaccountRemote(address(account)).previewWithdraw(1e6);
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory refused =
+            IMorphoLoanSubaccountRemote(address(account)).previewWithdraw(1e6);
         assertFalse(refused.coverSatisfied, "the cover gate refuses a withdrawal in this state");
         _deliverExpectingRefusal(
             9, _withdraw(bytes32("blocked"), 1e6, 0), RETURN_VALUE, refused.requiredCover, refused.remainingValue
@@ -763,7 +765,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         assertEq(_collateral(), collateralBefore - seized);
         assertEq(IERC20(FXRP).balanceOf(parent), seized, "the collateral is the user's own again");
         assertGt(
-            ILoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18,
+            IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().feeDebtX18,
             0,
             "with the fee still owed against what is left"
         );
@@ -773,7 +775,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
     // solhint-disable-next-line ordering
     function _repayWith(uint256 _amount) private {
         deal(RLUSD, address(account), _amount);
-        ILoanSubaccountRemote(address(account)).repay();
+        IMorphoLoanSubaccountRemote(address(account)).repay();
     }
 
     /**
@@ -828,13 +830,13 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         returns (uint256 _feeNow)
     {
         (uint256 principal, , , , uint64 floorRate, uint64 spreadRate) =
-            ILoanSubaccountRemote(address(account)).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         // accrue on the market first, so the interest below is Morpho's own figure
         morpho.accrueInterest(params);
         uint256 liveDebt = _debt();
         uint256 interestX18 = (liveDebt > principal ? liveDebt - principal : 0) * WAD;
-        ILoanSubaccountRemote(address(account)).checkpointFee();
-        (, _feeNow, , , , ) = ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(address(account)).checkpointFee();
+        (, _feeNow, , , , ) = IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         assertEq(
             _feeNow - _feeBefore,
             Math.max(
@@ -918,10 +920,10 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         vm.prank(address(endpoint));
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _required, _remaining
+                IMorphoLoanSubaccountRemote.InsufficientRemainingCollateral.selector, _required, _remaining
             )
         );
-        ILoanSubaccountRemote(address(account)).lzCompose{value: _value}(
+        IMorphoLoanSubaccountRemote(address(account)).lzCompose{value: _value}(
             address(oft), guid, message, address(this), ""
         );
         assertEq(_debt(), debtBefore, "a refused action must change nothing");
@@ -957,7 +959,7 @@ contract LoanSubaccountRemoteMorphoForkTest is LoanForkFixture {
         private view
         returns (uint256 _feeNow)
     {
-        (, _feeNow, , , , ) = ILoanSubaccountRemote(address(account)).getLoanFeeState();
+        (, _feeNow, , , , ) = IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         assertEq(
             _feeNow - _feeBefore,
             Math.mulDiv(_principal * _floorRate, vm.getBlockTimestamp() - _lastCheckpoint, LoanMath.YEAR),

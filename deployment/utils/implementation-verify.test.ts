@@ -228,7 +228,7 @@ void test("queued: only this exact calldata counts, and the duration must be non
   // a registration queued for the other registry is not this one either
   const wrongTarget = new FakeChain();
   wrongTarget.beaconImpl = OTHER_IMPL;
-  wrongTarget.queue(IMPLEMENTATIONS.LoanSubaccountRemote!, IMPL);
+  wrongTarget.queue(IMPLEMENTATIONS.MorphoLoanSubaccountRemote!, IMPL);
   assert.deepEqual(failed((await verifyImplementation(inputs(wrongTarget, { stage: "queued" }))).checks), [
     "timelock: exactly this registration is queued",
   ]);
@@ -263,8 +263,8 @@ void test("live: the registry must point at the implementation", async () => {
 });
 
 void test("the subaccount registry is read for its own type", async () => {
-  const chain = new FakeChain("LoanSubaccountRemote");
-  const asLoan = { contract: "LoanSubaccountRemote", stage: "live" as Stage };
+  const chain = new FakeChain("MorphoLoanSubaccountRemote");
+  const asLoan = { contract: "MorphoLoanSubaccountRemote", stage: "live" as Stage };
   assert.deepEqual(failed((await verifyImplementation(inputs(chain, asLoan))).checks), []);
   // the beacon holding the right address does not make the type registry right
   chain.typeImpl = OTHER_IMPL;
@@ -316,11 +316,11 @@ void test("live with a sample account: beacon, controller, owner, parent and typ
 });
 
 void test("a sample subaccount's parent and type are checked, not just its controller", async () => {
-  const asLoan = { contract: "LoanSubaccountRemote", stage: "live" as Stage, sampleXrplOwner: OWNER };
-  const honest = new FakeChain("LoanSubaccountRemote");
+  const asLoan = { contract: "MorphoLoanSubaccountRemote", stage: "live" as Stage, sampleXrplOwner: OWNER };
+  const honest = new FakeChain("MorphoLoanSubaccountRemote");
   assert.deepEqual(failed((await verifyImplementation(inputs(honest, asLoan))).checks), []);
 
-  const wrongParent = new FakeChain("LoanSubaccountRemote");
+  const wrongParent = new FakeChain("MorphoLoanSubaccountRemote");
   wrongParent.identities.set(SUBACCOUNT, {
     controller: DIAMOND,
     parent: STRANGER,
@@ -330,7 +330,7 @@ void test("a sample subaccount's parent and type are checked, not just its contr
     `sample: ${SUBACCOUNT}'s parent is ${OWNER}'s Personal Account`,
   ]);
 
-  const wrongType = new FakeChain("LoanSubaccountRemote");
+  const wrongType = new FakeChain("MorphoLoanSubaccountRemote");
   wrongType.identities.set(SUBACCOUNT, { controller: DIAMOND, parent: ACCOUNT, subaccountType: 7n });
   const typeResult = await verifyImplementation(inputs(wrongType, asLoan));
   assert.deepEqual(failed(typeResult.checks), [`sample: ${SUBACCOUNT} is of type 1`]);
@@ -372,7 +372,7 @@ void test("the encoded registration matches the setters' signatures", () => {
     encodeRegistration(IMPLEMENTATIONS.PersonalAccount!, IMPL)
   );
   assert.equal(
-    encodeRegistration(IMPLEMENTATIONS.LoanSubaccountRemote!, IMPL),
+    encodeRegistration(IMPLEMENTATIONS.MorphoLoanSubaccountRemote!, IMPL),
     encodeRegistration(IMPLEMENTATIONS.LoanSubaccount!, IMPL)
   );
 });
@@ -380,10 +380,10 @@ void test("the encoded registration matches the setters' signatures", () => {
 void test("a registry whose facet is not cut is a named failure, not a crash", async () => {
   // what the Coston2 dry run hit: implementationForType reverts FunctionNotFound because
   // SubaccountsFacet is not cut there yet, so there is nothing to register into
-  const uncut = new FakeChain("LoanSubaccountRemote");
+  const uncut = new FakeChain("MorphoLoanSubaccountRemote");
   uncut.typeImpl = undefined;
   for (const stage of ["pre", "queued", "live"] as Stage[]) {
-    const result = await verifyImplementation(inputs(uncut, { contract: "LoanSubaccountRemote", stage }));
+    const result = await verifyImplementation(inputs(uncut, { contract: "MorphoLoanSubaccountRemote", stage }));
     assert.ok(
       failed(result.checks).includes("registry: SubaccountsFacet is cut on the controller"),
       `stage ${stage} did not report the uncut registry`
@@ -434,14 +434,14 @@ void test("a real subaccount proxy has no beacon slot, and is verified without o
   // SubaccountProxy is a plain proxy: it holds the controller and the type as immutables and
   // resolves implementationForType on every call, so there is no ERC-1967 slot to read. A slot
   // check here would fail every valid loan subaccount
-  const chain = new FakeChain("LoanSubaccountRemote");
+  const chain = new FakeChain("MorphoLoanSubaccountRemote");
   assert.equal(
     await chain.storage(SUBACCOUNT, BEACON_SLOT),
     `0x${"0".repeat(64)}`,
     "the fake must model the real proxy: no beacon slot"
   );
   const result = await verifyImplementation(
-    inputs(chain, { contract: "LoanSubaccountRemote", stage: "live", sampleXrplOwner: OWNER })
+    inputs(chain, { contract: "MorphoLoanSubaccountRemote", stage: "live", sampleXrplOwner: OWNER })
   );
   assert.deepEqual(failed(result.checks), []);
   assert.equal(
@@ -456,10 +456,10 @@ void test("a real subaccount proxy has no beacon slot, and is verified without o
 });
 
 void test("a missing sample subaccount fails the request too", async () => {
-  const chain = new FakeChain("LoanSubaccountRemote");
+  const chain = new FakeChain("MorphoLoanSubaccountRemote");
   chain.codes.delete(SUBACCOUNT.toLowerCase());
   const result = await verifyImplementation(
-    inputs(chain, { contract: "LoanSubaccountRemote", stage: "live", sampleXrplOwner: OWNER })
+    inputs(chain, { contract: "MorphoLoanSubaccountRemote", stage: "live", sampleXrplOwner: OWNER })
   );
   assert.deepEqual(failed(result.checks), [`sample: ${OWNER}'s account at ${SUBACCOUNT} is materialized`]);
 });

@@ -10,14 +10,14 @@ import {MasterAccountController} from "../../contracts/smartAccounts/implementat
 import {IIMasterAccountController} from "../../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
-import {LoanSubaccountRemote} from "../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
+import {MorphoLoanSubaccountRemote} from "../../contracts/smartAccounts/implementation/MorphoLoanSubaccountRemote.sol";
 import {SubaccountProxy} from "../../contracts/smartAccounts/proxy/SubaccountProxy.sol";
 import {ComposeTransportFacet} from "../../contracts/smartAccounts/facets/ComposeTransportFacet.sol";
-import {LoanMarketsFacet} from "../../contracts/smartAccounts/facets/LoanMarketsFacet.sol";
+import {MorphoLoanMarketsFacet} from "../../contracts/smartAccounts/facets/MorphoLoanMarketsFacet.sol";
 import {IIComposeTransportFacet} from "../../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
-import {IILoanMarketsFacet} from "../../contracts/smartAccounts/interface/IILoanMarketsFacet.sol";
+import {IIMorphoLoanMarketsFacet} from "../../contracts/smartAccounts/interface/IIMorphoLoanMarketsFacet.sol";
 import {IComposeTransportFacet} from "../../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
-import {ILoanMarketsFacet} from "../../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
+import {IMorphoLoanMarketsFacet} from "../../contracts/userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 import {IMorpho} from "../../contracts/smartAccounts/interface/IMorpho.sol";
 import {MorphoMath} from "../../contracts/smartAccounts/library/MorphoMath.sol";
 import {MintableERC20} from "../../contracts/mock/MintableERC20.sol";
@@ -33,15 +33,15 @@ import {
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM
-} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 
 /**
  * @title LoanRemoteFixture
  * @notice The loan-chain side of the loan flow for the adversarial, fuzz and invariant suites: the
  * diamond with its loan facets, one registered market (RLUSD/FXRP, health check ON - the unit
- * suite in `LoanSubaccountRemote.t.sol` turns it off for its over-leveraged fee fixtures), one
- * `LoanSubaccountRemote` proxy under a parent address, and the endpoint's compose queue. FXRP is
+ * suite in `MorphoLoanSubaccountRemote.t.sol` turns it off for its over-leveraged fee fixtures), one
+ * `MorphoLoanSubaccountRemote` proxy under a parent address, and the endpoint's compose queue. FXRP is
  * a `MockCallbackToken`, so a scenario can fire a callback from inside a collateral move; the
  * market's IRM is a `MockIrm` at rate zero, so interest arrives only where a scenario sets a rate
  * or queues it.
@@ -54,7 +54,7 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
     uint256 internal constant YEAR = 365 days;
 
     IIMasterAccountController internal controller;
-    LoanSubaccountRemote internal account;
+    MorphoLoanSubaccountRemote internal account;
     MintableERC20 internal fxrp;
     MintableERC20 internal loanToken;
     MockMorpho internal morpho;
@@ -129,8 +129,8 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
             IDiamond.FacetCutAction.Add
         );
         cuts[1] = _buildFacetCut(
-            address(new LoanMarketsFacet()),
-            "LoanMarketsFacet",
+            address(new MorphoLoanMarketsFacet()),
+            "MorphoLoanMarketsFacet",
             IDiamond.FacetCutAction.Add
         );
         vm.prank(owner);
@@ -142,10 +142,10 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
     }
 
     function _installRemoteAccount() private {
-        LoanSubaccountRemote implementation = new LoanSubaccountRemote();
+        MorphoLoanSubaccountRemote implementation = new MorphoLoanSubaccountRemote();
         vm.prank(owner);
         controller.setSubaccountImplementation(1, address(implementation));
-        account = LoanSubaccountRemote(
+        account = MorphoLoanSubaccountRemote(
             address(new SubaccountProxy(address(controller), parent, 1))
         );
         _configureMarket(1, loanToken);
@@ -177,9 +177,9 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         );
         _ensureMarket();
         vm.prank(owner);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             _type,
-            ILoanMarketsFacet.Market(address(morpho), params)
+            IMorphoLoanMarketsFacet.Market(address(morpho), params)
         );
         _setTerms(_type, 0.07e18, 0.01e18);
     }
@@ -197,9 +197,9 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         internal
     {
         vm.prank(owner);
-        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+        IIMorphoLoanMarketsFacet(address(controller)).setLoanFeeTerms(
             _type,
-            ILoanMarketsFacet.FeeTerms(_floor, _spread, collector)
+            IMorphoLoanMarketsFacet.FeeTerms(_floor, _spread, collector)
         );
     }
 

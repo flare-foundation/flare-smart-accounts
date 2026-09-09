@@ -9,15 +9,15 @@ import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
 import {
-    ILoanSubaccountRemote,
+    IMorphoLoanSubaccountRemote,
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_CANCEL,
     DESTINATION_KIND_EVM
-} from "../../userInterfaces/ILoanSubaccountRemote.sol";
+} from "../../userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
-import {ILoanMarketsFacet} from "../../userInterfaces/facets/ILoanMarketsFacet.sol";
+import {IMorphoLoanMarketsFacet} from "../../userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/IBridgingSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
@@ -30,7 +30,7 @@ import {SubaccountBase} from "./SubaccountBase.sol";
 import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
 
 /**
- * @title LoanSubaccountRemote contract
+ * @title MorphoLoanSubaccountRemote contract
  * @notice The loan-chain-side subaccount implementation (Ethereum, at launch): same frozen
  * proxy and CREATE2 address as the Flare-side account, resolved per type through the
  * controller-as-beacon. Authenticated compose actions ({ComposeReceiverAccountBase}), sent by
@@ -50,7 +50,7 @@ import {ComposeReceiverAccountBase} from "./ComposeReceiverAccountBase.sol";
  * plain send reverts; native landing without a call (pre-deployment funding, an LZ native
  * drop, a force-send) strands until a beacon upgrade adds a rail - accepted.
  */
-contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeReceiverAccountBase {
+contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBase, ComposeReceiverAccountBase {
     using SafeERC20 for IERC20;
 
     /// @dev The market's borrow side brought to the current block, and this account's position
@@ -83,14 +83,14 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     // deliberately no receive() and no native exit: a withdraw delivery's compose value is
     // spent or forwarded in-call; pre-deployment, dropped or force-sent native strands
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function repay()
         external
         nonReentrant
         returns (uint256 _assets)
     {
         // no pause gate: repaying moves the position toward safety, and must stay available
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         IERC20 loanToken = IERC20(market.marketParams.loanToken);
         uint256 balance = loanToken.balanceOf(address(this));
         require(balance > 0, NothingToRepay());
@@ -144,7 +144,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         _collectFeeAndPushSurplus(market, loanToken);
     }
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function checkpointFee()
         external
         nonReentrant
@@ -154,20 +154,20 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         _checkpointFee(_myMarket());
     }
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function depositIdleFxrp()
         external
         nonReentrant
         returns (uint256 _amount)
     {
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         _checkDepositAllowed(market);
         _amount = _supplyBalance(market);
         require(_amount > 0, NothingToDeposit());
         emit IdleFxrpDeposited(_parentAccount(), _amount);
     }
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function getLoanFeeState()
         external view
         returns (
@@ -189,12 +189,12 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         );
     }
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function getLoanPosition()
         external view
         returns (LoanPosition memory _position)
     {
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         MarketView memory view_ = _marketView(market);
         _position.collateral = view_.collateral;
         _position.idleCollateral = IERC20(market.marketParams.collateralToken).balanceOf(address(this));
@@ -213,14 +213,14 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         _position.liquidationPrice = _liquidationPrice(view_.debt, view_.collateral, market.marketParams.lltv);
     }
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function getLoanLimits(
         uint256 _additionalCollateral
     )
         external view
         returns (LoanLimits memory _limits)
     {
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         MarketView memory view_ = _marketView(market);
         uint256 collectible = _projectedFeeX18(view_.debt) / WAD;
         uint256 price = _oraclePrice(market);
@@ -234,14 +234,14 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         );
     }
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function previewRepay(
         uint256 _additionalLoanToken
     )
         external view
         returns (RepayPreview memory _preview)
     {
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         // shares-first, as repay is: a debt-free account's preview reads no rate model, so it
         // stays available where repay does - the fee-only settlement and the surplus recovery
         // of an account whose market's IRM has died
@@ -256,14 +256,14 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         _preview.closingTopUp = owed > idle ? owed - idle : 0;
     }
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function previewWithdraw(
         uint256 _amount
     )
         external view
         returns (WithdrawPreview memory _preview)
     {
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         MarketView memory view_ = _marketView(market);
         uint256 collectible = _projectedFeeX18(view_.debt) / WAD;
         uint256 lltv = market.marketParams.lltv;
@@ -277,7 +277,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         }
     }
 
-    /// @inheritdoc ILoanSubaccountRemote
+    /// @inheritdoc IMorphoLoanSubaccountRemote
     function previewBorrow(
         uint256 _amount,
         uint256 _additionalCollateral
@@ -285,7 +285,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         external view
         returns (BorrowPreview memory _preview)
     {
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         MarketView memory view_ = _marketView(market);
         uint256 supplied = view_.collateral
             + IERC20(market.marketParams.collateralToken).balanceOf(address(this))
@@ -399,16 +399,19 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         }
         // a debt increase respects the pause and the per-type borrow switch
         _checkNotPaused();
-        require(!ILoanMarketsFacet(controllerAddress).isLoanBorrowingDisabled(_accountType()), BorrowingDisabled());
+        require(
+            !IMorphoLoanMarketsFacet(controllerAddress).isLoanBorrowingDisabled(_accountType()),
+            BorrowingDisabled()
+        );
         // and configured fee terms (the recipient is the activation marker); a revert, not
         // a skip, so the packet stays retriable
         require(
-            ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient != address(0),
+            IMorphoLoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient != address(0),
             FeeTermsNotConfigured()
         );
         _markOperationUsed(operationId);
 
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         uint256 supplied = _supplyBalance(market);
         _borrowTo(market, destinationKind, destination, borrowAmount);
         emit LoanOpened(
@@ -437,7 +440,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         private
     {
         require(_bridgedAmount > 0, ZeroAmount());
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         _checkDepositAllowed(market);
         // the credit already sits on the account (the OFT delivered it a transaction ago), so
         // it goes in with whatever else is here; the rail may already have deposited it (the
@@ -453,7 +456,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// put a credit into the position before its packet is delivered (the accepted race),
     /// leaving nothing to supply; a message-only borrow arrives with nothing idle by design.
     function _supplyBalance(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private
         returns (uint256 _supplied)
@@ -475,7 +478,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// with nothing sent. Morpho's own health check ran inside the borrow; the gate implies
     /// it, so it is the binding one whenever Morpho passed.
     function _borrowTo(
-        ILoanMarketsFacet.Market memory _market,
+        IMorphoLoanMarketsFacet.Market memory _market,
         uint8 _destinationKind,
         bytes32 _destination,
         uint256 _amount
@@ -542,7 +545,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         // pause after the terminal gates (duplicates and expired packets finalize during a
         // pause); the exit itself waits - it rides the OFT
         _checkNotPaused();
-        ILoanMarketsFacet.Market memory market = _myMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         // the cover gate: a live fee principal checkpoints first (zero principal has nothing to
         // accrue and no snapshot worth refreshing - a borrow re-baselines itself), then the
         // withdrawal is refused (retriably) unless the collateral it leaves covers the position
@@ -669,7 +672,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// repayment must not keep a stale base); zero live shares settle at `D = 0` without
     /// touching the IRM.
     function _checkpointFee(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private
     {
@@ -692,8 +695,8 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
                 feePrincipal = liveDebt;
             }
         }
-        ILoanMarketsFacet.FeeTerms memory terms =
-            ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType());
+        IMorphoLoanMarketsFacet.FeeTerms memory terms =
+            IMorphoLoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType());
         feeLastCheckpoint = uint64(block.timestamp);
         feeSnapshotFloor = terms.feeFloor;
         feeSnapshotSpread = terms.feeSpread;
@@ -712,7 +715,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// retried, while a borrow needs the oracle back (Morpho, whose check ran first inside the
     /// borrow, reads it too). Reverts `InsufficientRemainingCollateral` with the two numbers.
     function _requirePositionCovered(
-        ILoanMarketsFacet.Market memory _market,
+        IMorphoLoanMarketsFacet.Market memory _market,
         uint256 _collateralOut
     )
         private
@@ -752,7 +755,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// requested amount (shares and rounding matter). The clock stays: the action's
     /// checkpoint just set it.
     function _syncFeePrincipal(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private
     {
@@ -767,7 +770,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// uncovered shortfall needs new funds) and send only the unreserved balance to the
     /// parent, once debt-free.
     function _collectFeeAndPushSurplus(
-        ILoanMarketsFacet.Market memory _market,
+        IMorphoLoanMarketsFacet.Market memory _market,
         IERC20 _loanToken
     )
         private
@@ -828,7 +831,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
         private view
         returns (address)
     {
-        return ILoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient;
+        return IMorphoLoanMarketsFacet(controllerAddress).getLoanFeeTerms(_accountType()).feeRecipient;
     }
 
     /// @dev The account's one market, bound write-once to its type. If its Morpho stops
@@ -837,18 +840,18 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// of the pinned v1.0.0 implementation (any other needs the conformance verification repeated).
     function _myMarket()
         private view
-        returns (ILoanMarketsFacet.Market memory _market)
+        returns (IMorphoLoanMarketsFacet.Market memory _market)
     {
-        _market = ILoanMarketsFacet(controllerAddress).getLoanMarket(_accountType());
+        _market = IMorphoLoanMarketsFacet(controllerAddress).getLoanMarket(_accountType());
         require(
             _market.morpho != address(0),
-            ILoanMarketsFacet.MarketNotRegistered(_accountType())
+            IMorphoLoanMarketsFacet.MarketNotRegistered(_accountType())
         );
     }
 
     /// @dev The account's collateral on its market, a plain Morpho storage read.
     function _collateralOf(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private view
         returns (uint128 _collateral)
@@ -861,7 +864,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// @dev The account's live borrow shares on its market - the exact test for "is there
     /// any debt", read live from Morpho every time (nothing is cached).
     function _borrowSharesOf(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private view
         returns (uint128 _borrowShares)
@@ -879,7 +882,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// question refuses every deposit, indebted or not, the same fail-closed posture as
     /// {_checkNotPaused}.
     function _checkDepositAllowed(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private view
     {
@@ -892,7 +895,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// Morpho's rounded-up share conversion with virtual offsets ({MorphoMath}, pinned to
     /// upstream `SharesMathLib`).
     function _debtOf(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private view
         returns (uint128 _borrowShares, uint256 _fullDebt)
@@ -907,7 +910,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// @dev The market oracle's price, zero when the oracle is dead, reverting or answers zero -
     /// the gate's own treatment, so a quote reads the collateral the way the gate will.
     function _oraclePrice(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private view
         returns (uint256)
@@ -925,7 +928,7 @@ contract LoanSubaccountRemote is ILoanSubaccountRemote, SubaccountBase, ComposeR
     /// earns nothing) - and this account's shares, collateral and the debt those shares represent
     /// on the accrued totals. Reverts where the rate model does: every debt-bearing action would.
     function _marketView(
-        ILoanMarketsFacet.Market memory _market
+        IMorphoLoanMarketsFacet.Market memory _market
     )
         private view
         returns (MarketView memory _view)

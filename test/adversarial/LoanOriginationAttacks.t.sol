@@ -15,15 +15,15 @@ import {
     MODE_REENTER
 } from "../../contracts/mock/MockFaultyParent.sol";
 import {MockOft} from "../../contracts/mock/MockOft.sol";
-import {LoanSubaccountRemote} from "../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
+import {MorphoLoanSubaccountRemote} from "../../contracts/smartAccounts/implementation/MorphoLoanSubaccountRemote.sol";
 import {SubaccountProxy} from "../../contracts/smartAccounts/proxy/SubaccountProxy.sol";
 import {MockFreezableToken} from "../../contracts/mock/MockFreezableToken.sol";
-import {ILoanSubaccountRemote} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {IMorphoLoanSubaccountRemote} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {IComposeReceiverAccountBase} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 import {IComposeTransportFacet} from "../../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
 import {IIComposeTransportFacet} from "../../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
-import {IILoanMarketsFacet} from "../../contracts/smartAccounts/interface/IILoanMarketsFacet.sol";
-import {ILoanMarketsFacet} from "../../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
+import {IIMorphoLoanMarketsFacet} from "../../contracts/smartAccounts/interface/IIMorphoLoanMarketsFacet.sol";
+import {IMorphoLoanMarketsFacet} from "../../contracts/userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 import {IPauseFacet} from "../../contracts/userInterfaces/facets/IPauseFacet.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
@@ -54,7 +54,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
             _deliver(10, 100e6, _deposit(), 0);
             if (order == 1) {
                 vm.expectRevert(
-                    ILoanSubaccountRemote.NothingToDeposit.selector
+                    IMorphoLoanSubaccountRemote.NothingToDeposit.selector
                 );
                 account.depositIdleFxrp();
             }
@@ -70,7 +70,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
 
     /// A rail before credit cannot consume future credit or make the later compose double-supply.
     function testDepositBeforeCreditCannotConsumeFutureTokens() public {
-        vm.expectRevert(ILoanSubaccountRemote.NothingToDeposit.selector);
+        vm.expectRevert(IMorphoLoanSubaccountRemote.NothingToDeposit.selector);
         account.depositIdleFxrp();
         fxrp.mint(address(account), 100e6);
         _deliver(2, 100e6, _deposit(), 0);
@@ -129,7 +129,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         uint256 collateral = _collateral();
         uint256 debt = _debt();
 
-        vm.expectRevert(ILoanSubaccountRemote.NothingToDeposit.selector);
+        vm.expectRevert(IMorphoLoanSubaccountRemote.NothingToDeposit.selector);
         account.depositIdleFxrp();
 
         assertEq(_collateral(), collateral);
@@ -157,7 +157,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         _deliver(2, 100e6, _deposit(), 0);
         oracle.setPrice(1e48);
         _liquidate(_shares());
-        vm.expectRevert(ILoanSubaccountRemote.NothingToDeposit.selector);
+        vm.expectRevert(IMorphoLoanSubaccountRemote.NothingToDeposit.selector);
         account.depositIdleFxrp();
         assertEq(_collateral(), 0);
         assertEq(_debt(), 0);
@@ -324,7 +324,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
             abi.encodeCall(oft.setPeer, (ORIGIN_EID, bytes32(uint256(7))))
         );
         _withdrawMustRevert(
-            ILoanSubaccountRemote.WrongOriginPeer.selector,
+            IMorphoLoanSubaccountRemote.WrongOriginPeer.selector,
             RETURN_VALUE
         );
         assertEq(oft.peers(ORIGIN_EID), originPeer);
@@ -341,7 +341,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         );
         _withdrawMustRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientFundsForBridgeHome.selector,
+                IMorphoLoanSubaccountRemote.InsufficientFundsForBridgeHome.selector,
                 2 * RETURN_VALUE
             ),
             RETURN_VALUE
@@ -476,7 +476,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         // 999 FXRP left are worth at the new price
         _withdrawMustRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientRemainingCollateral.selector,
+                IMorphoLoanSubaccountRemote.InsufficientRemainingCollateral.selector,
                 2100e18,
                 999e18
             ),
@@ -500,7 +500,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         vm.warp(block.timestamp + 2 hours);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientDeliveryValue.selector,
+                IMorphoLoanSubaccountRemote.InsufficientDeliveryValue.selector,
                 RETURN_VALUE
             )
         );
@@ -547,17 +547,17 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
     /// Same parent, market and operation ID remain isolated between two subaccount types.
     function testTwoTypesSharingMarketAndOperationIdAreIsolated() public {
         _open(1_000e18);
-        LoanSubaccountRemote first = account;
+        MorphoLoanSubaccountRemote first = account;
         address implementation = account.implementation();
         vm.startPrank(owner);
         controller.setSubaccountImplementation(2, implementation);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             2,
-            ILoanMarketsFacet.Market(address(morpho), params)
+            IMorphoLoanMarketsFacet.Market(address(morpho), params)
         );
         vm.stopPrank();
         _setTerms(2, 0.07e18, 0.01e18);
-        account = LoanSubaccountRemote(
+        account = MorphoLoanSubaccountRemote(
             address(new SubaccountProxy(address(controller), parent, 2))
         );
         fxrp.mint(address(account), 10_000e6);
@@ -636,7 +636,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         // and reads the balance, so what the old OFT credited still goes in - and it needs no
         // packet at all, which is the point: inventing a second packet here would assert against
         // a credit no OFT ever delivered
-        uint256 recovered = ILoanSubaccountRemote(address(account)).depositIdleFxrp();
+        uint256 recovered = IMorphoLoanSubaccountRemote(address(account)).depositIdleFxrp();
         assertEq(recovered, 1_000e6, "the stranded credit is recoverable");
         assertEq(_collateral(), 1_000e6, "and it is supplied to the market");
     }
@@ -704,7 +704,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         vm.prank(owner);
         controller.setSubaccountImplementation(2, implementation);
         _configureMarket(2, loanToken);
-        account = LoanSubaccountRemote(
+        account = MorphoLoanSubaccountRemote(
             address(new SubaccountProxy(address(controller), parent, 2))
         );
     }
@@ -797,7 +797,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
     {
         _receiver = new MockFaultyParent();
         parent = address(_receiver);
-        account = LoanSubaccountRemote(
+        account = MorphoLoanSubaccountRemote(
             address(new SubaccountProxy(address(controller), parent, 1))
         );
     }
@@ -817,7 +817,7 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
             _withdraw(bytes32("parent failure"), 1e6, RETURN_VALUE)
         );
         // Bound gas so the deliberately consuming receiver cannot stall the test process.
-        vm.expectRevert(ILoanSubaccountRemote.RefundFailed.selector);
+        vm.expectRevert(IMorphoLoanSubaccountRemote.RefundFailed.selector);
         endpoint.deliver{value: 2 * RETURN_VALUE, gas: 2_000_000}(
             address(oft),
             address(account),

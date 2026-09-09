@@ -72,7 +72,7 @@ void test("an implementation upgrade needs no flag: that is what the deploy scri
     "PersonalAccountImplementation",
     "LoanSubaccountImplementation",
     "PersonalAccountRemoteImplementation",
-    "LoanSubaccountRemoteImplementation",
+    "MorphoLoanSubaccountRemoteImplementation",
     "FAssetRedeemComposerImplementation",
     "FAssetRedeemerAccountImplementation",
   ]) {

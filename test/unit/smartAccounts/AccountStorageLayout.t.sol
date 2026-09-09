@@ -5,7 +5,8 @@ import {Test} from "forge-std/Test.sol";
 import {PersonalAccount} from "../../../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {PersonalAccountRemote} from "../../../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
 import {LoanSubaccount} from "../../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
-import {LoanSubaccountRemote} from "../../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
+import {MorphoLoanSubaccountRemote} from
+    "../../../contracts/smartAccounts/implementation/MorphoLoanSubaccountRemote.sol";
 
 /// The storage rule of the account bases, pinned: `controllerAddress` is slot 0, linear, in
 /// every lineage, and `xrplOwner` slot 1 in every Personal Account lineage - the production
@@ -28,7 +29,7 @@ contract AccountStorageLayoutTest is Test {
             address(new PersonalAccount()),
             address(new PersonalAccountRemote()),
             address(new LoanSubaccount()),
-            address(new LoanSubaccountRemote())
+            address(new MorphoLoanSubaccountRemote())
         ];
         for (uint256 i = 0; i < implementations.length; i++) {
             assertEq(_addressAt(implementations[i], 0), EMPTY_ADDRESS, "slot 0 is not the controller");
@@ -54,7 +55,7 @@ contract AccountStorageLayoutTest is Test {
 
     function testSubaccountIdentityLivesInItsNamespaceOnBothChains() public {
         LoanSubaccount flare = new LoanSubaccount();
-        LoanSubaccountRemote remote = new LoanSubaccountRemote();
+        MorphoLoanSubaccountRemote remote = new MorphoLoanSubaccountRemote();
         _initializeSubaccount(address(flare));
         _initializeSubaccount(address(remote));
         address[2] memory accounts = [address(flare), address(remote)];
@@ -77,7 +78,7 @@ contract AccountStorageLayoutTest is Test {
         // receivers
         PersonalAccountRemote remotePa = new PersonalAccountRemote();
         LoanSubaccount flare = new LoanSubaccount();
-        LoanSubaccountRemote remote = new LoanSubaccountRemote();
+        MorphoLoanSubaccountRemote remote = new MorphoLoanSubaccountRemote();
         _initializePersonalAccount(address(remotePa));
         _initializeSubaccount(address(flare));
         _initializeSubaccount(address(remote));
@@ -85,16 +86,16 @@ contract AccountStorageLayoutTest is Test {
         bytes32 slot = keccak256(abi.encode(operationId, COMPOSE_NAMESPACE));
         address[3] memory receivers = [address(remotePa), address(flare), address(remote)];
         for (uint256 i = 0; i < receivers.length; i++) {
-            assertFalse(LoanSubaccountRemote(payable(receivers[i])).usedOperations(operationId));
+            assertFalse(MorphoLoanSubaccountRemote(payable(receivers[i])).usedOperations(operationId));
             vm.store(receivers[i], slot, bytes32(uint256(1)));
-            assertTrue(LoanSubaccountRemote(payable(receivers[i])).usedOperations(operationId));
+            assertTrue(MorphoLoanSubaccountRemote(payable(receivers[i])).usedOperations(operationId));
         }
     }
 
     function testRemoteSubaccountFeeStateIsLinearAfterTheController() public {
         // the loan-chain subaccount's own state starts right after slot 0: principal at 1, the
         // WAD fee carry at 2, and the clock plus the two rate snapshots packed into slot 3
-        LoanSubaccountRemote remote = new LoanSubaccountRemote();
+        MorphoLoanSubaccountRemote remote = new MorphoLoanSubaccountRemote();
         _initializeSubaccount(address(remote));
         vm.store(address(remote), bytes32(uint256(1)), bytes32(uint256(123e18)));
         vm.store(address(remote), bytes32(uint256(2)), bytes32(uint256(456e36)));

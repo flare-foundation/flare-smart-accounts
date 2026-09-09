@@ -3,12 +3,12 @@ pragma solidity ^0.8.27;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {LoanRemoteFixture} from "../utils/LoanRemoteFixture.sol";
-import {ILoanSubaccountRemote} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {IMorphoLoanSubaccountRemote} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {MorphoMath} from "../../contracts/smartAccounts/library/MorphoMath.sol";
 
 /**
  * @title LoanFeeFuzzTest
- * @notice Property tests over the Flare fee arithmetic of `LoanSubaccountRemote`, each stated as
+ * @notice Property tests over the Flare fee arithmetic of `MorphoLoanSubaccountRemote`, each stated as
  * the spec's formula computed here independently of the account: the pro-rata split of an
  * underfunded repayment, the covering repayment, the accrual over three periods with a terms
  * change in between (priced at the snapshotted terms, never compounding), the cover gate on
@@ -207,7 +207,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         irm.setRate(bound(_rate, 0, MAX_RATE));
         vm.warp(block.timestamp + bound(_elapsed, 0, 2 * YEAR));
 
-        ILoanSubaccountRemote.LoanPosition memory projected = account.getLoanPosition();
+        IMorphoLoanSubaccountRemote.LoanPosition memory projected = account.getLoanPosition();
         account.checkpointFee();
 
         (uint256 principal, uint256 feeDebtX18, uint256 collectible, , , ) = account.getLoanFeeState();
@@ -235,7 +235,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         vm.warp(block.timestamp + bound(_elapsed, 1, 2 * YEAR));
         oracle.setPrice(bound(_priceMantissa, 1_000, 9_999) * 10 ** bound(_priceExponent, 27, 46));
         uint256 amount = bound(_amount, 1, _collateral());
-        ILoanSubaccountRemote.WithdrawPreview memory preview = account.previewWithdraw(amount);
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory preview = account.previewWithdraw(amount);
 
         (bool success, bytes memory data) = _tryWithdrawAt(2, bytes32("exit"), amount);
 
@@ -267,7 +267,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         oracle.setPrice(bound(_priceMantissa, 1_000, 9_999) * 10 ** bound(_priceExponent, 27, 46));
         uint256 more = bound(_moreSeed, 1, MAX_DEBT);
         uint256 credit = bound(_credit, 0, 10_000e6);
-        ILoanSubaccountRemote.BorrowPreview memory preview = account.previewBorrow(more, credit);
+        IMorphoLoanSubaccountRemote.BorrowPreview memory preview = account.previewBorrow(more, credit);
         BorrowTerms memory terms =
             BorrowTerms(_debt(), preview.debtAfter, preview.requiredCover, preview.collateralValue);
         fxrp.mint(address(account), credit);
@@ -296,7 +296,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         vm.warp(block.timestamp + bound(_elapsed, 0, 2 * YEAR));
         oracle.setPrice(bound(_priceMantissa, 1_000, 9_999) * 10 ** bound(_priceExponent, 27, 46));
         uint256 credit = bound(_credit, 0, 10_000e6);
-        ILoanSubaccountRemote.LoanLimits memory limits = account.getLoanLimits(credit);
+        IMorphoLoanSubaccountRemote.LoanLimits memory limits = account.getLoanLimits(credit);
 
         _assertBorrowLimitIsExact(limits.maxBorrowByCover, credit);
         _assertWithdrawLimitIsExact(limits.maxWithdraw);
@@ -320,7 +320,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         uint256 idle = bound(_idleSeed, 0, 2 * debt);
         uint256 topUp = bound(_topUpSeed, idle == 0 ? 1 : 0, 2 * debt);
         loanToken.mint(address(account), idle);
-        ILoanSubaccountRemote.RepayPreview memory preview = account.previewRepay(topUp);
+        IMorphoLoanSubaccountRemote.RepayPreview memory preview = account.previewRepay(topUp);
         loanToken.mint(address(account), topUp);
         uint256 collectorBefore = loanToken.balanceOf(collector);
         uint256 parentBefore = loanToken.balanceOf(parent);
@@ -591,7 +591,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
             assertEq(
                 _data,
                 abi.encodeWithSelector(
-                    ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _terms.required, _terms.value
+                    IMorphoLoanSubaccountRemote.InsufficientRemainingCollateral.selector, _terms.required, _terms.value
                 )
             );
             assertEq(_debt(), _terms.debtBefore);
@@ -604,7 +604,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
     }
 
     function _assertRepayOutcome(
-        ILoanSubaccountRemote.RepayPreview memory _preview,
+        IMorphoLoanSubaccountRemote.RepayPreview memory _preview,
         uint256 _repaid,
         uint256 _collectorBefore,
         uint256 _parentBefore
@@ -647,7 +647,7 @@ contract LoanFeeFuzzTest is LoanRemoteFixture {
         assertEq(
             _data,
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _required, _remaining
+                IMorphoLoanSubaccountRemote.InsufficientRemainingCollateral.selector, _required, _remaining
             )
         );
         assertEq(_collateral(), _collateralBefore);

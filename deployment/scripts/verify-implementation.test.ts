@@ -374,7 +374,7 @@ void test("bad usage exits 2 and names the accepted contracts", async () => {
   const missing = await runCli(repo, rpc.url, ["ethereum", "PersonalAccountRemote"]);
   assert.equal(missing.status, 2);
   assert.match(missing.stderr, /Usage: pnpm verify_implementation/);
-  assert.match(missing.stderr, /PersonalAccount, PersonalAccountRemote, LoanSubaccount, LoanSubaccountRemote/);
+  assert.match(missing.stderr, /PersonalAccount, PersonalAccountRemote, LoanSubaccount, MorphoLoanSubaccountRemote/);
   const badStage = await runCli(repo, rpc.url, ["ethereum", "PersonalAccountRemote", IMPL, "--stage", "later"]);
   assert.equal(badStage.status, 1);
   assert.match(badStage.stderr, /--stage takes pre, queued or live/);

@@ -23,7 +23,7 @@ import {
     REDEEM_HOME_TTL
 } from "../../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
-import {DESTINATION_KIND_EVM} from "../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {DESTINATION_KIND_EVM} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 
 /**
  * @title LoanHomeFixture

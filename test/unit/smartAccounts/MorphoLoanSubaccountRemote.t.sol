@@ -16,12 +16,12 @@ import {PersonalAccount} from "../../../contracts/smartAccounts/implementation/P
 import {LoanSubaccount} from "../../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
 import {PersonalAccountProxy} from "../../../contracts/smartAccounts/proxy/PersonalAccountProxy.sol";
 import {
-    LoanSubaccountRemote
-} from "../../../contracts/smartAccounts/implementation/LoanSubaccountRemote.sol";
+    MorphoLoanSubaccountRemote
+} from "../../../contracts/smartAccounts/implementation/MorphoLoanSubaccountRemote.sol";
 import {SubaccountProxy} from "../../../contracts/smartAccounts/proxy/SubaccountProxy.sol";
 import {MockNativeRejectingParent} from "../../../contracts/mock/MockNativeRejectingParent.sol";
 import {ComposeTransportFacet} from "../../../contracts/smartAccounts/facets/ComposeTransportFacet.sol";
-import {LoanMarketsFacet} from "../../../contracts/smartAccounts/facets/LoanMarketsFacet.sol";
+import {MorphoLoanMarketsFacet} from "../../../contracts/smartAccounts/facets/MorphoLoanMarketsFacet.sol";
 import {SubaccountsFacet} from "../../../contracts/smartAccounts/facets/SubaccountsFacet.sol";
 import {PersonalAccountsFacet} from "../../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {
@@ -29,7 +29,7 @@ import {
 } from "../../../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";
 import {TimelockFacet} from "../../../contracts/smartAccounts/facets/TimelockFacet.sol";
 import {PauseFacet} from "../../../contracts/smartAccounts/facets/PauseFacet.sol";
-import {ILoanSubaccountRemote} from "../../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+import {IMorphoLoanSubaccountRemote} from "../../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {ILoanSubaccount} from "../../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {IPersonalAccount} from "../../../contracts/userInterfaces/IPersonalAccount.sol";
@@ -37,11 +37,11 @@ import {IPersonalAccountRemote} from "../../../contracts/userInterfaces/IPersona
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
 import {IComposeTransportFacet} from "../../../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
 import {
-    ILoanMarketsFacet,
+    IMorphoLoanMarketsFacet,
     MAX_FEE_RATE
-} from "../../../contracts/userInterfaces/facets/ILoanMarketsFacet.sol";
+} from "../../../contracts/userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 import {IIComposeTransportFacet} from "../../../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
-import {IILoanMarketsFacet} from "../../../contracts/smartAccounts/interface/IILoanMarketsFacet.sol";
+import {IIMorphoLoanMarketsFacet} from "../../../contracts/smartAccounts/interface/IIMorphoLoanMarketsFacet.sol";
 import {IMorpho} from "../../../contracts/smartAccounts/interface/IMorpho.sol";
 import {
     ISubaccountsFacet,
@@ -75,7 +75,7 @@ import {
     ACTION_CANCEL,
     DESTINATION_KIND_EVM,
     DESTINATION_KIND_XRPL_WORMHOLE
-} from "../../../contracts/userInterfaces/ILoanSubaccountRemote.sol";
+} from "../../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {
     IComposeReceiverAccountBase,
     PAYLOAD_VERSION_1,
@@ -84,7 +84,7 @@ import {
 } from "../../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 
 /**
- * @title LoanSubaccountRemoteTest
+ * @title MorphoLoanSubaccountRemoteTest
  * @notice The loan-chain-side subaccount (Ethereum, at launch): the same frozen proxy
  * resolves a per-chain implementation through the controller-as-beacon, so the account keeps
  * its cross-chain CREATE2 address while behaving differently per chain. Covers creation and
@@ -92,7 +92,7 @@ import {
  * fee accounting and gates, and cross-chain payload integration.
  */
 // solhint-disable-next-line max-states-count
-contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
+contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
     address private constant SINGLETON_FACTORY = 0xce0042B868300000d44A59004Da54A005ffdcf9f;
     /// The signed return-leg options a withdraw payload carries (the mock OFT ignores them).
     bytes private constant RETURN_OPTIONS = hex"0003";
@@ -102,7 +102,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     MockAssetManager private flareAssetManager;
 
     IIMasterAccountController private controller;
-    LoanSubaccountRemote private loanChainImpl;
+    MorphoLoanSubaccountRemote private loanChainImpl;
 
     address private initialOwner;
     address private governance;
@@ -171,15 +171,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             IDiamond.FacetCutAction.Add
         );
         settingsCut[1] = _buildFacetCut(
-            address(new LoanMarketsFacet()),
-            "LoanMarketsFacet",
+            address(new MorphoLoanMarketsFacet()),
+            "MorphoLoanMarketsFacet",
             IDiamond.FacetCutAction.Add
         );
         vm.prank(governance);
         controller.diamondCut(settingsCut, address(0), "");
 
         // register the loan-chain implementation for the loan type (timelock is 0 in tests)
-        loanChainImpl = new LoanSubaccountRemote();
+        loanChainImpl = new MorphoLoanSubaccountRemote();
         vm.prank(governance);
         controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
@@ -192,7 +192,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         emit ISubaccount.SubaccountInitialized(
             address(controller), parentPersonalAccount, SUBACCOUNT_TYPE_LOAN
         );
-        LoanSubaccountRemote subaccount = _deploySubaccount();
+        MorphoLoanSubaccountRemote subaccount = _deploySubaccount();
 
         assertEq(subaccount.controllerAddress(), address(controller));
         assertEq(subaccount.parentPersonalAccount(), parentPersonalAccount);
@@ -201,7 +201,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testInitializeRevertAlreadyInitialized() public {
-        LoanSubaccountRemote subaccount = _deploySubaccount();
+        MorphoLoanSubaccountRemote subaccount = _deploySubaccount();
 
         vm.expectRevert(IControlledAccount.AlreadyInitialized.selector);
         subaccount.initialize(
@@ -222,10 +222,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testUpgradeRoutesToNewImplementation() public {
-        LoanSubaccountRemote subaccount = _deploySubaccount();
+        MorphoLoanSubaccountRemote subaccount = _deploySubaccount();
         assertEq(subaccount.implementation(), address(loanChainImpl));
 
-        LoanSubaccountRemote newImpl = new LoanSubaccountRemote();
+        MorphoLoanSubaccountRemote newImpl = new MorphoLoanSubaccountRemote();
         vm.prank(governance);
         controller.setSubaccountImplementation(
             SUBACCOUNT_TYPE_LOAN,
@@ -242,7 +242,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // chain, and each chain's diamond registers its own implementation for the type -
         // Flare the FAssets one, the loan chain this one. Switching the registration stands in
         // for looking at the other chain.
-        LoanSubaccountRemote subaccount = _deploySubaccount();
+        MorphoLoanSubaccountRemote subaccount = _deploySubaccount();
         assertEq(subaccount.implementation(), address(loanChainImpl));
         assertEq(subaccount.parentPersonalAccount(), parentPersonalAccount);
 
@@ -292,7 +292,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (bool success, ) = address(loanChainImpl).call{value: 1}("");
         assertFalse(success);
 
-        LoanSubaccountRemote subaccount = _deploySubaccount();
+        MorphoLoanSubaccountRemote subaccount = _deploySubaccount();
         (success, ) = address(subaccount).call{value: 1}("");
         assertFalse(success);
         assertEq(address(subaccount).balance, 0);
@@ -312,8 +312,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(transport.originEid, originEid);
         assertEq(transport.originPeer, originPeer);
 
-        ILoanMarketsFacet.Market memory market =
-            ILoanMarketsFacet(address(controller)).getLoanMarket(
+        IMorphoLoanMarketsFacet.Market memory market =
+            IMorphoLoanMarketsFacet(address(controller)).getLoanMarket(
                 SUBACCOUNT_TYPE_LOAN
             );
         assertEq(market.morpho, address(morpho));
@@ -321,14 +321,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(market.marketParams.collateralToken, address(fxrp));
         assertEq(market.marketParams.lltv, 0.77e18);
         assertFalse(
-            ILoanMarketsFacet(address(controller)).isLoanBorrowingDisabled(
+            IMorphoLoanMarketsFacet(address(controller)).isLoanBorrowingDisabled(
                 SUBACCOUNT_TYPE_LOAN
             )
         );
 
         // the fee terms were configured by the setters after registration
-        ILoanMarketsFacet.FeeTerms memory terms =
-            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        IMorphoLoanMarketsFacet.FeeTerms memory terms =
+            IMorphoLoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, 0.07e18);
         assertEq(terms.feeSpread, 0.01e18);
         assertEq(terms.feeRecipient, makeAddr("feeCollector"));
@@ -341,11 +341,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureTransport();
         morpho.createMarket(_defaultMarket().marketParams);
         vm.prank(governance);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
-        ILoanMarketsFacet.FeeTerms memory terms =
-            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        IMorphoLoanMarketsFacet.FeeTerms memory terms =
+            IMorphoLoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, 0);
         assertEq(terms.feeSpread, 0);
         assertEq(terms.feeRecipient, address(0));
@@ -358,14 +358,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(destination))), 500e18
         );
         _deliverExpectRevert(
-            subaccount, 1, payload, ILoanSubaccountRemote.FeeTermsNotConfigured.selector
+            subaccount, 1, payload, IMorphoLoanSubaccountRemote.FeeTermsNotConfigured.selector
         );
 
         // the one activating set opens borrowing: the same packet now delivers
         vm.startPrank(governance);
         _setFeeRates(0.07e18, 0.01e18);
         vm.stopPrank();
-        terms = ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        terms = IMorphoLoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, 0.07e18);
         assertEq(terms.feeRecipient, makeAddr("feeCollector"));
         _deliver(subaccount, 1, 100e6, payload);
@@ -378,13 +378,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureTransport();
         morpho.createMarket(_defaultMarket().marketParams);
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
         _setFeeRates(0, 0);
         vm.stopPrank();
-        ILoanMarketsFacet.FeeTerms memory terms =
-            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        IMorphoLoanMarketsFacet.FeeTerms memory terms =
+            IMorphoLoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, 0);
         assertEq(terms.feeSpread, 0);
         assertEq(terms.feeRecipient, makeAddr("feeCollector"));
@@ -397,8 +397,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 500e18
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 0);
     }
 
@@ -409,8 +409,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.startPrank(governance);
         _setFeeRates(0, 0);
         vm.stopPrank();
-        ILoanMarketsFacet.FeeTerms memory stored =
-            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        IMorphoLoanMarketsFacet.FeeTerms memory stored =
+            IMorphoLoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(stored.feeFloor, 0);
         assertEq(stored.feeSpread, 0);
         assertEq(stored.feeRecipient, makeAddr("feeCollector"));
@@ -422,12 +422,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // a rate change restates the collector; the caps are inclusive
         vm.expectEmit();
-        emit ILoanMarketsFacet.LoanFeeTermsSet(
+        emit IMorphoLoanMarketsFacet.LoanFeeTermsSet(
             SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE, MAX_FEE_RATE, makeAddr("feeCollector")
         );
         _setFeeRates(MAX_FEE_RATE, MAX_FEE_RATE);
-        ILoanMarketsFacet.FeeTerms memory terms =
-            ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        IMorphoLoanMarketsFacet.FeeTerms memory terms =
+            IMorphoLoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, MAX_FEE_RATE);
         assertEq(terms.feeSpread, MAX_FEE_RATE);
         assertEq(terms.feeRecipient, makeAddr("feeCollector"));
@@ -435,13 +435,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // a collector rotation restates the rates
         address newCollector = makeAddr("newCollector");
         vm.expectEmit();
-        emit ILoanMarketsFacet.LoanFeeTermsSet(
+        emit IMorphoLoanMarketsFacet.LoanFeeTermsSet(
             SUBACCOUNT_TYPE_LOAN, MAX_FEE_RATE, MAX_FEE_RATE, newCollector
         );
-        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+        IIMorphoLoanMarketsFacet(address(controller)).setLoanFeeTerms(
             SUBACCOUNT_TYPE_LOAN, _feeTerms(MAX_FEE_RATE, MAX_FEE_RATE, newCollector)
         );
-        terms = ILoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
+        terms = IMorphoLoanMarketsFacet(address(controller)).getLoanFeeTerms(SUBACCOUNT_TYPE_LOAN);
         assertEq(terms.feeFloor, MAX_FEE_RATE);
         assertEq(terms.feeSpread, MAX_FEE_RATE);
         assertEq(terms.feeRecipient, newCollector);
@@ -455,20 +455,20 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // the setter needs a registered market: terms exist exactly as long as the type does
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, 9)
+            abi.encodeWithSelector(IMorphoLoanMarketsFacet.MarketNotRegistered.selector, 9)
         );
-        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(9, _feeTerms(0, 0, collector));
+        IIMorphoLoanMarketsFacet(address(controller)).setLoanFeeTerms(9, _feeTerms(0, 0, collector));
 
-        vm.expectRevert(ILoanMarketsFacet.InvalidFeeTerms.selector);
-        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+        vm.expectRevert(IMorphoLoanMarketsFacet.InvalidFeeTerms.selector);
+        IIMorphoLoanMarketsFacet(address(controller)).setLoanFeeTerms(
             SUBACCOUNT_TYPE_LOAN, _feeTerms(MAX_FEE_RATE + 1, 0, collector)
         );
-        vm.expectRevert(ILoanMarketsFacet.InvalidFeeTerms.selector);
-        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+        vm.expectRevert(IMorphoLoanMarketsFacet.InvalidFeeTerms.selector);
+        IIMorphoLoanMarketsFacet(address(controller)).setLoanFeeTerms(
             SUBACCOUNT_TYPE_LOAN, _feeTerms(0, MAX_FEE_RATE + 1, collector)
         );
-        vm.expectRevert(ILoanMarketsFacet.InvalidFeeRecipient.selector);
-        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+        vm.expectRevert(IMorphoLoanMarketsFacet.InvalidFeeRecipient.selector);
+        IIMorphoLoanMarketsFacet(address(controller)).setLoanFeeTerms(
             SUBACCOUNT_TYPE_LOAN, _feeTerms(0, 0, address(0))
         );
         vm.stopPrank();
@@ -484,19 +484,19 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
+        IIMorphoLoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.expectRevert(
             abi.encodeWithSelector(NotContractOwner.selector, notOwner, governance)
         );
-        IILoanMarketsFacet(address(controller)).enableLoanBorrowing(
+        IIMorphoLoanMarketsFacet(address(controller)).enableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.expectRevert(
@@ -534,36 +534,36 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function testRegisterLoanMarketRevertInvalidValues() public {
         _configureTransport();
-        ILoanMarketsFacet.Market memory market;
+        IMorphoLoanMarketsFacet.Market memory market;
 
         // Morpho must be a contract
         market = _defaultMarket();
         market.morpho = makeAddr("noCode");
-        _registerMarketExpectRevert(market, ILoanMarketsFacet.InvalidMorpho.selector);
+        _registerMarketExpectRevert(market, IMorphoLoanMarketsFacet.InvalidMorpho.selector);
 
         // the market must name both tokens and a non-zero LLTV
         market = _defaultMarket();
         market.marketParams.loanToken = address(0);
         _registerMarketExpectRevert(
-            market, ILoanMarketsFacet.InvalidMarketParams.selector
+            market, IMorphoLoanMarketsFacet.InvalidMarketParams.selector
         );
 
         market = _defaultMarket();
         market.marketParams.collateralToken = address(0);
         _registerMarketExpectRevert(
-            market, ILoanMarketsFacet.InvalidMarketParams.selector
+            market, IMorphoLoanMarketsFacet.InvalidMarketParams.selector
         );
 
         market = _defaultMarket();
         market.marketParams.lltv = 0;
         _registerMarketExpectRevert(
-            market, ILoanMarketsFacet.InvalidMarketParams.selector
+            market, IMorphoLoanMarketsFacet.InvalidMarketParams.selector
         );
 
         // the reserved type 0 can never be bound
         vm.prank(governance);
         vm.expectRevert(ISubaccountsFacet.InvalidSubaccountType.selector);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             0, _defaultMarket()
         );
     }
@@ -582,10 +582,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the market's collateral token must be exactly the OFT's own token
         _configureTransport();
         MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
-        ILoanMarketsFacet.Market memory market = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.collateralToken = address(otherToken);
         morpho.createMarket(market.marketParams);
-        _registerMarketExpectRevert(market, ILoanMarketsFacet.InvalidMarketParams.selector);
+        _registerMarketExpectRevert(market, IMorphoLoanMarketsFacet.InvalidMarketParams.selector);
     }
 
     function testSetComposeTransportRevertWrongSharedDecimals() public {
@@ -686,7 +686,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // the write-once market binding is not part of the transport and survives
         assertEq(
-            ILoanMarketsFacet(address(controller))
+            IMorphoLoanMarketsFacet(address(controller))
                 .getLoanMarket(SUBACCOUNT_TYPE_LOAN).morpho,
             address(morpho)
         );
@@ -756,17 +756,17 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
 
         // the binding is permanent: a different market means a new subaccount type
-        ILoanMarketsFacet.Market memory other = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory other = _defaultMarket();
         other.marketParams.lltv = 0.5e18;
         morpho.createMarket(other.marketParams);
         vm.prank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanMarketsFacet.MarketAlreadyRegistered.selector,
+                IMorphoLoanMarketsFacet.MarketAlreadyRegistered.selector,
                 SUBACCOUNT_TYPE_LOAN
             )
         );
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, other
         );
     }
@@ -775,18 +775,18 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.startPrank(governance);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
+                IMorphoLoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
             )
         );
-        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
+        IIMorphoLoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
+                IMorphoLoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
             )
         );
-        IILoanMarketsFacet(address(controller)).enableLoanBorrowing(
+        IIMorphoLoanMarketsFacet(address(controller)).enableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.stopPrank();
@@ -839,12 +839,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // a different collateral token (rejected against the pinned transport's OFT)
         _configureSettings();
         MintableERC20 otherToken = new MintableERC20("Other", "OTH", 6);
-        ILoanMarketsFacet.Market memory market = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.collateralToken = address(otherToken);
         morpho.createMarket(market.marketParams);
         vm.prank(governance);
-        vm.expectRevert(ILoanMarketsFacet.InvalidMarketParams.selector);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(2, market);
+        vm.expectRevert(IMorphoLoanMarketsFacet.InvalidMarketParams.selector);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(2, market);
     }
 
     //
@@ -861,7 +861,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         bytes32 operationId = bytes32("op-1");
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanOpened(
+        emit IMorphoLoanSubaccountRemote.LoanOpened(
             parentPersonalAccount,
             operationId,
             105e6,
@@ -881,7 +881,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(borrowShares, 500e18 * 1e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
         assertEq(rlusd.balanceOf(destination), 500e18);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(operationId));
     }
 
     function testLzComposeDepositCollateral() public {
@@ -891,7 +891,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the deposit action supplies the credit (the whole idle balance - here exactly the
         // authenticated amount), no debt
         vm.expectEmit();
-        emit ILoanSubaccountRemote.CollateralDeposited(
+        emit IMorphoLoanSubaccountRemote.CollateralDeposited(
             parentPersonalAccount, 100e6, _guidFor(1)
         );
         _deliver(subaccount, 1, 100e6, _depositPayload());
@@ -902,7 +902,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // a deposit that brings nothing is malformed, not a skip
         _deliverExpectRevertZeroAmount(
-            subaccount, 2, _depositPayload(), ILoanSubaccountRemote.ZeroAmount.selector
+            subaccount, 2, _depositPayload(), IMorphoLoanSubaccountRemote.ZeroAmount.selector
         );
     }
 
@@ -929,7 +929,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         bytes32 operationId = bytes32("op-2");
         vm.expectEmit();
-        emit ILoanSubaccountRemote.CollateralWithdrawn(
+        emit IMorphoLoanSubaccountRemote.CollateralWithdrawn(
             parentPersonalAccount, operationId, 30e6, _guidFor(2)
         );
         uint256 oftBalanceBefore = fxrp.balanceOf(address(fxrpOft));
@@ -986,15 +986,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.prank(lzEndpoint);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientFundsForBridgeHome.selector, 0.01 ether
+                IMorphoLoanSubaccountRemote.InsufficientFundsForBridgeHome.selector, 0.01 ether
             )
         );
-        ILoanSubaccountRemote(subaccount).lzCompose{value: 0.001 ether}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: 0.001 ether}(
             address(fxrpOft), guid, message, executor, ""
         );
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(operationId));
     }
 
     function testLzComposeWithdrawForwardsExcessToTheParent() public {
@@ -1012,15 +1012,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.prank(lzEndpoint);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientDeliveryValue.selector, 0.05 ether
+                IMorphoLoanSubaccountRemote.InsufficientDeliveryValue.selector, 0.05 ether
             )
         );
-        ILoanSubaccountRemote(subaccount).lzCompose{value: 0.01 ether}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: 0.01 ether}(
             address(fxrpOft), guid, message, executor, ""
         );
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.NativeSweptToParent(parentPersonalAccount, 0.04 ether);
+        emit IMorphoLoanSubaccountRemote.NativeSweptToParent(parentPersonalAccount, 0.04 ether);
         _deliverWithValue(subaccount, 2, 0, payload, 0.05 ether);
         assertEq(parentPersonalAccount.balance, 0.04 ether);
         assertEq(subaccount.balance, 0);
@@ -1042,11 +1042,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.prank(lzEndpoint);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientDeliveryValue.selector, RETURN_MIN_VALUE
+                IMorphoLoanSubaccountRemote.InsufficientDeliveryValue.selector, RETURN_MIN_VALUE
             )
         );
-        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
 
         // skip path: a zero-value delivery of a duplicate reverts the same way instead of
         // consuming the packet with the prepaid value undelivered
@@ -1055,14 +1055,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.prank(lzEndpoint);
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.InsufficientDeliveryValue.selector, RETURN_MIN_VALUE
+                IMorphoLoanSubaccountRemote.InsufficientDeliveryValue.selector, RETURN_MIN_VALUE
             )
         );
-        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
 
         // the same packet delivered at the floor terminal-skips and forwards the value
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanActionSkipped(
+        emit IMorphoLoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, bytes32("op-1"), SKIP_REASON_DUPLICATE, _guidFor(3)
         );
         _deliverWithValue(subaccount, 3, 0, dupPayload, RETURN_MIN_VALUE);
@@ -1078,7 +1078,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
         vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose{value: 1}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: 1}(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -1090,7 +1090,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         vm.prank(makeAddr("notTheEndpoint"));
         vm.expectRevert(IComposeReceiverAccountBase.OnlyEndpoint.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function testLzComposeRevertWrongComposeSender() public {
@@ -1103,7 +1103,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(IComposeReceiverAccountBase.WrongComposeSender.selector, notTheOft)
         );
-        ILoanSubaccountRemote(subaccount).lzCompose(notTheOft, guid, message, executor, "");
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(notTheOft, guid, message, executor, "");
     }
 
     function testLzComposeRevertWrongSourceEid() public {
@@ -1122,7 +1122,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(IComposeReceiverAccountBase.WrongSourceEid.selector, originEid + 1)
         );
-        ILoanSubaccountRemote(subaccount).lzCompose(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(
             address(fxrpOft), _guidFor(1), message, executor, ""
         );
     }
@@ -1143,7 +1143,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(IComposeReceiverAccountBase.WrongComposeFrom.selector, attacker)
         );
-        ILoanSubaccountRemote(subaccount).lzCompose(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(
             address(fxrpOft), _guidFor(1), message, executor, ""
         );
     }
@@ -1165,7 +1165,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.expectRevert(
             abi.encodeWithSelector(IComposeReceiverAccountBase.WrongGuid.selector, forgedGuid)
         );
-        ILoanSubaccountRemote(subaccount).lzCompose(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(
             address(fxrpOft), forgedGuid, message, executor, ""
         );
     }
@@ -1184,12 +1184,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _pauseController();
         vm.prank(lzEndpoint);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
 
         // the compose stays queued at the endpoint; the same delivery succeeds after unpausing
         _unpauseController();
         vm.prank(lzEndpoint);
-        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
     }
@@ -1214,16 +1214,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 30e6);
         _pauseController();
 
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 130e6);
 
         // once the debt is gone, a paused deposit is new exposure and reverts
         rlusd.mint(subaccount, 600e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         fxrp.mint(subaccount, 10e6);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
     }
 
     function testLzComposeDepositWhilePausedRequiresLiveDebt() public {
@@ -1260,7 +1260,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
 
         vm.expectRevert(noPauseFacet);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
         _deliverExpectRevert(subaccount, 2, _depositPayload(), noPauseFacet);
 
         vm.clearMockedCalls();
@@ -1288,7 +1288,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
         vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose{value: 1}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: 1}(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -1303,7 +1303,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             subaccount, 1,
             _borrowPayloadWithFloor(bytes32("op-1"), _soon(), DESTINATION_KIND_EVM, _dest(), 1),
-            ILoanSubaccountRemote.UnexpectedDeliveryValueFloor.selector
+            IMorphoLoanSubaccountRemote.UnexpectedDeliveryValueFloor.selector
         );
     }
 
@@ -1322,7 +1322,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             _borrowPayloadWithFloor(
                 operationId, _soon(), DESTINATION_KIND_XRPL_WORMHOLE, _dest(), 1 ether
             ),
-            abi.encodeWithSelector(ILoanSubaccountRemote.InsufficientDeliveryValue.selector, 1 ether)
+            abi.encodeWithSelector(IMorphoLoanSubaccountRemote.InsufficientDeliveryValue.selector, 1 ether)
         );
 
         // consume the id with a real borrow, then re-deliver the underfunded packet: the floor
@@ -1335,7 +1335,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             _borrowPayloadWithFloor(
                 operationId, _soon(), DESTINATION_KIND_XRPL_WORMHOLE, _dest(), 1 ether
             ),
-            abi.encodeWithSelector(ILoanSubaccountRemote.InsufficientDeliveryValue.selector, 1 ether)
+            abi.encodeWithSelector(IMorphoLoanSubaccountRemote.InsufficientDeliveryValue.selector, 1 ether)
         );
     }
 
@@ -1349,7 +1349,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             _composeMessage(subaccount, 1, 100e6, _borrowPayloadFiveWords(bytes32("op-1"), _soon(), _dest()));
         vm.prank(lzEndpoint);
         vm.expectRevert();
-        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function testExternalLiquidationTurnsBalanceIntoSurplus() public {
@@ -1361,8 +1361,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 100e18);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 100e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        emit IMorphoLoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 100e18);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
         assertEq(rlusd.balanceOf(subaccount), 0);
     }
@@ -1392,7 +1392,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         // the remaining debt stays repayable with canonical share conversion afterwards
         rlusd.mint(subaccount, 500e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         (, uint128 finalShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(finalShares, 0);
     }
@@ -1441,7 +1441,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // principal at the current terms, never on zero or stale ones
         address subaccount = _borrowedSubaccount(1000e18);
         (uint256 principal, uint256 feeDebtX18, , uint64 last, uint64 fl, uint64 sp) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 1000e18);
         assertEq(feeDebtX18, 0);
         assertEq(last, vm.getBlockTimestamp());
@@ -1457,12 +1457,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         morpho.addPendingInterest(_marketId(), 60e18);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeCheckpointed(
+        emit IMorphoLoanSubaccountRemote.LoanFeeCheckpointed(
             parentPersonalAccount, 1060e18, 10e18 * 1e18
         );
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (uint256 principal, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 1060e18);
         assertEq(collectible, 10e18);
     }
@@ -1483,10 +1483,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         morpho.addPendingInterest(_marketId(), 100e18);
 
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         // owed = max(5% * 1000, 100 + 3% * 1000) = 130; the fee is 130 - 100 = 30
         (uint256 principal, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 1100e18);
         assertEq(collectible, 30e18);
     }
@@ -1499,16 +1499,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         _externalRepay(subaccount, 900e18);
 
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (uint256 principal, uint256 feeDebtX18, , , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertApproxEqAbs(principal, 100e18, 1);
         assertEq(feeDebtX18, 70e18 * 1e18);
 
         // the shrunken base is what the next period is priced on
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 70e18 * 1e18 + principal * 0.07e18);
     }
 
@@ -1520,16 +1520,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         _liquidate(subaccount, 0);
 
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (uint256 principal, uint256 feeDebtX18, , , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 0);
         assertEq(feeDebtX18, 70e18 * 1e18);
 
         // zero principal accrues nothing further; the claim simply stays outstanding
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 70e18 * 1e18);
     }
 
@@ -1539,16 +1539,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address borrowed = _borrowedSubaccount(1000e18);
         address subaccount = address(_deploySubaccount());
         morpho.setAccrueInterestReverts(true);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         morpho.setAccrueInterestReverts(false);
         vm.warp(vm.getBlockTimestamp() + 365 days);
         _liquidate(borrowed, 0);
         morpho.setAccrueInterestReverts(true);
         // principal is stale-positive but the position has no shares: the checkpoint settles
         // at zero debt, charges the floor, and never invokes the IRM
-        ILoanSubaccountRemote(borrowed).checkpointFee();
+        IMorphoLoanSubaccountRemote(borrowed).checkpointFee();
         (uint256 principal, uint256 feeDebtX18, , , , ) =
-            ILoanSubaccountRemote(borrowed).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(borrowed).getLoanFeeState();
         assertEq(principal, 0);
         assertEq(feeDebtX18, 70e18 * 1e18);
     }
@@ -1559,17 +1559,17 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // debt, or the next period would be charged on the stale pre-repayment base
         address subaccount = _borrowedSubaccount(1000e18);
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         _externalRepay(subaccount, 900e18);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (uint256 principal, uint256 feeDebtX18, , , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertApproxEqAbs(principal, 100e18, 1);
         assertEq(feeDebtX18, 70e18 * 1e18);
 
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         // the second year is priced on ~100, not the stale 1000
         assertEq(feeDebtX18, 70e18 * 1e18 + principal * 0.07e18);
     }
@@ -1585,16 +1585,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.stopPrank();
 
         // the elapsed year is still the old 7%
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (, uint256 feeDebtX18, , , uint64 fl, ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 70e18 * 1e18);
         assertEq(fl, 0.14e18);
 
         // the next year is the new 14%
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 210e18 * 1e18);
 
         // the decrease direction: a dormant account keeps paying its snapshotted higher rate
@@ -1603,13 +1603,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _setFeeRates(0.035e18, 0.005e18);
         vm.stopPrank();
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 350e18 * 1e18);
 
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 385e18 * 1e18);
     }
 
@@ -1623,9 +1623,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         for (uint256 i = 0; i < 3; i++) {
             vm.warp(vm.getBlockTimestamp() + 1);
-            ILoanSubaccountRemote(subaccount).checkpointFee();
+            IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         }
-        (, uint256 partitioned, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 partitioned, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(partitioned, 3 * perSecond);
         assertLe(partitioned, threeSeconds);
         assertLt(threeSeconds - partitioned, 3);
@@ -1637,9 +1637,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _borrowedSubaccount(1000e18);
         vm.warp(vm.getBlockTimestamp() + 365 days);
         rlusd.mint(subaccount, 1070e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         (uint256 principal, uint256 feeDebtX18, , , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 0);
         assertEq(feeDebtX18, 0);
 
@@ -1649,14 +1649,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _setFeeRates(0.14e18, 0.02e18);
         vm.stopPrank();
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeePrincipalSynced(parentPersonalAccount, 500e18);
+        emit IMorphoLoanSubaccountRemote.LoanFeePrincipalSynced(parentPersonalAccount, 500e18);
         _deliver(subaccount, 2, 0, _borrowPayload(
             bytes32("op-2"), DESTINATION_KIND_EVM,
             bytes32(uint256(uint160(makeAddr("dest")))), 500e18
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (principal, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (principal, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 500e18);
         assertEq(feeDebtX18, 70e18 * 1e18);
     }
@@ -1679,8 +1679,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // A's external repayment of 500 converts at the ACCRUED rate (total 2100, not 2000)
         _externalRepay(subaccountA, 500e18);
         vm.warp(vm.getBlockTimestamp() + 1);
-        ILoanSubaccountRemote(subaccountB).checkpointFee();
-        (uint256 principalB, , , , , ) = ILoanSubaccountRemote(subaccountB).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccountB).checkpointFee();
+        (uint256 principalB, , , , , ) = IMorphoLoanSubaccountRemote(subaccountB).getLoanFeeState();
         // B's share of the interest is exactly half: 1000 + 50; a stale-rate conversion
         // would have shifted this to ~1066
         assertApproxEqAbs(principalB, 1050e18, 1);
@@ -1691,13 +1691,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // indivisible-partition test covers the sub-X18 truncation bound
         address subaccount = _borrowedSubaccount(1000e18);
         vm.warp(vm.getBlockTimestamp() + 365 days / 2);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, uint256 halfYear, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 halfYear, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(halfYear, 35e18 * 1e18);
 
         vm.warp(vm.getBlockTimestamp() + 365 days / 2);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, uint256 fullYear, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 fullYear, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(fullYear, 70e18 * 1e18);
     }
 
@@ -1717,8 +1717,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         morpho.addPendingInterest(_marketId(), 60e18);
 
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 0);
     }
 
@@ -1738,7 +1738,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 1000e18
         ));
         (uint256 principal, , uint256 collectible, uint64 last, , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertApproxEqAbs(principal, 2060e18, 1);
         assertEq(collectible, 10e18);
         assertEq(last, vm.getBlockTimestamp());
@@ -1753,9 +1753,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             address(controller), parentPersonalAccount, typeB
         ));
         vm.expectRevert(
-            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, typeB)
+            abi.encodeWithSelector(IMorphoLoanMarketsFacet.MarketNotRegistered.selector, typeB)
         );
-        ILoanSubaccountRemote(subaccountB).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccountB).checkpointFee();
     }
 
     function testRepayCollectsFeeThenPushesOnlyTheSurplus() public {
@@ -1766,14 +1766,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 1100e18);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), 70e18);
+        emit IMorphoLoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), 70e18);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 30e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 1000e18);
+        emit IMorphoLoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 30e18);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 1000e18);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 30e18);
         assertEq(rlusd.balanceOf(subaccount), 0);
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 0);
     }
 
@@ -1788,14 +1788,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         uint256 feeShare = uint256(1050e18) * 70e18 / 1070e18;
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
+        emit IMorphoLoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 1050e18 - feeShare);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 1050e18 - feeShare);
+        emit IMorphoLoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 1050e18 - feeShare);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 1050e18 - feeShare);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), feeShare);
         assertEq(rlusd.balanceOf(subaccount), 0);
         (uint256 principal, uint256 feeDebtX18, , , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, (70e18 - feeShare) * 1e18);
         assertApproxEqAbs(principal, 1000e18 - (1050e18 - feeShare), 1);
         // the proportion survives the split: 1000:70 before, the same after (within the
@@ -1803,10 +1803,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertApproxEqAbs(principal * 70, (70e18 - feeShare) * 1000, 2000);
 
         rlusd.mint(subaccount, 30e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
         assertApproxEqAbs(rlusd.balanceOf(parentPersonalAccount), 10e18, 2);
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 0);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(borrowShares, 0);
@@ -1822,10 +1822,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _pauseController();
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), 70e18);
+        emit IMorphoLoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), 70e18);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 30e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 1000e18);
+        emit IMorphoLoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 30e18);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 1000e18);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 30e18);
         assertEq(rlusd.balanceOf(subaccount), 0);
@@ -1841,10 +1841,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 1000e18);
         uint256 feeShare = uint256(1000e18) * 70e18 / 1070e18;
 
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 1000e18 - feeShare);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 1000e18 - feeShare);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), feeShare);
         (uint256 principal, uint256 feeDebtX18, , , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, (70e18 - feeShare) * 1e18);
         assertApproxEqAbs(principal, feeShare, 1);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
@@ -1861,13 +1861,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         uint256 feeShare = uint256(100e18) * 70e18 / 1070e18;
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
+        emit IMorphoLoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 100e18 - feeShare);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18 - feeShare);
+        emit IMorphoLoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 100e18 - feeShare);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 100e18 - feeShare);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), feeShare);
         assertEq(rlusd.balanceOf(subaccount), 0);
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, (70e18 - feeShare) * 1e18);
     }
 
@@ -1878,9 +1878,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         rlusd.mint(subaccount, 1);
 
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 1);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 1);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 0);
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 70e18 * 1e18);
     }
 
@@ -1891,20 +1891,20 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // one wei wide here, F/D wide in general - see the next test)
         address subaccount = _borrowedSubaccount(1000e18);
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (uint256 principal, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         rlusd.mint(subaccount, principal + collectible - 1);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), collectible - 1);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), principal);
+        emit IMorphoLoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), collectible - 1);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), principal);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), collectible - 1);
         assertEq(rlusd.balanceOf(subaccount), 0);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(borrowShares, 0);
         // the one wei stays owed: a whole base unit is never forgiven
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 1e18);
     }
 
@@ -1921,9 +1921,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
         _externalRepay(subaccount, 98e18);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (uint256 principal, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertApproxEqAbs(principal, 2e18, 1);
         assertEq(collectible, 7e18);
         uint256 payment = principal + collectible - 4;
@@ -1932,12 +1932,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, payment);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), principal);
+        emit IMorphoLoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), principal);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
         assertEq(borrowShares, 0);
         assertEq(rlusd.balanceOf(subaccount), 0);
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, (collectible - feeShare) * 1e18);
     }
 
@@ -1958,20 +1958,20 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
         vm.warp(vm.getBlockTimestamp() + 1);
         rlusd.mint(subaccount, 1100e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         (, uint256 dustX18, uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(collectible, 0);
         assertGt(dustX18, 0);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeRemainderForgiven(dustX18);
+        emit IMorphoLoanSubaccountRemote.LoanFeeRemainderForgiven(dustX18);
         _deliverWithValue(
             subaccount, 2, 0,
             _withdrawPayload(bytes32("op-w"), 100e6),
             RETURN_MIN_VALUE
         );
-        (, dustX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, dustX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(dustX18, 0);
     }
 
@@ -1987,9 +1987,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 30 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (, uint256 feeBefore, uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertGt(collectible, 0);
 
         // remaining 90 FXRP is worth 180 RLUSD >= 1.5 x (100 + 2 x ~0.575) = ~151.7: no caps,
@@ -2002,7 +2002,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 0);
         assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 0);
-        (, uint256 feeAfter, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeAfter, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeAfter, feeBefore);
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
         assertEq(amountLD, 10e6);
@@ -2021,9 +2021,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 30 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
 
         // remaining 2 FXRP (4 RLUSD) cannot cover the ~151.7 the position needs: refused, id
         // unconsumed
@@ -2032,18 +2032,18 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(_requiredCover(100e18, collectible), 4e18));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 0);
 
         // loan tokens to the account, repay closes the debt and pays the fee, the packet passes
         rlusd.mint(subaccount, 110e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), collectible);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
         assertEq(amountLD, 98e6);
     }
@@ -2061,9 +2061,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 30 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         // a live oracle would pass this withdrawal (180 left against ~151.7); the dead one
         // values the remainder at nothing
         assertGe(_valueOf(90e6), _requiredCover(100e18, collectible));
@@ -2074,14 +2074,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(_requiredCover(100e18, collectible), 0));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
 
         rlusd.mint(subaccount, 110e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testWithdrawZeroPricedOracleRefusesAndRepayIsTheEscape() public {
@@ -2097,9 +2097,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 30 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertGe(_valueOf(90e6), _requiredCover(100e18, collectible));
         oracle.setPrice(0);
 
@@ -2108,16 +2108,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(_requiredCover(100e18, collectible), 0));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
         rlusd.mint(subaccount, 110e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), collectible);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         assertEq(oracle.storedPrice(), 0);
     }
 
@@ -2142,15 +2142,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(_requiredCover(500e18, 0), 0));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
         rlusd.mint(subaccount, 501e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         assertTrue(oracle.priceReverts());
     }
 
@@ -2182,16 +2182,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(1500e18, 1498e18));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
         // 250 out leaves exactly 1500: the boundary passes
         _deliverWithValue(
             subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 250e6), RETURN_MIN_VALUE
         );
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 750e6);
     }
@@ -2224,9 +2224,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.revertToState(snapshot);
 
         // the gate wants 1.5 x (10 + 2 x 7) = 36 against the 16 left - refused, id unconsumed
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (uint256 debt, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(collectible, 7e18);
         assertApproxEqAbs(debt, 10e18, 1);
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 92e6);
@@ -2234,27 +2234,27 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(_requiredCover(debt, collectible), 16e18));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
         // a 10 RLUSD top-up is split 10 x 7 / 17 to the fee and 10 x 10 / 17 to the debt: the
         // fee falls to ~2.88 and the debt to ~4.12, still 10:7, and the cover to
         // 1.5 x (4.12 + 2 x 2.88) = ~14.8 <= 16
         rlusd.mint(subaccount, 10e18);
         uint256 feeShare = Math.mulDiv(10e18, collectible, debt + collectible);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), feeShare);
         (uint256 principal, , uint256 collectibleAfter, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(collectibleAfter, collectible - feeShare);
         assertApproxEqAbs(principal, debt - (10e18 - feeShare), 1);
         assertLe(_requiredCover(principal, collectibleAfter), 16e18);
 
         // the same packet now passes, the debt still open
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
         assertEq(amountLD, 92e6);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
@@ -2280,7 +2280,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             subaccount, 1, _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 134e18),
             _uncovered(201e18, 200e18)
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
         assertEq(fxrp.balanceOf(subaccount), 100e6);
         assertEq(rlusd.balanceOf(makeAddr("dest")), 0);
 
@@ -2288,7 +2288,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             subaccount, 1, 100e6,
             _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dest, 133e18)
         );
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
         assertEq(rlusd.balanceOf(makeAddr("dest")), 133e18);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
@@ -2315,7 +2315,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             subaccount, 2, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 153e18),
             _uncovered(_requiredCover(253e18, 7e18), 400e18)
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
         assertEq(fxrp.balanceOf(subaccount), 100e6);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
@@ -2324,13 +2324,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliver(
             subaccount, 2, 100e6, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 152e18)
         );
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
         assertEq(fxrp.balanceOf(subaccount), 0);
         (, , collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 200e6);
         assertEq(rlusd.balanceOf(makeAddr("dest")), 252e18);
         (uint256 principal, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 252e18);
         assertEq(collectible, 7e18);
     }
@@ -2349,17 +2349,17 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         oracle.setPriceReverts(true);
 
         _deliverExpectRevert(subaccount, 1, payload, bytes("oracle reverted"));
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
         assertEq(fxrp.balanceOf(subaccount), 100e6);
 
         morpho.setHealthCheckDisabled(true);
         _deliverExpectRevert(subaccount, 1, payload, _uncovered(_requiredCover(100e18, 0), 0));
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
         assertEq(fxrp.balanceOf(subaccount), 100e6);
 
         oracle.setPriceReverts(false);
         _deliver(subaccount, 1, 100e6, payload);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
         assertEq(rlusd.balanceOf(makeAddr("dest")), 100e18);
     }
 
@@ -2376,19 +2376,19 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         irm.setRate(1585489599);
         vm.warp(vm.getBlockTimestamp() + 100 days);
 
-        ILoanSubaccountRemote.LoanPosition memory projected =
-            ILoanSubaccountRemote(subaccount).getLoanPosition();
+        IMorphoLoanSubaccountRemote.LoanPosition memory projected =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanPosition();
         assertGt(projected.debt, 1000e18);
         assertGt(projected.feeDebtX18, 0);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
         (uint256 principal, uint256 feeDebtX18, uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, projected.debt);
         assertEq(feeDebtX18, projected.feeDebtX18);
         assertEq(collectible, projected.feeDebtX18 / 1e18);
 
-        ILoanSubaccountRemote.LoanPosition memory again =
-            ILoanSubaccountRemote(subaccount).getLoanPosition();
+        IMorphoLoanSubaccountRemote.LoanPosition memory again =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanPosition();
         assertEq(again.debt, projected.debt);
         assertEq(again.feeDebtX18, projected.feeDebtX18);
     }
@@ -2401,8 +2401,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _depositPayload());
 
-        ILoanSubaccountRemote.LoanPosition memory p =
-            ILoanSubaccountRemote(subaccount).getLoanPosition();
+        IMorphoLoanSubaccountRemote.LoanPosition memory p =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanPosition();
         assertEq(p.collateral, 100e6);
         assertEq(p.debt, 0);
         assertEq(p.requiredCover, 0);
@@ -2414,7 +2414,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
         fxrp.mint(subaccount, 5e6);
         rlusd.mint(subaccount, 3e18);
-        p = ILoanSubaccountRemote(subaccount).getLoanPosition();
+        p = IMorphoLoanSubaccountRemote(subaccount).getLoanPosition();
         assertEq(p.collateral, 100e6);
         assertEq(p.idleCollateral, 5e6);
         assertEq(p.idleLoanToken, 3e18);
@@ -2428,7 +2428,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(p.morphoHealthFactor, 3.08e18);
 
         oracle.setPriceReverts(true);
-        p = ILoanSubaccountRemote(subaccount).getLoanPosition();
+        p = IMorphoLoanSubaccountRemote(subaccount).getLoanPosition();
         assertEq(p.oraclePrice, 0);
         assertEq(p.collateralValue, 0);
         assertEq(p.morphoHealthFactor, 0);
@@ -2446,8 +2446,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 20e6);
         bytes32 dest = bytes32(uint256(uint160(makeAddr("dest"))));
 
-        ILoanSubaccountRemote.LoanLimits memory limits =
-            ILoanSubaccountRemote(subaccount).getLoanLimits(30e6);
+        IMorphoLoanSubaccountRemote.LoanLimits memory limits =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanLimits(30e6);
         assertEq(limits.maxBorrowByCover, 200e18);
         assertEq(limits.maxWithdraw, 100e6);
         assertEq(limits.marketLiquidity, 1e30);
@@ -2464,7 +2464,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliver(subaccount, 2, 30e6, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 200e18));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 150e6);
-        limits = ILoanSubaccountRemote(subaccount).getLoanLimits(0);
+        limits = IMorphoLoanSubaccountRemote(subaccount).getLoanLimits(0);
         assertEq(limits.maxBorrowByCover, 0);
         assertEq(limits.maxWithdraw, 0);
     }
@@ -2482,8 +2482,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         morpho.setTotalSupplyAssets(_marketId(), 150e18);
 
-        ILoanSubaccountRemote.LoanLimits memory limits =
-            ILoanSubaccountRemote(subaccount).getLoanLimits(0);
+        IMorphoLoanSubaccountRemote.LoanLimits memory limits =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanLimits(0);
         assertEq(limits.maxWithdraw, 114.5e6);
         assertEq(limits.marketLiquidity, 50e18);
         assertGt(limits.maxBorrowByCover, 51e18);
@@ -2495,11 +2495,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(refusal);
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
         _deliverWithValue(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 114.5e6), RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         vm.revertToState(snapshot);
 
         (bytes memory borrowMessage, bytes32 borrowGuid) = _composeMessage(
@@ -2507,9 +2507,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         vm.prank(lzEndpoint);
         vm.expectRevert(bytes("insufficient liquidity"));
-        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), borrowGuid, borrowMessage, executor, "");
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), borrowGuid, borrowMessage, executor, "");
         _deliver(subaccount, 3, 0, _borrowPayload(bytes32("op-3"), DESTINATION_KIND_EVM, dest, 50e18));
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-3")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-3")));
     }
 
     function testPreviewRepayMatchesRepay() public {
@@ -2518,8 +2518,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         (address parent, address subaccount) = _borrowedPairWithFee("rPreviewRepayOwner");
         rlusd.mint(subaccount, 30e18);
-        ILoanSubaccountRemote.RepayPreview memory q =
-            ILoanSubaccountRemote(subaccount).previewRepay(100e18);
+        IMorphoLoanSubaccountRemote.RepayPreview memory q =
+            IMorphoLoanSubaccountRemote(subaccount).previewRepay(100e18);
         assertEq(q.feePaid, uint256(130e18) * 70e18 / 1070e18);
         assertEq(q.debtPaid, 130e18 - q.feePaid);
         assertEq(q.surplus, 0);
@@ -2527,15 +2527,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         rlusd.mint(subaccount, 100e18);
         uint256 collectorBefore = rlusd.balanceOf(makeAddr("feeCollector"));
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), q.debtPaid);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), q.debtPaid);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")) - collectorBefore, q.feePaid);
         (uint256 principal, , uint256 collectible, , , ) =
-            ILoanSubaccountRemote(subaccount).getLoanFeeState();
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, q.debtAfter);
         assertEq(collectible, q.collectibleAfter);
         assertEq(rlusd.balanceOf(parent), 0);
 
-        q = ILoanSubaccountRemote(subaccount).previewRepay(principal + collectible + 1e18);
+        q = IMorphoLoanSubaccountRemote(subaccount).previewRepay(principal + collectible + 1e18);
         assertEq(q.closingTopUp, principal + collectible);
         assertEq(q.feePaid, collectible);
         assertEq(q.debtPaid, principal);
@@ -2544,10 +2544,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(q.collectibleAfter, 0);
         rlusd.mint(subaccount, principal + collectible + 1e18);
         collectorBefore = rlusd.balanceOf(makeAddr("feeCollector"));
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), q.debtPaid);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), q.debtPaid);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")) - collectorBefore, q.feePaid);
         assertEq(rlusd.balanceOf(parent), q.surplus);
-        (principal, , collectible, , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (principal, , collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 0);
         assertEq(collectible, 0);
     }
@@ -2559,12 +2559,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         uint256 typeB = 2;
         MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.loanToken = address(frozenRlusd);
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
         address subaccount = controller.createSubaccount("rFrozenPreviewOwner", typeB);
@@ -2577,13 +2577,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         frozenRlusd.mint(subaccount, 100e18);
         frozenRlusd.setFrozen(makeAddr("feeCollector"), true);
 
-        ILoanSubaccountRemote.RepayPreview memory q = ILoanSubaccountRemote(subaccount).previewRepay(0);
+        IMorphoLoanSubaccountRemote.RepayPreview memory q = IMorphoLoanSubaccountRemote(subaccount).previewRepay(0);
         assertEq(q.feePaid, uint256(100e18) * 70e18 / 1070e18);
         assertEq(q.debtPaid, 100e18 - q.feePaid);
 
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 100e18);
         assertEq(frozenRlusd.balanceOf(makeAddr("feeCollector")), 0);
-        (, , uint256 collectible, , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(collectible, 70e18);
     }
 
@@ -2601,10 +2601,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
         _externalRepay(subaccount, 90e18);
 
-        ILoanSubaccountRemote.WithdrawPreview memory w =
-            ILoanSubaccountRemote(subaccount).previewWithdraw(92e6);
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory w =
+            IMorphoLoanSubaccountRemote(subaccount).previewWithdraw(92e6);
         assertFalse(w.coverSatisfied);
-        assertEq(w.requiredCover, _requiredCover(ILoanSubaccountRemote(subaccount).getLoanPosition().debt, 7e18));
+        assertEq(
+            w.requiredCover,
+            _requiredCover(IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().debt, 7e18)
+        );
         assertEq(w.remainingValue, 16e18);
         assertGt(w.minimumTopUp, 9e18);
         assertLt(w.minimumTopUp, 10e18);
@@ -2612,24 +2615,24 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 92e6);
         uint256 snapshot = vm.snapshotState();
         rlusd.mint(subaccount, w.minimumTopUp - 1);
-        ILoanSubaccountRemote(subaccount).repay();
-        assertFalse(ILoanSubaccountRemote(subaccount).previewWithdraw(92e6).coverSatisfied);
-        ILoanSubaccountRemote.WithdrawPreview memory short_ =
-            ILoanSubaccountRemote(subaccount).previewWithdraw(92e6);
+        IMorphoLoanSubaccountRemote(subaccount).repay();
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).previewWithdraw(92e6).coverSatisfied);
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory short_ =
+            IMorphoLoanSubaccountRemote(subaccount).previewWithdraw(92e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(short_.requiredCover, short_.remainingValue));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
         vm.revertToState(snapshot);
 
         rlusd.mint(subaccount, w.minimumTopUp);
-        ILoanSubaccountRemote(subaccount).repay();
-        assertTrue(ILoanSubaccountRemote(subaccount).previewWithdraw(92e6).coverSatisfied);
+        IMorphoLoanSubaccountRemote(subaccount).repay();
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).previewWithdraw(92e6).coverSatisfied);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testViewsWithoutTheOracle() public {
@@ -2642,15 +2645,17 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 4e18);
         oracle.setPriceReverts(true);
 
-        ILoanSubaccountRemote.RepayPreview memory q = ILoanSubaccountRemote(subaccount).previewRepay(0);
+        IMorphoLoanSubaccountRemote.RepayPreview memory q = IMorphoLoanSubaccountRemote(subaccount).previewRepay(0);
         assertEq(q.surplus, 4e18);
         assertEq(q.closingTopUp, 0);
-        ILoanSubaccountRemote.WithdrawPreview memory w = ILoanSubaccountRemote(subaccount).previewWithdraw(50e6);
+        IMorphoLoanSubaccountRemote.WithdrawPreview memory w =
+            IMorphoLoanSubaccountRemote(subaccount).previewWithdraw(50e6);
         assertTrue(w.coverSatisfied);
         assertEq(w.requiredCover, 0);
         assertEq(w.remainingValue, 0);
         assertEq(w.minimumTopUp, 0);
-        ILoanSubaccountRemote.LoanLimits memory limits = ILoanSubaccountRemote(subaccount).getLoanLimits(0);
+        IMorphoLoanSubaccountRemote.LoanLimits memory limits =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanLimits(0);
         assertEq(limits.maxWithdraw, 100e6);
         assertEq(limits.maxBorrowByCover, 0);
 
@@ -2660,14 +2665,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         oracle.setPriceReverts(true);
-        w = ILoanSubaccountRemote(subaccount).previewWithdraw(1);
+        w = IMorphoLoanSubaccountRemote(subaccount).previewWithdraw(1);
         assertFalse(w.coverSatisfied);
         assertEq(w.requiredCover, 150e18);
         assertEq(w.remainingValue, 0);
         // the 4 idle already count: closing needs the debt less them
         assertEq(w.minimumTopUp, 100e18 - 4e18);
-        assertEq(w.minimumTopUp, ILoanSubaccountRemote(subaccount).previewRepay(0).closingTopUp);
-        limits = ILoanSubaccountRemote(subaccount).getLoanLimits(0);
+        assertEq(w.minimumTopUp, IMorphoLoanSubaccountRemote(subaccount).previewRepay(0).closingTopUp);
+        limits = IMorphoLoanSubaccountRemote(subaccount).getLoanLimits(0);
         assertEq(limits.maxWithdraw, 0);
         assertEq(limits.maxBorrowByCover, 0);
     }
@@ -2689,16 +2694,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         irm.setReverts(true);
 
         vm.expectRevert(bytes("IRM reverted"));
-        ILoanSubaccountRemote(subaccount).getLoanPosition();
+        IMorphoLoanSubaccountRemote(subaccount).getLoanPosition();
 
         rlusd.mint(subaccount, 75e18);
-        ILoanSubaccountRemote.RepayPreview memory q = ILoanSubaccountRemote(subaccount).previewRepay(0);
+        IMorphoLoanSubaccountRemote.RepayPreview memory q = IMorphoLoanSubaccountRemote(subaccount).previewRepay(0);
         assertEq(q.feePaid, 70e18);
         assertEq(q.debtPaid, 0);
         assertEq(q.surplus, 5e18);
         assertEq(q.closingTopUp, 0);
 
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
         assertEq(rlusd.balanceOf(parent), 5e18);
     }
@@ -2718,10 +2723,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
                 SafeCast.SafeCastOverflowedUintDowncast.selector, 128, uint256(type(uint128).max) + interest
             )
         );
-        ILoanSubaccountRemote(subaccount).getLoanPosition();
+        IMorphoLoanSubaccountRemote(subaccount).getLoanPosition();
         // the mock's accrual adds into its uint128 supply total and overflows the same way
         vm.expectRevert(stdError.arithmeticError);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
     }
 
     function testProjectedDebtWithoutARateModel() public {
@@ -2729,12 +2734,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // principal over a year, and the checkpoint agrees
         _configureSettings();
         uint256 typeB = 2;
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.irm = address(0);
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
         address subaccount = controller.createSubaccount("rNoIrmOwner", typeB);
@@ -2745,11 +2750,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
 
-        ILoanSubaccountRemote.LoanPosition memory p = ILoanSubaccountRemote(subaccount).getLoanPosition();
+        IMorphoLoanSubaccountRemote.LoanPosition memory p = IMorphoLoanSubaccountRemote(subaccount).getLoanPosition();
         assertEq(p.debt, 100e18);
         assertEq(p.feeDebtX18 / 1e18, 7e18);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (uint256 principal, , uint256 collectible, , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (uint256 principal, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(principal, 100e18);
         assertEq(collectible, 7e18);
     }
@@ -2765,15 +2770,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 20e6);
         bytes32 dest = bytes32(uint256(uint160(makeAddr("dest"))));
 
-        ILoanSubaccountRemote.BorrowPreview memory fits =
-            ILoanSubaccountRemote(subaccount).previewBorrow(200e18, 30e6);
+        IMorphoLoanSubaccountRemote.BorrowPreview memory fits =
+            IMorphoLoanSubaccountRemote(subaccount).previewBorrow(200e18, 30e6);
         assertTrue(fits.coverSatisfied);
         assertEq(fits.requiredCover, 300e18);
         assertEq(fits.collateralValue, 300e18);
         assertEq(fits.debtAfter, 200e18);
         assertEq(fits.marketLiquidity, 1e30);
-        ILoanSubaccountRemote.BorrowPreview memory tooMuch =
-            ILoanSubaccountRemote(subaccount).previewBorrow(200e18 + 1, 30e6);
+        IMorphoLoanSubaccountRemote.BorrowPreview memory tooMuch =
+            IMorphoLoanSubaccountRemote(subaccount).previewBorrow(200e18 + 1, 30e6);
         assertFalse(tooMuch.coverSatisfied);
         assertEq(tooMuch.debtAfter, 200e18 + 1);
         assertEq(tooMuch.requiredCover, _requiredCover(200e18 + 1, 0));
@@ -2784,7 +2789,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             _uncovered(tooMuch.requiredCover, tooMuch.collateralValue)
         );
         _deliver(subaccount, 2, 30e6, _borrowPayload(bytes32("op-2"), DESTINATION_KIND_EVM, dest, 200e18));
-        assertEq(ILoanSubaccountRemote(subaccount).getLoanPosition().debt, fits.debtAfter);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().debt, fits.debtAfter);
     }
 
     function testLiquidationPriceIsMorphosEdge() public {
@@ -2800,23 +2805,23 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         oracle.setPrice(2e48);
         fxrp.mint(subaccount, 100e6);
-        assertEq(ILoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice, 0);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice, 0);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
             bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
-        uint256 price = ILoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice;
+        uint256 price = IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice;
         assertEq(
             price,
             Math.mulDiv(Math.mulDiv(100e18, 1e18, 0.77e18, Math.Rounding.Ceil), 1e36, 100e6, Math.Rounding.Ceil)
         );
 
         oracle.setPrice(price);
-        assertGe(ILoanSubaccountRemote(subaccount).getLoanPosition().morphoHealthFactor, 1e18);
+        assertGe(IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().morphoHealthFactor, 1e18);
         vm.prank(subaccount);
         morpho.withdrawCollateral(_defaultMarket().marketParams, 0, subaccount, subaccount);
 
         oracle.setPrice(price - 1);
-        assertLt(ILoanSubaccountRemote(subaccount).getLoanPosition().morphoHealthFactor, 1e18);
+        assertLt(IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().morphoHealthFactor, 1e18);
         vm.prank(subaccount);
         vm.expectRevert(bytes("insufficient collateral"));
         morpho.withdrawCollateral(_defaultMarket().marketParams, 0, subaccount, subaccount);
@@ -2826,7 +2831,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         morpho.setHealthCheckDisabled(true);
         vm.prank(subaccount);
         morpho.withdrawCollateral(_defaultMarket().marketParams, 100e6, subaccount, subaccount);
-        assertEq(ILoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice, type(uint256).max);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().liquidationPrice, type(uint256).max);
     }
 
     function testWithdrawBeyondCollateralRevertsAtMorpho() public {
@@ -2842,10 +2847,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(bytes("withdraw exceeds collateral"));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testExitGateBoundaryIsInclusive() public {
@@ -2860,7 +2865,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
 
         // a year's fee on 100 is 7, so the cover is 1.5 x (100 + 14) = 171 RLUSD = 85.5 FXRP;
         // 115 out leaves 85 FXRP = 170 RLUSD < 171: uncovered, refused
@@ -2870,7 +2875,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(171e18, 170e18));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
 
@@ -2878,7 +2883,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliverWithValue(
             subaccount, 3, 0, _withdrawPayload(bytes32("op-w2"), 114.5e6), RETURN_MIN_VALUE
         );
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 7e18 * 1e18);
     }
 
@@ -2902,14 +2907,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(171e18, 171e18 - 1));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
         oracle.setPrice(2e48);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testExitGateFollowsTheMarketLltv() public {
@@ -2921,12 +2926,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         oracle.setPrice(2e48); // 1 FXRP = 2 RLUSD, the price these numbers are written at
         uint256 typeB = 2;
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
         address subaccount = address(new SubaccountProxy(
@@ -2943,15 +2948,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(231e18, 230e18));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
         _deliverWithValue(
             subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 884.5e6), RETURN_MIN_VALUE
         );
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         (, , uint128 collateral) =
             morpho.position(keccak256(abi.encode(marketB.marketParams)), subaccount);
         assertEq(collateral, 115.5e6);
@@ -2964,7 +2969,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (address parent, address subaccount) = _borrowedPairWithFee("rPausedGateOwner");
         // clear debt and fee first so the withdrawal itself is gate-free
         rlusd.mint(subaccount, 1100e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         bytes memory executed = _withdrawPayload(bytes32("op-w"), 40e6);
         _deliverWithValue(subaccount, 2, 0, executed, RETURN_MIN_VALUE);
         _pauseController();
@@ -2972,7 +2977,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the duplicate finalizes even while paused, its value forwarded to the parent
         uint256 parentNativeBefore = parent.balance;
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanActionSkipped(
+        emit IMorphoLoanSubaccountRemote.LoanActionSkipped(
             parent, bytes32("op-w"), SKIP_REASON_DUPLICATE, _guidFor(3)
         );
         _deliverWithValue(subaccount, 3, 0, executed, RETURN_MIN_VALUE);
@@ -2984,10 +2989,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w2")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w2")));
     }
 
     //
@@ -3010,20 +3015,20 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(210e18, 0));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
         // the fee paid in loan tokens through repay - the whole
         // collateral goes home
         rlusd.mint(subaccount, 70e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
         _deliverWithValue(subaccount, 2, 0, stripping, RETURN_MIN_VALUE);
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
         assertEq(amountLD, 100e6);
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 0);
     }
 
@@ -3034,26 +3039,26 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         (, address subaccount) = _borrowedPairWithFee("rSelfLiqOwner");
         _liquidate(subaccount, 0);
-        ILoanSubaccountRemote(subaccount).checkpointFee();
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 70e18 * 1e18);
 
         // idle FXRP arriving later has one route home - into the position, then a signed
         // withdraw - and that withdraw cannot pass the now-unsecured claim
         fxrp.mint(subaccount, 5e6);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 5e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(210e18, 0));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
 
         // paying the claim (the free direction + repay) reopens the exit
         rlusd.mint(subaccount, 70e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 70e18);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
@@ -3070,14 +3075,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 100e18);
 
         vm.prank(makeAddr("griefer"));
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         (, uint128 sharesAfter, ) = morpho.position(_marketId(), subaccount);
         assertLt(sharesAfter, sharesBefore);
         assertEq(rlusd.balanceOf(subaccount), 0);
         // the fee is measured and paid pro rata - nothing was stolen, nothing collected
         // beyond the payment's share of it
         uint256 feeShare = uint256(100e18) * 70e18 / 1070e18;
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, (70e18 - feeShare) * 1e18);
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), feeShare);
     }
@@ -3102,7 +3107,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             _withdrawPayload(bytes32("op-w1"), 50e6),
             RETURN_MIN_VALUE
         );
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 3.5e18 * 1e18);
 
         // price halves; remaining 200 FXRP = 200 RLUSD still >= 160.5 - still covered
@@ -3123,19 +3128,19 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(171e18, 25e18));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
 
         // debt and fee paid in loan tokens through repay: the exit passes in full, and the
         // ledger is exact at every step
         rlusd.mint(subaccount, 108e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(rlusd.balanceOf(makeAddr("feeCollector")), 7e18);
         _deliverWithValue(subaccount, 4, 0, refused, RETURN_MIN_VALUE);
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
         assertEq(amountLD, 150e6);
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 0);
     }
 
@@ -3157,26 +3162,26 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 365 days);
 
         // step 1: pre-change pass (C missed); step 2: the change; step 3: post-change pass
-        ILoanSubaccountRemote(subaccounts[0]).checkpointFee();
-        ILoanSubaccountRemote(subaccounts[1]).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccounts[0]).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccounts[1]).checkpointFee();
         vm.startPrank(governance);
         _setFeeRates(0.14e18, 0.02e18);
         vm.stopPrank();
-        ILoanSubaccountRemote(subaccounts[0]).checkpointFee();
-        ILoanSubaccountRemote(subaccounts[1]).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccounts[0]).checkpointFee();
+        IMorphoLoanSubaccountRemote(subaccounts[1]).checkpointFee();
 
         vm.warp(vm.getBlockTimestamp() + 365 days);
         for (uint256 i = 0; i < 3; i++) {
-            ILoanSubaccountRemote(subaccounts[i]).checkpointFee();
+            IMorphoLoanSubaccountRemote(subaccounts[i]).checkpointFee();
         }
         // A and B: year 1 at 7% (70) + year 2 at 14% (140)
-        (, uint256 feeA, , , , ) = ILoanSubaccountRemote(subaccounts[0]).getLoanFeeState();
-        (, uint256 feeB, , , , ) = ILoanSubaccountRemote(subaccounts[1]).getLoanFeeState();
+        (, uint256 feeA, , , , ) = IMorphoLoanSubaccountRemote(subaccounts[0]).getLoanFeeState();
+        (, uint256 feeB, , , , ) = IMorphoLoanSubaccountRemote(subaccounts[1]).getLoanFeeState();
         assertEq(feeA, 210e18 * 1e18);
         assertEq(feeB, 210e18 * 1e18);
         // C, missed by both passes: two years at the OLD 7% snapshot - late, in the user's
         // favor, never retroactive
-        (, uint256 feeC, , , , ) = ILoanSubaccountRemote(subaccounts[2]).getLoanFeeState();
+        (, uint256 feeC, , , , ) = IMorphoLoanSubaccountRemote(subaccounts[2]).getLoanFeeState();
         assertEq(feeC, 140e18 * 1e18);
     }
 
@@ -3188,7 +3193,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (address pairParent, address subaccount) = _borrowedPairWithFee("rIdleCreditOwner");
         fxrp.mint(subaccount, 20e6);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanActionSkipped(
+        emit IMorphoLoanSubaccountRemote.LoanActionSkipped(
             pairParent, bytes32("op-2"), SKIP_REASON_EXPIRED, _guidFor(2)
         );
         _deliver(subaccount, 2, 20e6, _borrowPayloadAt(
@@ -3204,13 +3209,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(1710e18, 1200e18));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
         assertEq(fxrp.balanceOf(makeAddr("feeCollector")), 0);
         assertEq(fxrp.balanceOf(subaccount), 20e6);
 
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
         assertEq(fxrp.balanceOf(subaccount), 0);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 120e6);
@@ -3237,15 +3242,15 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
 
         vm.warp(vm.getBlockTimestamp() + 365 days / 2);
-        ILoanSubaccountRemote(pinged).checkpointFee();
+        IMorphoLoanSubaccountRemote(pinged).checkpointFee();
         // the market's interest arrives entirely in the second half: 100 per position
         morpho.addPendingInterest(_marketId(), 200e18);
         vm.warp(vm.getBlockTimestamp() + 365 days / 2);
-        ILoanSubaccountRemote(pinged).checkpointFee();
-        ILoanSubaccountRemote(dormant).checkpointFee();
+        IMorphoLoanSubaccountRemote(pinged).checkpointFee();
+        IMorphoLoanSubaccountRemote(dormant).checkpointFee();
 
-        (, uint256 feePinged, , , , ) = ILoanSubaccountRemote(pinged).getLoanFeeState();
-        (, uint256 feeDormant, , , , ) = ILoanSubaccountRemote(dormant).getLoanFeeState();
+        (, uint256 feePinged, , , , ) = IMorphoLoanSubaccountRemote(pinged).getLoanFeeState();
+        (, uint256 feeDormant, , , , ) = IMorphoLoanSubaccountRemote(dormant).getLoanFeeState();
         assertEq(feePinged, 40e18 * 1e18);
         assertEq(feeDormant, 10e18 * 1e18);
     }
@@ -3256,12 +3261,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         uint256 typeB = 2;
         MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.loanToken = address(frozenRlusd);
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
         address subaccount = controller.createSubaccount("rFrozenFeeOwner", typeB);
@@ -3275,16 +3280,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         frozenRlusd.setFrozen(makeAddr("feeCollector"), true);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeReserved(makeAddr("feeCollector"), 70e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        emit IMorphoLoanSubaccountRemote.LoanFeeReserved(makeAddr("feeCollector"), 70e18);
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(frozenRlusd.balanceOf(subaccount), 70e18);
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 70e18 * 1e18);
 
         frozenRlusd.setFrozen(makeAddr("feeCollector"), false);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(frozenRlusd.balanceOf(makeAddr("feeCollector")), 70e18);
-        (, feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 0);
     }
 
@@ -3295,12 +3300,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         uint256 typeB = 2;
         MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.loanToken = address(frozenRlusd);
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
         address subaccount = controller.createSubaccount("rFrozenShareOwner", typeB);
@@ -3315,16 +3320,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         uint256 feeShare = uint256(100e18) * 70e18 / 1070e18;
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeDeferred(makeAddr("feeCollector"), feeShare);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18);
+        emit IMorphoLoanSubaccountRemote.LoanFeeDeferred(makeAddr("feeCollector"), feeShare);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 100e18);
         assertEq(frozenRlusd.balanceOf(subaccount), 0);
         assertEq(frozenRlusd.balanceOf(makeAddr("feeCollector")), 0);
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, 70e18 * 1e18);
 
         frozenRlusd.setFrozen(makeAddr("feeCollector"), false);
         frozenRlusd.mint(subaccount, 97e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertApproxEqAbs(frozenRlusd.balanceOf(makeAddr("feeCollector")), 7e18, 1);
     }
 
@@ -3335,12 +3340,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         uint256 typeB = 2;
         MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.loanToken = address(frozenRlusd);
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
         address subaccount = controller.createSubaccount("rFrozenSubaccountOwner", typeB);
@@ -3358,25 +3363,25 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
         vm.expectRevert(_uncovered(1710e18, 40e18));
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
 
         // the settlement cannot even be funded while frozen
         vm.expectRevert(
             abi.encodeWithSelector(MockFreezableToken.FrozenAccount.selector, subaccount)
         );
         frozenRlusd.mint(subaccount, 1100e18);
-        vm.expectRevert(ILoanSubaccountRemote.NothingToRepay.selector);
-        ILoanSubaccountRemote(subaccount).repay();
+        vm.expectRevert(IMorphoLoanSubaccountRemote.NothingToRepay.selector);
+        IMorphoLoanSubaccountRemote(subaccount).repay();
 
         frozenRlusd.setFrozen(subaccount, false);
         frozenRlusd.mint(subaccount, 1100e18);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(frozenRlusd.balanceOf(makeAddr("feeCollector")), 70e18);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         (, , uint256 amountLD, , , , ) = fxrpOft.lastSendParam();
         assertEq(amountLD, 98e6);
     }
@@ -3390,12 +3395,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         uint256 typeB = 2;
         MockReentrantToken evil = new MockReentrantToken();
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.loanToken = address(evil);
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
         address subaccount = controller.createSubaccount("rEvilRepayOwner", typeB);
@@ -3406,26 +3411,26 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
         vm.warp(vm.getBlockTimestamp() + 365 days);
         evil.mint(subaccount, 100e18);
-        evil.setCallback(subaccount, abi.encodeCall(ILoanSubaccountRemote.repay, ()));
+        evil.setCallback(subaccount, abi.encodeCall(IMorphoLoanSubaccountRemote.repay, ()));
         evil.setSoftFailures(true);
         uint256 feeShare = uint256(100e18) * 70e18 / 1070e18;
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18 - feeShare);
+        emit IMorphoLoanSubaccountRemote.LoanFeeCollected(makeAddr("feeCollector"), feeShare);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 100e18 - feeShare);
         assertEq(evil.callbackFailures(), 2);
         assertEq(
             evil.lastCallbackRevert(),
             abi.encodeWithSelector(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector)
         );
         assertEq(evil.balanceOf(makeAddr("feeCollector")), feeShare);
-        (, uint256 feeDebtX18, , , , ) = ILoanSubaccountRemote(subaccount).getLoanFeeState();
+        (, uint256 feeDebtX18, , , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
         assertEq(feeDebtX18, (70e18 - feeShare) * 1e18);
 
         evil.setSoftFailures(false);
         evil.mint(subaccount, 100e18);
         vm.expectRevert(ReentrancyGuardTransient.ReentrancyGuardReentrantCall.selector);
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
     }
 
     function testInitializeValidatesItsArgumentsOnAClearedAccount() public {
@@ -3459,18 +3464,18 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             address(controller), address(rejectingParent), SUBACCOUNT_TYPE_LOAN
         ));
         fxrp.mint(subaccount, 5e6);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
         vm.deal(subaccount, 5 ether);
 
         bytes memory payload = _withdrawPayload(bytes32("op-w"), 5e6);
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 1, 0, payload);
         vm.deal(lzEndpoint, 0.02 ether);
         vm.prank(lzEndpoint);
-        vm.expectRevert(ILoanSubaccountRemote.RefundFailed.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose{value: 0.02 ether}(
+        vm.expectRevert(IMorphoLoanSubaccountRemote.RefundFailed.selector);
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: 0.02 ether}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 5e6);
 
@@ -3494,17 +3499,17 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) = _composeMessage(subaccount, 2, 0, payload);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(ILoanSubaccountRemote.WrongOriginPeer.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        vm.expectRevert(IMorphoLoanSubaccountRemote.WrongOriginPeer.selector);
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
 
         fxrpOft.setPeer(originEid, originPeer);
         _deliverWithValue(subaccount, 2, 0, payload, RETURN_MIN_VALUE);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
     }
 
     function testSkippedWithdrawValueForwardFailureReverts() public {
@@ -3522,11 +3527,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.warp(vm.getBlockTimestamp() + 2 hours);
         vm.deal(lzEndpoint, RETURN_MIN_VALUE);
         vm.prank(lzEndpoint);
-        vm.expectRevert(ILoanSubaccountRemote.RefundFailed.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
+        vm.expectRevert(IMorphoLoanSubaccountRemote.RefundFailed.selector);
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: RETURN_MIN_VALUE}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testLzComposeRevertTransportNotConfigured() public {
@@ -3540,7 +3545,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.expectRevert(
             IComposeTransportFacet.ComposeTransportNotConfigured.selector
         );
-        ILoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
     }
 
     function testLzComposeRevertUnsupportedPayloadShapes() public {
@@ -3568,7 +3573,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _deliverExpectRevert(
             subaccount, 1, payload,
             abi.encodeWithSelector(
-                ILoanSubaccountRemote.UnsupportedDestinationKind.selector,
+                IMorphoLoanSubaccountRemote.UnsupportedDestinationKind.selector,
                 DESTINATION_KIND_XRPL_WORMHOLE
             )
         );
@@ -3576,12 +3581,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // a zero destination, and a destination with dirty upper bits
         payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(0), 500e18);
         _deliverExpectRevert(
-            subaccount, 1, payload, ILoanSubaccountRemote.InvalidDestination.selector
+            subaccount, 1, payload, IMorphoLoanSubaccountRemote.InvalidDestination.selector
         );
         bytes32 dirty = bytes32(uint256(uint160(makeAddr("dest"))) | (uint256(1) << 200));
         payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, dirty, 500e18);
         _deliverExpectRevert(
-            subaccount, 1, payload, ILoanSubaccountRemote.InvalidDestination.selector
+            subaccount, 1, payload, IMorphoLoanSubaccountRemote.InvalidDestination.selector
         );
 
         // disbursing to the account itself only opens debt its own proceeds must repay (the
@@ -3590,13 +3595,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(subaccount))), 500e18
         );
         _deliverExpectRevert(
-            subaccount, 1, payload, ILoanSubaccountRemote.InvalidDestination.selector
+            subaccount, 1, payload, IMorphoLoanSubaccountRemote.InvalidDestination.selector
         );
 
         // a borrow with nothing to borrow is malformed even with collateral attached: a pure
         // deposit is its own action
         payload = _borrowPayload(bytes32("op-1"), DESTINATION_KIND_EVM, bytes32(uint256(1)), 0);
-        _deliverExpectRevert(subaccount, 1, payload, ILoanSubaccountRemote.ZeroAmount.selector);
+        _deliverExpectRevert(subaccount, 1, payload, IMorphoLoanSubaccountRemote.ZeroAmount.selector);
     }
 
     function testLzComposeSkipDuplicateOperation() public {
@@ -3613,7 +3618,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // account for the rail
         fxrp.mint(subaccount, 100e6);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanActionSkipped(
+        emit IMorphoLoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
         _deliver(subaccount, 2, 100e6, _borrowPayload(
@@ -3638,11 +3643,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         ));
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanActionSkipped(
+        emit IMorphoLoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_DUPLICATE, _guidFor(2)
         );
         vm.expectEmit();
-        emit ILoanSubaccountRemote.NativeSweptToParent(parentPersonalAccount, 0.01 ether);
+        emit IMorphoLoanSubaccountRemote.NativeSweptToParent(parentPersonalAccount, 0.01 ether);
         _deliverWithValue(subaccount, 2, 0, _withdrawPayload(operationId, 30e6), 0.01 ether);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 100e6);
@@ -3658,14 +3663,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 100e6);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanActionSkipped(
+        emit IMorphoLoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, operationId, SKIP_REASON_EXPIRED, _guidFor(1)
         );
         _deliver(subaccount, 1, 100e6, _borrowPayloadAt(
             operationId, uint64(block.timestamp - 1), DESTINATION_KIND_EVM,
             bytes32(uint256(uint160(destination))), 300e18
         ));
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(operationId));
 
         // the same intent retries under the same operation id with a fresh deadline; the
         // retry is a real second packet, crediting its own amount - and the first packet's
@@ -3678,7 +3683,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 200e6);
         assertEq(borrowShares, 300e18 * 1e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(operationId));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(operationId));
     }
 
     function testLzComposeExecutesAtDeadlineBoundary() public {
@@ -3698,7 +3703,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 60e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-w")));
     }
 
     function testLzComposeBorrowRevertBorrowingDisabled() public {
@@ -3707,8 +3712,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _borrowedSubaccount(500e18);
         vm.prank(governance);
         vm.expectEmit();
-        emit ILoanMarketsFacet.LoanBorrowingDisabled(SUBACCOUNT_TYPE_LOAN);
-        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
+        emit IMorphoLoanMarketsFacet.LoanBorrowingDisabled(SUBACCOUNT_TYPE_LOAN);
+        IIMorphoLoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
 
@@ -3718,7 +3723,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(makeAddr("dest")))), 100e18
         );
         _deliverExpectRevert(
-            subaccount, 2, borrowMore, ILoanSubaccountRemote.BorrowingDisabled.selector
+            subaccount, 2, borrowMore, IMorphoLoanSubaccountRemote.BorrowingDisabled.selector
         );
 
         // a collateral deposit is not a debt increase and still works (a real second packet,
@@ -3732,8 +3737,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the signed borrow executes against the position
         vm.prank(governance);
         vm.expectEmit();
-        emit ILoanMarketsFacet.LoanBorrowingEnabled(SUBACCOUNT_TYPE_LOAN);
-        IILoanMarketsFacet(address(controller)).enableLoanBorrowing(
+        emit IMorphoLoanMarketsFacet.LoanBorrowingEnabled(SUBACCOUNT_TYPE_LOAN);
+        IIMorphoLoanMarketsFacet(address(controller)).enableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         _deliver(subaccount, 2, 100e6, borrowMore);
@@ -3747,13 +3752,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // without effect instead of reverting forever on a sunset pool
         address subaccount = _borrowedSubaccount(500e18);
         vm.prank(governance);
-        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
+        IIMorphoLoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
 
         fxrp.mint(subaccount, 100e6);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanActionSkipped(
+        emit IMorphoLoanSubaccountRemote.LoanActionSkipped(
             parentPersonalAccount, bytes32("op-borrow"), SKIP_REASON_DUPLICATE, _guidFor(9)
         );
         _deliver(subaccount, 9, 100e6, _borrowPayload(
@@ -3768,7 +3773,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // wants), repayment, and recovery of the surplus
         address subaccount = _borrowedSubaccount(50e18);
         vm.prank(governance);
-        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
+        IIMorphoLoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
 
@@ -3777,7 +3782,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 70e6);
 
         rlusd.mint(subaccount, 100e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 50e18);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 50e18);
         // the surplus left with the same call
         assertEq(rlusd.balanceOf(parentPersonalAccount), 50e18);
     }
@@ -3799,16 +3804,16 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the switch isolates per type: sunsetting one pool leaves another borrowing
         _configureSettings();
         uint256 typeB = 2;
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
         _setDefaultFeeTerms(address(controller), typeB);
-        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
+        IIMorphoLoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         vm.stopPrank();
@@ -3821,7 +3826,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
                 bytes32("op-a"), DESTINATION_KIND_EVM,
                 bytes32(uint256(uint160(makeAddr("destA")))), 100e18
             ),
-            ILoanSubaccountRemote.BorrowingDisabled.selector
+            IMorphoLoanSubaccountRemote.BorrowingDisabled.selector
         );
 
         address subaccountB = address(new SubaccountProxy(
@@ -3848,7 +3853,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
         _deliverExpectRevert(
             subaccount, 1, _withdrawPayload(bytes32("op-1"), 0),
-            ILoanSubaccountRemote.ZeroAmount.selector
+            IMorphoLoanSubaccountRemote.ZeroAmount.selector
         );
         _deliverExpectRevert(
             subaccount, 1, _withdrawPayload(bytes32(0), 50e6),
@@ -3862,10 +3867,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // here - and reports the amount it actually supplied
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.CollateralDeposited(
+        emit IMorphoLoanSubaccountRemote.CollateralDeposited(
             parentPersonalAccount, 0, _guidFor(1)
         );
         _deliver(subaccount, 1, 100e6, _depositPayload());
@@ -3876,7 +3881,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // a 100 packet supplies 40
         fxrp.mint(subaccount, 40e6);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.CollateralDeposited(
+        emit IMorphoLoanSubaccountRemote.CollateralDeposited(
             parentPersonalAccount, 40e6, _guidFor(2)
         );
         _deliver(subaccount, 2, 100e6, _depositPayload());
@@ -3888,7 +3893,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // packet supplies all 150 - no separate rail call needed
         fxrp.mint(subaccount, 150e6);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.CollateralDeposited(
+        emit IMorphoLoanSubaccountRemote.CollateralDeposited(
             parentPersonalAccount, 150e6, _guidFor(3)
         );
         _deliver(subaccount, 3, 100e6, _depositPayload());
@@ -3903,11 +3908,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // destination
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
         address destination = makeAddr("exchangeDeposit");
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanOpened(
+        emit IMorphoLoanSubaccountRemote.LoanOpened(
             parentPersonalAccount, bytes32("op-1"), 0, 300e18, DESTINATION_KIND_EVM,
             bytes32(uint256(uint160(destination))), _guidFor(1)
         );
@@ -3927,7 +3932,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         morpho.setHealthCheckDisabled(false);
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
         _deliverWithValue(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 30e6), RETURN_MIN_VALUE);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 70e6);
@@ -3936,7 +3941,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // (150 needed): it executes
         address destination = makeAddr("exchangeDeposit");
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanOpened(
+        emit IMorphoLoanSubaccountRemote.LoanOpened(
             parentPersonalAccount, bytes32("op-1"), 0, 100e18, DESTINATION_KIND_EVM,
             bytes32(uint256(uint160(destination))), _guidFor(1)
         );
@@ -3980,12 +3985,12 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // pools never share an account
         _configureSettings();
         uint256 typeB = 2;
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
         _setDefaultFeeTerms(address(controller), typeB);
@@ -4045,7 +4050,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccountB = address(proxyB);
         fxrp.mint(subaccountB, 100e6);
         bytes memory notRegistered =
-            abi.encodeWithSelector(ILoanMarketsFacet.MarketNotRegistered.selector, typeB);
+            abi.encodeWithSelector(IMorphoLoanMarketsFacet.MarketNotRegistered.selector, typeB);
 
         _deliverExpectRevert(
             subaccountB, 1,
@@ -4053,14 +4058,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
                 bytes32("op-borrow"), DESTINATION_KIND_EVM,
                 bytes32(uint256(uint160(makeAddr("dest")))), 50e18
             ),
-            ILoanSubaccountRemote.FeeTermsNotConfigured.selector
+            IMorphoLoanSubaccountRemote.FeeTermsNotConfigured.selector
         );
         // the revert rolled the whole delivery back: the packet stays retriable, the id unconsumed
-        assertFalse(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-borrow")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-borrow")));
         _deliverExpectRevert(subaccountB, 2, _depositPayload(), notRegistered);
 
         vm.expectRevert(notRegistered);
-        ILoanSubaccountRemote(subaccountB).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccountB).depositIdleFxrp();
         assertEq(fxrp.balanceOf(subaccountB), 100e6);
     }
 
@@ -4082,14 +4087,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             bytes32("op-borrow"), DESTINATION_KIND_EVM, bytes32(uint256(uint160(dest))), 50e18
         );
         _deliverExpectRevert(
-            subaccountB, 1, payload, ILoanSubaccountRemote.FeeTermsNotConfigured.selector
+            subaccountB, 1, payload, IMorphoLoanSubaccountRemote.FeeTermsNotConfigured.selector
         );
 
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.lltv = 0.5e18;
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(typeB, marketB);
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
 
@@ -4099,7 +4104,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 100e6);
         assertGt(borrowShares, 0);
         assertEq(rlusd.balanceOf(dest), 50e18);
-        assertTrue(ILoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-borrow")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccountB).usedOperations(bytes32("op-borrow")));
     }
 
     function testRepayPartialByAssets() public {
@@ -4107,8 +4112,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 200e18);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 200e18);
-        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
+        emit IMorphoLoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 200e18);
+        uint256 assets = IMorphoLoanSubaccountRemote(subaccount).repay();
 
         assertEq(assets, 200e18);
         assertEq(rlusd.balanceOf(subaccount), 0);
@@ -4123,10 +4128,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 600e18);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 500e18);
+        emit IMorphoLoanSubaccountRemote.LoanRepaid(parentPersonalAccount, 500e18);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 100e18);
-        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
+        emit IMorphoLoanSubaccountRemote.LoanSurplusRecovered(parentPersonalAccount, 100e18);
+        uint256 assets = IMorphoLoanSubaccountRemote(subaccount).repay();
 
         assertEq(assets, 500e18);
         (, uint128 borrowShares, ) = morpho.position(_marketId(), subaccount);
@@ -4142,7 +4147,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         morpho.addPendingInterest(_marketId(), 25e18);
         rlusd.mint(subaccount, 600e18);
 
-        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
+        uint256 assets = IMorphoLoanSubaccountRemote(subaccount).repay();
 
         // full debt incl. accrued interest, repaid via exact shares (rounding up by at most 1)
         assertGe(assets, 525e18);
@@ -4157,8 +4162,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     function testRepayRevertNothingToRepay() public {
         // no idle balance at all
         address subaccount = _createConfiguredSubaccount();
-        vm.expectRevert(ILoanSubaccountRemote.NothingToRepay.selector);
-        ILoanSubaccountRemote(subaccount).repay();
+        vm.expectRevert(IMorphoLoanSubaccountRemote.NothingToRepay.selector);
+        IMorphoLoanSubaccountRemote(subaccount).repay();
     }
 
     function testRepayWithoutDebtRecoversWholeBalance() public {
@@ -4166,7 +4171,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // are surplus: repay is their exit, with nothing repaid
         address subaccount = _createConfiguredSubaccount();
         rlusd.mint(subaccount, 100e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
         assertEq(rlusd.balanceOf(subaccount), 0);
     }
@@ -4176,7 +4181,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // partial repay consumes it and nothing leaves to the parent
         address subaccount = _borrowedSubaccount(500e18);
         rlusd.mint(subaccount, 100e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 100e18);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 100e18);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 0);
         assertEq(rlusd.balanceOf(subaccount), 0);
     }
@@ -4188,10 +4193,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                ILoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
+                IMorphoLoanMarketsFacet.MarketNotRegistered.selector, SUBACCOUNT_TYPE_LOAN
             )
         );
-        ILoanSubaccountRemote(subaccount).repay();
+        IMorphoLoanSubaccountRemote(subaccount).repay();
     }
 
     function testRepayWorksWhilePaused() public {
@@ -4200,7 +4205,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 200e18);
         _pauseController();
 
-        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
+        uint256 assets = IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(assets, 200e18);
     }
 
@@ -4212,14 +4217,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         IIComposeTransportFacet(address(controller)).clearComposeTransport();
 
         rlusd.mint(subaccount, 600e18);
-        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
+        uint256 assets = IMorphoLoanSubaccountRemote(subaccount).repay();
         assertEq(assets, 500e18);
         // nor does the surplus push
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
 
         // the defensive idle deposit needs no transport either
         fxrp.mint(subaccount, 10e6);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(collateral, 110e6);
     }
@@ -4229,18 +4234,18 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // survives the clear, and recovery to the parent needs no transport at all
         address subaccount = _createConfiguredSubaccount();
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).disableLoanBorrowing(
+        IIMorphoLoanMarketsFacet(address(controller)).disableLoanBorrowing(
             SUBACCOUNT_TYPE_LOAN
         );
         IIComposeTransportFacet(address(controller)).clearComposeTransport();
         vm.stopPrank();
 
         assertTrue(
-            ILoanMarketsFacet(address(controller))
+            IMorphoLoanMarketsFacet(address(controller))
                 .isLoanBorrowingDisabled(SUBACCOUNT_TYPE_LOAN)
         );
         rlusd.mint(subaccount, 1e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 1e18);
     }
 
@@ -4249,8 +4254,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 70e6);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.IdleFxrpDeposited(parentPersonalAccount, 70e6);
-        uint256 amount = ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        emit IMorphoLoanSubaccountRemote.IdleFxrpDeposited(parentPersonalAccount, 70e6);
+        uint256 amount = IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
 
         assertEq(amount, 70e6);
         (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
@@ -4262,14 +4267,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
 
         // nothing idle
-        vm.expectRevert(ILoanSubaccountRemote.NothingToDeposit.selector);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        vm.expectRevert(IMorphoLoanSubaccountRemote.NothingToDeposit.selector);
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
 
         // new exposure is pause-gated
         fxrp.mint(subaccount, 70e6);
         _pauseController();
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        ILoanSubaccountRemote(subaccount).depositIdleFxrp();
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
     }
 
     function testRetiredSweepDepositActionIsUnsupported() public {
@@ -4292,7 +4297,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _pauseController();
 
         rlusd.mint(subaccount, 1e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 1e18);
     }
 
@@ -4316,22 +4321,22 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // the binding is permanent, and a Morpho market can exist for an address with no
         // code - so both tokens must be contracts
         _configureTransport();
-        ILoanMarketsFacet.Market memory market = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.loanToken = makeAddr("codelessToken");
         morpho.createMarket(market.marketParams);
         _registerMarketExpectRevert(
-            market, ILoanMarketsFacet.InvalidMarketParams.selector
+            market, IMorphoLoanMarketsFacet.InvalidMarketParams.selector
         );
     }
 
     function testRegisterLoanMarketRevertCodelessCollateralToken() public {
         // the symmetric case: a codeless collateral token must be rejected too
         _configureTransport();
-        ILoanMarketsFacet.Market memory market = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.collateralToken = makeAddr("codelessCollateral");
         morpho.createMarket(market.marketParams);
         _registerMarketExpectRevert(
-            market, ILoanMarketsFacet.InvalidMarketParams.selector
+            market, IMorphoLoanMarketsFacet.InvalidMarketParams.selector
         );
     }
 
@@ -4341,11 +4346,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // and decoding it reverts outside the catch - so the whole withdraw would revert raw
         // instead of the gate refusing; registration is the place to close it
         _configureTransport();
-        ILoanMarketsFacet.Market memory market = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory market = _defaultMarket();
         market.marketParams.oracle = makeAddr("codelessOracle");
         morpho.createMarket(market.marketParams);
         _registerMarketExpectRevert(
-            market, ILoanMarketsFacet.InvalidMarketParams.selector
+            market, IMorphoLoanMarketsFacet.InvalidMarketParams.selector
         );
     }
 
@@ -4354,7 +4359,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // action against it would revert
         _configureTransport();
         _registerMarketExpectRevert(
-            _defaultMarket(), ILoanMarketsFacet.InvalidMarketParams.selector
+            _defaultMarket(), IMorphoLoanMarketsFacet.InvalidMarketParams.selector
         );
     }
 
@@ -4364,19 +4369,19 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureSettings();
         uint256 typeB = 2;
         MockFreezableToken frozenRlusd = new MockFreezableToken("Frozen RLUSD", "RLUSD", 18);
-        ILoanMarketsFacet.Market memory marketB = _defaultMarket();
+        IMorphoLoanMarketsFacet.Market memory marketB = _defaultMarket();
         marketB.marketParams.loanToken = address(frozenRlusd);
         morpho.createMarket(marketB.marketParams);
         vm.startPrank(governance);
         controller.setSubaccountImplementation(typeB, address(loanChainImpl));
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             typeB, marketB
         );
         _setDefaultFeeTerms(address(controller), typeB);
         vm.stopPrank();
 
         address subaccount = controller.createSubaccount("rFrozenParentOwner", typeB);
-        address parent = LoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
+        address parent = MorphoLoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
         fxrp.mint(subaccount, 100e6);
         _deliver(subaccount, 1, 100e6, _borrowPayload(
             bytes32("op-frz"), DESTINATION_KIND_EVM,
@@ -4387,10 +4392,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         frozenRlusd.setFrozen(parent, true);
 
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanRepaid(parent, 300e18);
+        emit IMorphoLoanSubaccountRemote.LoanRepaid(parent, 300e18);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanSurplusRetained(parent, 100e18);
-        uint256 assets = ILoanSubaccountRemote(subaccount).repay();
+        emit IMorphoLoanSubaccountRemote.LoanSurplusRetained(parent, 100e18);
+        uint256 assets = IMorphoLoanSubaccountRemote(subaccount).repay();
 
         // the debt is closed and the repayment stood; only the push was deferred
         assertEq(assets, 300e18);
@@ -4403,8 +4408,8 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // unfrozen, the next permissionless repay retries the push
         frozenRlusd.setFrozen(parent, false);
         vm.expectEmit();
-        emit ILoanSubaccountRemote.LoanSurplusRecovered(parent, 100e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        emit IMorphoLoanSubaccountRemote.LoanSurplusRecovered(parent, 100e18);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(frozenRlusd.balanceOf(parent), 100e18);
         assertEq(frozenRlusd.balanceOf(subaccount), 0);
     }
@@ -4416,7 +4421,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         rlusd.mint(subaccount, 100e18);
         morpho.setAccrueInterestReverts(true);
 
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(rlusd.balanceOf(parentPersonalAccount), 100e18);
 
         // with live debt, repayment still needs accrual - the guard is scoped to debt-free
@@ -4430,7 +4435,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         morpho.setAccrueInterestReverts(true);
         rlusd.mint(indebted, 100e18);
         vm.expectRevert(bytes("IRM reverted"));
-        ILoanSubaccountRemote(indebted).repay();
+        IMorphoLoanSubaccountRemote(indebted).repay();
     }
 
     function testStrayTokenHasNoExit() public {
@@ -4521,7 +4526,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (amountLD, payload) = _lastSentCompose();
         assertEq(amountLD, 0);
         _deliver(subaccount, 7, 0, payload);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-c")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-c")));
 
         // the Personal Account's transfer: sent by a Flare PersonalAccount through
         // executeUserOp, decoded by a parent created behind the same beacon
@@ -4566,7 +4571,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             IDiamond.FacetCutAction.Add
         );
         cuts[4] = _buildFacetCut(
-            address(new LoanMarketsFacet()), "LoanMarketsFacet", IDiamond.FacetCutAction.Add
+            address(new MorphoLoanMarketsFacet()), "MorphoLoanMarketsFacet", IDiamond.FacetCutAction.Add
         );
         cuts[5] = _buildFacetCut(
             address(new PersonalAccountsFacet()),
@@ -4585,7 +4590,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.startPrank(initialOwner);
         minimalController.setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, address(loanChainImpl));
         IIComposeTransportFacet(address(minimal)).setComposeTransport(_defaultTransport());
-        IILoanMarketsFacet(address(minimal)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(minimal)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
         _setDefaultFeeTerms(address(minimal), SUBACCOUNT_TYPE_LOAN);
@@ -4598,10 +4603,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         // codeless - parent address, and the surplus push parks the tokens there; creating
         // the parent later puts code and the registry entry at that same address, with the
         // parked balance now under the user's signature
-        address parent = LoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
+        address parent = MorphoLoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
         assertEq(parent.code.length, 0);
         rlusd.mint(subaccount, 5e18);
-        assertEq(ILoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
         assertEq(rlusd.balanceOf(parent), 5e18);
 
         // the parent Personal Account also materializes on the minimal topology, behind the
@@ -4635,11 +4640,11 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 100e6);
 
         vm.expectEmit(true, false, false, true, subaccount);
-        emit ILoanSubaccountRemote.LoanActionCancelled(
+        emit IMorphoLoanSubaccountRemote.LoanActionCancelled(
             parentPersonalAccount, bytes32("op-1"), _guidFor(1)
         );
         _deliver(subaccount, 1, 0, _cancelPayload(bytes32("op-1")));
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
 
         // the borrow that id authorized is now a duplicate: it finalizes without executing
         _deliver(
@@ -4670,7 +4675,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (, uint128 shares, uint128 collateral) = morpho.position(_marketId(), subaccount);
         assertEq(shares, sharesBefore);
         assertEq(collateral, collateralBefore);
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
     }
 
     function testLzComposeCancelIsIdempotentAndNotPauseGated() public {
@@ -4679,7 +4684,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address subaccount = _createConfiguredSubaccount();
         _pauseController();
         _deliver(subaccount, 1, 0, _cancelPayload(bytes32("op-1")));
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
 
         vm.recordLogs();
         _deliver(subaccount, 2, 0, _cancelPayload(bytes32("op-1")));
@@ -4698,10 +4703,10 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         vm.deal(lzEndpoint, 1 ether);
         vm.prank(lzEndpoint);
         vm.expectRevert(IComposeReceiverAccountBase.NonZeroComposeValue.selector);
-        ILoanSubaccountRemote(subaccount).lzCompose{value: 1 ether}(
+        IMorphoLoanSubaccountRemote(subaccount).lzCompose{value: 1 ether}(
             address(fxrpOft), guid, message, executor, ""
         );
-        assertFalse(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
     }
 
     function testLzComposeCancelNeedsNoMarketAndNoTerms() public {
@@ -4713,7 +4718,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(subaccount, 100e6);
 
         _deliver(subaccount, 1, 0, _cancelPayload(bytes32("op-1")));
-        assertTrue(ILoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
+        assertTrue(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-1")));
 
         _deliver(
             subaccount, 2, 100e6,
@@ -4741,9 +4746,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function _defaultMarket()
         private
-        returns (ILoanMarketsFacet.Market memory)
+        returns (IMorphoLoanMarketsFacet.Market memory)
     {
-        return ILoanMarketsFacet.Market({
+        return IMorphoLoanMarketsFacet.Market({
             morpho: address(morpho),
             marketParams: IMorpho.MarketParams({
                 loanToken: address(rlusd),
@@ -4759,7 +4764,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     /// collector) for `_subaccountType` - the one call that activates the type. The caller
     /// must already be pranked as the diamond's owner.
     function _setDefaultFeeTerms(address _diamond, uint256 _subaccountType) private {
-        IILoanMarketsFacet(_diamond).setLoanFeeTerms(
+        IIMorphoLoanMarketsFacet(_diamond).setLoanFeeTerms(
             _subaccountType, _feeTerms(0.07e18, 0.01e18, makeAddr("feeCollector"))
         );
     }
@@ -4767,7 +4772,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     /// Changes the loan type's rates on this diamond, keeping the default collector. The
     /// caller must already be pranked as the diamond's owner.
     function _setFeeRates(uint64 _feeFloor, uint64 _feeSpread) private {
-        IILoanMarketsFacet(address(controller)).setLoanFeeTerms(
+        IIMorphoLoanMarketsFacet(address(controller)).setLoanFeeTerms(
             SUBACCOUNT_TYPE_LOAN, _feeTerms(_feeFloor, _feeSpread, makeAddr("feeCollector"))
         );
     }
@@ -4798,7 +4803,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function _externalRepayWith(
         MintableERC20 _loanToken,
-        ILoanMarketsFacet.Market memory _market,
+        IMorphoLoanMarketsFacet.Market memory _market,
         address _subaccount,
         uint256 _assets
     )
@@ -4833,7 +4838,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _configureTransport();
         morpho.createMarket(_defaultMarket().marketParams);
         vm.startPrank(governance);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _defaultMarket()
         );
         _setDefaultFeeTerms(address(controller), SUBACCOUNT_TYPE_LOAN);
@@ -4852,14 +4857,14 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function _registerMarketExpectRevert(
-        ILoanMarketsFacet.Market memory _market,
+        IMorphoLoanMarketsFacet.Market memory _market,
         bytes4 _selector
     )
         private
     {
         vm.prank(governance);
         vm.expectRevert(_selector);
-        IILoanMarketsFacet(address(controller)).registerLoanMarket(
+        IIMorphoLoanMarketsFacet(address(controller)).registerLoanMarket(
             SUBACCOUNT_TYPE_LOAN, _market
         );
     }
@@ -5023,7 +5028,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             _composeMessage(_subaccount, _nonce, _amountLD, _payload);
         vm.deal(lzEndpoint, _value);
         vm.prank(lzEndpoint);
-        ILoanSubaccountRemote(_subaccount).lzCompose{value: _value}(
+        IMorphoLoanSubaccountRemote(_subaccount).lzCompose{value: _value}(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -5040,7 +5045,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
             _composeMessage(_subaccount, _nonce, 100e6, _payload);
         vm.prank(lzEndpoint);
         vm.expectRevert(_expectedRevert);
-        ILoanSubaccountRemote(_subaccount).lzCompose(
+        IMorphoLoanSubaccountRemote(_subaccount).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -5067,7 +5072,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         (bytes memory message, bytes32 guid) = _composeMessage(_subaccount, _nonce, 0, _payload);
         vm.prank(lzEndpoint);
         vm.expectRevert(_selector);
-        ILoanSubaccountRemote(_subaccount).lzCompose(
+        IMorphoLoanSubaccountRemote(_subaccount).lzCompose(
             address(fxrpOft), guid, message, executor, ""
         );
     }
@@ -5193,13 +5198,13 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         _controller.transferOwnership(governance);
     }
 
-    function _deploySubaccount() private returns (LoanSubaccountRemote) {
+    function _deploySubaccount() private returns (MorphoLoanSubaccountRemote) {
         SubaccountProxy proxy = new SubaccountProxy(
             address(controller),
             parentPersonalAccount,
             SUBACCOUNT_TYPE_LOAN
         );
-        return LoanSubaccountRemote(payable(address(proxy)));
+        return MorphoLoanSubaccountRemote(payable(address(proxy)));
     }
 
     function _composeMessage(
@@ -5274,9 +5279,9 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         address _feeRecipient
     )
         private pure
-        returns (ILoanMarketsFacet.FeeTerms memory)
+        returns (IMorphoLoanMarketsFacet.FeeTerms memory)
     {
-        return ILoanMarketsFacet.FeeTerms({
+        return IMorphoLoanMarketsFacet.FeeTerms({
             feeFloor: _feeFloor, feeSpread: _feeSpread, feeRecipient: _feeRecipient
         });
     }
@@ -5358,7 +5363,7 @@ contract LoanSubaccountRemoteTest is Test, FacetsDeploy {
         returns (bytes memory)
     {
         return abi.encodeWithSelector(
-            ILoanSubaccountRemote.InsufficientRemainingCollateral.selector, _required, _remaining
+            IMorphoLoanSubaccountRemote.InsufficientRemainingCollateral.selector, _required, _remaining
         );
     }
 }
