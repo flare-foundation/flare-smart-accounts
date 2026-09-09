@@ -501,8 +501,20 @@ address itself commits to the pool:
   live is the one state in which the user cannot revoke a parked packet; there the loan
   chain's own pause suspends the borrow but cancels nothing, so the order is: pause the loan
   chain, restore Flare when safe, submit and confirm the cancellation while the loan chain stays
-  paused, then resume — unpausing it earlier makes the latent packet executable again. Sending it
-  is **not**
+  paused, then resume — unpausing it earlier makes the latent packet executable again. That gap is
+  **accepted, not scheduled**, and so is the matching proposal to exempt the Flare-side collateral
+  deposit: either would take a new authenticated entry point on Flare and a carve-out in the
+  bridge's own pause, to buy an availability guarantee a dependency can withdraw anyway — bridging
+  fresh collateral starts at FAssets, which has a pause of its own. What a Flare pause does not
+  touch is the loan chain, whose rails are local and permissionless: repayment, a deposit of FXRP
+  already sitting on the account (with debt outstanding), and the fee checkpoint all stay
+  available. So the position can still be defended with RLUSD already on the subaccount, or with
+  RLUSD anyone can send there — a third party included — since `repay` needs no signature. Being
+  on the loan chain is not enough on its own: RLUSD held by the remote Personal Account moves only
+  on a signed instruction from Flare, and a Flare pause stops a new one being sent — though an
+  instruction already in flight can still execute, since the loan chain is not the paused side.
+  The accepted risk is the position with no reachable funds — Morpho interest keeps accruing and
+  it stays liquidatable for as long as the Flare side is closed. Sending it is **not**
   cancellation: the two packets race, an original that lands first executes normally and the
   cancellation then finds the id consumed and finalizes quietly without an event. A client
   therefore resolves a sent cancellation by whichever arrives — `LoanActionCancelled`, or the
