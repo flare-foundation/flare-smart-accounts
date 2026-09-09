@@ -29,6 +29,12 @@ library Subaccounts {
      * production deployment. Burned in as a constant so the CREATE2 input is invariant across
      * rebuilds.
      *
+     * Equal to `type(SubaccountProxy).creationCode` as compiled from this revision with the
+     * release compiler (solc 0.8.35), so unlike {PersonalAccounts.PROXY_CREATION_CODE} it is
+     * byte-exactly reproducible from current source. Later metadata-only drift is expected and
+     * tolerated rather than re-frozen: once an address is predicted anywhere, the constant is
+     * fixed for good.
+     *
      * Why not `type(SubaccountProxy).creationCode`: solc resolves that at compile time and
      * inlines the proxy's full creation bytecode, including the trailing CBOR metadata IPFS
      * hash, which is recomputed from the entire compilation context (sources of the proxy and
@@ -72,8 +78,8 @@ library Subaccounts {
         hex"ff565b634e487b7160e01b5f52604160045260245ffd5b503d61007f565b6040"
         hex"513d5f823e3d90fd5b602090607f1901126100fb576080516001600160a01b03"
         hex"811681036100fb5790565b5f80fd5b5f8091368280378136915af43d5f803e15"
-        hex"610118573d5ff35b3d5ffdfea2646970667358221220f794d5d7bf4e2af7968b"
-        hex"236ad68dc4d4c9f05d2d4d3d647e1aed2b54d69be42c64736f6c634300082300"
+        hex"610118573d5ff35b3d5ffdfea26469706673582212206890331099336b609447"
+        hex"483f1427a7c293a0f60780e43f4c38a4efd33fee459e64736f6c634300082300"
         hex"33";
 
     function setSubaccountImplementation(

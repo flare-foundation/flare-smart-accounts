@@ -26,9 +26,10 @@ contract PinnedInitCodeTest is Test {
     /// from the frozen proxy creation codes; any drift in the derivation inputs breaks this.
     string private constant GOLDEN_XRPL_OWNER = "rGoldenVectorXrplOwner";
     address private constant GOLDEN_PERSONAL_ACCOUNT = 0x3A5AE0e715593e617b74B0f4705C3934b0116B3c;
-    /// @dev Re-derived 2026-08-26 for the `SubaccountProxy` contract-rename refreeze
-    /// (pre-deployment; previously re-derived for the `implementationForType` refreeze).
-    address private constant GOLDEN_LOAN_SUBACCOUNT = 0x6194388E2Bd42B5f4cE3767692b3C2EeF11eC017;
+    /// @dev Re-derived 2026-09-09 for the release-build refreeze (pre-deployment; previously
+    /// re-derived for the `implementationForType` and `SubaccountProxy` renames). The Personal
+    /// Account vector above is untouched by all three: only the subaccount constant moved.
+    address private constant GOLDEN_LOAN_SUBACCOUNT = 0x65F5d5954A5CA67406A38D184cd176051cCF3D93;
 
     function testPinnedInitCodeDeploysToPinnedRuntimeCode() public {
         // the pinned init code must actually deploy, and what it deploys must be

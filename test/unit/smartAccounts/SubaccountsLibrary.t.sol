@@ -21,11 +21,12 @@ import {SubaccountProxy} from "../../../contracts/smartAccounts/proxy/Subaccount
  * update fixtures in this file without explicit cross-chain alignment.
  */
 contract SubaccountsLibraryTest is Test {
-    /// @dev keccak256 of `PROXY_CREATION_CODE` as frozen (2026-08-26, pre-deployment;
-    /// re-frozen for the `implementationForType` rename and again for the
-    /// `SubaccountProxy` contract rename, while no subaccount was deployed).
+    /// @dev keccak256 of `PROXY_CREATION_CODE` as frozen (2026-09-09, pre-deployment;
+    /// re-frozen for the `implementationForType` rename, then for the `SubaccountProxy`
+    /// contract rename, and last onto the release build so the constant is the exact
+    /// output of the reviewed source - all while no subaccount was deployed on any network).
     bytes32 private constant EXPECTED_PROXY_CREATION_CODE_HASH =
-        0xad4d7fa799f7a81d5abbd9af1c88e479cd564096e8c1f663ce1c3e486088f3df;
+        0x52bde1ddd87f9b0784511c5e1db5bcabe63dc1e5c25aa9dbf655f47cd6d8b5cb;
 
     /// @dev Not runnable under `forge coverage` — coverage disables via-IR and `type(...).creationCode`
     /// comes out structurally different from the via-IR build the constant was frozen against.

@@ -17,6 +17,16 @@ network, and who executes governance on each. Every verification below compares 
 *this* working tree, so a runbook execution that cannot name its commit cannot be reproduced or
 audited afterwards.
 
+**The subaccount creation-code constant belongs to this commit.** `Subaccounts.PROXY_CREATION_CODE`
+was re-frozen onto the release build on 2026-09-09, so it is the byte-exact creation code of the
+reviewed source. Do not re-freeze it again. Every subaccount address derives from it, and from the
+first predicted address onward — published to a user or funded before the subaccount exists — a
+change misdirects assets already sent to the old one. Later metadata-only drift in the proxy's
+sources is expected and is not a reason to touch it: what that drift moves is only the
+fresh-source comparison in `test/unit/smartAccounts/SubaccountsLibrary.t.sol`, which is deliberately
+metadata-blind. The two fixtures that would catch an address moving — the frozen hash there and the
+golden vectors in `PinnedInitCode.t.sol` — stay exact, and a diff in either is the signal to stop.
+
 ## Scope — every row resolved before execution
 
 Implementation upgrades and loan activation are separate decisions and are listed separately. A
