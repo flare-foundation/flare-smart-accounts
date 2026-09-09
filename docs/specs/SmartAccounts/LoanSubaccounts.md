@@ -414,6 +414,29 @@ transition in both the remote OFT's receive path (a standard OFT holds one peer 
 endpoint) and the compose authentication — a separate future extension, distinct from the
 multi-origin `acceptedOrigins[srcEid]` design deferred under Multiple remote chains.
 
+> **The adapters are upgradeable proxies, and an upgrade is not a rotation.** Every FXRP OFT
+> checked on 2026-09-09 sits behind a proxy — Flare's adapter, its Coston2 counterpart and the
+> Ethereum OFT — so the same address can change behavior with no rotation, no runbook and no
+> event on our side. `setFxrpOft`'s four reads (`token`, `sharedDecimals`, `oftVersion`, and the
+> per-route peers) are true when read and can change afterwards, and re-reading them defends
+> nothing: an upgrade can keep all four truthful while forging compose instructions. This is an
+> accepted dependency on the upgrade authority. On Flare that authority is
+> `0xbe653C54DF337F13Fcb726101388F4a4803049F3`, the same Safe that owns the controller, so it is
+> the trust domain the protocol already rests on; the Ethereum OFT's owner is a different party.
+>
+> Same authority is not the same safeguard, though. The diamond's upgrades and timelocked
+> configuration changes currently carry a 3,600-second delay — queued, visible and cancellable —
+> while the same Safe upgrading the adapter through its ProxyAdmin takes effect in the transaction.
+> (Not every owner call here is delayed: ownership transfer, cancellation and unpauser removal are
+> immediate by design.) The delay we do rely on does not extend to the adapter, so the warning
+> window there is zero.
+>
+> What the operator owes is the record — implementation address and code hash, upgrade authority,
+> OApp owner and delegate — and treating a change as an incident, which means the incident runbook
+> above in full: **pause → cancel queued transport sets → clear → rotate**. Clearing alone is not
+> enough; a `setComposeTransport` queued beforehand survives the clear and anyone may execute it
+> once it matures.
+
 Adding a remote chain is a deployment of existing bytecode plus governance, with nothing changing
 in what users sign or what clients build: bootstrap the diamond there from the pinned init code,
 cut the remote facet set, `setComposeTransport`, register the pool under a new type (the same

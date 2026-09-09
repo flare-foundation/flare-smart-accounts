@@ -59,7 +59,18 @@ library BridgeRoutes {
             IBridgeRoutesFacet.InvalidFxrpOft()
         );
         // compose authentication depends on the canonical OFT codec v1 (composeFrom = source
-        // caller); adapter version stability is a deployment assumption (it is not a proxy)
+        // caller). The adapter IS an upgradeable proxy on every deployment checked - Flare, its
+        // Coston2 counterpart and the Ethereum OFT - so this answer, like the three above, is
+        // true when read and can change afterwards. That is an accepted dependency on whoever
+        // holds the adapter's upgrade authority, not something re-reading defends: an upgrade
+        // can keep every one of these answers truthful while forging compose instructions.
+        // On Flare the upgrade authority is the Safe that owns this controller, but that is not
+        // the same safeguard: the cut and the timelocked setters here carry a delay, while its
+        // adapter upgrade takes effect in the transaction. The operator's duty is to record the
+        // implementation address and its code hash, the upgrade authority, the OApp owner and
+        // delegate, and to treat a change as an incident - the spec's runbook in full (pause,
+        // cancel the queued transport sets, clear, rotate), since a clear alone leaves a queued
+        // set to restore the route and a pause alone does not stop every action.
         (bytes4 interfaceId, uint64 version) = IOFT(_fxrpOft).oftVersion();
         require(
             interfaceId == type(IOFT).interfaceId && version == 1,
