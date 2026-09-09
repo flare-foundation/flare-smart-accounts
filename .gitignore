@@ -45,3 +45,4 @@ error-selectors.txt
 
 # Claude Code
 .claude
+deployment/deploys/*_mock.json

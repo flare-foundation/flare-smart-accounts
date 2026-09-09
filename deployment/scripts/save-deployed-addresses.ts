@@ -1,17 +1,17 @@
 import fs from "node:fs";
 import { PROTECTED_ETHEREUM_NAMES, loadPinnedEthereumAddresses, validateContractName } from "../utils/pinned-constants";
+import {
+  type ContractInfo,
+  PROTECTED_RECORD_NAMES,
+  mergeDeployedRecords,
+  parseAllowedReplacements,
+} from "../utils/deploy-records";
 
 // Read Forge output from a output file
 const outputPath = "forge-deploy-output.txt";
 const output = fs.readFileSync(outputPath, "utf8");
 
 const lines = output.split("\n");
-type ContractInfo = {
-  name: string;
-  contractName: string;
-  address: string;
-};
-
 const contracts: ContractInfo[] = [];
 let network: string = "unknown";
 
@@ -98,14 +98,23 @@ for (const deployed of contracts) {
   if (network === "ethereum") {
     checkProtectedEthereumRecord(deployed);
   }
-  const index = existingContracts.findIndex((item) => item.name === deployed.name);
-  if (index >= 0) {
-    existingContracts[index] = deployed;
-  } else {
-    existingContracts.push(deployed);
-  }
 }
 
-fs.writeFileSync(filePath, JSON.stringify(existingContracts, null, 2));
+// records follow their redeployments freely, which is what the deploy scripts are for; the two
+// that name a live contract the tooling resolves through may not change quietly - deploy-records.ts
+//
+// scdev and the `_mock` files are exempt. Both are throwaway records, gitignored rather than
+// tracked, and neither describes a live deployment. A local loop that edits a base facet changes
+// the controller's CREATE2 input and so its address on every iteration, so enforcing the guard
+// there would make the override part of everyone's environment permanently - which is exactly how
+// a guard stops guarding anything.
+const isThrowawayRecord = network === "scdev" || isMock;
+const merged = mergeDeployedRecords(
+  existingContracts,
+  contracts,
+  isThrowawayRecord ? new Set(PROTECTED_RECORD_NAMES) : parseAllowedReplacements(process.env.ALLOW_RECORD_REPLACEMENT)
+);
+
+fs.writeFileSync(filePath, JSON.stringify(merged, null, 2));
 fs.unlinkSync(outputPath);
 console.log(`Saved deployed addresses to ${filePath}`);
