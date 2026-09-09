@@ -79,6 +79,7 @@ pnpm deploy_composer <network>
 pnpm verify_contracts <network>
 ```
 
+- The ordered, verified release sequence — which governance call to make when, and what proves each step landed — is [`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md). The commands below are its building blocks; the runbook is what says in which order to run them and on which networks.
 - `<fullDeploy>` is a boolean (`true` or `false`). `false` skips initialization and is useful for diamond facets.
 - Supported networks are `coston2`, `coston`, `flare`, `songbird`, and `scdev`, plus `-staging` variants such as `coston2-staging`.
 - Deployment requires `.env` with `<NETWORK>_RPC_URL` and `DEPLOYER_PRIVATE_KEY`.
