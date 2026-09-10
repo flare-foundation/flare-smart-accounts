@@ -16,7 +16,7 @@ import {
   loadDeployedContracts,
   normalizeCutFileName,
 } from "../utils/diamond-inspect";
-import { resolveRpcUrl, validateNetwork } from "../utils/networks";
+import { isLoanChainNetwork, resolveRpcUrl, validateNetwork } from "../utils/networks";
 import {
   type FacetAction,
   type FacetPlan,
@@ -69,7 +69,7 @@ async function main() {
 
   const deployedFacets = deployedContracts.filter((contract) => contract.name.endsWith("Facet"));
   const deployedByName = new Map(deployedFacets.map((contract) => [contract.name, contract]));
-  if (network === "ethereum") {
+  if (isLoanChainNetwork(network)) {
     // the complete pin set (controller + three base facets) must be present and correctly
     // recorded before any planning: an omitted or renamed record would otherwise dodge the
     // pinned branch and let a same-named cut entry through the generic ADD path
@@ -78,7 +78,7 @@ async function main() {
       const record = deployedByName.get(pinnedName);
       if (!record) {
         throw new Error(
-          `${pinnedName}: pinned base facet missing from deployment/deploys/ethereum.json — ` +
+          `${pinnedName}: pinned base facet missing from deployment/deploys/${network}.json — ` +
             `run the pinned bootstrap (DeployEthereumController) before planning a cut`
         );
       }
@@ -100,7 +100,7 @@ async function main() {
     // passing, a cut file could otherwise aim the cut at another diamond
     if (diamond.toLowerCase() !== pins.controllerAddress) {
       throw new Error(
-        `the Ethereum cut target ${diamond} must be the pinned MasterAccountController ` + `${pins.controllerAddress}`
+        `the loan-chain cut target ${diamond} must be the pinned MasterAccountController ` + `${pins.controllerAddress}`
       );
     }
   }
@@ -148,7 +148,7 @@ async function main() {
 // and deployment/pinned-init-code/). Comparing them against today's build would wrongly
 // propose replacing them; instead they are verified against the pinned Flare runtime-code
 // hashes (keccak256 of the deployed code) and reported as intentional reuse. Applies only on
-// the "ethereum" network. The pinned values are parsed lazily from PinnedControllerInitCode.sol
+// the loan chains, where the pinned bootstrap runs. The pinned values are parsed lazily from PinnedControllerInitCode.sol
 // via deployment/utils/pinned-constants.ts, shared with the recorder.
 
 async function buildFacetPlans(
@@ -166,7 +166,7 @@ async function buildFacetPlans(
     // the pinned branch runs before all generic planning: a pinned base facet must never be
     // classified by source/artifact/code heuristics, and missing on-chain code is a fatal
     // bootstrap requirement, not an actionable ADD
-    const pinned = network === "ethereum" ? loadPinnedEthereumAddresses().baseFacets.get(facet.name) : undefined;
+    const pinned = isLoanChainNetwork(network) ? loadPinnedEthereumAddresses().baseFacets.get(facet.name) : undefined;
     if (pinned !== undefined) {
       if (facet.address.toLowerCase() !== pinned.address) {
         throw new Error(

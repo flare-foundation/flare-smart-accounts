@@ -9,6 +9,7 @@ import {
   SUPPORTED_BASE_NETWORKS,
   baseNetworkName,
   expectedChainId,
+  isLoanChainNetwork,
   resolveRpcUrl,
   validateNetwork,
 } from "./networks";
@@ -41,6 +42,10 @@ void test("a Flare-family staging alias is a network, a loan chain's is not, and
   assert.throws(() => validateNetwork("goerli"), /Invalid network: goerli/);
   assert.equal(baseNetworkName("coston2-staging"), "coston2");
   assert.equal(baseNetworkName("coston2"), "coston2");
+  // the pinned bootstrap's records and pin checks follow the loan chains, both of them
+  assert.equal(isLoanChainNetwork("ethereum"), true);
+  assert.equal(isLoanChainNetwork("sepolia"), true);
+  assert.equal(isLoanChainNetwork("coston2-staging"), false);
 });
 
 void test("every network has one chain id, its staging alias the same one, and nothing else has any", () => {

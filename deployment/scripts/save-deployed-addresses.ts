@@ -6,7 +6,7 @@ import {
   mergeDeployedRecords,
   parseAllowedReplacements,
 } from "../utils/deploy-records";
-import { validateNetwork } from "../utils/networks";
+import { isLoanChainNetwork, validateNetwork } from "../utils/networks";
 
 // Read Forge output from a output file
 const outputPath = "forge-deploy-output.txt";
@@ -36,11 +36,11 @@ if (network === "unknown") {
 
 validateNetwork(network);
 
-// the four pinned Ethereum records are chain-recovered facts, not build outputs: on ethereum
-// a protected name (in any casing - development filesystems can be case-insensitive) may only
-// ever be recorded with its canonical spelling and canonical pinned address, whether or not a
-// record already exists - the pinned bootstrap records through here too, so this is what keeps
-// it from ever writing anything but the pins
+// the four pinned records are chain-recovered facts, not build outputs: on a loan chain -
+// Ethereum, or Sepolia reproducing it - a protected name (in any casing - development
+// filesystems can be case-insensitive) may only ever be recorded with its canonical spelling and
+// canonical pinned address, whether or not a record already exists - the pinned bootstrap records
+// through here too, so this is what keeps it from ever writing anything but the pins
 function checkProtectedEthereumRecord(record: ContractInfo): void {
   const canonical = PROTECTED_ETHEREUM_NAMES.find(
     (protectedName) => protectedName.toLowerCase() === record.name.toLowerCase()
@@ -90,7 +90,7 @@ for (const deployed of contracts) {
   // record names become artifact path components downstream, and a path or case alias
   // (`./OwnershipFacet`) would not equal a protected name under whole-string comparison
   validateContractName(deployed.name);
-  if (network === "ethereum") {
+  if (isLoanChainNetwork(network)) {
     checkProtectedEthereumRecord(deployed);
   }
 }

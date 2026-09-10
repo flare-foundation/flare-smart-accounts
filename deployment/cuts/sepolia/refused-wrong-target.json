@@ -1,0 +1,8 @@
+{
+  "note": "Test fixture, not a cut. test/unit/deployment/ExecuteDiamondCutGuards.t.sol runs the executor against this file to prove a cut file naming any diamond but the pinned controller is refused on a loan chain. It can never execute.",
+  "diamond": "0x00000000000000000000000000000000DeaDBeef",
+  "facets": [],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "execute": false
+}

@@ -1457,9 +1457,11 @@ the diamond and its three base facets is therefore pinned as raw bytes under
 `deployment/pinned-init-code/` (recovered from the Flare creation transactions and verified:
 its CREATE2 derivation reproduces the live addresses exactly; `test/unit/smartAccounts/PinnedInitCode.t.sol`
 asserts the hashes, the derivation, and a golden xrplOwner → Personal Account → subaccount
-address vector in CI). `pnpm deploy_ethereum_controller` reproduces all four contracts on
-Ethereum at the production addresses — permissionless, since CREATE2 through the EIP-2470
-factory is sender-independent. **The follow-up facet cut is not permissionless**: the fresh
+address vector in CI). `pnpm deploy_ethereum_controller <network>` reproduces all four contracts
+at the production addresses on a loan chain — Ethereum, or Sepolia, where the same singleton
+factory makes the same derivation land the same addresses, which is what allows the bootstrap to
+be rehearsed there. It is permissionless, since CREATE2 through the EIP-2470 factory is
+sender-independent. **The follow-up facet cut is not permissionless**: the fresh
 diamond is owned by the historical `DiamondArgs.owner` EOA
 (`0x7801A7e1FD6a99d1a74DC0a59622b3b7dc4049bA`) — confirm that key is still controlled
 before relying on an Ethereum deployment. The Ethereum cut installs `SubaccountsFacet`,

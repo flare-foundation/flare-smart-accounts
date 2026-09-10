@@ -25,7 +25,7 @@ import { isFunctionFragment, loadAbi, toSelector } from "../utils/prep-cut";
 import { artifactPathFor, buildRepoFacetSourceSet, loadCreationCode, loadDeployedCode } from "../utils/facet-code";
 import { loadPinnedEthereumAddresses } from "../utils/pinned-constants";
 import { assertRpcChain, fetchLoupeFacets, loadCutConfig, loadDeployedContracts } from "../utils/diamond-inspect";
-import { resolveRpcUrl, validateNetwork } from "../utils/networks";
+import { isLoanChainNetwork, resolveRpcUrl, validateNetwork } from "../utils/networks";
 import { allPassed, formatChecks } from "../utils/diamond-verify";
 import { type ChainReader, type RepoReader, verifyDiamond } from "../utils/diamond-verifier";
 
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
 
   const record = loadDeployedContracts(options.network);
   const cut = options.cutFileName ? loadCutConfig(options.network, options.cutFileName) : undefined;
-  const pins = options.network === "ethereum" ? loadPinnedEthereumAddresses() : undefined;
+  const pins = isLoanChainNetwork(options.network) ? loadPinnedEthereumAddresses() : undefined;
   const web3 = new Web3(resolveRpcUrl(options.network));
   await assertRpcChain(web3, options.network);
   // one block for every read: `latest` and `finalized` move between calls, and a verdict must

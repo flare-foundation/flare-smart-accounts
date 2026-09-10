@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  PROTECTED_ETHEREUM_NAMES,
   loadPinnedEthereumAddresses,
   parsePinnedConstant,
   stripSolidity,
@@ -67,6 +68,19 @@ void test("throws on a wrong-width value", () => {
 void test("throws on a type mismatch", () => {
   const source = stripSolidity(declaration("PIN", ADDRESS));
   assert.throws(() => parsePinnedConstant(source, "PIN", "bytes32"), /found 0/);
+});
+
+void test("the protected set is exactly these four names", () => {
+  // written out rather than derived: every protection downstream - the recorder, the cut
+  // executor, the facet-address updater - iterates this list, and their tests iterate it too, so
+  // dropping a name here would drop both the protection and the cases that would have caught it
+  assert.deepEqual(
+    [...PROTECTED_ETHEREUM_NAMES],
+    ["MasterAccountController", "DiamondCutFacet", "DiamondLoupeFacet", "OwnershipFacet"]
+  );
+  // and each of the three facets is a pin in its own right, the controller being the fourth
+  const pins = loadPinnedEthereumAddresses();
+  assert.deepEqual([...pins.baseFacets.keys()].sort(), ["DiamondCutFacet", "DiamondLoupeFacet", "OwnershipFacet"]);
 });
 
 void test("loads all six pins from the real constants file", () => {

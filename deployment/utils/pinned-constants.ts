@@ -1,13 +1,14 @@
 import { readFileSync } from "node:fs";
 
-// The Ethereum bootstrap reproduces the controller and its base facets from pinned historical
+// The loan-chain bootstrap - Ethereum, or Sepolia reproducing it - recreates the controller and
+// its base facets from pinned historical
 // init code (see deployment/scripts/PinnedControllerInitCode.sol and
 // deployment/pinned-init-code/). The TypeScript tooling parses that Solidity file at runtime,
 // so preview, execution, and recording share one source of truth and cannot drift.
 
 export const PINNED_SOURCE = "deployment/scripts/PinnedControllerInitCode.sol";
 
-/** The four deployment records the Ethereum pinning workflow depends on. */
+/** The four deployment records the pinned bootstrap depends on, on either loan chain. */
 export const PROTECTED_ETHEREUM_NAMES = [
   "MasterAccountController",
   "DiamondCutFacet",

@@ -57,35 +57,20 @@ contract ExecuteDiamondCut is Script {
         }
 
         address diamond = abi.decode(json.parseRaw(".diamond"), (address));
-        // on Ethereum the cut target is the pinned controller, nothing else: with all four
-        // record checks passing, a cut file could otherwise aim the cut at another diamond
-        if (chainId == 1) {
-            require(
-                diamond == PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER,
-                "the Ethereum cut target must be the pinned MasterAccountController"
-            );
-        }
+        _requirePermittedCutTarget(diamond);
         string[] memory facetNames = abi.decode(json.parseRaw(".facets"), (string[]));
 
         address[] memory facetAddrs = new address[](facetNames.length);
         // deploy facets
         vm.startBroadcast();
         for (uint256 i = 0; i < facetNames.length; i++) {
-            // on Ethereum the historical base facets are pinned: they are never deployed or
+            // on a loan chain the historical base facets are pinned: they are never deployed or
             // replaced through the generic path, and their live code must match the Flare
             // production runtime exactly (mirrors check-cut-plan; constants are shared via
             // PinnedControllerInitCode)
             _validateFacetName(facetNames[i]);
-            (address pinnedAddr, bytes32 pinnedCodeHash, bool isPinned) =
-                _pinnedBaseFacet(facetNames[i]);
+            (address pinnedAddr, bool isPinned) = _pinnedFacetAddress(facetNames[i]);
             if (isPinned) {
-                require(
-                    pinnedAddr.codehash == pinnedCodeHash,
-                    string.concat(
-                        facetNames[i],
-                        ": on-chain code does not match the pinned historical runtime"
-                    )
-                );
                 facetAddrs[i] = pinnedAddr;
                 continue;
             }
@@ -642,13 +627,50 @@ contract ExecuteDiamondCut is Script {
         }
         return string(str);
     }
+    /// @dev On a loan chain the cut target is the pinned controller, nothing else: with all four
+    /// record checks passing, a cut file could otherwise aim the cut at another diamond. Every
+    /// other chain takes its target from the cut file, as the deployment record's own diamond.
+    function _requirePermittedCutTarget(
+        address _diamond
+    )
+        internal view
+    {
+        if (DeployNetworks.isLoanChain(block.chainid)) {
+            require(
+                _diamond == PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER,
+                "the loan-chain cut target must be the pinned MasterAccountController"
+            );
+        }
+    }
+
+    /// @dev The address a pinned base facet must be cut at, and whether the name is one at all.
+    /// A pinned facet is never deployed or replaced through the generic path, and its live code
+    /// must be the Flare production runtime byte for byte, so a chain holding something else at
+    /// a pinned address cannot be cut until that is understood.
+    function _pinnedFacetAddress(
+        string memory _name
+    )
+        internal view
+        returns (address _addr, bool _isPinned)
+    {
+        (address pinnedAddr, bytes32 pinnedCodeHash, bool isPinned) = _pinnedBaseFacet(_name);
+        if (!isPinned) {
+            return (address(0), false);
+        }
+        require(
+            pinnedAddr.codehash == pinnedCodeHash,
+            string.concat(_name, ": on-chain code does not match the pinned historical runtime")
+        );
+        return (pinnedAddr, true);
+    }
+
     function _pinnedBaseFacet(
         string memory _name
     )
         private view
         returns (address _addr, bytes32 _codeHash, bool _isPinned)
     {
-        if (block.chainid != 1) {
+        if (!DeployNetworks.isLoanChain(block.chainid)) {
             return (address(0), bytes32(0), false);
         }
         bytes32 nameHash = keccak256(bytes(_name));

@@ -5,14 +5,16 @@ import {Script, console2} from "forge-std/Script.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
 import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
+import {DeployNetworks} from "./DeployNetworks.sol";
 
 /**
- * Reproduces the production MasterAccountController deployment on a new chain (Ethereum) from
- * the pinned historical init code — never from rebuilt sources, which have drifted and derive
- * a different address. Every contract is verified twice before broadcasting: the pinned file
- * must hash to its fixture, and the CREATE2 derivation from that hash must equal the known
- * production address. Deployment itself is permissionless (CREATE2 through the EIP-2470
- * factory is sender-independent).
+ * Reproduces the production MasterAccountController deployment on a loan chain - Ethereum, or
+ * Sepolia as its rehearsal - from the pinned historical init code, never from rebuilt sources,
+ * which have drifted and derive a different address. Every contract is verified twice before
+ * broadcasting: the pinned file must hash to its fixture, and the CREATE2 derivation from that
+ * hash must equal the known production address. Deployment itself is permissionless (CREATE2
+ * through the EIP-2470 factory is sender-independent), and the factory sits at the same address
+ * on both chains, so the same init code lands the same four addresses on Sepolia.
  *
  * This script only reproduces the diamond with its three base facets. The follow-up cut that
  * installs the Ethereum facet set (SubaccountsFacet, TimelockFacet, PauseFacet,
@@ -20,17 +22,22 @@ import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
  * diamond is owned by the historical
  * `DiamondArgs.owner` EOA. Confirm that key is still controlled before deploying here.
  *
- * Ethereum only (chain id 1; a mainnet fork for rehearsals). It prints the recorder's
- * `NETWORK:`/`DEPLOYED:` lines so the wrapper records the four contracts in
- * `deployment/deploys/ethereum.json` when - and only when - they exist there.
+ * The loan chains only, held to the name the wrapper dialed the RPC by (a fork of either, under
+ * its real name, for rehearsals). It prints the recorder's `NETWORK:`/`DEPLOYED:` lines so the
+ * wrapper records the four contracts in `deployment/deploys/<network>.json` when - and only
+ * when - they exist there.
  */
 // solhint-disable no-console
 contract DeployEthereumController is Script {
-    function run()
+    function run(
+        string calldata _expectedNetwork
+    )
         external
     {
-        require(block.chainid == 1, "the pinned bootstrap runs on Ethereum (chain id 1) only");
-        console2.log("NETWORK: ethereum");
+        require(DeployNetworks.isLoanChain(block.chainid), "the pinned bootstrap runs on a loan chain");
+        string memory network = DeployNetworks.networkName(block.chainid);
+        DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
+        console2.log(string.concat("NETWORK: ", network));
 
         vm.startBroadcast();
         // base facets first: the diamond constructor cuts them and requires their code

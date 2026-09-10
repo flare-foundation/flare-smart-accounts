@@ -3,7 +3,10 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 import {DeployComposer} from "../../../deployment/scripts/DeployComposer.s.sol";
+import {DeployEthereumController} from "../../../deployment/scripts/DeployEthereumController.s.sol";
 import {DeployNetworks} from "../../../deployment/scripts/DeployNetworks.sol";
+import {PinnedControllerInitCode} from "../../../deployment/scripts/PinnedControllerInitCode.sol";
+import {MockSingletonFactory} from "../../../contracts/mock/MockSingletonFactory.sol";
 import {DeployLoanSubaccountImplementation} from
     "../../../deployment/scripts/DeployLoanSubaccountImplementation.s.sol";
 import {DeployPersonalAccountImplementation} from
@@ -34,6 +37,7 @@ contract DeployNetworkGuardsTest is Test {
     DeployPersonalAccountImplementation private personalAccountScript;
     DeployRemoteAccountImplementations private remoteScript;
     DeployComposer private composerScript;
+    DeployEthereumController private bootstrapScript;
 
     /// @dev an external seam, so `expectRevert` can watch the library's own revert
     function nameOf(
@@ -52,6 +56,7 @@ contract DeployNetworkGuardsTest is Test {
         personalAccountScript = new DeployPersonalAccountImplementation();
         remoteScript = new DeployRemoteAccountImplementations();
         composerScript = new DeployComposer();
+        bootstrapScript = new DeployEthereumController();
     }
 
     function testHomeImplementationsRefuseEveryLoanChain() public {
@@ -139,6 +144,42 @@ contract DeployNetworkGuardsTest is Test {
             vm.expectRevert(bytes("the loan chains have no staging deployment"));
             remoteScript.run(DeployNetworks.networkName(loan[i]), true);
         }
+    }
+
+    function testThePinnedBootstrapRunsOnTheLoanChainsOnly() public {
+        // the bootstrap reproduces Ethereum's production controller from pinned init code; on
+        // Sepolia the same factory and init code land the same four addresses, so the rehearsal
+        // runs there under the real name - and on no other chain, whatever the wrapper called it
+        vm.chainId(COSTON2);
+        vm.expectRevert(bytes("the pinned bootstrap runs on a loan chain"));
+        bootstrapScript.run("coston2");
+        vm.chainId(UNKNOWN);
+        vm.expectRevert(bytes("the pinned bootstrap runs on a loan chain"));
+        bootstrapScript.run("ethereum");
+        vm.expectRevert(bytes("the pinned bootstrap runs on a loan chain"));
+        bootstrapScript.run("scdev");
+        // and on a loan chain it is held to the name the wrapper dialed the RPC by
+        vm.chainId(ETHEREUM);
+        vm.expectRevert(bytes("RPC chain is ethereum, not the named network sepolia"));
+        bootstrapScript.run("sepolia");
+        vm.chainId(SEPOLIA);
+        vm.expectRevert(bytes("RPC chain is sepolia, not the named network ethereum"));
+        bootstrapScript.run("ethereum");
+    }
+
+    function testThePinnedBootstrapReproducesTheProductionAddressesOnSepolia() public {
+        // the EIP-2470 factory sits at the same address on Sepolia, so the same pinned init code
+        // must land the same four contracts there - the script checks each derivation and runtime
+        // hash itself, so getting through it is the proof. A CREATE2 factory stands in for the
+        // real one at its address; the derivation depends on that address and the init code only
+        vm.etch(PinnedControllerInitCode.SINGLETON_FACTORY, type(MockSingletonFactory).runtimeCode);
+        vm.chainId(SEPOLIA);
+        bootstrapScript.run("sepolia");
+        assertEq(
+            PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER.codehash,
+            PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER_RUNTIME_CODE_HASH,
+            "the controller is at the pinned address with the production runtime"
+        );
     }
 
     function testTheComposerIsHeldToTheFlareFamilyAndToItsName() public {

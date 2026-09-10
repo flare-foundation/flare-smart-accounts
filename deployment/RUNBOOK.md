@@ -114,8 +114,8 @@ pnpm verify_diamond <network> <cut-file> --expect-owner <approved owner>
 Moved selectors are repointed by including the new facet, never by listing them for deletion.
 
 Pass `--expect-owner` explicitly. Its default is the chain config's `governance`, which is the zero
-address on `coston2-staging` and therefore checks nothing, and on Ethereum the default is the pinned
-historical owner, which stops being correct the moment ownership is transferred.
+address on `coston2-staging` and therefore checks nothing, and on a loan chain the default is the
+pinned historical owner, which stops being correct the moment ownership is transferred.
 
 **Coston2 only — the seven pre-freeze registrations.** Decided 2026-09-09: the seven accounts
 registered before the proxy creation code was frozen are cleared here, in this cut, by a
@@ -196,6 +196,11 @@ Owner, pausers, unpausers and the timelock duration — set as intended and read
 
 ## Part B — a new chain, from nothing
 
+Part B runs on a loan chain: Ethereum, or Sepolia, where the same singleton factory and the same
+pinned init code reproduce the production controller at the same address — which is what makes
+Sepolia the network this part is rehearsed on. Every command below takes the network name; the
+tooling refuses any other chain.
+
 ### B1. Prove control of the bootstrap owner, then bootstrap
 
 The bootstrap is permissionless, but the first cut must come from the pinned historical owner.
@@ -204,16 +209,17 @@ holder before deploying anything, because a controller nobody can cut is a dead 
 frozen address.
 
 ```bash
-pnpm deploy_ethereum_controller
-pnpm verify_diamond ethereum --pre-cut
+pnpm deploy_ethereum_controller <network>   # ethereum, or sepolia for the rehearsal
+pnpm verify_diamond <network> --pre-cut
 ```
 
-`--pre-cut` requires the pinned owner, exactly the three pinned base facets, and no ERC-165 flag.
+`--pre-cut` requires the pinned owner — the bootstrap's own initial owner, the default the verifier
+expects on a loan chain — exactly the three pinned base facets, and no ERC-165 flag.
 
 ### B2. Now the safety and plan checks
 
 The same checks as A1, plus the cut plan. They run **after** B1 here, not before: they need a
-deployed controller and a deployment record, and on Ethereum the recorded base facets.
+deployed controller and a deployment record, and on a loan chain the recorded base facets.
 
 ```bash
 pnpm build:upgrade-info && pnpm validate-upgrade
@@ -224,7 +230,7 @@ pnpm check_cut <network> <cut-file>
 ### B3. The cut, with its init in one transaction
 
 `EthereumControllerInit.init()` sets the four ERC-165 flags and nothing else. Verify after with
-`pnpm verify_diamond ethereum <cut> --expect-owner <owner>`.
+`pnpm verify_diamond <network> <cut> --expect-owner <owner>`.
 
 ### B4. Governance configuration, then the ownership transfer
 
@@ -241,7 +247,7 @@ before proceeding. A diamond with the right owner and no pauser is not configure
 
 ### B5. Remote implementations
 
-`pnpm deploy_remote_account_implementations ethereum`, then register `PersonalAccountRemote` and
+`pnpm deploy_remote_account_implementations <network>`, then register `PersonalAccountRemote` and
 type-1 `MorphoLoanSubaccountRemote` through the same three-stage verification and timelocked procedure as
 A4 and A5, then freeze both lineages exactly as A6 describes.
 
@@ -259,12 +265,13 @@ status.
 are recorded, with results, against the release commit.** Each answers a question no post-hoc smoke
 test can answer, because by then the change is already live.
 
-Note where they can run. The bootstrap refuses any chain id but Ethereum's, and the remote
-implementation deployment refuses the Flare-family chain ids, so the pinned bootstrap sequence
-cannot be rehearsed on an ordinary public testnet at all — rehearse it against a **mainnet fork**,
-under the real network name (anvil keeps the forked chain's id; there is no local-development network)
-and in a disposable worktree: the run writes the network's tracked record, and a rehearsal's addresses
-left in the release workspace would misdirect every later check.
+Note where they can run. The pinned bootstrap and the remote implementation deployment run on the
+loan chains only — Ethereum, and Sepolia, where the same factory and pinned init code reproduce the
+production controller at the same address — so Part B is rehearsed end to end on the
+Coston2 ↔ Sepolia run. Ethereum itself is rehearsed against a **mainnet fork**, under the
+real network name (anvil keeps the forked chain's id; there is no local-development network) and in
+a disposable worktree: the run writes the network's tracked record, and a rehearsal's addresses left
+in the release workspace would misdirect every later check.
 The live transport rehearsal needs real endpoints and a real OFT, so it needs its own stated network
 plan (which testnets, which endpoint deployment, which peer) rather than being assumed to fit
 alongside the rest.

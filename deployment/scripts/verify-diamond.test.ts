@@ -6,18 +6,21 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import Web3, { type AbiItem } from "web3";
 import { FACETS_ABI, type LoupeFacet } from "../utils/diamond-inspect";
 import { dispatchSlot } from "../utils/diamond-verify";
+import { loadPinnedEthereumAddresses } from "../utils/pinned-constants";
 import { isFunctionFragment, toSelector } from "../utils/prep-cut";
 
 const SCRIPT = join(__dirname, "verify-diamond.ts");
 const TSX_CLI = createRequire(__filename).resolve("tsx/cli");
 const DIAMOND = "0x000000000000000000000000000000000000d1a0";
+/** The bootstrap's own owner: the verifier's default on a loan chain when no flag names one. */
+const PINNED_INITIAL_OWNER = loadPinnedEthereumAddresses().initialOwner;
 const OWNER = "0x0000000000000000000000000000000000000e0e";
 const STRANGER = "0x000000000000000000000000000000000000bad0";
 const BLOCK = "0x1234";
@@ -228,6 +231,7 @@ function scratchRepo(): string {
   const root = mkdtempSync(join(tmpdir(), "verify-diamond-cli-"));
   mkdirSync(join(root, "deployment/deploys"), { recursive: true });
   mkdirSync(join(root, "deployment/cuts/coston2"), { recursive: true });
+  mkdirSync(join(root, "deployment/scripts"), { recursive: true });
   mkdirSync(join(root, "contracts/smartAccounts/facets"), { recursive: true });
   const record = [
     { name: "MasterAccountController", contractName: "MasterAccountController.sol", address: DIAMOND },
@@ -260,7 +264,12 @@ interface RunResult {
 }
 
 function runCli(cwd: string, rpcUrl: string, args: string[], blockTag?: string): Promise<RunResult> {
-  const env: NodeJS.ProcessEnv = { ...process.env, COSTON2_RPC_URL: rpcUrl };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    COSTON2_RPC_URL: rpcUrl,
+    SEPOLIA_RPC_URL: rpcUrl,
+    ETHEREUM_RPC_URL: rpcUrl,
+  };
   if (blockTag !== undefined) {
     env.VERIFY_BLOCK_TAG = blockTag;
   }
@@ -337,4 +346,58 @@ void test("a cut file targeting another diamond aborts with the record's control
   const result = await runCli(repo, rpc.url, ["coston2", "elsewhere", "--no-build", "--expect-owner", OWNER]);
   assert.equal(result.status, 1);
   assert.match(result.stderr, new RegExp(`the cut file targets ${STRANGER} but deployment/deploys/coston2.json`));
+});
+
+/** The pins and the default owner are a loan-chain rule, so both chains are driven, not one. */
+const LOAN_CHAINS = [
+  { network: "sepolia", chainId: "0xaa36a7" },
+  { network: "ethereum", chainId: "0x1" },
+];
+
+/** Gives the scratch repo this network's record and the pinned source the verifier parses. */
+function prepareLoanChain(network: string): void {
+  writeFileSync(
+    join(repo, `deployment/deploys/${network}.json`),
+    readFileSync(join(repo, "deployment/deploys/coston2.json"), "utf8")
+  );
+  copyFileSync(
+    join(__dirname, "PinnedControllerInitCode.sol"),
+    join(repo, "deployment/scripts/PinnedControllerInitCode.sol")
+  );
+}
+
+void test("the pins are read on both loan chains, and on no other", async () => {
+  // the pinned bootstrap reproduces Ethereum's controller at the same address on Sepolia, so the
+  // verifier holds both chains to the pins. The fixture diamond is not the pinned controller, so
+  // the pin checks appear and fail - which is what proves they were consulted at all
+  for (const chain of LOAN_CHAINS) {
+    rpc.reset();
+    rpc.state.chainId = chain.chainId;
+    prepareLoanChain(chain.network);
+    const result = await runCli(repo, rpc.url, [chain.network, "--no-build", "--expect-owner", OWNER]);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout, /pins: the diamond is the pinned controller/);
+    assert.match(result.stdout, /pins: OwnershipFacet recorded at the pinned address/);
+  }
+
+  // a Flare-family chain has no pinned bootstrap, so the same record raises no pin check at all
+  rpc.reset();
+  const onCoston2 = await runCli(repo, rpc.url, BASE_ARGS);
+  assert.equal(onCoston2.status, 0, onCoston2.stdout + onCoston2.stderr);
+  assert.doesNotMatch(onCoston2.stdout, /pins:/);
+});
+
+void test("without --expect-owner a loan chain is held to the pinned initial owner", async () => {
+  // the bootstrap's own owner is the default on both, so an operator who omits the flag before
+  // the handover still gets a real check rather than none: the fixture answers another owner
+  for (const chain of LOAN_CHAINS) {
+    rpc.reset();
+    rpc.state.chainId = chain.chainId;
+    prepareLoanChain(chain.network);
+    const result = await runCli(repo, rpc.url, [chain.network, "--no-build"]);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    // the check's expectation is the pinned owner, printed under its name; without the default it
+    // would fall back to the chain config's governance, which these networks do not have
+    assert.match(result.stdout, new RegExp(`FAIL\\s+owner[\\s\\S]{0,120}?${PINNED_INITIAL_OWNER}`, "i"));
+  }
 });

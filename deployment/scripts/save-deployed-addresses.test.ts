@@ -13,6 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { PROTECTED_ETHEREUM_NAMES, loadPinnedEthereumAddresses } from "../utils/pinned-constants";
 
 const here = __dirname;
 const repoRoot = path.resolve(here, "../..");
@@ -22,7 +23,7 @@ const TSX_CLI = createRequire(__filename).resolve("tsx/cli");
 const CONTROLLER_A = "0xaaaabbbbccccddddeeeeffff1111222233334444";
 const CONTROLLER_B = "0x5555666677778888999900001111222233334444";
 const FACET = "0x1234123412341234123412341234123412341234";
-/** `PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER`: the one address that name may hold on Ethereum. */
+/** `PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER`: the one address that name may hold on a loan chain. */
 const PINNED_CONTROLLER = "0x434936d47503353f06750Db1A444DBDC5F0AD37c";
 
 type DeployRecord = { name: string; contractName: string; address: string };
@@ -137,7 +138,7 @@ void test("the mock files are exempt, and a network the tooling does not know is
   assert.equal(readRecords(mocked, "coston2_mock")[0]?.address, CONTROLLER_B);
 });
 
-void test("the Ethereum pins hold even when the override names the controller", () => {
+void test("the pins hold even when the override names the controller", () => {
   // the two guards compose: an override for the replacement rule must not buy a way past the
   // pinned-Ethereum rule, which allows only one address for that name on that chain.
   //
@@ -155,4 +156,47 @@ void test("the Ethereum pins hold even when the override names the controller", 
   assert.notEqual(status, 0, "the pinned Ethereum record must not be writable");
   assert.match(stderr, /only the canonical pinned Ethereum record/);
   assert.equal(readRecords(dir, "ethereum")[0]?.address, PINNED_CONTROLLER);
+});
+
+void test("every protected name is held to its pin, on both loan chains", () => {
+  // the four are protected as a set: the controller and its three base facets. Exempting any one
+  // of them would let the bootstrap's own record be overwritten with something else, so each is
+  // driven here rather than one standing for the rest
+  const pins = loadPinnedEthereumAddresses();
+  const pinnedAddressOf = (name: string): string =>
+    name === "MasterAccountController" ? pins.controllerAddress : pins.baseFacets.get(name)!.address;
+  for (const network of ["ethereum", "sepolia"]) {
+    for (const name of PROTECTED_ETHEREUM_NAMES) {
+      const pinned = pinnedAddressOf(name);
+      const dir = setUp(
+        network,
+        [{ name, contractName: `${name}.sol`, address: pinned }],
+        [{ name, contractName: `${name}.sol`, address: CONTROLLER_B }]
+      );
+      fs.mkdirSync(path.join(dir, "deployment/scripts"), { recursive: true });
+      fs.copyFileSync(
+        path.join(repoRoot, "deployment/scripts/PinnedControllerInitCode.sol"),
+        path.join(dir, "deployment/scripts/PinnedControllerInitCode.sol")
+      );
+      const { status, stderr } = run(dir, name);
+      assert.notEqual(status, 0, `${network}/${name}: the pinned record must not be writable`);
+      assert.match(stderr, /only the canonical pinned Ethereum record/);
+      assert.equal(readRecords(dir, network)[0]?.address, pinned, `${network}/${name}: nothing was written`);
+    }
+  }
+});
+
+void test("the pins hold on Sepolia exactly as on Ethereum", () => {
+  // the rehearsal reproduces the production controller at the same address on Sepolia, so the
+  // same four names may only ever hold the pinned values there too
+  const dir = setUp("sepolia", [controller(PINNED_CONTROLLER)], [controller(CONTROLLER_B)]);
+  fs.mkdirSync(path.join(dir, "deployment/scripts"), { recursive: true });
+  fs.copyFileSync(
+    path.join(repoRoot, "deployment/scripts/PinnedControllerInitCode.sol"),
+    path.join(dir, "deployment/scripts/PinnedControllerInitCode.sol")
+  );
+  const { status, stderr } = run(dir, "MasterAccountController");
+  assert.notEqual(status, 0, "the pinned record must not be writable on Sepolia either");
+  assert.match(stderr, /only the canonical pinned Ethereum record/);
+  assert.equal(readRecords(dir, "sepolia")[0]?.address, PINNED_CONTROLLER);
 });

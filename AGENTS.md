@@ -71,8 +71,12 @@ Spellcheck uses cspell with the dictionary in `.vscode/cspell.json`; add legitim
 ```bash
 pnpm deploy_contracts <network> <fullDeploy>
 pnpm deploy_personal_account_implementation <network>
+pnpm deploy_loan_subaccount_implementation <network>
+pnpm deploy_remote_account_implementations <network>
+pnpm deploy_ethereum_controller <network>
 pnpm diamond_cut <network> <cut-file-name>
 pnpm check_cut <network> [cut-file-name] [--no-build]
+pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]
 pnpm verify_diamond <network> [cut-file-name] [--pre-cut] [--expect-owner <address>] [--no-build]
 pnpm verify_implementation <network> <Contract> <address> [--stage pre|queued|live] [--xrpl-owner <owner>] [--no-build]
 pnpm deploy_composer <network> <onlyImpl>

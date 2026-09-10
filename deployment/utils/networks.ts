@@ -44,6 +44,11 @@ export function validateNetwork(network: string): void {
   }
 }
 
+/** Whether the network is a loan chain, where the pinned bootstrap's records and pin checks apply. */
+export function isLoanChainNetwork(network: string): boolean {
+  return LOAN_CHAIN_NETWORKS.includes(baseNetworkName(network));
+}
+
 /** The chain id a network's RPC must answer; a name without one is not a network here. */
 export function expectedChainId(network: string): number {
   const expected = CHAIN_IDS[baseNetworkName(network)];
