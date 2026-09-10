@@ -2,10 +2,6 @@
 node_modules
 pnpm-debug.log
 
-## Test deploys info
-deployment/deploys/scdev.json
-deployment/deploys/all/scdev.json
-
 # Foundry files
 cache-forge/
 artifacts-forge/

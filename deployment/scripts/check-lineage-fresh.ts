@@ -30,31 +30,23 @@
  *
  * Preconditions are checked, not assumed: an unknown network, a network without a deployment
  * record, a malformed record or cut file, a record without exactly one controller, a recorded
- * controller without code, or an RPC answering with another chain id all fail (scdev is a local
- * chain with no fixed id and its id is not checked); a shallow clone blocks only the git fallback,
- * never the decisive on-chain checks. Caveat: a proxy deployed
+ * controller without code, or an RPC answering with another chain id all fail; a shallow clone
+ * blocks only the git fallback, never the decisive on-chain checks. Caveat: a proxy deployed
  * outside the controller (own CREATE2, own salt) is invisible here, but it also would not sit at
  * a canonical address.
  *
  * Usage:
  *   pnpm check_lineage_fresh <network> [subaccounts|personal-accounts|all]
  * The RPC comes from `<NETWORK>_RPC_URL` (environment or the repository's env file), else the
- * public Flare RPC of the network.
+ * public Flare RPC of a Flare-family network; the loan chains have no default.
  */
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { Web3 } from "web3";
+import { assertRpcChain } from "../utils/diamond-inspect";
+import { resolveRpcUrl, validateNetwork } from "../utils/networks";
 
-/** Known networks; scdev is a local chain with no fixed id and is not chain-id checked. */
-const CHAIN_IDS: Record<string, number | undefined> = {
-  flare: 14,
-  songbird: 19,
-  coston: 16,
-  coston2: 114,
-  ethereum: 1,
-  scdev: undefined,
-};
 /** Subaccount types probed while the facet is cut: 0 is reserved, the space is a raw counter from 1. */
 const PROBED_SUBACCOUNT_TYPES = 32;
 
@@ -80,67 +72,6 @@ const NOT_CUT = Symbol("not-cut");
 
 type Verdict = "fresh" | "not-fresh" | "unproven";
 type DeployRecord = { name: string; address: string };
-
-function baseNetworkName(network: string): string {
-  return network.endsWith("-staging") ? network.replace(/-staging$/, "") : network;
-}
-
-function readEnvFile(): Record<string, string> {
-  const path = ".env";
-  if (!existsSync(path)) {
-    return {};
-  }
-  const env: Record<string, string> = {};
-  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator <= 0) {
-      continue;
-    }
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed
-      .slice(separator + 1)
-      .trim()
-      .replace(/^["']|["']$/g, "");
-    env[key] = value;
-  }
-  return env;
-}
-
-function resolveRpcUrl(network: string): string {
-  const env = { ...readEnvFile(), ...process.env };
-  const baseNetwork = baseNetworkName(network);
-  const rpcUrl = env[`${baseNetwork.toUpperCase()}_RPC_URL`];
-  if (rpcUrl) {
-    return rpcUrl;
-  }
-  if (baseNetwork === "ethereum" || baseNetwork === "scdev") {
-    throw new Error(`${baseNetwork.toUpperCase()}_RPC_URL is required for the ${baseNetwork} network`);
-  }
-  return `https://${baseNetwork}-api.flare.network/ext/C/rpc`;
-}
-
-function assertKnownNetwork(network: string): void {
-  if (!(baseNetworkName(network) in CHAIN_IDS)) {
-    throw new Error(
-      `Unknown network "${network}" (known: ${Object.keys(CHAIN_IDS).join(", ")}, or their -staging variants)`
-    );
-  }
-}
-
-async function assertRpcChain(web3: Web3, network: string): Promise<void> {
-  const expected = CHAIN_IDS[baseNetworkName(network)];
-  if (expected === undefined) {
-    return;
-  }
-  const actual = Number(await web3.eth.getChainId());
-  if (actual !== expected) {
-    throw new Error(`RPC chain id is ${actual}, not ${expected} (the ${network} network)`);
-  }
-}
 
 function deployRecordPath(network: string): string {
   return `deployment/deploys/${network}.json`;
@@ -392,7 +323,7 @@ async function main(): Promise<void> {
   if (!["subaccounts", "personal-accounts", "all"].includes(requested)) {
     throw new Error(`Unknown lineage "${requested}" (subaccounts | personal-accounts | all)`);
   }
-  assertKnownNetwork(network);
+  validateNetwork(network);
 
   const records = readDeployRecords(network);
   const controller = findController(records, network);

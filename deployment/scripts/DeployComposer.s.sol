@@ -6,6 +6,7 @@ import {FAssetRedeemComposer} from "../../contracts/composer/implementation/FAss
 import {FAssetRedeemerAccount} from "../../contracts/composer/implementation/FAssetRedeemerAccount.sol";
 import {FAssetRedeemComposerProxy} from "../../contracts/composer/proxy/FAssetRedeemComposerProxy.sol";
 import {IOwnableWithTimelock} from "../../contracts/userInterfaces/IOwnableWithTimelock.sol";
+import {DeployNetworks} from "./DeployNetworks.sol";
 
 // solhint-disable no-console
 contract DeployComposer is Script {
@@ -28,6 +29,7 @@ contract DeployComposer is Script {
     FAssetRedeemComposer private composer;
 
     function run(
+        string calldata _expectedNetwork,
         bool _onlyImpl
     )
         external
@@ -35,18 +37,13 @@ contract DeployComposer is Script {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
 
-        string memory configFile = "deployment/chain-config/";
-        string memory network;
-        uint256 chainId = block.chainid;
-
-        if (chainId == 14) {
-            network = "flare";
-        } else if (chainId == 114) {
-            network = "coston2";
-        } else {
-            network = "scdev";
-        }
-        configFile = string.concat(configFile, network, ".json");
+        // the composer is a Flare-side contract, held to the Flare family like the account
+        // implementations are, and to the name the wrapper dialed the RPC by. Only the Flare and
+        // Coston2 chain configs carry usable composer values
+        require(DeployNetworks.isFlareFamily(block.chainid), "the composer belongs on a Flare-family chain");
+        string memory network = DeployNetworks.networkName(block.chainid);
+        DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
+        string memory configFile = string.concat("deployment/chain-config/", network, ".json");
         console2.log(string.concat("NETWORK: ", network));
 
         vm.startBroadcast();

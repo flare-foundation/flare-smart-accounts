@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Diamond inspection shared by the cut planner (check-cut-plan.ts) and the diamond verifier
-// (verify-diamond.ts): the network list and chain ids, the RPC resolution, the deployment record
-// and cut file loaders, and the loupe fetch.
-import { existsSync, readFileSync } from "node:fs";
+// (verify-diamond.ts): the RPC's chain check, the deployment record and cut file loaders, and
+// the loupe fetch. The network table itself - names, families, chain ids, RPCs - is networks.ts.
+import { readFileSync } from "node:fs";
 import Web3 from "web3";
+import { baseNetworkName, expectedChainId } from "./networks";
 import { validateContractName } from "./pinned-constants";
 
 export interface DeployedContract {
@@ -24,11 +25,6 @@ export interface LoupeFacet {
   facetAddress: string;
   functionSelectors: string[];
 }
-
-export const SUPPORTED_BASE_NETWORKS = ["coston2", "coston", "flare", "songbird", "scdev", "ethereum"];
-
-// scdev is a local chain with no fixed id and is not checked
-export const CHAIN_IDS: Record<string, number> = { flare: 14, songbird: 19, coston: 16, coston2: 114, ethereum: 1 };
 
 export const FACETS_ABI = {
   type: "tuple[]",
@@ -69,37 +65,18 @@ export async function fetchLoupeFacets(
   });
 }
 
-export function validateNetwork(network: string) {
-  const baseNetwork = baseNetworkName(network);
-  if (!SUPPORTED_BASE_NETWORKS.includes(baseNetwork)) {
-    throw new Error(`Invalid network: ${network}`);
-  }
-  if (baseNetwork === "ethereum" && network !== "ethereum") {
-    // the pin logic keys on the exact "ethereum" network while the executor keys on
-    // chain id 1; a staging alias would skip every preview pin check yet execute pinned
-    throw new Error(`Unsupported network: ${network} — Ethereum has only the pinned production deployment`);
-  }
-}
-
 // the RPC is picked by network name while every downstream decision keys on the chain the RPC
 // actually serves; a mis-set <NETWORK>_RPC_URL would otherwise preview - and let the executor
-// cut - another chain
+// cut - another chain. Every network has an id to hold the RPC to: there is no unlisted local chain
 export async function assertRpcChain(web3: Web3, network: string) {
   const baseNetwork = baseNetworkName(network);
-  const expected = CHAIN_IDS[baseNetwork];
-  if (expected === undefined) {
-    return;
-  }
+  const expected = expectedChainId(network);
   const actual = Number(await web3.eth.getChainId());
   if (actual !== expected) {
     throw new Error(
       `RPC for ${network} answers chain id ${actual}, expected ${expected} - check ${baseNetwork.toUpperCase()}_RPC_URL`
     );
   }
-}
-
-export function baseNetworkName(network: string): string {
-  return network.endsWith("-staging") ? network.replace(/-staging$/, "") : network;
 }
 
 export function loadDeployedContracts(network: string): DeployedContract[] {
@@ -203,39 +180,4 @@ export function findDiamondAddress(deployedContracts: DeployedContract[]): strin
 
 export function normalizeCutFileName(cutFileName: string): string {
   return cutFileName.endsWith(".json") ? cutFileName : `${cutFileName}.json`;
-}
-
-export function resolveRpcUrl(network: string): string {
-  const env = { ...readDotEnv(), ...process.env };
-  const baseNetwork = baseNetworkName(network);
-  const rpcEnvName = `${baseNetwork.toUpperCase()}_RPC_URL`;
-  const rpcUrl = env[rpcEnvName];
-  if (rpcUrl) {
-    return rpcUrl;
-  }
-  return `https://${baseNetwork}-api.flare.network/ext/C/rpc`;
-}
-
-function readDotEnv(): Record<string, string> {
-  if (!existsSync(".env")) {
-    return {};
-  }
-  const env: Record<string, string> = {};
-  for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator < 0) {
-      continue;
-    }
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed
-      .slice(separator + 1)
-      .trim()
-      .replace(/^['"]|['"]$/g, "");
-    env[key] = value;
-  }
-  return env;
 }

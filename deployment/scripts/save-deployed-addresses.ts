@@ -6,6 +6,7 @@ import {
   mergeDeployedRecords,
   parseAllowedReplacements,
 } from "../utils/deploy-records";
+import { validateNetwork } from "../utils/networks";
 
 // Read Forge output from a output file
 const outputPath = "forge-deploy-output.txt";
@@ -33,13 +34,7 @@ if (network === "unknown") {
   throw new Error("Network name not found in output");
 }
 
-const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev", "ethereum"];
-const isValidNetwork =
-  allowedBaseNetworks.includes(network) ||
-  (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
-if (!isValidNetwork) {
-  throw new Error(`Invalid network: ${network}`);
-}
+validateNetwork(network);
 
 // the four pinned Ethereum records are chain-recovered facts, not build outputs: on ethereum
 // a protected name (in any casing - development filesystems can be case-insensitive) may only
@@ -103,12 +98,9 @@ for (const deployed of contracts) {
 // records follow their redeployments freely, which is what the deploy scripts are for; the two
 // that name a live contract the tooling resolves through may not change quietly - deploy-records.ts
 //
-// scdev and the `_mock` files are exempt. Both are throwaway records, gitignored rather than
-// tracked, and neither describes a live deployment. A local loop that edits a base facet changes
-// the controller's CREATE2 input and so its address on every iteration, so enforcing the guard
-// there would make the override part of everyone's environment permanently - which is exactly how
-// a guard stops guarding anything.
-const isThrowawayRecord = network === "scdev" || isMock;
+// the `_mock` files are exempt: throwaway records, gitignored rather than tracked, describing no
+// live deployment
+const isThrowawayRecord = isMock;
 const merged = mergeDeployedRecords(
   existingContracts,
   contracts,

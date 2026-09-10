@@ -31,6 +31,9 @@ chmod +x "$SCRATCH/bin/forge" "$SCRATCH/bin/npx"
 
 export PATH="$SCRATCH/bin:$PATH"
 export COSTON2_RPC_URL="http://stub.invalid"
+# present so a missing variable is never what stops a loan-chain scenario
+export ETHEREUM_RPC_URL="http://stub.invalid"
+export SEPOLIA_RPC_URL="http://stub.invalid"
 export DEPLOYER_PRIVATE_KEY="0x01"
 export CALL_LOG="$SCRATCH/calls.log"
 
@@ -92,7 +95,15 @@ expect "missing cut file: forge did not run" "$(grep -c '^forge ' "$CALL_LOG")" 
 
 # 6. the argument count is enforced
 expect "one argument: usage exit 2" "$(run_wrapper coston2)" "2"
-expect "ethereum-staging: refused" "$(run_wrapper ethereum-staging anything)" "2"
+
+# 6b. a staging alias of a loan chain is refused for that reason and before forge is reached; the
+# RPC variables are set above, so a missing one cannot be what produced the exit code
+for alias in ethereum-staging sepolia-staging; do
+  expect "$alias: refused" "$(run_wrapper "$alias" anything)" "2"
+  expect "$alias: the message names the rule" \
+    "$(grep -c "$alias is not supported: the loan chains have only the pinned deployment" "$SCRATCH/out.log")" "1"
+  expect "$alias: forge did not run" "$(grep -c '^forge ' "$CALL_LOG")" "0"
+done
 
 # 7. a failing forge script stops the run with its status; nothing is verified
 expect "forge failure: wrapper exits with forge's status" "$(FORGE_EXIT=3 run_wrapper coston2 executed)" "3"

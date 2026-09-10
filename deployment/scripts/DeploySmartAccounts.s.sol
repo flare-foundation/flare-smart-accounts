@@ -109,7 +109,7 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
         // it. And this script deploys both home implementations whatever `_fullDeploy` says, so
         // it is held to the home family like the implementation scripts are
         require(
-            DeployNetworks.isFlareFamily(block.chainid) || DeployNetworks.isDeclaredLocal(_expectedNetwork),
+            DeployNetworks.isFlareFamily(block.chainid),
             "the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap"
         );
 

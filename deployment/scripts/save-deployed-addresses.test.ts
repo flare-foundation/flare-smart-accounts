@@ -113,14 +113,19 @@ void test("an implementation upgrade records with no override at all", () => {
   assert.equal(readRecords(dir, "flare")[0]?.address, CONTROLLER_B);
 });
 
-void test("the throwaway records are exempt: scdev and the mock files need no override", () => {
-  // both are gitignored rather than tracked, and neither describes a live deployment. On scdev a
-  // local loop that edits a base facet changes the controller's CREATE2 address every iteration,
-  // so enforcing the guard there would put the override in everyone's environment for good
-  const scdev = setUp("scdev", [controller(CONTROLLER_A)], [controller(CONTROLLER_B)]);
-  const scdevRun = run(scdev);
-  assert.equal(scdevRun.status, 0, scdevRun.stderr);
-  assert.equal(readRecords(scdev, "scdev")[0]?.address, CONTROLLER_B);
+void test("the mock files are exempt, and a network the tooling does not know is not recorded at all", () => {
+  // the mock records are gitignored rather than tracked and describe no live deployment. A name
+  // outside both families - a local chain, say - has no record here: the recorder refuses it
+  // before the guard question arises, while the sepolia record is written like any other
+  const unknown = setUp("scdev", [controller(CONTROLLER_A)], [controller(CONTROLLER_B)]);
+  const unknownRun = run(unknown);
+  assert.notEqual(unknownRun.status, 0, "an unknown network must not be recorded");
+  assert.match(unknownRun.stderr, /Invalid network: scdev/);
+  assert.equal(readRecords(unknown, "scdev")[0]?.address, CONTROLLER_A);
+  const sepolia = setUp("sepolia", [], [pauseFacet]);
+  const sepoliaRun = run(sepolia);
+  assert.equal(sepoliaRun.status, 0, sepoliaRun.stderr);
+  assert.equal(readRecords(sepolia, "sepolia")[0]?.address, FACET);
 
   const mocked = setUp("coston2", [], [controller(CONTROLLER_B)]);
   fs.writeFileSync(

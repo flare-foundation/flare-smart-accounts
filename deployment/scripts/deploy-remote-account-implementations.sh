@@ -20,19 +20,19 @@ if [[ "$NETWORK" == *-staging ]]; then
   BASE_NETWORK="${NETWORK%-staging}"
 fi
 
-# only the loan chain (and the local dev chain): the remote implementations lay out storage
-# for the loan chain's proxy lineages, and the forge script refuses Flare-family chain ids too
+# only the loan chains: the remote implementations lay out storage for the loan chains' proxy
+# lineages, and the forge script refuses Flare-family chain ids too
 case "$BASE_NETWORK" in
-  ethereum|scdev) ;;
+  ethereum|sepolia) ;;
   *)
     echo "Unsupported network: $NETWORK" >&2
     exit 2
     ;;
 esac
 
-# Ethereum has only the pinned production deployment (the cut flow rejects this too)
-if [[ "$BASE_NETWORK" == "ethereum" && "$STAGING" == "true" ]]; then
-  echo "ethereum-staging is not supported: Ethereum has only the pinned production deployment" >&2
+# the loan chains have only the pinned deployment (the cut flow rejects this too)
+if [[ ("$BASE_NETWORK" == "ethereum" || "$BASE_NETWORK" == "sepolia") && "$STAGING" == "true" ]]; then
+  echo "$NETWORK is not supported: the loan chains have only the pinned deployment" >&2
   exit 2
 fi
 

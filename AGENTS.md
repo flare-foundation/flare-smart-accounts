@@ -75,13 +75,13 @@ pnpm diamond_cut <network> <cut-file-name>
 pnpm check_cut <network> [cut-file-name] [--no-build]
 pnpm verify_diamond <network> [cut-file-name] [--pre-cut] [--expect-owner <address>] [--no-build]
 pnpm verify_implementation <network> <Contract> <address> [--stage pre|queued|live] [--xrpl-owner <owner>] [--no-build]
-pnpm deploy_composer <network>
+pnpm deploy_composer <network> <onlyImpl>
 pnpm verify_contracts <network>
 ```
 
 - The ordered, verified release sequence — which governance call to make when, and what proves each step landed — is [`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md). The commands below are its building blocks; the runbook is what says in which order to run them and on which networks.
 - `<fullDeploy>` is a boolean (`true` or `false`). **Both modes are a full deployment from current source** — `false` only skips the diamond cut, the init and the vault/wallet configuration — so neither is a facet-only mode or for a live network. To add or replace facets on a live network, use a cut file and `pnpm diamond_cut`. Why, and the recorder's guard on the two live entries, are in [`deployment/README.md`](./deployment/README.md).
-- Supported networks are `coston2`, `coston`, `flare`, `songbird`, and `scdev`, plus `-staging` variants such as `coston2-staging`.
+- Supported networks are the Flare family `coston2`, `coston`, `flare` and `songbird`, with `-staging` variants such as `coston2-staging`, and the loan chains `ethereum` and `sepolia` (its testnet), which have only the pinned deployment and no staging alias. A chain in neither family is refused by every tool; the rules are in [`deployment/README.md`](./deployment/README.md#networks).
 - Deployment requires `.env` with `<NETWORK>_RPC_URL` and `DEPLOYER_PRIVATE_KEY`.
 - All `forge script` invocations use `--offline` to skip Foundry's external selector/source lookups. Without it, runs on Flare/Songbird hang for several minutes — likely external signature/source database calls timing out for these chains. The chain RPC itself is unaffected.
 
@@ -116,8 +116,9 @@ pnpm test:tooling
 ```
 
 `test:tooling` runs the node tests beside the deployment utilities (`deployment/utils/*.test.ts`), the verifier
-CLI's own test against a fake JSON-RPC server (`deployment/scripts/verify-diamond.test.ts`) and the cut wrapper's
-shell scenarios (`deployment/scripts/execute-diamond-cut.test.sh`); CI runs it too.
+CLI's own test against a fake JSON-RPC server (`deployment/scripts/verify-diamond.test.ts`), the recorder's and the
+explorer submission's tests beside it (the latter against a stubbed `forge`, so the argument vector itself is
+pinned) and the cut wrapper's shell scenarios (`deployment/scripts/execute-diamond-cut.test.sh`); CI runs it too.
 
 For shell scripts:
 

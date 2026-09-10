@@ -7,6 +7,7 @@ import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {IDiamondCut} from "../../contracts/diamond/interfaces/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../contracts/diamond/interfaces/IDiamondLoupe.sol";
 import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
+import {DeployNetworks} from "./DeployNetworks.sol";
 
 // solhint-disable no-console
 contract ExecuteDiamondCut is Script {
@@ -32,23 +33,11 @@ contract ExecuteDiamondCut is Script {
         uint256 chainId = block.chainid;
         configFileName = _configFileName;
 
-        if (chainId == 14) {
-            network = "flare";
-        } else if (chainId == 19) {
-            network = "songbird";
-        } else if (chainId == 16) {
-            network = "coston";
-        } else if (chainId == 114) {
-            network = "coston2";
-        } else if (chainId == 1) {
-            network = "ethereum";
-            // Ethereum has only the pinned production deployment: a staging alias would
-            // sidestep the mandatory check-cut-plan preview, which rejects it too
-            require(!_staging, "Ethereum has no staging deployment");
-        } else {
-            network = "scdev";
-        }
-        _requireExpectedNetwork(network, _expectedNetwork);
+        network = DeployNetworks.networkName(chainId);
+        // the loan chains have only the pinned deployment: a staging alias would sidestep the
+        // mandatory check-cut-plan preview, which rejects it too
+        require(!(_staging && DeployNetworks.isLoanChain(chainId)), "the loan chains have no staging deployment");
+        DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -685,20 +674,5 @@ contract ExecuteDiamondCut is Script {
             );
         }
         return (address(0), bytes32(0), false);
-    }
-
-    /// @dev The wrapper picks the RPC by network name while this script derives the network
-    /// from the chain id; the two must agree, or a mis-set RPC variable would silently
-    /// retarget the whole flow to another chain.
-    function _requireExpectedNetwork(
-        string memory _derived,
-        string calldata _expected
-    )
-        private pure
-    {
-        require(
-            keccak256(bytes(_derived)) == keccak256(bytes(_expected)),
-            string.concat("RPC chain is ", _derived, ", not the named network ", _expected)
-        );
     }
 }

@@ -23,13 +23,8 @@ import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import Web3 from "web3";
 import { artifactPathFor, loadCreationCode, loadDeployedCode } from "../utils/facet-code";
-import {
-  assertRpcChain,
-  findDiamondAddress,
-  loadDeployedContracts,
-  resolveRpcUrl,
-  validateNetwork,
-} from "../utils/diamond-inspect";
+import { assertRpcChain, findDiamondAddress, loadDeployedContracts } from "../utils/diamond-inspect";
+import { resolveRpcUrl, validateNetwork } from "../utils/networks";
 import { allPassed, formatChecks } from "../utils/diamond-verify";
 import {
   type AccountIdentity,

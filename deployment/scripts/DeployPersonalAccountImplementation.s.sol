@@ -18,7 +18,7 @@ contract DeployPersonalAccountImplementation is Script {
         // the Flare Personal Account lays out storage for the Flare PA proxy lineage; the loan
         // chains register PersonalAccountRemote instead (see DeployRemoteAccountImplementations)
         require(
-            DeployNetworks.isFlareFamily(block.chainid) || DeployNetworks.isDeclaredLocal(_expectedNetwork),
+            DeployNetworks.isFlareFamily(block.chainid),
             "the Flare Personal Account belongs on a Flare-family chain"
         );
 

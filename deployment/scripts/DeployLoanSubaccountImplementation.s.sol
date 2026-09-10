@@ -18,7 +18,7 @@ contract DeployLoanSubaccountImplementation is Script {
         // the Flare-side implementation lays out storage for the Flare proxy lineage; the loan
         // chains register MorphoLoanSubaccountRemote instead (see DeployRemoteAccountImplementations)
         require(
-            DeployNetworks.isFlareFamily(block.chainid) || DeployNetworks.isDeclaredLocal(_expectedNetwork),
+            DeployNetworks.isFlareFamily(block.chainid),
             "the Flare-side loan implementation belongs on a Flare-family chain"
         );
 

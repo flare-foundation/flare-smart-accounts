@@ -21,16 +21,12 @@ contract DeployRemoteAccountImplementations is Script {
         // the remote implementations lay out storage for the loan chain's proxy lineages; a copy
         // deployed and recorded on a Flare-family chain would look like a legitimate artifact and,
         // registered there, run the loan chain's logic over every Personal Account
-        require(
-            DeployNetworks.isLoanChain(block.chainid) || DeployNetworks.isDeclaredLocal(_expectedNetwork),
-            "remote implementations belong on a loan chain"
-        );
+        require(DeployNetworks.isLoanChain(block.chainid), "remote implementations belong on a loan chain");
+        // the loan chains have only the pinned deployment; the recorder refuses a staging name too
+        require(!_staging, "the loan chains have no staging deployment");
 
         string memory network = DeployNetworks.networkName(block.chainid);
         DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
-        if (_staging) {
-            network = string.concat(network, "-staging");
-        }
 
         vm.startBroadcast(deployerPrivateKey);
         MorphoLoanSubaccountRemote loanSubaccountRemoteImpl = new MorphoLoanSubaccountRemote();

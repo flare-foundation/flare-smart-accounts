@@ -24,14 +24,8 @@ import Web3 from "web3";
 import { isFunctionFragment, loadAbi, toSelector } from "../utils/prep-cut";
 import { artifactPathFor, buildRepoFacetSourceSet, loadCreationCode, loadDeployedCode } from "../utils/facet-code";
 import { loadPinnedEthereumAddresses } from "../utils/pinned-constants";
-import {
-  assertRpcChain,
-  fetchLoupeFacets,
-  loadCutConfig,
-  loadDeployedContracts,
-  resolveRpcUrl,
-  validateNetwork,
-} from "../utils/diamond-inspect";
+import { assertRpcChain, fetchLoupeFacets, loadCutConfig, loadDeployedContracts } from "../utils/diamond-inspect";
+import { resolveRpcUrl, validateNetwork } from "../utils/networks";
 import { allPassed, formatChecks } from "../utils/diamond-verify";
 import { type ChainReader, type RepoReader, verifyDiamond } from "../utils/diamond-verifier";
 

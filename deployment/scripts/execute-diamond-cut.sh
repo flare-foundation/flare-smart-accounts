@@ -21,9 +21,9 @@ if [[ "$NETWORK" == *-staging ]]; then
   BASE_NETWORK="${NETWORK%-staging}"
 fi
 
-# Ethereum has only the pinned production deployment (the executor rejects this too)
-if [[ "$BASE_NETWORK" == "ethereum" && "$STAGING" == "true" ]]; then
-  echo "ethereum-staging is not supported: Ethereum has only the pinned production deployment" >&2
+# the loan chains have only the pinned deployment (the executor rejects this too)
+if [[ ("$BASE_NETWORK" == "ethereum" || "$BASE_NETWORK" == "sepolia") && "$STAGING" == "true" ]]; then
+  echo "$NETWORK is not supported: the loan chains have only the pinned deployment" >&2
   exit 2
 fi
 

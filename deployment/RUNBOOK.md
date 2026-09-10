@@ -261,7 +261,10 @@ test can answer, because by then the change is already live.
 
 Note where they can run. The bootstrap refuses any chain id but Ethereum's, and the remote
 implementation deployment refuses the Flare-family chain ids, so the pinned bootstrap sequence
-cannot be rehearsed on an ordinary public testnet at all — rehearse it against a **mainnet fork**.
+cannot be rehearsed on an ordinary public testnet at all — rehearse it against a **mainnet fork**,
+under the real network name (anvil keeps the forked chain's id; there is no local-development network)
+and in a disposable worktree: the run writes the network's tracked record, and a rehearsal's addresses
+left in the release workspace would misdirect every later check.
 The live transport rehearsal needs real endpoints and a real OFT, so it needs its own stated network
 plan (which testnets, which endpoint deployment, which peer) rather than being assumed to fit
 alongside the rest.

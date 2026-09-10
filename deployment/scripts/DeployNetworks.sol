@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.27;
 
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+
 /**
  * @title DeployNetworks
  * @notice The one place the deploy scripts agree on which chain is which. Two families: the
@@ -9,12 +11,10 @@ pragma solidity ^0.8.27;
  * on the other family's chain would look like a legitimate artifact. Registered there, it would
  * run the other chain's logic over every account behind it: wrong behavior at once, and whatever
  * that logic writes before governance re-registers the right implementation is damage the
- * re-registration does not undo. So each deploy script allows its own family and nothing else.
- *
- * The one exception is declared, not inferred: a local development chain has no fixed id, so a
- * script admits an unknown chain only when the wrapper named `scdev` - and the network check
- * that follows holds the two to the same name. A new production chain of either family is added
- * to its set here before anything is deployed to it.
+ * re-registration does not undo. So each deploy script allows its own family and nothing else,
+ * and a chain in neither family has no name here: the scripts refuse it before anything is
+ * deployed or recorded. A new production chain of either family is added to its set here before
+ * anything is deployed to it; a rehearsal runs against a fork of the real chain, under its name.
  */
 library DeployNetworks {
     /// @notice A chain the home accounts (`PersonalAccount`, `LoanSubaccount`) belong on.
@@ -38,20 +38,9 @@ library DeployNetworks {
         return _chainId == 1 || _chainId == 11155111;
     }
 
-    /// @notice Whether the wrapper declared a local development run. The local chain has no
-    /// fixed id, so this is the only way an unknown chain id passes a family guard - and only
-    /// because the caller said so.
-    function isDeclaredLocal(
-        string calldata _expectedNetwork
-    )
-        internal pure
-        returns (bool)
-    {
-        return keccak256(bytes(_expectedNetwork)) == keccak256(bytes("scdev"));
-    }
-
-    /// @notice The network name a chain id records under. A chain in neither family is the
-    /// local development chain, `scdev`.
+    /// @notice The network name a chain id records under. A chain in neither family is refused:
+    /// no record, chain config or cut directory exists for it, and the id is printed for the
+    /// operator holding the mis-set RPC variable.
     function networkName(
         uint256 _chainId
     )
@@ -71,7 +60,7 @@ library DeployNetworks {
         } else if (_chainId == 11155111) {
             return "sepolia";
         } else {
-            return "scdev";
+            revert(string.concat("chain id ", Strings.toString(_chainId), " is not a known network"));
         }
     }
 

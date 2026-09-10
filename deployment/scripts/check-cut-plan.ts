@@ -15,9 +15,8 @@ import {
   loadCutConfig,
   loadDeployedContracts,
   normalizeCutFileName,
-  resolveRpcUrl,
-  validateNetwork,
 } from "../utils/diamond-inspect";
+import { resolveRpcUrl, validateNetwork } from "../utils/networks";
 import {
   type FacetAction,
   type FacetPlan,

@@ -9,6 +9,7 @@
 import Web3 from "web3";
 import { type Check, check, checkEq } from "./diamond-verify";
 import { ZERO_CODE, compareFacet, hexToBytes } from "./facet-code";
+import { FLARE_FAMILY_CHAIN_IDS, LOAN_CHAIN_IDS } from "./networks";
 
 /** Which registry an implementation is registered in. */
 export type RegistryTarget = "personalAccountBeacon" | "subaccountType";
@@ -46,14 +47,6 @@ export type Stage = "pre" | "queued" | "live";
 /** The ERC-1967 beacon slot, `keccak256("eip1967.proxy.beacon") - 1`, where BeaconProxy keeps it. */
 export const BEACON_SLOT = "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
 
-/**
- * The two chain families, as `deployment/scripts/DeployNetworks.sol` enumerates them: the Flare
- * family where the home accounts live, and the loan chains - Ethereum, and Sepolia as its testnet
- * - where the remote accounts live. Each side refuses the OTHER family rather than allowing only
- * its own, because a local development chain has no fixed id.
- */
-export const FLARE_FAMILY_CHAIN_IDS = [14, 19, 16, 114];
-export const LOAN_CHAIN_IDS = [1, 11155111];
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 /** One materialized account's identity, as its own getters report it. */
@@ -166,16 +159,16 @@ export async function verifyImplementation(inputs: VerificationInputs): Promise<
   checks.push(await codeCheck(chain, repo, inputs.contract, implementation));
 
   // 2. the chain family: the Flare accounts and the remote accounts lay out storage for
-  // different proxy lineages, and each looks like a legitimate artifact on the other's chain
-  // judged by family, with the same two sets DeployNetworks.sol enumerates
-  const onFlareFamily = FLARE_FAMILY_CHAIN_IDS.includes(inputs.chainId);
-  const onLoanChain = LOAN_CHAIN_IDS.includes(inputs.chainId);
-  const belongs = spec.family === "flare" ? !onLoanChain : !onFlareFamily;
+  // different proxy lineages, and each looks like a legitimate artifact on the other's chain.
+  // Allowed by family, from the same two sets the deploy scripts use; a chain in neither is
+  // refused for both
+  const belongs =
+    spec.family === "flare" ? FLARE_FAMILY_CHAIN_IDS.includes(inputs.chainId) : LOAN_CHAIN_IDS.includes(inputs.chainId);
   checks.push(
     check(
       `chain: ${inputs.contract} belongs on ${inputs.network} (chain ${inputs.chainId})`,
       belongs,
-      spec.family === "flare" ? "not a loan chain" : "not a Flare-family chain",
+      spec.family === "flare" ? "a Flare-family chain" : "a loan chain",
       belongs ? "correct family" : `${inputs.contract} lays out the ${spec.family} lineage's storage`
     )
   );

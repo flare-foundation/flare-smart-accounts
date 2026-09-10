@@ -13,6 +13,16 @@ fi
 NETWORK="$1"
 ONLY_IMPL="$2"
 
+# only Flare-family networks: the composer is a Flare-side contract, and the forge script holds
+# the RPC's chain to this name
+case "$NETWORK" in
+  flare|songbird|coston|coston2) ;;
+  *)
+    echo "Unsupported network: $NETWORK" >&2
+    exit 2
+    ;;
+esac
+
 # Convert network to uppercase and build env var name
 NETWORK_UPPER=$(echo "$NETWORK" | tr '[:lower:]' '[:upper:]')
 RPC_ENV_VAR="${NETWORK_UPPER}_RPC_URL"
@@ -41,7 +51,7 @@ forge script deployment/scripts/DeployComposer.s.sol:DeployComposer \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
   --offline \
-  --sig "run(bool)" "$ONLY_IMPL" \
+  --sig "run(string,bool)" "$NETWORK" "$ONLY_IMPL" \
   --broadcast | tee forge-deploy-output.txt
 
 npx tsx deployment/scripts/save-deployed-addresses.ts

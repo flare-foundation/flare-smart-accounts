@@ -21,10 +21,9 @@ import {DeploySmartAccounts} from "../../../deployment/scripts/DeploySmartAccoun
 contract DeploySmartAccountsGuardsTest is Test {
     uint256 private constant ETHEREUM = 1;
     uint256 private constant SEPOLIA = 11155111;
-    uint256 private constant FLARE = 14;
-    uint256 private constant SONGBIRD = 19;
-    uint256 private constant COSTON = 16;
     uint256 private constant COSTON2 = 114;
+    /// @dev anvil's default: a chain in neither family, which the guard refuses under any name.
+    uint256 private constant UNKNOWN = 31337;
 
     DeploySmartAccounts private script;
 
@@ -62,29 +61,17 @@ contract DeploySmartAccountsGuardsTest is Test {
         script.run("coston2", false, false);
     }
 
-    function testAnUndeclaredUnknownChainIsRefusedByTheGuardItself() public {
-        vm.chainId(31337);
+    function testAnUnknownChainIsRefusedUnderAnyName() public {
+        // a chain in neither family is refused by the guard itself, whatever the wrapper called
+        // it - there is no local-development network for a name to open
+        vm.chainId(UNKNOWN);
         vm.expectRevert(
             bytes("the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap")
         );
         script.run("coston2", false, false);
-    }
-
-    function testAKnownChainDeclaredLocalIsRefusedByName() public {
-        // the declaration opens only the family guard: on a known chain of either family the name
-        // check refuses `scdev`, so declaring a local run cannot put the generic deployment on a
-        // loan chain
-        uint256[6] memory known = [FLARE, SONGBIRD, COSTON, COSTON2, ETHEREUM, SEPOLIA];
-        for (uint256 i = 0; i < known.length; i++) {
-            vm.chainId(known[i]);
-            vm.expectRevert(
-                bytes(
-                    string.concat(
-                        "RPC chain is ", DeployNetworks.networkName(known[i]), ", not the named network scdev"
-                    )
-                )
-            );
-            script.run("scdev", false, false);
-        }
+        vm.expectRevert(
+            bytes("the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap")
+        );
+        script.run("scdev", false, false);
     }
 }

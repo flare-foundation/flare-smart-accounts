@@ -197,8 +197,8 @@ void test("an implementation on the wrong chain family is refused, in both direc
   flareOnEthereum.beaconImpl = OTHER_IMPL;
   const result = await verifyImplementation(inputs(flareOnEthereum, { contract: "PersonalAccount" }));
   assert.deepEqual(failed(result.checks), ["chain: PersonalAccount belongs on ethereum (chain 1)"]);
-  // nor on Sepolia: the check used to be `chainId !== 1`, which read both home implementations
-  // as the correct family there. Refusal is by loan-chain family, and the reason says so
+  // nor on Sepolia: a guard keyed to Ethereum alone would read both home implementations as the
+  // correct family there. Refusal is by loan-chain family, and the reason says so
   for (const contract of ["PersonalAccount", "LoanSubaccount"] as const) {
     const homeOnSepolia = new FakeChain(contract);
     // stage `pre` wants the registry - beacon or subaccount type, per contract - not yet pointing
@@ -231,6 +231,14 @@ void test("an implementation on the wrong chain family is refused, in both direc
     ),
     []
   );
+  // and a chain in neither family is nobody's: there is no local-development network, so an RPC
+  // answering an unlisted id fails the check for both families
+  for (const contract of ["PersonalAccount", "PersonalAccountRemote"] as const) {
+    const nowhere = new FakeChain(contract);
+    nowhere.beaconImpl = OTHER_IMPL;
+    const unlisted = await verifyImplementation(inputs(nowhere, { contract, network: "anvil", chainId: 31337 }));
+    assert.deepEqual(failed(unlisted.checks), [`chain: ${contract} belongs on anvil (chain 31337)`]);
+  }
 });
 
 void test("queued: only this exact calldata counts, and the duration must be non-zero", async () => {

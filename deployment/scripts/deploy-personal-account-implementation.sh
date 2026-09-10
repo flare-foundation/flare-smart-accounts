@@ -20,11 +20,11 @@ if [[ "$NETWORK" == *-staging ]]; then
   BASE_NETWORK="${NETWORK%-staging}"
 fi
 
-# only Flare-family networks (and the local dev chain): the Flare Personal Account lays out
+# only Flare-family networks: the Flare Personal Account lays out
 # storage for the Flare PA proxy lineage - the loan chain gets PersonalAccountRemote through
-# deploy-remote-account-implementations.sh - and the forge script refuses Ethereum too
+# deploy-remote-account-implementations.sh - and the forge script refuses the loan chains too
 case "$BASE_NETWORK" in
-  flare|songbird|coston|coston2|scdev) ;;
+  flare|songbird|coston|coston2) ;;
   *)
     echo "Unsupported network: $NETWORK" >&2
     exit 2
