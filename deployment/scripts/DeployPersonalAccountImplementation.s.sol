@@ -16,10 +16,9 @@ contract DeployPersonalAccountImplementation is Script {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         // the Flare Personal Account lays out storage for the Flare PA proxy lineage; the loan
-        // chains register PersonalAccountRemote instead (see DeployRemoteAccountImplementations).
-        // Refused by family, not by one chain id - see DeployLoanSubaccountImplementation
+        // chains register PersonalAccountRemote instead (see DeployRemoteAccountImplementations)
         require(
-            !DeployNetworks.isLoanChain(block.chainid),
+            DeployNetworks.isFlareFamily(block.chainid) || DeployNetworks.isDeclaredLocal(_expectedNetwork),
             "the Flare Personal Account belongs on a Flare-family chain"
         );
 

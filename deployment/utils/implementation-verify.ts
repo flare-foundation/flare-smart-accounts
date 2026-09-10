@@ -167,8 +167,7 @@ export async function verifyImplementation(inputs: VerificationInputs): Promise<
 
   // 2. the chain family: the Flare accounts and the remote accounts lay out storage for
   // different proxy lineages, and each looks like a legitimate artifact on the other's chain
-  // Refused by family, not by one chain id: the home check used to be `!== 1`, which let both
-  // home implementations read as the correct family on Sepolia
+  // judged by family, with the same two sets DeployNetworks.sol enumerates
   const onFlareFamily = FLARE_FAMILY_CHAIN_IDS.includes(inputs.chainId);
   const onLoanChain = LOAN_CHAIN_IDS.includes(inputs.chainId);
   const belongs = spec.family === "flare" ? !onLoanChain : !onFlareFamily;

@@ -12,11 +12,11 @@ import {DeployRemoteAccountImplementations} from
 
 /**
  * @title DeployNetworkGuardsTest
- * @notice Each implementation deploy script refuses the chain family it does not belong to.
- * The hole these pin shut: the home scripts used to refuse chain id 1 alone, so the Flare-side
- * implementations would have deployed - and been recorded as legitimate artifacts - on Sepolia
- * or any other loan chain. Registered there, they would have run Flare's logic over every
- * remote account. The family sets live in one library so the scripts cannot drift apart.
+ * @notice Each implementation deploy script allows its own chain family and a declared local
+ * run, and nothing else. What that rules out: a guard keyed to a single chain id would let the
+ * Flare-side implementations deploy - and be recorded as legitimate artifacts - on Sepolia or
+ * any other loan chain, where they would run Flare's logic over every remote account. The
+ * family sets live in one library so the scripts cannot drift apart.
  */
 contract DeployNetworkGuardsTest is Test {
     uint256 private constant ETHEREUM = 1;
@@ -25,7 +25,8 @@ contract DeployNetworkGuardsTest is Test {
     uint256 private constant SONGBIRD = 19;
     uint256 private constant COSTON = 16;
     uint256 private constant COSTON2 = 114;
-    /// @dev anvil's default: a local chain, in neither family, which both guards must allow.
+    /// @dev anvil's default: a local chain in neither family, which a guard admits only when the
+    /// wrapper declares `scdev`.
     uint256 private constant LOCAL = 31337;
 
     DeployLoanSubaccountImplementation private loanScript;
@@ -41,7 +42,8 @@ contract DeployNetworkGuardsTest is Test {
     }
 
     function testHomeImplementationsRefuseEveryLoanChain() public {
-        // Ethereum was always refused; Sepolia is the case that used to pass
+        // Ethereum for the pinned bootstrap's sake, Sepolia as a loan chain: a guard keyed to
+        // Ethereum alone would deploy both home implementations there
         uint256[2] memory loan = [ETHEREUM, SEPOLIA];
         for (uint256 i = 0; i < loan.length; i++) {
             vm.chainId(loan[i]);
@@ -86,18 +88,49 @@ contract DeployNetworkGuardsTest is Test {
         uint256[4] memory flare = [FLARE, SONGBIRD, COSTON, COSTON2];
         for (uint256 i = 0; i < flare.length; i++) {
             vm.chainId(flare[i]);
-            vm.expectRevert(bytes("remote implementations do not belong on a Flare-family chain"));
+            vm.expectRevert(bytes("remote implementations belong on a loan chain"));
             remoteScript.run(DeployNetworks.networkName(flare[i]), false);
         }
     }
 
-    function testALocalChainPassesBothGuards() public {
-        // the deliberate allowance: a development chain has no fixed id, so neither guard can
-        // name it, and both must let it through to the network check that follows
+    function testADeclaredLocalRunPassesEveryGuard() public {
+        // the one exception: a development chain has no fixed id, so a guard admits an unknown
+        // chain only because the wrapper declared `scdev` - and only under that name
         vm.chainId(LOCAL);
         loanScript.run("scdev", false);
         personalAccountScript.run("scdev", false);
         remoteScript.run("scdev", false);
+    }
+
+    function testAKnownChainDeclaredLocalIsRefusedByName() public {
+        // the declaration opens only the family guard; the name check still holds the RPC's chain
+        // to the wrapper's name, so `scdev` cannot run a script on a known chain - not one of the
+        // other family, which the guard let through on the declaration, and not one of its own
+        uint256[6] memory known = [FLARE, SONGBIRD, COSTON, COSTON2, ETHEREUM, SEPOLIA];
+        for (uint256 i = 0; i < known.length; i++) {
+            vm.chainId(known[i]);
+            bytes memory reason = bytes(
+                string.concat("RPC chain is ", DeployNetworks.networkName(known[i]), ", not the named network scdev")
+            );
+            vm.expectRevert(reason);
+            loanScript.run("scdev", false);
+            vm.expectRevert(reason);
+            personalAccountScript.run("scdev", false);
+            vm.expectRevert(reason);
+            remoteScript.run("scdev", false);
+        }
+    }
+
+    function testAnUndeclaredUnknownChainIsRefusedByTheGuardItself() public {
+        // the property the allow-list form buys: an unknown chain that nobody declared local is
+        // refused for its family, before the name check gets to disagree about the name
+        vm.chainId(LOCAL);
+        vm.expectRevert(bytes("the Flare-side loan implementation belongs on a Flare-family chain"));
+        loanScript.run("coston2", false);
+        vm.expectRevert(bytes("the Flare Personal Account belongs on a Flare-family chain"));
+        personalAccountScript.run("flare", false);
+        vm.expectRevert(bytes("remote implementations belong on a loan chain"));
+        remoteScript.run("ethereum", false);
     }
 
     function testTheGuardFiresBeforeTheNetworkNameIsChecked() public {

@@ -16,11 +16,9 @@ contract DeployLoanSubaccountImplementation is Script {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         // the Flare-side implementation lays out storage for the Flare proxy lineage; the loan
-        // chains register MorphoLoanSubaccountRemote instead (see DeployRemoteAccountImplementations).
-        // Refused by family, not by one chain id: Ethereum alone used to be refused, so this
-        // would have deployed - and been recorded as a legitimate artifact - on Sepolia
+        // chains register MorphoLoanSubaccountRemote instead (see DeployRemoteAccountImplementations)
         require(
-            !DeployNetworks.isLoanChain(block.chainid),
+            DeployNetworks.isFlareFamily(block.chainid) || DeployNetworks.isDeclaredLocal(_expectedNetwork),
             "the Flare-side loan implementation belongs on a Flare-family chain"
         );
 

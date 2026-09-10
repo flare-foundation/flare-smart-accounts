@@ -19,11 +19,11 @@ contract DeployRemoteAccountImplementations is Script {
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         // the remote implementations lay out storage for the loan chain's proxy lineages; a copy
-        // deployed and recorded on a Flare-family chain would look like a legitimate artifact
-        // and, registered there, corrupt every Personal Account's storage
+        // deployed and recorded on a Flare-family chain would look like a legitimate artifact and,
+        // registered there, run the loan chain's logic over every Personal Account
         require(
-            !DeployNetworks.isFlareFamily(block.chainid),
-            "remote implementations do not belong on a Flare-family chain"
+            DeployNetworks.isLoanChain(block.chainid) || DeployNetworks.isDeclaredLocal(_expectedNetwork),
+            "remote implementations belong on a loan chain"
         );
 
         string memory network = DeployNetworks.networkName(block.chainid);

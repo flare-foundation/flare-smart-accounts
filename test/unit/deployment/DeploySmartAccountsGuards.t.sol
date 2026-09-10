@@ -21,6 +21,9 @@ import {DeploySmartAccounts} from "../../../deployment/scripts/DeploySmartAccoun
 contract DeploySmartAccountsGuardsTest is Test {
     uint256 private constant ETHEREUM = 1;
     uint256 private constant SEPOLIA = 11155111;
+    uint256 private constant FLARE = 14;
+    uint256 private constant SONGBIRD = 19;
+    uint256 private constant COSTON = 16;
     uint256 private constant COSTON2 = 114;
 
     DeploySmartAccounts private script;
@@ -31,13 +34,13 @@ contract DeploySmartAccountsGuardsTest is Test {
     }
 
     function testRefusesEveryLoanChain() public {
-        // Ethereum was always refused, for the pinned bootstrap's sake; Sepolia is the case that
-        // used to pass, and would have deployed and recorded both home implementations there
+        // Ethereum for the pinned bootstrap's sake, Sepolia as a loan chain: a single-id guard
+        // would deploy and record both home implementations there
         uint256[2] memory loan = [ETHEREUM, SEPOLIA];
         for (uint256 i = 0; i < loan.length; i++) {
             vm.chainId(loan[i]);
             vm.expectRevert(
-                bytes("loan chains use the pinned bootstrap (DeployEthereumController), never this script")
+                bytes("the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap")
             );
             script.run(DeployNetworks.networkName(loan[i]), false, false);
         }
@@ -54,8 +57,34 @@ contract DeploySmartAccountsGuardsTest is Test {
     function testTheGuardFiresBeforeTheNetworkNameIsChecked() public {
         vm.chainId(SEPOLIA);
         vm.expectRevert(
-            bytes("loan chains use the pinned bootstrap (DeployEthereumController), never this script")
+            bytes("the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap")
         );
         script.run("coston2", false, false);
+    }
+
+    function testAnUndeclaredUnknownChainIsRefusedByTheGuardItself() public {
+        vm.chainId(31337);
+        vm.expectRevert(
+            bytes("the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap")
+        );
+        script.run("coston2", false, false);
+    }
+
+    function testAKnownChainDeclaredLocalIsRefusedByName() public {
+        // the declaration opens only the family guard: on a known chain of either family the name
+        // check refuses `scdev`, so declaring a local run cannot put the generic deployment on a
+        // loan chain
+        uint256[6] memory known = [FLARE, SONGBIRD, COSTON, COSTON2, ETHEREUM, SEPOLIA];
+        for (uint256 i = 0; i < known.length; i++) {
+            vm.chainId(known[i]);
+            vm.expectRevert(
+                bytes(
+                    string.concat(
+                        "RPC chain is ", DeployNetworks.networkName(known[i]), ", not the named network scdev"
+                    )
+                )
+            );
+            script.run("scdev", false, false);
+        }
     }
 }

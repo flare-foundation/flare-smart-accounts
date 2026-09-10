@@ -106,12 +106,11 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
         // never on a loan chain. Ethereum is reproduced from pinned historical bytes, not
         // deployed from current source - the generic deployment would derive different
         // addresses and its recorder would overwrite the pinned records - and Sepolia follows
-        // it. Refused by family: this script also deploys both home implementations whatever
-        // `_fullDeploy` says, and Ethereum alone used to be refused, so a misdirected RPC would
-        // have deployed and recorded them on Sepolia
+        // it. And this script deploys both home implementations whatever `_fullDeploy` says, so
+        // it is held to the home family like the implementation scripts are
         require(
-            !DeployNetworks.isLoanChain(block.chainid),
-            "loan chains use the pinned bootstrap (DeployEthereumController), never this script"
+            DeployNetworks.isFlareFamily(block.chainid) || DeployNetworks.isDeclaredLocal(_expectedNetwork),
+            "the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap"
         );
 
         uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");

@@ -3,20 +3,18 @@ pragma solidity ^0.8.27;
 
 /**
  * @title DeployNetworks
- * @notice The one place the deploy scripts agree on which chain is which. Two families:
- * the Flare family, where the home accounts live, and the loan chains, where the remote
- * accounts live. Each implementation is written for one family's chain, and a copy deployed
- * and recorded on the other family's chain would look like a legitimate artifact. Registered
- * there, it would run the other chain's logic over every account behind it: wrong behavior at
- * once, and whatever that logic writes before governance re-registers the right implementation
- * is damage the re-registration does not undo. So each deploy script refuses the OTHER family
- * by name.
+ * @notice The one place the deploy scripts agree on which chain is which. Two families: the
+ * Flare family, where the home accounts live, and the loan chains, where the remote accounts
+ * live. Each implementation is written for one family's chain, and a copy deployed and recorded
+ * on the other family's chain would look like a legitimate artifact. Registered there, it would
+ * run the other chain's logic over every account behind it: wrong behavior at once, and whatever
+ * that logic writes before governance re-registers the right implementation is damage the
+ * re-registration does not undo. So each deploy script allows its own family and nothing else.
  *
- * Refusing the other family, rather than allowing only its own, is deliberate: a local
- * development chain has no fixed id, so an allow-list would refuse it. The price is that a
- * chain in neither set passes both guards. That is the local-development allowance and nothing
- * else - a new production chain of either family is added to its set here before anything is
- * deployed to it, which is how the guards learned Sepolia.
+ * The one exception is declared, not inferred: a local development chain has no fixed id, so a
+ * script admits an unknown chain only when the wrapper named `scdev` - and the network check
+ * that follows holds the two to the same name. A new production chain of either family is added
+ * to its set here before anything is deployed to it.
  */
 library DeployNetworks {
     /// @notice A chain the home accounts (`PersonalAccount`, `LoanSubaccount`) belong on.
@@ -38,6 +36,18 @@ library DeployNetworks {
         returns (bool)
     {
         return _chainId == 1 || _chainId == 11155111;
+    }
+
+    /// @notice Whether the wrapper declared a local development run. The local chain has no
+    /// fixed id, so this is the only way an unknown chain id passes a family guard - and only
+    /// because the caller said so.
+    function isDeclaredLocal(
+        string calldata _expectedNetwork
+    )
+        internal pure
+        returns (bool)
+    {
+        return keccak256(bytes(_expectedNetwork)) == keccak256(bytes("scdev"));
     }
 
     /// @notice The network name a chain id records under. A chain in neither family is the
