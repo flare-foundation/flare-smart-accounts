@@ -111,7 +111,7 @@ The upper bound is `7 days`. Past that, `TimelockDurationTooLong()`.
 
 ## Bootstrapping
 
-Init runs in a non-timelocked context (it is a `delegatecall` from the diamond constructor, not a regular external call). After init the diamond has `timelockDurationSeconds == 0` until the owner explicitly sets it. The cuts under [`deployment/cuts/`](../../../deployment/cuts/) raise the timelock as one of the post-deploy operations — see the deployment notes in `AGENTS.md`.
+Init runs in a non-timelocked context (it is a `delegatecall` from the diamond constructor, not a regular external call). After init the diamond has `timelockDurationSeconds == 0` until the owner explicitly sets it. The cuts under [`deployment/cuts/`](../../../deployment/cuts/) raise the timelock as one of the post-deploy operations — see the runbook's [B4 step](../../../deployment/RUNBOOK.md#b4-governance-configuration-then-the-ownership-transfer).
 
 ## Identity with the composer
 

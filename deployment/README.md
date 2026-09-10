@@ -1,0 +1,93 @@
+# Deployment tooling
+
+What the deployment tooling does and how its pieces fit: the records the deploy scripts write, the
+cut planner, the diamond verifier, the implementation registration check and the upgrade-safety
+validator over the proxy layouts. The ordered release sequence — which governance call to make when,
+and what proves each step landed — is [`RUNBOOK.md`](./RUNBOOK.md); the commands themselves, and the
+checks to run after a change, are listed in [`AGENTS.md`](../AGENTS.md). The specs under
+[`docs/specs/`](../docs/specs/index.md) say what the contracts do.
+
+## Deployment records
+
+```bash
+pnpm deploy_contracts <network> <fullDeploy>
+```
+
+`<fullDeploy>` is a boolean (`true` or `false`). **Both modes are a full deployment from current source** — `false` only skips the diamond cut, the init and the vault/wallet configuration. It still deploys a controller, every facet and both account implementations, and records them. It is therefore **not** a facet-only mode and not for a live network: current source deliberately cannot reproduce the historical production controller address, so recording one over the live entry misdirects `check_cut` and `verify_diamond`, which resolve the diamond through that record. To add or replace facets on a live network, use a cut file and `pnpm diamond_cut` (see [`deployment/RUNBOOK.md`](./RUNBOOK.md)). The recorder refuses to replace the `MasterAccountController` or `FAssetRedeemComposer_FXRP` entry with a different address unless the caller names it in `ALLOW_RECORD_REPLACEMENT` — those two name live contracts and the tooling resolves the deployment through them. Every other entry, facets and account implementations alike, follows its redeployment freely, since that is what the deploy scripts are for. `scdev` and the `_mock` records are exempt entirely: both are gitignored throwaways, and a local loop that edits a base facet changes the controller's address every iteration.
+
+## Cut files and the frozen creation code
+
+Diamond cut files can list all candidate facets. `ExecuteDiamondCut.s.sol` checks the previously deployed address in `deployment/deploys/<network>.json` and reuses it when functional deployed bytecode matches the freshly compiled artifact. The comparison ignores the facet's own trailing Solidity metadata, so unrelated metadata-only rebuilds should not force redeployment.
+
+Facets that inline `PersonalAccounts` address-derivation logic (`PersonalAccountsFacet`, `InstructionsFacet`, `ReaderFacet`, `MemoInstructionsFacet`, and `SubaccountsFacet`, which resolves the parent account) bake the frozen `PersonalAccounts.PROXY_CREATION_CODE` constant into their runtime bytecode, and `SubaccountsFacet` carries `Subaccounts.PROXY_CREATION_CODE` as well. Because it is a constant, those bytes do not drift across rebuilds, so `check_cut` does not flag these facets for redeployment on unrelated metadata churn — only genuine logic changes trigger a redeploy. The embedded bytes change only if one of the constants itself is edited, which is a cross-chain coordination event: predicted addresses for not-yet-deployed accounts of that kind shift and must be recomputed after such a cut.
+
+There are two valid ways to prepare the `facets` list:
+
+- For the safest review flow, list all candidate facets and let the script reuse unchanged deployments.
+- For a smaller cut file, first run `pnpm check_cut <network> [cut-file-name]` and include only facets reported as `ADD` or `REPLACE`.
+
+Do not rely only on the source import graph, since internal libraries, interfaces, compiler settings, and embedded creation code can change facet bytecode.
+
+## Previewing a cut: `check_cut`
+
+Before executing a cut, run `pnpm check_cut <network> [cut-file-name]` to preview the full cut plan. It reports three sections:
+
+- **Facets (deploy):** each facet as `ADD` (in the cut, not yet deployed), `REPLACE` (deployed but functional runtime bytecode differs), `REUSE` (deployed and unchanged — trailing Solidity metadata differences are ignored), or `REMOVE` (no longer in the source tree). `REMOVE` is decided by source-file presence, not artifact presence, so a leftover artifact from a deleted facet (`forge build` does not prune those) cannot hide a removal — when one is detected the reason tells you to run `forge clean`. Pass a cut file so facets you intend to add are detected as `ADD`; without one the scope is limited to already-deployed facets.
+- **Selectors to remove:** live diamond selectors that no longer exist on any facet in current source. Each is marked `listed` (already in `deleteSelectorSigs`, so the cut removes it) or flagged as needing review; add only intentionally removed selectors to `deleteSelectorSigs`, and leave selectors out when they should remain live through an older facet. Entries accept either a 4-byte hex selector (e.g. `"0xe8a6eec2"`) or a canonical function signature (e.g. `"mintedFAssets(bytes32,string,uint256,uint256,bytes,address)"`); signatures are hashed to selectors at cut-build time. Signatures for orphaned selectors are resolved best-effort from local cut data and git history, and both live and currently deployed facet addresses are printed when the historical facet can be identified.
+- **Moved selectors:** live diamond selectors that still exist in the repo but on a _different_ facet (e.g. a function relocated to a new facet). These are reported as `MOVE`, not deletions — repoint them by adding that facet to the cut's `facets` (they become `Replace`); do **not** add them to `deleteSelectorSigs`, which would drop a live function. The tool warns loudly if a moved selector is already wrongly listed in `deleteSelectorSigs`.
+
+## Verifying the diamond: `verify_diamond`
+
+After a cut, run `pnpm verify_diamond <network> [cut-file-name]` to read the diamond back: it checks that the loupe exposes exactly the recorded facets' artifact selectors (less the cut file's `deleteSelectorSigs`), that no stale or orphan selector or facet is live, that every facet has code, that the four ERC-165 flags answer true and `0xffffffff` false, and the owner (`--expect-owner`, else the pinned initial owner on Ethereum, else the chain config's `governance`). On Ethereum it also checks the record and the on-chain code against the pinned controller and base facets. `--pre-cut` verifies the bootstrapped Ethereum diamond is pristine before its first cut: the pinned owner, exactly the three pinned base facets with their canonical selectors, no flag set. Every expected facet's on-chain code must also be the artifact's functional code (the planner's `REUSE` verdict: identical modulo the facet's own metadata trailer; a change in the embedded proxy creation code's metadata counts as a change) from a source still in the repository, and the diamond's own code the controller artifact's where no pin covers it. A cut file with `deleteAllOldMethods` narrows the expected surface to its own facets. The dispatch table is also read straight from the diamond's storage for the selectors the verifier itself calls, so a facet that lies about the layout cannot pass (the diamond's code, which is what the pins or the artifact comparison authenticate, is what reads that table), and a cut file's deleted selectors must have no dispatch entry left. The cut file must target the record's one controller. The cut wrapper runs the post-cut check itself when the cut file has `"execute": true`. All reads are made at one block; `VERIFY_BLOCK_TAG=finalized` makes it a finalized one. The checks live in `deployment/utils/diamond-verifier.ts` behind a chain reader and a repository reader, so `pnpm test:tooling` drives them against a fake chain (a forged loupe answer, a wrong runtime, both deletion modes, the pre-cut state, a wrong cut target, one failing fixture per check), runs the CLI itself against a fake JSON-RPC server (exit 1 on a failed check, every read at the resolved block, the chain-id guard) and runs the wrapper against stubbed `forge` and `npx` (the execute flag is validated before forge runs; verification follows an executed cut only and only after a successful forge run, under the staging name for a staging network; a failing verification fails the wrapper).
+
+## Verifying an account implementation: `verify_implementation`
+
+Registering an account implementation is the deployment's one blind step: `setPersonalAccountImplementation` and `setSubaccountImplementation` check only that the address has code, so a wrong but `initialize`-compatible implementation would let permissionless creation materialize proxies over the wrong storage layout — permanently, since initialization cannot be replayed. `pnpm verify_implementation <network> <Contract> <address>` asks the same question at the three moments it has to hold, with `--stage`: `pre` before the timelocked registration is queued, `queued` after queueing and before execution, `live` after it. `<Contract>` is `PersonalAccount`, `PersonalAccountRemote`, `LoanSubaccount` or `MorphoLoanSubaccountRemote`; the contract name decides which registry is read (the Personal Account beacon, or the subaccount type) and which chain family the implementation belongs to — the Flare accounts must not be registered on a loan chain (Ethereum, or Sepolia as its testnet) and the remote accounts must not be registered on a Flare-family chain, judged from the same two sets of chain ids the deploy scripts use (`deployment/scripts/DeployNetworks.sol`). Each script allows its own family and nothing else, with one exception that is declared rather than inferred: a local development chain has no fixed id, so a run the wrapper names `scdev` passes the family guard, and the network-name check that follows refuses that name on any known chain. Every stage checks that the address holds the reviewed artifact's functional code (the planner's `REUSE` verdict) from a source still in the repository. `pre` prints the exact calldata governance must queue; `queued` requires that exact calldata to be queued (the timelock getter reverts for a call it never recorded, which reads as "not queued"); `pre` and `queued` both require a non-zero timelock duration, since with a zero delay the calldata handed to governance registers immediately instead of queueing; `live` requires the registry to point at the address, and with `--xrpl-owner` reads a materialized account back — it reports this controller, and it was initialized with the expected owner, or parent and type for a subaccount; for a Personal Account the ERC-1967 beacon slot must also name the controller, which only `PersonalAccountProxy` records (`SubaccountProxy` is a plain proxy holding the controller and the type as immutables and resolving `implementationForType` on every call, so the registry check is what proves which implementation serves it). An account the flag names that is not materialized fails, since asking for a sample is asking for that proof; omit the flag to verify the registry alone. A registry whose facet is not cut yet is reported as such rather than crashing. All reads are made at one block; `VERIFY_BLOCK_TAG=finalized` makes it a finalized one.
+
+## Proxy storage layouts
+
+Proxies keep their storage across upgrades, so every implementation in a proxy's chain-local
+lineage must preserve that proxy's layout: append fields, never insert, reorder or retype. The
+OpenZeppelin upgrade-safety validator gates this, locally and in CI (`upgrade-build-info` +
+`validate-upgrade`):
+
+```bash
+pnpm build:upgrade-info && pnpm validate-upgrade
+```
+
+`build:upgrade-info` compiles the isolated `upgrade_validation` profile (full build-info and storage
+layouts under `artifacts-upgrades/`); `validate-upgrade` runs the validator over the six proxy-backed
+implementations. The three that are live — the Flare Personal Account, `FAssetRedeemComposer` and
+`FAssetRedeemerAccount` — are checked against `deployment/build-info-v2.0.0/`, a reconstructed v2.0.0
+reference: the build-info of those three compilation units rebuilt from the `v2.0.0` tag with its solc
+0.8.30. The reconstructed runtimes match the deployed implementations modulo the identified generated fields (the
+metadata hashes, including the one embedded in the redeemer-proxy creation code, and the UUPS
+immutable), so an incompatible layout change fails with field-level diagnostics while a safe append
+passes. The remote
+Personal Account and both loan subaccounts have no proxy on any network yet and run the checks that
+need no reference (constructor and initializer safety, unsafe operations, annotated namespaces); before
+re-laying one of those layouts, check the lineage is still empty with
+`pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]`. It is decisive on chain only through
+the beacon or the registration event history, which needs an RPC serving full-range logs (a private
+node); otherwise it answers from the retained git history of the network's deployment record and cut
+files (a full clone), on the stated assumption that every installation was committed under its canonical
+facet name before execution and remains reachable from the clone's refs (a facet named by any current,
+historical or example record may have been installed), and fails
+closed on anything unproven. At a lineage's first production
+deployment, copy that build's `artifacts-upgrades/build-info` into a tracked
+`deployment/build-info-<version>/` directory right away (CI artifacts expire, so the window closes
+with the deployment) and add it to `validate-upgrade` with `--referenceBuildInfoDirs` and
+`--reference <dirname>:<Contract> --requireReference`.
+
+Two things to know about the validator's output. The implementations' constructors carry the
+`@custom:oz-upgrades-unsafe-allow constructor` waiver (`ControlledAccountBase` for the four accounts, the
+two composer contracts for theirs). The validator's constructor rule applies to them as to any
+implementation; the waiver suppresses its finding because these constructors run on the implementation
+only, never on a proxy, and it keeps the exception reviewed rather than silent. And the
+diamond libraries' `State` structs raise "namespace struct is defined outside of a contract" warnings,
+which is expected (the validator covers the proxied implementations; the diamond's namespaces are the
+facets' concern). The rule the
+account bases follow — controller at slot 0 in every lineage, `xrplOwner` at slot 1 in every Personal
+Account lineage, every other base field in an ERC-7201 namespace — stays pinned by
+`test/unit/smartAccounts/AccountStorageLayout.t.sol`, which pins the cross-lineage layout rule the validator
+does not compare (it checks each lineage only against its own reference).
