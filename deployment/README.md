@@ -25,10 +25,12 @@ against a fork of the real chain under the real name (anvil keeps the forked cha
 disposable worktree, since the run writes that network's tracked record.
 
 Explorer verification (`pnpm verify_contracts <network>`) holds the RPC to the network's chain id like every
-other tool, then submits to every explorer a chain has:
-Blockscout for the Flare family, at a predictable host and without a key; Blockscout and Etherscan for
-the loan chains, where Etherscan needs `ETHERSCAN_API_KEY` (one V2 key for every chain) and is skipped
-with a note without it.
+other tool, then submits to every verifier a chain has: Blockscout for the Flare family, at a predictable host
+and without a key; Blockscout and Etherscan for the loan chains, where Etherscan needs `ETHERSCAN_API_KEY` (one
+V2 key for every chain) and is skipped with a note without it; and Sourcify everywhere it lists the chain
+(Coston it does not), a keyless record no explorer owns. Submissions are spaced twenty seconds apart, since the
+public Blockscout instances rate-limit a run's worth of back-to-back submissions; `VERIFY_SUBMIT_DELAY_MS`
+overrides the spacing, and `0` disables it for a re-run of one already-verified contract.
 
 ## Deployment records
 

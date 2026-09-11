@@ -209,6 +209,8 @@
     "Solhint",
     "Solidity",
     "Songbird",
+    "sourcify",
+    "Sourcify",
     "sstore",
     "struct",
     "subaccount",

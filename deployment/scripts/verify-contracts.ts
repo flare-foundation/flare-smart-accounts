@@ -5,10 +5,11 @@ import { assertRpcChain } from "../utils/diamond-inspect";
 import { FLARE_FAMILY_NETWORKS, baseNetworkName, loadEnv, resolveRpcUrl, validateNetwork } from "../utils/networks";
 
 // Source verification on the block explorers, driven by the record save-deployed-addresses.ts
-// writes. Every explorer a chain has is submitted to, not just one: a reader who arrives at
-// Etherscan should not see unverified source because we happened to publish to Blockscout.
-// Re-runnable, since --skip-is-verified-check resubmits rather than aborting, and failures are
-// collected per explorer and reported at the end instead of stopping the batch.
+// writes. Every verifier a chain has is submitted to, not just one: a reader who arrives at
+// Etherscan should not see unverified source because we happened to publish to Blockscout, and
+// Sourcify holds a record no explorer owns. Re-runnable, since --skip-is-verified-check resubmits
+// rather than aborting, and failures are collected per explorer and reported at the end instead
+// of stopping the batch.
 
 interface Explorer {
   label: string;
@@ -21,8 +22,22 @@ interface DeployedContract {
   address: string;
 }
 
+// Public Blockscout instances rate-limit hard: a run's submissions back to back exhaust the window,
+// and forge's own retries (five, five seconds apart) do not outlast it, so every Blockscout
+// submission fails at once. Spacing them trades a few minutes for not needing the retries at all.
+// Zero disables the wait, for a re-run of one already-verified contract.
+const DEFAULT_SUBMIT_DELAY_MS = 20_000;
+
 function blockscout(url: string): Explorer {
   return { label: `blockscout (${new URL(url).host})`, args: ["--verifier", "blockscout", "--verifier-url", url] };
+}
+
+// Chain-agnostic, keyless and owned by no explorer, so the record outlives any one of them losing
+// or rebuilding its index. Named explicitly: forge reaches Sourcify on its own only when no
+// verifier and no Etherscan key are given, which is neither of the paths below. Only for chains
+// Sourcify lists - submitting to one it does not support fails the run for nothing.
+function sourcify(): Explorer {
+  return { label: "sourcify", args: ["--verifier", "sourcify"] };
 }
 
 // One Etherscan V2 key covers every chain they support. Absent, that explorer is skipped with a
@@ -37,19 +52,50 @@ function etherscan(chain: string, env: Record<string, string | undefined>): Expl
 }
 
 function explorersFor(baseNetwork: string, env: Record<string, string | undefined>): Explorer[] {
-  // the Flare chains run Blockscout only, at a predictable host and without a key
+  // the Flare chains have no Etherscan instance: Blockscout at a predictable host and without a
+  // key, plus Sourcify wherever it lists the chain - Coston (16) it does not, so that one's source
+  // lives in Blockscout's database alone
   if (FLARE_FAMILY_NETWORKS.includes(baseNetwork)) {
-    return [blockscout(`https://${baseNetwork}-explorer.flare.network/api/`)];
+    const explorers = [blockscout(`https://${baseNetwork}-explorer.flare.network/api/`)];
+    if (baseNetwork !== "coston") {
+      explorers.push(sourcify());
+    }
+    return explorers;
   }
   const configured = (candidates: (Explorer | undefined)[]) =>
     candidates.filter((explorer): explorer is Explorer => explorer !== undefined);
   switch (baseNetwork) {
     case "ethereum":
-      return configured([blockscout("https://eth.blockscout.com/api/"), etherscan("mainnet", env)]);
+      return configured([blockscout("https://eth.blockscout.com/api/"), etherscan("mainnet", env), sourcify()]);
     case "sepolia":
-      return configured([blockscout("https://eth-sepolia.blockscout.com/api/"), etherscan("sepolia", env)]);
+      return configured([blockscout("https://eth-sepolia.blockscout.com/api/"), etherscan("sepolia", env), sourcify()]);
     default:
       throw new Error(`No explorer is configured for ${baseNetwork}`);
+  }
+}
+
+// Validated rather than coerced, and before any work: `Number("20s")` is NaN, and a NaN delay would
+// skip every wait while looking configured. Blank is the other coercion to refuse - `Number("")` and
+// `Number(" ")` are both 0, so an empty assignment would silently disable the spacing; it reads as
+// "not configured" here instead, which is what an empty entry in an env template means and leaves
+// the protection on. Disabling stays an explicit numeric zero.
+function submitDelayMs(env: Record<string, string | undefined>): number {
+  const raw = env["VERIFY_SUBMIT_DELAY_MS"];
+  if (raw === undefined || raw.trim() === "") {
+    return DEFAULT_SUBMIT_DELAY_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`VERIFY_SUBMIT_DELAY_MS must be a non-negative number of milliseconds, got "${raw}"`);
+  }
+  return parsed;
+}
+
+// Synchronous on purpose: the submissions are execFileSync, and threading async through the loop
+// would buy nothing but reordering hazards.
+function pause(ms: number): void {
+  if (ms > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   }
 }
 
@@ -84,6 +130,7 @@ async function main(): Promise<void> {
   validateNetwork(network);
   const isMock = process.argv[3] === "mock";
   const env = loadEnv();
+  const delayMs = submitDelayMs(env);
   // the same variable the deploy wrapper dials, and the chain it answers is checked before anything
   // is submitted: an explorer does not know which chain a record belongs to
   const rpcUrl = resolveRpcUrl(network, env);
@@ -115,6 +162,10 @@ async function main(): Promise<void> {
     }
 
     for (const explorer of explorers) {
+      if (attempted > 0 && delayMs > 0) {
+        console.log(`\nWaiting ${Math.round(delayMs / 1000)}s before the next submission...`);
+        pause(delayMs);
+      }
       attempted += 1;
       // one argument vector and no shell: an RPC URL carries a query string more often than not,
       // and a `&` inside a shell command line ends the argument and starts another command
@@ -130,7 +181,11 @@ async function main(): Promise<void> {
       ];
       console.log(`\nVerifying ${contract.name} at ${contract.address} (${contractName}) on ${explorer.label}`);
       try {
-        execFileSync("forge", args, { stdio: "inherit" });
+        // the nightly banner would repeat once per submission and bury the result it precedes
+        execFileSync("forge", args, {
+          stdio: "inherit",
+          env: { ...process.env, FOUNDRY_DISABLE_NIGHTLY_WARNING: "1" },
+        });
       } catch {
         console.log(`FAILED: ${contract.name} at ${contract.address} on ${explorer.label}`);
         failed.push(`${contract.name} (${contract.address}) on ${explorer.label}`);
