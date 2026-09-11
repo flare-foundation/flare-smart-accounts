@@ -387,17 +387,94 @@ void test("the pins are read on both loan chains, and on no other", async () => 
   assert.doesNotMatch(onCoston2.stdout, /pins:/);
 });
 
-void test("without --expect-owner a loan chain is held to the pinned initial owner", async () => {
+void test("before the cut a loan chain is held to the pinned initial owner", async () => {
   // the bootstrap's own owner is the default on both, so an operator who omits the flag before
   // the handover still gets a real check rather than none: the fixture answers another owner
   for (const chain of LOAN_CHAINS) {
     rpc.reset();
     rpc.state.chainId = chain.chainId;
     prepareLoanChain(chain.network);
-    const result = await runCli(repo, rpc.url, [chain.network, "--no-build"]);
+    const result = await runCli(repo, rpc.url, [chain.network, "--pre-cut", "--no-build"]);
     assert.equal(result.status, 1, result.stdout + result.stderr);
-    // the check's expectation is the pinned owner, printed under its name; without the default it
-    // would fall back to the chain config's governance, which these networks do not have
+    // the check's expectation is the pinned owner, printed under its name
     assert.match(result.stdout, new RegExp(`FAIL\\s+owner[\\s\\S]{0,120}?${PINNED_INITIAL_OWNER}`, "i"));
+  }
+});
+
+void test("after the cut a loan chain is held to its configured governance, not the pin", async () => {
+  // the handover happens before the cut (RUNBOOK B3), so from B4 on the pinned owner is the wrong
+  // expectation and every run without the flag would report a mismatch it should not
+  rpc.reset();
+  rpc.state.chainId = "0xaa36a7";
+  prepareLoanChain("sepolia");
+  mkdirSync(join(repo, "deployment/chain-config"), { recursive: true });
+  writeFileSync(join(repo, "deployment/chain-config/sepolia.json"), JSON.stringify({ governance: OWNER }));
+  try {
+    const result = await runCli(repo, rpc.url, ["sepolia", "--no-build"]);
+    // the fixture's diamond answers OWNER, so naming it as the expectation makes the owner check
+    // pass; the pinned owner would have failed it
+    assert.match(result.stdout, /(ok|OK|PASS)\s+owner/i);
+    assert.doesNotMatch(result.stdout, new RegExp(`FAIL\\s+owner[\\s\\S]{0,120}?${PINNED_INITIAL_OWNER}`, "i"));
+
+    // and before the cut the pin is still what it expects, on the very same repository
+    const preCut = await runCli(repo, rpc.url, ["sepolia", "--pre-cut", "--no-build"]);
+    assert.match(preCut.stdout, new RegExp(`FAIL\\s+owner[\\s\\S]{0,120}?${PINNED_INITIAL_OWNER}`, "i"));
+
+    // the explicit flag beats every default: named against the config's own governance it is the
+    // named address the check holds the diamond to, and fails it
+    const explicit = await runCli(repo, rpc.url, ["sepolia", "--expect-owner", STRANGER, "--no-build"]);
+    assert.equal(explicit.status, 1, explicit.stdout + explicit.stderr);
+    assert.match(explicit.stdout, new RegExp(`FAIL\\s+owner[\\s\\S]{0,120}?${STRANGER}`, "i"));
+  } finally {
+    rmSync(join(repo, "deployment/chain-config/sepolia.json"), { force: true });
+  }
+});
+
+void test("a loan chain with no config, or a zero governance, falls back to the pin after the cut", async () => {
+  // Ethereum has no chain config yet, and a zero governance means the deployer kept the diamond: in
+  // both cases the pin is the only expectation there is, and the check must not vanish
+  rpc.reset();
+  rpc.state.chainId = "0x1";
+  prepareLoanChain("ethereum");
+  const noConfig = await runCli(repo, rpc.url, ["ethereum", "--no-build"]);
+  assert.match(noConfig.stdout, new RegExp(`FAIL\\s+owner[\\s\\S]{0,120}?${PINNED_INITIAL_OWNER}`, "i"));
+
+  rpc.reset();
+  rpc.state.chainId = "0xaa36a7";
+  prepareLoanChain("sepolia");
+  mkdirSync(join(repo, "deployment/chain-config"), { recursive: true });
+  const configPath = join(repo, "deployment/chain-config/sepolia.json");
+  try {
+    writeFileSync(configPath, JSON.stringify({ governance: "0x0000000000000000000000000000000000000000" }));
+    const zero = await runCli(repo, rpc.url, ["sepolia", "--no-build"]);
+    assert.match(zero.stdout, new RegExp(`FAIL\\s+owner[\\s\\S]{0,120}?${PINNED_INITIAL_OWNER}`, "i"));
+  } finally {
+    rmSync(configPath, { force: true });
+  }
+});
+
+void test("a governance that is not an address stops the run, unless nothing would read it", async () => {
+  // an empty string is a string and not the zero address: read as "no expectation" it would switch
+  // the owner check off without a word. It is a malformed config and is refused before any check
+  rpc.reset();
+  rpc.state.chainId = "0xaa36a7";
+  prepareLoanChain("sepolia");
+  mkdirSync(join(repo, "deployment/chain-config"), { recursive: true });
+  const configPath = join(repo, "deployment/chain-config/sepolia.json");
+  try {
+    writeFileSync(configPath, JSON.stringify({ governance: "" }));
+    const malformed = await runCli(repo, rpc.url, ["sepolia", "--no-build"]);
+    assert.notEqual(malformed.status, 0, "a malformed governance must fail the run");
+    assert.match(malformed.stdout + malformed.stderr, /"governance" must be an address/);
+    assert.doesNotMatch(malformed.stdout, /owner/i);
+
+    // the two paths that never consult the config are not stopped by it: the explicit flag, and the
+    // pre-cut pin
+    const explicit = await runCli(repo, rpc.url, ["sepolia", "--expect-owner", OWNER, "--no-build"]);
+    assert.match(explicit.stdout, /(ok|OK|PASS)\s+owner/i);
+    const preCut = await runCli(repo, rpc.url, ["sepolia", "--pre-cut", "--no-build"]);
+    assert.match(preCut.stdout, new RegExp(`FAIL\\s+owner[\\s\\S]{0,120}?${PINNED_INITIAL_OWNER}`, "i"));
+  } finally {
+    rmSync(configPath, { force: true });
   }
 });

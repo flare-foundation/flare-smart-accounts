@@ -113,22 +113,41 @@ function parseOptions(args: string[]): Options {
 }
 
 /**
- * The owner to expect: the explicit option, else the pinned initial owner on Ethereum, else this
- * exact network's chain config governance (staging has its own file) - the deploy script transfers
- * ownership only to a non-zero governance, so zero means the deployer kept it and there is nothing
- * to expect.
+ * The owner to expect: the explicit option, else what the stage says it should be.
+ *
+ * On a loan chain that depends on where in the runbook the run sits. `--pre-cut` is the bootstrap's
+ * own diamond, which the pinned initial owner still holds; every later run is after the transfer
+ * (RUNBOOK.md B3 hands it over before the cut), so the chain config's governance is the expectation
+ * and the pin would report a mismatch on every one of them. Elsewhere - and on a loan chain whose
+ * config names no governance yet - the order is unchanged.
+ *
+ * A zero governance is no expectation at all: the deploy script transfers ownership only to a
+ * non-zero one, so zero means the deployer kept it and there is nothing to compare against.
  */
 function expectOwnerInput(options: Options, pinnedOwner: string | undefined): { expectOwner?: string } {
-  const expected = options.expectOwner ?? pinnedOwner ?? chainConfigGovernance(options.network);
+  // the explicit flag needs nothing else, and the pre-cut pin needs no config: neither should be
+  // stopped by a chain config it would not have read
+  if (options.expectOwner) return { expectOwner: options.expectOwner };
+  const configured = () => chainConfigGovernance(options.network);
+  const expected = options.preCut ? (pinnedOwner ?? configured()) : (configured() ?? pinnedOwner);
   return expected ? { expectOwner: expected } : {};
 }
 
+/**
+ * The chain config's governance, or undefined where there is nothing to expect: no config, no key,
+ * or the zero address, which the deploy script reads as "the deployer keeps it". Anything else that
+ * is not an address is a malformed config and stops the run - an empty string is not "no
+ * expectation", it is a typo that would otherwise disable the owner check without a word.
+ */
 function chainConfigGovernance(network: string): string | undefined {
   const path = `deployment/chain-config/${network}.json`;
   if (!existsSync(path)) return undefined;
   const config = JSON.parse(readFileSync(path, "utf8")) as { governance?: unknown };
-  if (typeof config.governance !== "string" || config.governance.toLowerCase() === ZERO_ADDRESS) return undefined;
-  return config.governance;
+  if (config.governance === undefined) return undefined;
+  if (typeof config.governance !== "string" || !Web3.utils.isAddress(config.governance)) {
+    throw new Error(`${path}: "governance" must be an address, got ${JSON.stringify(config.governance)}`);
+  }
+  return config.governance.toLowerCase() === ZERO_ADDRESS ? undefined : config.governance;
 }
 
 function fsRepoReader(): RepoReader {

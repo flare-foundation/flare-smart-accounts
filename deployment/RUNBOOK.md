@@ -132,9 +132,14 @@ pnpm verify_diamond <network> <cut-file> --expect-owner <approved owner>
 
 Moved selectors are repointed by including the new facet, never by listing them for deletion.
 
-Pass `--expect-owner` explicitly. Its default is the chain config's `governance`, which is the zero
-address on `coston2-staging` and therefore checks nothing, and on a loan chain the default is the
-pinned historical owner, which stops being correct the moment ownership is transferred.
+Pass `--expect-owner` when you know who should hold it. The default is the chain config's
+`governance`, which is the zero address on `coston2-staging` and therefore checks nothing. On a loan
+chain the default follows the stage: `--pre-cut` expects the pinned historical owner, since the
+bootstrap's diamond is still his, and every later run expects that network's configured governance,
+because B3 hands it over before the cut - falling back to the pin where no config names one, which is
+Ethereum today, so there a post-cut run without the flag cannot prove the handover happened. A
+`governance` that is present but not an address stops the run rather than being read as "nothing to
+expect".
 
 **Coston2 only — the seven pre-freeze registrations.** Decided 2026-09-09: the seven accounts
 registered before the proxy creation code was frozen are cleared here, in this cut, by a
@@ -285,7 +290,10 @@ pnpm check_cut <network> <cut-file>
 The bootstrap's owner is the historical EOA, which is on hardware: it signs **one** transaction
 here, `transferOwnership` to the intended governance, and nothing else. That is the plain EIP-2535
 ownership facet — an owner check and no timelock — and it is available the moment B1 lands, since
-the three pinned base facets include it. Re-verify with `--expect-owner` naming the new owner.
+the three pinned base facets include it. Re-verify with
+`pnpm verify_diamond <network> --pre-cut --expect-owner <new owner>`: the diamond is still in its
+pre-cut shape, and the pre-cut default expects the pinned owner it no longer has, so the new owner is
+named explicitly here.
 
 Everything owner-gated therefore comes **after** this step, not before it: the diamond arrives owned
 by that EOA, so a cut or a role change made first would need it to sign each one. In the throwaway
