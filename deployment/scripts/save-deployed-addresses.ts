@@ -90,7 +90,9 @@ for (const deployed of contracts) {
   // record names become artifact path components downstream, and a path or case alias
   // (`./OwnershipFacet`) would not equal a protected name under whole-string comparison
   validateContractName(deployed.name);
-  if (isLoanChainNetwork(network)) {
+  // the canonical addresses bind the tracked record alone: a `_mock` run is a throwaway deployment
+  // from current source, which cannot reproduce them and is not resolved through by any tool
+  if (isLoanChainNetwork(network) && !isMock) {
     checkProtectedEthereumRecord(deployed);
   }
 }

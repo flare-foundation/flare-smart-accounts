@@ -137,6 +137,23 @@ void test("the mock files are exempt, and a network the tooling does not know is
   assert.equal(readRecords(mocked, "coston2_mock")[0]?.address, CONTROLLER_B);
 });
 
+void test("a throwaway loan-chain record keeps the canonical names at addresses of its own", () => {
+  // the throwaway deployment builds the controller from current source, so it lands somewhere the
+  // pins do not name - and must still be recordable, because its `_mock` record is gitignored and
+  // no tool resolves a live deployment through it. The tracked record on the same chain is what
+  // the pins bind, and the case below proves they still do
+  const dir = setUp("sepolia", [], [controller(CONTROLLER_B)]);
+  fs.mkdirSync(path.join(dir, "deployment/lib"), { recursive: true });
+  fs.copyFileSync(
+    path.join(repoRoot, "deployment/lib/PinnedControllerInitCode.sol"),
+    path.join(dir, "deployment/lib/PinnedControllerInitCode.sol")
+  );
+
+  const { status, stderr } = run(dir, undefined, true);
+  assert.equal(status, 0, stderr);
+  assert.equal(readRecords(dir, "sepolia_mock")[0]?.address, CONTROLLER_B);
+});
+
 void test("the pins hold even when the override names the controller", () => {
   // the two guards compose: an override for the replacement rule must not buy a way past the
   // pinned-Ethereum rule, which allows only one address for that name on that chain.
