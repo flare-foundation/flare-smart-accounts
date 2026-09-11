@@ -10,7 +10,7 @@ import {
   type RegistryTarget,
   type RepoReader,
   type Stage,
-  SUBACCOUNT_TYPE_LOAN,
+  SUBACCOUNT_TYPE_MORPHO_LOAN,
   type VerificationInputs,
   verifyImplementation,
 } from "./implementation-verify";
@@ -53,11 +53,11 @@ class FakeChain implements ChainReader {
   duration: bigint | undefined = 3600n;
   accounts = new Map<string, string>([
     [`pa:${OWNER}`, ACCOUNT],
-    [`sub:${OWNER}:${SUBACCOUNT_TYPE_LOAN}`, SUBACCOUNT],
+    [`sub:${OWNER}:${SUBACCOUNT_TYPE_MORPHO_LOAN}`, SUBACCOUNT],
   ]);
   identities = new Map<string, AccountIdentity>([
     [ACCOUNT, { controller: DIAMOND, xrplOwner: OWNER }],
-    [SUBACCOUNT, { controller: DIAMOND, parent: ACCOUNT, subaccountType: BigInt(SUBACCOUNT_TYPE_LOAN) }],
+    [SUBACCOUNT, { controller: DIAMOND, parent: ACCOUNT, subaccountType: BigInt(SUBACCOUNT_TYPE_MORPHO_LOAN) }],
   ]);
 
   constructor(contract = "PersonalAccountRemote") {
@@ -357,7 +357,7 @@ void test("a sample subaccount's parent and type are checked, not just its contr
   wrongParent.identities.set(SUBACCOUNT, {
     controller: DIAMOND,
     parent: STRANGER,
-    subaccountType: BigInt(SUBACCOUNT_TYPE_LOAN),
+    subaccountType: BigInt(SUBACCOUNT_TYPE_MORPHO_LOAN),
   });
   assert.deepEqual(failed((await verifyImplementation(inputs(wrongParent, asLoan))).checks), [
     `sample: ${SUBACCOUNT}'s parent is ${OWNER}'s Personal Account`,

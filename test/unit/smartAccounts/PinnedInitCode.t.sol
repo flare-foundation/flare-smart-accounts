@@ -6,7 +6,7 @@ import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {PinnedControllerInitCode} from "../../../deployment/scripts/PinnedControllerInitCode.sol";
 import {PersonalAccounts} from "../../../contracts/smartAccounts/library/PersonalAccounts.sol";
 import {Subaccounts} from "../../../contracts/smartAccounts/library/Subaccounts.sol";
-import {SUBACCOUNT_TYPE_LOAN} from "../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
 
 /**
  * @title PinnedInitCodeTest
@@ -129,7 +129,7 @@ contract PinnedInitCodeTest is Test {
             abi.encode(
                 PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER,
                 personalAccount,
-                SUBACCOUNT_TYPE_LOAN
+                SUBACCOUNT_TYPE_MORPHO_LOAN
             )
         );
         assertEq(
@@ -282,7 +282,7 @@ contract PinnedInitCodeTest is Test {
             keccak256(
                 abi.encodePacked(
                     Subaccounts.PROXY_CREATION_CODE,
-                    abi.encode(COSTON2_CONTROLLER, _parent, SUBACCOUNT_TYPE_LOAN)
+                    abi.encode(COSTON2_CONTROLLER, _parent, SUBACCOUNT_TYPE_MORPHO_LOAN)
                 )
             ),
             PinnedControllerInitCode.SINGLETON_FACTORY

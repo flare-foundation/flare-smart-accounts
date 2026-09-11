@@ -9,7 +9,10 @@ import {IIMasterAccountController} from "../../contracts/smartAccounts/interface
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {LoanSubaccount} from "../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
-import {ILoanSubaccount} from "../../contracts/userInterfaces/ILoanSubaccount.sol";
+import {
+    ILoanSubaccount,
+    DESTINATION_KIND_EVM
+} from "../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {IIBridgeRoutesFacet} from "../../contracts/smartAccounts/interface/IIBridgeRoutesFacet.sol";
 import {MintableERC20} from "../../contracts/mock/MintableERC20.sol";
 import {MockAssetManager} from "../../contracts/mock/MockAssetManager.sol";
@@ -23,7 +26,6 @@ import {
     REDEEM_HOME_TTL
 } from "../../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
-import {DESTINATION_KIND_EVM} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
 
 /**
  * @title LoanHomeFixture

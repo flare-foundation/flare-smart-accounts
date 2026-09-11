@@ -13,7 +13,7 @@ import {IIMasterAccountController} from "../../contracts/smartAccounts/interface
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.sol";
-import {SUBACCOUNT_TYPE_LOAN} from "../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
@@ -355,7 +355,7 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
             console2.log("Registering loan subaccount implementation");
             // executes immediately: the timelock duration is still zero at this point
             masterAccountController.setSubaccountImplementation(
-                SUBACCOUNT_TYPE_LOAN, loanSubaccountImplAddress
+                SUBACCOUNT_TYPE_MORPHO_LOAN, loanSubaccountImplAddress
             );
 
             console2.log("Setting timelock duration");

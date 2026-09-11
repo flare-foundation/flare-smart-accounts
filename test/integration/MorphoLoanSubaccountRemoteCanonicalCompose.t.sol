@@ -2,10 +2,8 @@
 pragma solidity ^0.8.27;
 
 import {LoanRemoteFixture} from "../utils/LoanRemoteFixture.sol";
-import {
-    IMorphoLoanSubaccountRemote,
-    ACTION_CANCEL
-} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
+import {IMorphoLoanSubaccountRemote} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
+import {ACTION_CANCEL} from "../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 import {IComposeReceiverAccountBase} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 import {IComposeTransportFacet} from "../../contracts/userInterfaces/facets/IComposeTransportFacet.sol";

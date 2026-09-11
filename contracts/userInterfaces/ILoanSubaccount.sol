@@ -3,6 +3,78 @@ pragma solidity >=0.8.4 <0.9;
 
 import {IBridgingSubaccount} from "./IBridgingSubaccount.sol";
 
+/*
+ * The wire schema of a loan subaccount pair: the actions a compose payload can carry and the
+ * destination kinds a borrow can disburse to. Both halves of a pair speak it - the Flare half
+ * encodes it, the loan-chain half executes it - so it belongs to neither venue. What an action
+ * then does to a position is the executing half's own; for the Morpho pair that is written out
+ * in {IMorphoLoanSubaccountRemote}.
+ */
+
+/// @dev Borrow action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
+/// uint8 destinationKind, bytes32 destination, uint256 borrowAmount, uint256 minComposeValue)`.
+/// The floor is reserved for a destination kind that pays for its own onward delivery;
+/// `DESTINATION_KIND_EVM` must leave it zero ({UnexpectedDeliveryValueFloor}). The market is not a
+/// payload field: the account type fixes it (write-once), so the subaccount address itself
+/// commits to the pool. The bridged collateral and any residue on the account are supplied, and
+/// `borrowAmount` (non-zero) is borrowed and sent to `destination`; a zero bridged amount with
+/// nothing idle borrows against the existing position. The operation id
+/// must be non-zero and globally unique per subaccount across the actions that carry one (the
+/// borrow and the withdraw); clients
+/// retrying an expired intent must reuse its id only for the same intent with a fresh
+/// deadline (a convention, not contract-enforced). A pure collateral deposit is its own action
+/// (`ACTION_DEPOSIT_COLLATERAL`).
+uint8 constant ACTION_BORROW = 1;
+
+/// @dev Withdraw action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
+/// uint256 withdrawAmount, uint256 minComposeValue, bytes returnOptions)`. The atomic
+/// withdrawal: withdraws collateral from the account's one position and bridges it back to the
+/// account's own Flare address in the same execution, with the redeem-home compose - no idle
+/// window, so the redeposit ordering race cannot touch a withdrawal. `minComposeValue` is the
+/// delivery floor:
+/// compose delivery is permissionless and LayerZero does not authenticate the delivered value,
+/// so a delivery carrying less - execution and terminal skip alike - reverts
+/// (`InsufficientDeliveryValue`), which is what stops a zero-value front-run from consuming
+/// the packet and burning the prepaid value. `returnOptions` are the signed return-send
+/// options (Flare-side gas and, optionally, the redemption's executor fee as compose value,
+/// best-effort on that leg - the Flare redeem-home accepts zero value by design); the return
+/// fee is paid from the compose value delivered with this action - the only action that
+/// accepts value - and the excess goes to the parent. Every failure reverts and leaves the
+/// delivery retriable; what recovers it differs by cause, and for the Morpho pair
+/// {IMorphoLoanSubaccountRemote} writes each cause out.
+uint8 constant ACTION_WITHDRAW = 2;
+
+/// @dev Deposit-collateral action: carries no action data (empty bytes) - no operation id, since
+/// a re-issued deposit (a new packet; a delivered compose cannot replay) only adds the user's own
+/// collateral, which the permissionless rail can do
+/// with the same tokens anyway, and no deadline, since a late deposit is harmless. It supplies
+/// the account's idle collateral and moves no debt.
+uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
+
+/// @dev Cancel action: `actionData` is `abi.encode(bytes32 operationId)`. Message-only, and the
+/// one action that withdraws an authority instead of using one: it consumes the id so the packet
+/// that carried it can never execute, and does nothing else. It carries no deadline of its own (a
+/// late cancellation is either
+/// unnecessary or still correct). Sending one is NOT cancellation: the two packets race, and an
+/// original that arrives first executes normally, after which the cancellation finds the id
+/// consumed and finalizes quietly without an event - so a client resolves a sent cancellation
+/// by whichever arrives, {LoanActionCancelled} or the original action's own execution event,
+/// and either ends the instruction's live state. Cancelling an id that was never issued is
+/// allowed and simply burns it, which is what makes the action idempotent and its delivery
+/// terminal on the first attempt.
+/// Action id 4 is retired (the removed sweep-to-origin) and is never reused.
+uint8 constant ACTION_CANCEL = 5;
+
+/// @dev The destination is an EVM address (cleanly zero-padded into the `bytes32`), paid by a
+/// plain ERC-20 transfer — typically an exchange deposit address, or the user's own
+/// loan-chain Personal Account (the parent, a functional compose-driven account). It may not
+/// be zero or the subaccount itself (the proceeds could only repay the new debt).
+uint8 constant DESTINATION_KIND_EVM = 1;
+
+/// @dev Reserved: an XRPL address reached over Wormhole. Not implemented yet (Wormhole specs
+/// pending); payloads using it revert.
+uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
+
 /**
  * @title ILoanSubaccount
  * @notice User interface for deterministic loan subaccounts on Flare: the parent-driven loan

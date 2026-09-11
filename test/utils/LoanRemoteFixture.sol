@@ -33,7 +33,7 @@ import {
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM
-} from "../../contracts/userInterfaces/IMorphoLoanSubaccountRemote.sol";
+} from "../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 
 /**

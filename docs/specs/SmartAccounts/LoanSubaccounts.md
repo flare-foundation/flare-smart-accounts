@@ -230,9 +230,11 @@ is re-checked against the pinned one on every call. What differs is authorizatio
   action and, for a borrow, a user-chosen destination for the proceeds, so it must carry the
   user's XRPL signature. This is the instruction-destination rule below, in contract form.
 - **The payload schema is shared with the loan-chain account**, not opaque: the constants
-  (`PAYLOAD_VERSION_1`, `ACTION_BORROW`, `ACTION_DEPOSIT_COLLATERAL`,
-  `ACTION_WITHDRAW`, `ACTION_CANCEL`, `DESTINATION_KIND_*`) are imported
-  from the loan-chain interfaces, so the tags cannot drift apart. The per-action tuple layouts
+  (`ACTION_BORROW`, `ACTION_DEPOSIT_COLLATERAL`, `ACTION_WITHDRAW`, `ACTION_CANCEL`,
+  `DESTINATION_KIND_*`) live in `ILoanSubaccount`, which both halves import, and
+  `PAYLOAD_VERSION_1` in `IComposeReceiverAccountBase` beside the bridging surface, so the tags
+  cannot drift apart. They are venue-neutral by design: what each action then does to a position
+  is the executing half's own, written out for this pair in `IMorphoLoanSubaccountRemote`. The per-action tuple layouts
   are duplicated by construction (the sender encodes, the receiver decodes) and are held equal
   by tests: byte-equality of every sender payload against an independently built one, and a
   sender→codec→receiver test that executes the bytes the Flare senders hand to `send` on the
@@ -1437,7 +1439,7 @@ Account.
   must also be deployed and registered, and neither is part of the cut.** The loan subaccount:
   `pnpm deploy_loan_subaccount_implementation <network>` (Flare-family networks only — the script
   refuses Ethereum), registered by governance with the timelocked
-  `setSubaccountImplementation(SUBACCOUNT_TYPE_LOAN, <address>)`. And **the home `PersonalAccount`
+  `setSubaccountImplementation(SUBACCOUNT_TYPE_MORPHO_LOAN, <address>)`. And **the home `PersonalAccount`
   itself**: `pnpm deploy_personal_account_implementation <network>`, registered with the timelocked
   `setPersonalAccountImplementation(<address>)`. Replacing `PersonalAccountsFacet` does not change
   the code behind existing Personal Account proxies — the beacon keeps serving whatever

@@ -8,14 +8,14 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IOFT, SendParam} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
 import {MessagingFee, MessagingReceipt} from "@layerzerolabs/oapp-evm/contracts/oapp/OAppSender.sol";
+import {IMorphoLoanSubaccountRemote} from "../../userInterfaces/IMorphoLoanSubaccountRemote.sol";
 import {
-    IMorphoLoanSubaccountRemote,
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_CANCEL,
     DESTINATION_KIND_EVM
-} from "../../userInterfaces/IMorphoLoanSubaccountRemote.sol";
+} from "../../userInterfaces/ILoanSubaccount.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 import {IMorphoLoanMarketsFacet} from "../../userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/IBridgingSubaccount.sol";

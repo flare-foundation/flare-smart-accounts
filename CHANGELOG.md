@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
   - Loan subaccounts — deterministic, restricted staging accounts under each Personal Account for the loan-origination flow. Design: `docs/specs/SmartAccounts/LoanSubaccounts.md`.
-    - `LoanSubaccount` + `SubaccountProxy`; the controller is a type-aware beacon (`implementationForType`, timelocked `setSubaccountImplementation`). The type is a raw `uint256` (`0` reserved, `1` = loan).
+    - `LoanSubaccount` + `SubaccountProxy`; the controller is a type-aware beacon (`implementationForType`, timelocked `setSubaccountImplementation`). The type is a raw `uint256` (`0` reserved, `1` = `SUBACCOUNT_TYPE_MORPHO_LOAN`, which fixes one Morpho market write-once). The pair's wire schema (`ACTION_*`, `DESTINATION_KIND_*`) is declared in `ILoanSubaccount`, not in the venue's interface.
     - `createSubaccount(xrplOwner, type)` (permissionless, idempotent) and `getSubaccount`: CREATE2 via the EIP-2470 singleton factory — the same address on every chain, creatable before the Personal Account exists. Frozen proxy creation code with a pinned-hash test.
     - Restricted methods are `onlyParent`, reached through the existing `0xFF`/`0xFE` account abstraction path; no new memo opcode.
     - One permissionless direction per account: on Flare, `sweepRedeem()` (pushes FXRP to the parent, which redeems it through the subaccount-only `PersonalAccount.redeemFromSubaccount(amount)`); forward moves are signed. Non-FXRP strays have no rail and strand (accepted; see the spec).

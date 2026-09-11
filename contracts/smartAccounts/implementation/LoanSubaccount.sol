@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.27;
 
-import {ILoanSubaccount} from "../../userInterfaces/ILoanSubaccount.sol";
-import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {
+    ILoanSubaccount,
     ACTION_BORROW,
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_CANCEL,
     DESTINATION_KIND_EVM
-} from "../../userInterfaces/IMorphoLoanSubaccountRemote.sol";
+} from "../../userInterfaces/ILoanSubaccount.sol";
+import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {BridgingSubaccountBase} from "./BridgingSubaccountBase.sol";
 
 /**

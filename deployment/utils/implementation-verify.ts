@@ -27,15 +27,19 @@ export interface ImplementationSpec {
   family: "flare" | "remote";
 }
 
-/** `SUBACCOUNT_TYPE_LOAN` in contracts/userInterfaces/facets/ISubaccountsFacet.sol. */
-export const SUBACCOUNT_TYPE_LOAN = 1;
+/** `SUBACCOUNT_TYPE_MORPHO_LOAN` in contracts/userInterfaces/facets/ISubaccountsFacet.sol. */
+export const SUBACCOUNT_TYPE_MORPHO_LOAN = 1;
 
 /** The four implementations that get registered, by artifact name. */
 export const IMPLEMENTATIONS: Record<string, ImplementationSpec> = {
   PersonalAccount: { target: "personalAccountBeacon", family: "flare" },
   PersonalAccountRemote: { target: "personalAccountBeacon", family: "remote" },
-  LoanSubaccount: { target: "subaccountType", subaccountType: SUBACCOUNT_TYPE_LOAN, family: "flare" },
-  MorphoLoanSubaccountRemote: { target: "subaccountType", subaccountType: SUBACCOUNT_TYPE_LOAN, family: "remote" },
+  LoanSubaccount: { target: "subaccountType", subaccountType: SUBACCOUNT_TYPE_MORPHO_LOAN, family: "flare" },
+  MorphoLoanSubaccountRemote: {
+    target: "subaccountType",
+    subaccountType: SUBACCOUNT_TYPE_MORPHO_LOAN,
+    family: "remote",
+  },
 };
 
 /**
@@ -258,7 +262,7 @@ export async function verifyImplementation(inputs: VerificationInputs): Promise<
     const account =
       spec.target === "personalAccountBeacon"
         ? personalAccount
-        : await chain.subaccount(diamond, owner, spec.subaccountType ?? SUBACCOUNT_TYPE_LOAN);
+        : await chain.subaccount(diamond, owner, spec.subaccountType ?? SUBACCOUNT_TYPE_MORPHO_LOAN);
     const accountCode = await chain.code(account);
     const materialized = accountCode !== ZERO_CODE;
     checks.push(
@@ -305,7 +309,7 @@ export async function verifyImplementation(inputs: VerificationInputs): Promise<
             identity.parent ?? ZERO_ADDRESS
           )
         );
-        const type = BigInt(spec.subaccountType ?? SUBACCOUNT_TYPE_LOAN);
+        const type = BigInt(spec.subaccountType ?? SUBACCOUNT_TYPE_MORPHO_LOAN);
         checks.push(
           check(
             `sample: ${account} is of type ${type.toString()}`,
@@ -343,7 +347,7 @@ export function encodeRegistration(spec: ImplementationSpec, implementation: str
         { type: "address", name: "_implementation" },
       ],
     },
-    [String(spec.subaccountType ?? SUBACCOUNT_TYPE_LOAN), implementation]
+    [String(spec.subaccountType ?? SUBACCOUNT_TYPE_MORPHO_LOAN), implementation]
   );
 }
 
