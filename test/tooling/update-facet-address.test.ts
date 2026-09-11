@@ -12,11 +12,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { PROTECTED_ETHEREUM_NAMES, loadPinnedEthereumAddresses } from "./pinned-constants";
+import { PROTECTED_ETHEREUM_NAMES, loadPinnedEthereumAddresses } from "../../deployment/utils/pinned-constants";
 
-const here = __dirname;
-const deploymentDir = path.resolve(here, "..");
-const SCRIPT = path.join(here, "update-facet-address.ts");
+const repoRoot = path.resolve(__dirname, "../..");
+const deploymentDir = path.join(repoRoot, "deployment");
+const SCRIPT = path.join(deploymentDir, "utils/update-facet-address.ts");
 const TSX_CLI = createRequire(__filename).resolve("tsx/cli");
 const STRANGER = "0x00000000000000000000000000000000deadbeef";
 const ORDINARY = "0x1234123412341234123412341234123412341234";

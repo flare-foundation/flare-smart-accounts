@@ -13,11 +13,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { PROTECTED_ETHEREUM_NAMES, loadPinnedEthereumAddresses } from "../utils/pinned-constants";
+import { PROTECTED_ETHEREUM_NAMES, loadPinnedEthereumAddresses } from "../../deployment/utils/pinned-constants";
 
-const here = __dirname;
-const repoRoot = path.resolve(here, "../..");
-const SCRIPT = path.join(here, "save-deployed-addresses.ts");
+const repoRoot = path.resolve(__dirname, "../..");
+const SCRIPT = path.join(repoRoot, "deployment/scripts/save-deployed-addresses.ts");
 const TSX_CLI = createRequire(__filename).resolve("tsx/cli");
 
 const CONTROLLER_A = "0xaaaabbbbccccddddeeeeffff1111222233334444";

@@ -11,12 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import Web3, { type AbiItem } from "web3";
-import { FACETS_ABI, type LoupeFacet } from "../utils/diamond-inspect";
-import { dispatchSlot } from "../utils/diamond-verify";
-import { loadPinnedEthereumAddresses } from "../utils/pinned-constants";
-import { isFunctionFragment, toSelector } from "../utils/prep-cut";
+import { FACETS_ABI, type LoupeFacet } from "../../deployment/utils/diamond-inspect";
+import { dispatchSlot } from "../../deployment/utils/diamond-verify";
+import { loadPinnedEthereumAddresses } from "../../deployment/utils/pinned-constants";
+import { isFunctionFragment, toSelector } from "../../deployment/utils/prep-cut";
 
-const SCRIPT = join(__dirname, "verify-diamond.ts");
+const SCRIPT = join(__dirname, "../../deployment/scripts/verify-diamond.ts");
 const TSX_CLI = createRequire(__filename).resolve("tsx/cli");
 const DIAMOND = "0x000000000000000000000000000000000000d1a0";
 /** The bootstrap's own owner: the verifier's default on a loan chain when no flag names one. */
@@ -361,7 +361,7 @@ function prepareLoanChain(network: string): void {
     readFileSync(join(repo, "deployment/deploys/coston2.json"), "utf8")
   );
   copyFileSync(
-    join(__dirname, "PinnedControllerInitCode.sol"),
+    join(__dirname, "../../deployment/scripts/PinnedControllerInitCode.sol"),
     join(repo, "deployment/scripts/PinnedControllerInitCode.sol")
   );
 }

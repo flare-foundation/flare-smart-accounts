@@ -13,8 +13,8 @@ import {
   SUBACCOUNT_TYPE_MORPHO_LOAN,
   type VerificationInputs,
   verifyImplementation,
-} from "./implementation-verify";
-import { type Check, allPassed } from "./diamond-verify";
+} from "../../deployment/utils/implementation-verify";
+import { type Check, allPassed } from "../../deployment/utils/diamond-verify";
 
 const DIAMOND = "0x000000000000000000000000000000000000d1a0";
 const IMPL = "0x0000000000000000000000000000000000001111";

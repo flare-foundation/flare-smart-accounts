@@ -14,7 +14,7 @@ import {
   interfaceId,
   layoutChecks,
   layoutMatches,
-} from "./diamond-verify";
+} from "../../deployment/utils/diamond-verify";
 
 const CUT = "0x000000000000000000000000000000000000000A";
 const LOUPE = "0x000000000000000000000000000000000000000b";

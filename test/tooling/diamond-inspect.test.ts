@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findDiamondAddress, loadCutConfig, parseCutConfig, parseDeployedContracts } from "./diamond-inspect";
+import {
+  findDiamondAddress,
+  loadCutConfig,
+  parseCutConfig,
+  parseDeployedContracts,
+} from "../../deployment/utils/diamond-inspect";
 
 const DIAMOND = "0x434936d47503353f06750Db1A444DBDC5F0AD37c";
 

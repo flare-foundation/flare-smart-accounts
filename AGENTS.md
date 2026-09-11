@@ -119,15 +119,18 @@ pnpm typecheck
 pnpm test:tooling
 ```
 
-`test:tooling` runs the node tests beside the deployment utilities (`deployment/utils/*.test.ts`), the verifier
-CLI's own test against a fake JSON-RPC server (`deployment/scripts/verify-diamond.test.ts`), the recorder's and the
-explorer submission's tests beside it (the latter against a stubbed `forge`, so the argument vector itself is
-pinned) and the cut wrapper's shell scenarios (`deployment/scripts/execute-diamond-cut.test.sh`); CI runs it too.
+`test:tooling` runs everything in `test/tooling/`: the node tests of the deployment utilities, the verifier CLI's
+own test against a fake JSON-RPC server, the recorder's and the explorer submission's tests (the latter against a
+stubbed `forge`, so the argument vector itself is pinned) and the cut wrapper's shell scenarios
+(`execute-diamond-cut.test.sh`, run after the node tests). They live under `test/` like every other suite and are
+held to the same lint rules as the tooling they exercise, not the looser ones the shared config gives
+`test/**/*.ts` - `eslint.config.mjs` exempts this directory from that relaxation. Run them from the repository
+root: several read pinned sources by a path relative to it. CI runs the script too.
 
 For shell scripts:
 
 ```bash
-shellcheck deployment/scripts/*.sh scripts/*.sh
+shellcheck deployment/scripts/*.sh scripts/*.sh test/tooling/*.sh
 ```
 
 CI runs the same check (the shared `lint-shell` component) and fails the pipeline on any finding, informational
@@ -159,14 +162,15 @@ test/
   adversarial/       # Attack and ordering tests across whole flows, on both chains
   invariants/        # Stateful invariant campaigns (handlers live in utils/)
   fuzz/              # Property tests over the arithmetic and the gates
+  tooling/           # The deployment tooling's own node and shell tests (TypeScript, not forge)
   utils/             # Fixtures, handlers and harnesses shared by the suites
 deployment/
   chain-config/      # Per-network chain config JSON
   deploys/           # Deployed contract addresses per network
   build-info-v2.0.0/ # Reconstructed v2.0.0 build of the three live implementations: the upgrade validator's reference
   cuts/              # Diamond cut files per network
-  scripts/           # Forge deploy scripts (.s.sol), bash wrappers, TS helpers
-  utils/             # Deployment utility scripts
+  scripts/           # Forge deploy scripts (.s.sol), bash wrappers, TS helpers - no tests
+  utils/             # Deployment utility scripts - no tests; both are tested from test/tooling/
 scripts/             # Repository utility scripts
 audit/               # Security audit reports
 ```
@@ -310,6 +314,10 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
     `ETHEREUM_RPC_URL=<url> forge test --match-path "test/integration/*"`. Most free tiers prune that far back;
     `https://eth-pokt.nodies.app` served it on 2026-09-09, and `cast block <FORK_BLOCK> --rpc-url <url>` plus one
     `eth_call` at that block is the quickest way to test a candidate before running the suite.
+  - `test/tooling/`: the deployment tooling's own tests, in TypeScript and shell rather than Solidity, run by
+    `pnpm test:tooling` rather than by forge, which ignores them. They sit here rather than beside the scripts so
+    that `deployment/` holds only what an operator runs, and they are held to the tooling's lint rules, not the
+    looser ones the shared config applies to `test/**/*.ts`.
   - `test/utils/`: fixtures, handlers and harnesses shared by the suites. Mocks live in `contracts/mock/`. Both are
     excluded from the coverage figure. `LoanForkFixture` is `LoanRemoteFixture` with the loan market's real
     contracts behind it (canonical Morpho Blue, the live FXRP/RLUSD market, its oracle and adaptive rate model,

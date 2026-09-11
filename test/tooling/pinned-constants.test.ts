@@ -6,7 +6,7 @@ import {
   parsePinnedConstant,
   stripSolidity,
   validateContractName,
-} from "./pinned-constants";
+} from "../../deployment/utils/pinned-constants";
 
 const ADDRESS = "0x434936d47503353f06750Db1A444DBDC5F0AD37c";
 const OTHER_ADDRESS = "0x0000000000000000000000000000000000000001";

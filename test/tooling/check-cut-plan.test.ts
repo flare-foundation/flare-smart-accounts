@@ -17,12 +17,11 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import Web3 from "web3";
-import { FACETS_ABI } from "../utils/diamond-inspect";
-import { loadPinnedEthereumAddresses } from "../utils/pinned-constants";
+import { FACETS_ABI } from "../../deployment/utils/diamond-inspect";
+import { loadPinnedEthereumAddresses } from "../../deployment/utils/pinned-constants";
 
-const here = __dirname;
-const repoRoot = path.resolve(here, "../..");
-const SCRIPT = path.join(here, "check-cut-plan.ts");
+const repoRoot = path.resolve(__dirname, "../..");
+const SCRIPT = path.join(repoRoot, "deployment/scripts/check-cut-plan.ts");
 const TSX_CLI = createRequire(__filename).resolve("tsx/cli");
 
 const SEPOLIA_CHAIN_ID = "0xaa36a7";

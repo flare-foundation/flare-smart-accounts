@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import Web3 from "web3";
-import type { CutConfig, DeployedContract, LoupeFacet } from "./diamond-inspect";
-import { type Check, allPassed, dispatchSlot } from "./diamond-verify";
-import { type ChainReader, type RepoReader, type VerificationInputs, verifyDiamond } from "./diamond-verifier";
-import type { PinnedEthereumAddresses } from "./pinned-constants";
+import type { CutConfig, DeployedContract, LoupeFacet } from "../../deployment/utils/diamond-inspect";
+import { type Check, allPassed, dispatchSlot } from "../../deployment/utils/diamond-verify";
+import {
+  type ChainReader,
+  type RepoReader,
+  type VerificationInputs,
+  verifyDiamond,
+} from "../../deployment/utils/diamond-verifier";
+import type { PinnedEthereumAddresses } from "../../deployment/utils/pinned-constants";
 
 // A small diamond: the three base facets and one application facet, each with a distinct fake
 // runtime, a controller, and the proxy whose creation code the comparison strips.

@@ -5,7 +5,7 @@ import {
   PROTECTED_RECORD_NAMES,
   mergeDeployedRecords,
   parseAllowedReplacements,
-} from "./deploy-records";
+} from "../../deployment/utils/deploy-records";
 
 const record = (name: string, address: string): ContractInfo => ({
   name,

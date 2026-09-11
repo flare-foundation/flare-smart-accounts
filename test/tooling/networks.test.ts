@@ -12,7 +12,7 @@ import {
   isLoanChainNetwork,
   resolveRpcUrl,
   validateNetwork,
-} from "./networks";
+} from "../../deployment/utils/networks";
 
 void test("the two families are pinned, disjoint and complete", () => {
   // pinned by member, not by iterating the module's own lists: a test that consults the list it

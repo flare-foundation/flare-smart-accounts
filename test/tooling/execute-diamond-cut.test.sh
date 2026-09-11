@@ -9,7 +9,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WRAPPER="$HERE/execute-diamond-cut.sh"
+WRAPPER="$HERE/../../deployment/scripts/execute-diamond-cut.sh"
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 

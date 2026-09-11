@@ -13,9 +13,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import Web3 from "web3";
-import { BEACON_SLOT } from "../utils/implementation-verify";
+import { BEACON_SLOT } from "../../deployment/utils/implementation-verify";
 
-const SCRIPT = join(__dirname, "verify-implementation.ts");
+const SCRIPT = join(__dirname, "../../deployment/scripts/verify-implementation.ts");
 const TSX_CLI = createRequire(__filename).resolve("tsx/cli");
 const DIAMOND = "0x000000000000000000000000000000000000d1a0";
 const IMPL = "0x0000000000000000000000000000000000001111";

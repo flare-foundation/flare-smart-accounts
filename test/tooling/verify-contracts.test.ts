@@ -14,8 +14,8 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-const here = __dirname;
-const SCRIPT = path.join(here, "verify-contracts.ts");
+const repoRoot = path.resolve(__dirname, "../..");
+const SCRIPT = path.join(repoRoot, "deployment/scripts/verify-contracts.ts");
 const TSX_CLI = createRequire(__filename).resolve("tsx/cli");
 const FACET = "0x1234123412341234123412341234123412341234";
 const SOURCE = "contracts/smartAccounts/facets/PauseFacet.sol";
