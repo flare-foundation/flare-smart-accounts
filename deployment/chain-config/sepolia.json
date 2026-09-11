@@ -19,8 +19,8 @@
     "lltv": "770000000000000000"
   },
   "loanFeeTerms": {
-    "feeFloor": "0",
-    "feeSpread": "0",
-    "feeRecipient": "0x0000000000000000000000000000000000000000"
+    "feeFloor": "70000000000000000",
+    "feeSpread": "10000000000000000",
+    "feeRecipient": "0x99E0770aa23CAA9071B6112208297E7a8d8F8a4A"
   }
 }

@@ -146,10 +146,13 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(0xCd3d2127935Ae82Af54Fc31cCD9D3440dbF46639)))
         );
         assertEq(config.market.marketParams.lltv, 0.77e18);
-        // the two the rehearsal has still to deploy, and the terms nobody has decided
+        // the two the rehearsal has still to deploy
         assertEq(config.market.marketParams.loanToken, address(0));
         assertEq(config.market.marketParams.oracle, address(0));
-        assertEq(config.fees.feeRecipient, address(0));
+        // the fee terms, decided 2026-09-11: a 7% floor, a 1% spread, the deployer collecting
+        assertEq(config.fees.feeFloor, 0.07e18);
+        assertEq(config.fees.feeSpread, 0.01e18);
+        assertEq(config.fees.feeRecipient, 0x99E0770aa23CAA9071B6112208297E7a8d8F8a4A);
     }
 
     function testTheGovernanceSectionIsTheRolesThenTheDurationLast() public {
@@ -214,11 +217,22 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
         vm.expectRevert(bytes("the loanMarket section is not filled in"));
         harness.callsFor("market", config);
 
-        // the same config swept: the transport is ready and is prepared, the other two are skipped
+        // the same config swept: the sections it has are prepared, the market is skipped
         ConfigureRemoteController.Call[] memory calls = harness.callsFor("wiring", config);
-        assertEq(calls.length, 1);
+        assertEq(calls.length, 2);
         assertEq(calls[0].description, "setComposeTransport");
+        assertEq(calls[1].description, "setLoanFeeTerms");
         assertTrue(harness.printed("SKIPPED: the loanMarket section is not filled in"));
+
+        // the fee terms are ready on a recipient rather than on a rate, so that case is driven
+        // over a configuration naming none - the shipped one names the deployer
+        ConfigureRemoteController.Configuration memory noRecipient =
+            harness.parseConfiguration(_configJson(_text()));
+        vm.expectRevert(bytes("the loanFeeTerms section names no recipient"));
+        harness.callsFor("fees", noRecipient);
+        calls = harness.callsFor("wiring", noRecipient);
+        assertEq(calls.length, 2);
+        assertEq(calls[1].description, "registerLoanMarket");
         assertTrue(harness.printed("SKIPPED: the loanFeeTerms section names no recipient"));
     }
 
@@ -232,8 +246,10 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
         harness.submit(diamond, "market", config);
         vm.expectRevert(bytes("the loanMarket section is not filled in"));
         harness.requireApplied(diamond, "market", config);
+        ConfigureRemoteController.Configuration memory noRecipient =
+            harness.parseConfiguration(_configJson(_text()));
         vm.expectRevert(bytes("the loanFeeTerms section names no recipient"));
-        harness.requireApplied(diamond, "fees", config);
+        harness.requireApplied(diamond, "fees", noRecipient);
     }
 
     function testAValueThatDoesNotFitItsFieldStopsTheRunInsteadOfWrapping() public {
