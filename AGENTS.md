@@ -414,3 +414,14 @@ Always include a commit body explaining what changed and why.
 | `chore(deploy)` | Updating deploy parameters and scripts |
 
 `fix`, `feat`, and `refactor` modify production or audit-scoped code. `chore` and `test` should not modify audit-scoped files.
+
+## The changelog
+
+`CHANGELOG.md` describes the release, so **every entry is the delta against `main`** — what someone upgrading from
+the last release gets — never the delta against an earlier commit of the branch it is written on. A branch that
+adds something and then reworks it carries one entry describing what finally landed, not two describing the
+journey; a branch that changes something it introduced since the last release edits its own entry rather than
+adding a second. A change that leaves the released behavior untouched has no entry at all.
+
+Keep the entries one line each, and leave out what a reader of the release does not act on: tests, refactors with
+no behavioral change, and deployment tooling beyond a line naming it.
