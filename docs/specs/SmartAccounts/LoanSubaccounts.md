@@ -1429,8 +1429,9 @@ Account.
   facets, a `LoanSubaccount` implementation is deployed alongside the Personal Account
   implementation, and type `1` is registered with `setSubaccountImplementation` before
   `setTimelockDuration`, while the timelock is still zero.
-- **Existing deployments** (flare, songbird, coston2): the facet needs no dedicated deploy
-  step — naming `SubaccountsFacet`, `BridgeRoutesFacet`, the replaced `PersonalAccountsFacet`
+- **Existing deployments that adopt the release** (flare and coston2; the runbook's scope table is
+  what says which networks those are, and Songbird takes neither the upgrades nor the activation):
+  the facet needs no dedicated deploy step — naming `SubaccountsFacet`, `BridgeRoutesFacet`, the replaced `PersonalAccountsFacet`
   (it gains `createPersonalAccount`) and the replaced `PauseFacet` (`removeUnpausers` becomes
   immediate; a removal queued before the cut must be cancelled and redone directly — see
   [Pause](./Pause.md#upgrading-to-the-immediate-unpauser-removal)) in a cut plan

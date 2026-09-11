@@ -49,9 +49,17 @@ execution** — leaving one open while drafting is fine, starting with one open 
 | --- | ---: | --- | --- | --- | --- |
 | `ethereum` | 1 | new, bootstrapped | `flare` | remote Personal Account, remote loan subaccount | yes |
 | `flare` | 14 | live | `ethereum` | home Personal Account, home loan subaccount | yes |
-| `songbird` | 19 | live | — | **to resolve** | **to resolve** |
-| `coston2` | 114 | live | **to resolve** | **to resolve** | **to resolve** |
-| `coston2-staging` | 114 | live | **to resolve** | **to resolve** | **to resolve** |
+| `songbird` | 19 | live | — | no | no |
+| `coston2` | 114 | live | `sepolia` | home Personal Account, home loan subaccount | yes |
+| `coston2-staging` | 114 | live | — | no | no |
+| `sepolia` | 11155111 | new, bootstrapped | `coston2` | remote Personal Account, remote loan subaccount | yes |
+
+Resolved 2026-09-11. Songbird takes neither, so its Personal Account lineage stays on the
+implementation it has: that is the divergence this table warns about, taken deliberately rather than
+discovered. Coston2 takes the whole release against its live controller, and Sepolia is the loan
+chain opposite it, bootstrapped and activated exactly as Ethereum will be — so the flow is rehearsed
+end to end on a pair that reproduces the production controller at both ends. `coston2-staging` is
+dormant and takes nothing.
 
 > **Coston2 carries a known exception, and it is settled — see step A2.** Seven Personal
 > Accounts registered before the proxy creation code was frozen sit at addresses the current
@@ -212,12 +220,40 @@ pinned init code reproduce the production controller at the same address — whi
 Sepolia the network this part is rehearsed on. Every command below takes the network name; the
 tooling refuses any other chain.
 
+**Two modes, and the address decides which.** A CREATE2 address is the factory, the salt and the
+init code; the salt is zero everywhere here, so the init code is what decides. It carries the
+compiled controller, the three base facets' addresses with their selector lists, and the owner — so
+reproducing the production address needs **every one of those** to match, not the owner alone. That
+is what the pinned bootstrap is for: it deploys historical bytes rather than rebuilding them, which
+is why current source deliberately cannot reproduce the address and the generic script must not be
+pointed at a loan chain (it refuses: Flare family only). Within one build the owner is the input
+that moves, and moving it is what separates the two modes. Everything below is the **pinned** mode;
+the other is named here so nobody reaches for the wrong one.
+
+| | pinned (production) | throwaway (staging, testing) |
+| --- | --- | --- |
+| initial owner | the historical EOA, in the pinned init code | the deployer |
+| the rest of the init code | historical bytes, deployed as they were | current source, rebuilt |
+| controller address | the production one, on every chain | another one, deliberately |
+| who broadcasts | any funded key; CREATE2 ignores the sender | the deployer, who must be the owner |
+| cut and configuration | the multisig, after the transfer | the deployer, in the run, timelock zero |
+| ownership transfer | one transaction from the initial owner | the run's last step, if governance is set |
+| what it rehearses | the real thing, ceremony included | everything but the bootstrap and that |
+| the script | `deploy_ethereum_controller` (loan chains only) | `deploy_contracts` (Flare family only) |
+
+This is the sequence Coston2 followed in January: base facets deployed from an ordinary key with
+the historical owner passed in, that owner transferring to the multisig in a separate transaction,
+and every cut and setting arriving from the multisig afterwards. Its staging controller is the other
+mode and sits at another address, still owned by the key that deployed it. Note the last row: the
+throwaway script is Flare-family only today, so on a loan chain the pinned mode is the only one
+there is.
+
 ### B1. Prove control of the bootstrap owner, then bootstrap
 
-The bootstrap is permissionless, but the first cut must come from the pinned historical owner.
-**Reading that address proves nothing about who holds its key**: obtain signing evidence from the
-holder before deploying anything, because a controller nobody can cut is a dead deployment at a
-frozen address.
+The bootstrap is permissionless, but the diamond it produces is owned by the pinned historical
+owner, and only that key can hand it on. **Reading the address proves nothing about who holds its
+key**: obtain signing evidence from the holder before deploying anything, because a controller
+nobody can transfer is a dead deployment at a frozen address, with no way to cut a facet into it.
 
 ```bash
 pnpm deploy_ethereum_controller <network>   # ethereum, or sepolia for the rehearsal
@@ -238,18 +274,29 @@ pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]
 pnpm check_cut <network> <cut-file>
 ```
 
-### B3. The cut, with its init in one transaction
+### B3. The ownership transfer
 
-`EthereumControllerInit.init()` sets the four ERC-165 flags and nothing else. Verify after with
-`pnpm verify_diamond <network> <cut> --expect-owner <owner>`.
+The bootstrap's owner is the historical EOA, which is on hardware: it signs **one** transaction
+here, `transferOwnership` to the intended governance, and nothing else. That is the plain EIP-2535
+ownership facet — an owner check and no timelock — and it is available the moment B1 lands, since
+the three pinned base facets include it. Re-verify with `--expect-owner` naming the new owner.
 
-### B4. Governance configuration, then the ownership transfer
+Everything owner-gated therefore comes **after** this step, not before it: the diamond arrives owned
+by that EOA, so a cut or a role change made first would need it to sign each one. In the throwaway
+mode the order is the opposite, because there the deployer owns the diamond and configures it in the
+deploy run itself.
 
-In this order: set pausers, unpausers and a non-zero timelock duration **while the bootstrap owner
-still holds the diamond**, then transfer ownership to the intended governance, then re-verify with
-`--expect-owner` naming the new owner. The init establishes none of these. Transferring first means
-every remaining configuration call has to go through the new owner, which is slower and easy to get
-half-done.
+### B4. The cut and the governance configuration, from the new owner
+
+`EthereumControllerInit.init()` sets the four ERC-165 flags and nothing else, in the same
+transaction as the cut. Verify after with
+`pnpm verify_diamond <network> <cut> --expect-owner <owner>`, naming the new owner.
+
+Then, in this order: pausers, unpausers, and the timelock duration **last**. The init establishes
+none of them. The order matters because the duration is still zero until it is set, so everything
+before it applies immediately while every **timelocked** call after it queues — adding a pauser or
+an unpauser included. The one exception is `removeUnpausers`, which this release makes immediate
+(`onlyOwner`); pauser removal stays timelocked like the rest.
 
 Read the configuration itself back, not only the owner — `verify_diamond` checks ownership and the
 diamond's surface and says nothing about roles or delay. Compare `getPausers()`, `getUnpausers()`
