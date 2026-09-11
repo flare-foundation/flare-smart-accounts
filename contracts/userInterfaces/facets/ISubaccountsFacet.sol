@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.4 <0.9;
 
-/// @dev Reserved subaccount type: "not configured". Never has an implementation.
+/// @dev Reserved subaccount type: "not configured". Never has an implementation. Every other
+/// value is an allocation this deployment made, not a protocol concept: the ids in use are in
+/// `deployment/scripts/SubaccountTypes.sol` and published in `docs/specs/ApiReference.md`.
 uint256 constant SUBACCOUNT_TYPE_NONE = 0;
-/// @dev The loan subaccount type: the pair that borrows on one Morpho market. The type fixes
-/// that market write-once, so the name is the venue's and a second market is a second type.
-uint256 constant SUBACCOUNT_TYPE_MORPHO_LOAN = 1;
 
 /**
  * @title ISubaccountsFacet

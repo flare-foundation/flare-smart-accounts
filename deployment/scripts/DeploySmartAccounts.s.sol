@@ -13,7 +13,7 @@ import {IIMasterAccountController} from "../../contracts/smartAccounts/interface
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.sol";
-import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "./SubaccountTypes.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";

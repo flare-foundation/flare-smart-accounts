@@ -17,6 +17,24 @@ Pointer index from each module to its public interfaces. All user-facing types a
 - [`IComposeReceiverAccountBase`](../../contracts/userInterfaces/IComposeReceiverAccountBase.sol) — the shared authenticated `lzCompose` and replay surface of the three compose receivers (the loan-chain subaccount and Personal Account, and the Flare loan subaccount as the receiver of its own bridge-back): the entry point, the payload version and skip-reason constants, the authentication/replay errors, and the `usedOperations` and `controllerAddress` views. `IMorphoLoanSubaccountRemote`, `IPersonalAccountRemote` and `ILoanSubaccount` extend it and expose their other rails.
 - [`IPersonalAccountRemote`](../../contracts/userInterfaces/IPersonalAccountRemote.sol) — remote Personal Account ABI (the compose-driven twin of the Flare PA at the same address, on the loan chain at launch): signed call-batch execution and the identity views; no permissionless rails.
 
+### Subaccount types
+
+A subaccount's type is a `uint256` the caller passes to `createSubaccount(xrplOwner, type)` and
+`getSubaccount(xrplOwner, type)`. Type `0` is reserved and always invalid; every other value is an
+allocation this deployment made, and the contracts accept any of them that governance has given an
+implementation. The ids in use:
+
+| Type | Allocated implementation pair | Resolve its market with |
+|------|-------------------------------|-------------------------|
+| `0` | None, ever — the reserved "not configured" value ([`SUBACCOUNT_TYPE_NONE`](../../contracts/userInterfaces/facets/ISubaccountsFacet.sol)) | — |
+| `1` | The loan pair: `LoanSubaccount` on Flare and `MorphoLoanSubaccountRemote` on the loan chain (Ethereum, at launch), borrowing on one Morpho market registered write-once | [`getLoanMarket(1)`](../../contracts/userInterfaces/facets/IMorphoLoanMarketsFacet.sol), on the loan-chain diamond |
+
+An allocation is what this repository assigns, not what a given chain has: whether a type is usable
+there is `implementationForType(type)` on that chain's controller, and a loan type's market is
+`getLoanMarket(type)` on the loan-chain diamond. The allocations live with the deployment, in
+[`deployment/scripts/SubaccountTypes.sol`](../../deployment/scripts/SubaccountTypes.sol); read a
+type's market from the chain rather than from a name, since a second market is a second type.
+
 ### Per-facet
 
 | Interface | Facet | Subject |

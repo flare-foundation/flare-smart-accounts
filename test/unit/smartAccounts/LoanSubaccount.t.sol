@@ -43,9 +43,9 @@ import {
 import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {
     ISubaccountsFacet,
-    SUBACCOUNT_TYPE_MORPHO_LOAN,
     SUBACCOUNT_TYPE_NONE
 } from "../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../../deployment/scripts/SubaccountTypes.sol";
 import {IBridgeRoutesFacet} from "../../../contracts/userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {IMasterAccountController} from "../../../contracts/userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../../../contracts/userInterfaces/IPersonalAccount.sol";

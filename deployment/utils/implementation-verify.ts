@@ -27,7 +27,7 @@ export interface ImplementationSpec {
   family: "flare" | "remote";
 }
 
-/** `SUBACCOUNT_TYPE_MORPHO_LOAN` in contracts/userInterfaces/facets/ISubaccountsFacet.sol. */
+/** `SUBACCOUNT_TYPE_MORPHO_LOAN` in deployment/scripts/SubaccountTypes.sol, mirrored here. */
 export const SUBACCOUNT_TYPE_MORPHO_LOAN = 1;
 
 /** The four implementations that get registered, by artifact name. */

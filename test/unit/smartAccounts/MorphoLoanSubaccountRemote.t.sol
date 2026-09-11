@@ -53,9 +53,9 @@ import {IIMorphoLoanMarketsFacet} from "../../../contracts/smartAccounts/interfa
 import {IMorpho} from "../../../contracts/smartAccounts/interface/IMorpho.sol";
 import {
     ISubaccountsFacet,
-    SUBACCOUNT_TYPE_MORPHO_LOAN,
     SUBACCOUNT_TYPE_NONE
 } from "../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../../deployment/scripts/SubaccountTypes.sol";
 import {IBridgeRoutesFacet} from "../../../contracts/userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {NotContractOwner} from "../../../contracts/diamond/libraries/LibDiamond.sol";
 import {MintableERC20} from "../../../contracts/mock/MintableERC20.sol";
