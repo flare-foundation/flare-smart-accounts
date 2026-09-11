@@ -181,12 +181,22 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
             _type,
             IMorphoLoanMarketsFacet.Market(address(morpho), params)
         );
-        _setTerms(_type, 0.07e18, 0.01e18);
+        _activateMarket(_type);
     }
 
     /// @dev Creates the market the fixture is about; a fork suite inherits a live one instead.
     function _ensureMarket() internal virtual {
         morpho.createMarket(params);
+    }
+
+    /// @dev Prices the type the fixture registered - the first `setLoanFeeTerms` is what opens
+    /// borrowing; a suite that rehearses the activation itself leaves the type unpriced instead.
+    function _activateMarket(
+        uint256 _type
+    )
+        internal virtual
+    {
+        _setTerms(_type, 0.07e18, 0.01e18);
     }
 
     function _setTerms(
@@ -223,12 +233,25 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         internal view
         returns (bytes memory)
     {
+        return _borrowUntil(_id, _amount, uint64(vm.getBlockTimestamp() + 1 hours));
+    }
+
+    /// @dev A borrow to the parent with an explicit deadline, for a packet that has to outlive a
+    /// governance delay.
+    function _borrowUntil(
+        bytes32 _id,
+        uint256 _amount,
+        uint64 _deadline
+    )
+        internal view
+        returns (bytes memory)
+    {
         return abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_BORROW,
             abi.encode(
                 _id,
-                uint64(vm.getBlockTimestamp() + 1 hours),
+                _deadline,
                 DESTINATION_KIND_EVM,
                 bytes32(uint256(uint160(parent))),
                 _amount,
