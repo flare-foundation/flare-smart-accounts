@@ -181,6 +181,7 @@
     "ReentrancyGuardTransient",
     "redeployments",
     "relayer",
+    "remappings",
     "repoint",
     "Repoint",
     "repointed",

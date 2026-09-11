@@ -14,9 +14,12 @@ import {PersonalAccountProxy} from "../../../contracts/smartAccounts/proxy/Perso
  * rebuilds is the property that lets Personal Account CREATE2 addresses match across all
  * networks the protocol is deployed to.
  *
- * If any test here fails, you are looking at a cross-chain coordination event: all "predicted but
- * not yet deployed" Personal Account addresses will shift to a new derivation moment. Do not
- * update fixtures in this file without explicit cross-chain alignment.
+ * Two kinds of failure, and only one of them moves an address. The frozen hash below is the
+ * constant itself: if it differs, every "predicted but not yet deployed" Personal Account address
+ * shifts to a new derivation moment, and that is a cross-chain coordination event. The
+ * comparisons against a fresh compilation say something else - that the proxy's source no longer
+ * matches what the constant was frozen from - and while the constant stands no address moves.
+ * Either way the answer is never to update a fixture here: align first.
  */
 contract PersonalAccountsLibraryTest is Test {
     /// @dev keccak256 of `PROXY_CREATION_CODE` from the live Flare deployment (commit `2abb115`).
@@ -28,7 +31,8 @@ contract PersonalAccountsLibraryTest is Test {
     /// Excluded by name in `.gitlab-ci.yml` and `package.json`'s `coverage` script.
     function testProxyCreationCodeLengthMatchesFreshCompilation() public pure {
         // Cheapest smoke test: if `PersonalAccountProxy.sol` recompiles to a different *length*,
-        // the proxy's runtime size changed and the frozen constant no longer represents the live
+        // the creation code moved - the constructor, the runtime it carries or the size of the
+        // metadata trailer - and the frozen constant no longer represents the live
         // source. The deeper check below covers same-length semantic drift.
         assertEq(
             PersonalAccounts.PROXY_CREATION_CODE.length,

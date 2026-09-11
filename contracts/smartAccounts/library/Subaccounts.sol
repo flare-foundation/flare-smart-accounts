@@ -29,9 +29,16 @@ library Subaccounts {
      * production deployment. Burned in as a constant so the CREATE2 input is invariant across
      * rebuilds.
      *
-     * Equal to `type(SubaccountProxy).creationCode` as compiled from this revision with the
-     * release compiler (solc 0.8.35), so unlike {PersonalAccounts.PROXY_CREATION_CODE} it is
-     * byte-exactly reproducible from current source. Later metadata-only drift is expected and
+     * Equal to `type(SubaccountProxy).creationCode` as compiled from this revision on the release
+     * build (solc 0.8.35), unlike {PersonalAccounts.PROXY_CREATION_CODE}, which was frozen from
+     * an earlier one. Reproducing it byte for byte is possible wherever every input matches; what
+     * survives a difference is the functional prefix, given the same compiler and the same
+     * code-generation settings over the same resolved dependencies. The trailing CBOR holds the
+     * compiler version and a hash of the metadata JSON, and that JSON carries the source unit
+     * names and hashes, the settings and the remappings the compiler was handed - so a machine
+     * whose installed dependencies produce other remappings compiles this same source to another
+     * trailer. (Changing `bytecodeHash` or `appendCBOR` is a different matter: it resizes the
+     * trailer rather than moving it, so the code's length changes too.) The drift is expected and
      * tolerated rather than re-frozen: once an address is predicted anywhere, the constant is
      * fixed for good.
      *

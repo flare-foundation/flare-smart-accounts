@@ -18,14 +18,25 @@ network, and who executes governance on each. Every verification below compares 
 audited afterwards.
 
 **The subaccount creation-code constant belongs to this commit.** `Subaccounts.PROXY_CREATION_CODE`
-was re-frozen onto the release build on 2026-09-09, so it is the byte-exact creation code of the
-reviewed source. Do not re-freeze it again. Every subaccount address derives from it, and from the
-first predicted address onward — published to a user or funded before the subaccount exists — a
-change misdirects assets already sent to the old one. Later metadata-only drift in the proxy's
-sources is expected and is not a reason to touch it: what that drift moves is only the
-fresh-source comparison in `test/unit/smartAccounts/SubaccountsLibrary.t.sol`, which is deliberately
-metadata-blind. The two fixtures that would catch an address moving — the frozen hash there and the
-golden vectors in `PinnedInitCode.t.sol` — stay exact, and a diff in either is the signal to stop.
+was re-frozen onto the release build on 2026-09-09, so it is the creation code of the reviewed
+source as that build compiled it: byte for byte wherever every input matches, and in its functional
+prefix given the same compiler and code-generation settings over the same resolved dependencies.
+The CBOR trailer holds the compiler version and a hash of the metadata JSON, which carries the
+source unit names and hashes, the settings and the remappings — so another machine can compile this
+same source to another trailer. Do not re-freeze the constant. Every subaccount address derives from
+it, and from the first predicted address onward — published to a user or funded before the
+subaccount exists — a change misdirects assets already sent to the old one.
+
+Running the check, and what each outcome means. Run the comparisons in
+`test/unit/smartAccounts/SubaccountsLibrary.t.sol` under the normal build profile, not the
+upgrade-validation one. If the frozen hash there and the golden vectors in `PinnedInitCode.t.sol`
+pass while only the trailer differs from a fresh compilation, that is the tolerated metadata drift:
+record it and carry on, since the constant and every address derived from it are unchanged. If the
+length or the metadata-blind functional comparison fails, stop and reconcile the build inputs —
+compiler, dependencies, settings — and if they are already identical, the proxy's source itself has
+moved, which is a release decision rather than an execution one. If the frozen hash or a golden
+vector differs, stop outright: that is the constant changing, and with it every predicted address.
+In none of these cases is the answer to update the constant or a fixture to make a test pass.
 
 ## Scope — every row resolved before execution
 

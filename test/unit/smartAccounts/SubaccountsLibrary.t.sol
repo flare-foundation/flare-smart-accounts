@@ -16,9 +16,12 @@ import {SubaccountProxy} from "../../../contracts/smartAccounts/proxy/Subaccount
  * match across all networks; for the loan type it is load-bearing for funds in flight, since
  * the forward moves bridge FXRP to this same address on the loan chain.
  *
- * If any test here fails, you are looking at a cross-chain coordination event: all "predicted
- * but not yet deployed" subaccount addresses will shift to a new derivation moment. Do not
- * update fixtures in this file without explicit cross-chain alignment.
+ * Two kinds of failure, and only one of them moves an address. The frozen hash below is the
+ * constant itself: if it differs, every "predicted but not yet deployed" subaccount address
+ * shifts to a new derivation moment, and that is a cross-chain coordination event. The two
+ * comparisons against a fresh compilation say something else - that the proxy's source no longer
+ * matches what the constant was frozen from - and while the constant stands no address moves.
+ * Either way the answer is never to update a fixture here: align first.
  */
 contract SubaccountsLibraryTest is Test {
     /// @dev keccak256 of `PROXY_CREATION_CODE` as frozen (2026-09-09, pre-deployment;
@@ -32,9 +35,10 @@ contract SubaccountsLibraryTest is Test {
     /// comes out structurally different from the via-IR build the constant was frozen against.
     /// Excluded by name in `.gitlab-ci.yml` and `package.json`'s `coverage` script.
     function testProxyCreationCodeLengthMatchesFreshCompilation() public pure {
-        // Cheapest smoke test: if `SubaccountProxy.sol` recompiles to a different *length*,
-        // the proxy's runtime size changed and the frozen constant no longer represents the live
-        // source. The deeper check below covers same-length semantic drift.
+        // Cheapest smoke test: if `SubaccountProxy.sol` recompiles to a different *length*, the
+        // frozen constant no longer represents the live source - the creation code moved, whether
+        // in the constructor, the runtime it carries or the size of the metadata trailer. The
+        // deeper check below covers same-length semantic drift.
         assertEq(
             Subaccounts.PROXY_CREATION_CODE.length,
             type(SubaccountProxy).creationCode.length,
