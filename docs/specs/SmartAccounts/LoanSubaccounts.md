@@ -1460,7 +1460,7 @@ the diamond and its three base facets is therefore pinned as raw bytes under
 `deployment/pinned-init-code/` (recovered from the Flare creation transactions and verified:
 its CREATE2 derivation reproduces the live addresses exactly; `test/unit/smartAccounts/PinnedInitCode.t.sol`
 asserts the hashes, the derivation, and a golden xrplOwner → Personal Account → subaccount
-address vector in CI). `pnpm deploy_ethereum_controller <network>` reproduces all four contracts
+address vector in CI). `pnpm deploy_remote_controller_pinned <network>` reproduces all four contracts
 at the production addresses on a loan chain — Ethereum, or Sepolia, where the same singleton
 factory makes the same derivation land the same addresses, which is what allows the bootstrap to
 be rehearsed there. It is permissionless, since CREATE2 through the EIP-2470 factory is

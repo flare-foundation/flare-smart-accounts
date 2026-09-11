@@ -79,7 +79,7 @@ async function main() {
       if (!record) {
         throw new Error(
           `${pinnedName}: pinned base facet missing from deployment/deploys/${network}.json — ` +
-            `run the pinned bootstrap (DeployEthereumController) before planning a cut`
+            `run the pinned bootstrap (DeployRemoteControllerPinned) before planning a cut`
         );
       }
       if (record.address.toLowerCase() !== pin.address) {
@@ -178,7 +178,7 @@ async function buildFacetPlans(
       if (pinnedCodeHex === ZERO_CODE) {
         throw new Error(
           `${facet.name}: no code at the pinned address — run the Ethereum bootstrap ` +
-            `(DeployEthereumController) before planning a cut`
+            `(DeployRemoteControllerPinned) before planning a cut`
         );
       }
       if (Web3.utils.keccak256(pinnedCodeHex).toLowerCase() !== pinned.runtimeCodeHash) {

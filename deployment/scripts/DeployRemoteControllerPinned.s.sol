@@ -28,7 +28,7 @@ import {DeployNetworks} from "../lib/DeployNetworks.sol";
  * when - they exist there.
  */
 // solhint-disable no-console
-contract DeployEthereumController is Script {
+contract DeployRemoteControllerPinned is Script {
     function run(
         string calldata _expectedNetwork
     )

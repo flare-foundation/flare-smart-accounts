@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 import {DeployComposer} from "../../../deployment/scripts/DeployComposer.s.sol";
-import {DeployEthereumController} from "../../../deployment/scripts/DeployEthereumController.s.sol";
+import {DeployRemoteControllerPinned} from "../../../deployment/scripts/DeployRemoteControllerPinned.s.sol";
 import {DeployNetworks} from "../../../deployment/lib/DeployNetworks.sol";
 import {PinnedControllerInitCode} from "../../../deployment/lib/PinnedControllerInitCode.sol";
 import {MockSingletonFactory} from "../../../contracts/mock/MockSingletonFactory.sol";
@@ -37,7 +37,7 @@ contract DeployNetworkGuardsTest is Test {
     DeployPersonalAccountImplementation private personalAccountScript;
     DeployRemoteAccountImplementations private remoteScript;
     DeployComposer private composerScript;
-    DeployEthereumController private bootstrapScript;
+    DeployRemoteControllerPinned private bootstrapScript;
 
     /// @dev an external seam, so `expectRevert` can watch the library's own revert
     function nameOf(
@@ -56,7 +56,7 @@ contract DeployNetworkGuardsTest is Test {
         personalAccountScript = new DeployPersonalAccountImplementation();
         remoteScript = new DeployRemoteAccountImplementations();
         composerScript = new DeployComposer();
-        bootstrapScript = new DeployEthereumController();
+        bootstrapScript = new DeployRemoteControllerPinned();
     }
 
     function testHomeImplementationsRefuseEveryLoanChain() public {

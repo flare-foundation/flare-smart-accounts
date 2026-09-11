@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: deployment/scripts/deploy-ethereum-controller.sh <network>
-# Example: deployment/scripts/deploy-ethereum-controller.sh sepolia
+# Usage: deployment/scripts/deploy-remote-controller-pinned.sh <network>
+# Example: deployment/scripts/deploy-remote-controller-pinned.sh sepolia
 #
 # Reproduces the pinned controller and its three base facets at the production addresses on a
 # loan chain - Ethereum, or Sepolia as its rehearsal; the forge script refuses any other chain and
@@ -41,7 +41,7 @@ if [[ -z "${DEPLOYER_PRIVATE_KEY:-}" ]]; then
   exit 2
 fi
 
-forge script deployment/scripts/DeployEthereumController.s.sol:DeployEthereumController \
+forge script deployment/scripts/DeployRemoteControllerPinned.s.sol:DeployRemoteControllerPinned \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
   --offline \
