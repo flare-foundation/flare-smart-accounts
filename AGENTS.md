@@ -73,7 +73,9 @@ pnpm deploy_contracts <network> <fullDeploy>
 pnpm deploy_personal_account_implementation <network>
 pnpm deploy_loan_subaccount_implementation <network>
 pnpm deploy_remote_account_implementations <network>
-pnpm deploy_ethereum_controller <network>
+pnpm deploy_remote_controller_pinned <network>
+pnpm deploy_remote_controller_throwaway <network>
+pnpm configure_remote_controller <network> <prepare|execute|verify> [section] [target]
 pnpm diamond_cut <network> <cut-file-name>
 pnpm check_cut <network> [cut-file-name] [--no-build]
 pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]
@@ -85,8 +87,19 @@ pnpm verify_contracts <network>
 
 - The ordered, verified release sequence — which governance call to make when, and what proves each step landed — is [`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md). The commands below are its building blocks; the runbook is what says in which order to run them and on which networks.
 - `<fullDeploy>` is a boolean (`true` or `false`). **Both modes are a full deployment from current source** — `false` only skips the diamond cut, the init and the vault/wallet configuration — so neither is a facet-only mode or for a live network. To add or replace facets on a live network, use a cut file and `pnpm diamond_cut`. Why, and the recorder's guard on the two live entries, are in [`deployment/README.md`](./deployment/README.md).
-- Supported networks are the Flare family `coston2`, `coston`, `flare` and `songbird`, with `-staging` variants such as `coston2-staging`, and the loan chains `ethereum` and `sepolia` (its testnet), which have only the pinned deployment and no staging alias. A chain in neither family is refused by every tool; the rules are in [`deployment/README.md`](./deployment/README.md#networks).
+- Supported networks are the Flare family `coston2`, `coston`, `flare` and `songbird`, with `-staging` variants such as `coston2-staging`, and the loan chains `ethereum` and `sepolia` (its testnet), whose one tracked deployment is the pinned one and which have no staging alias. Sepolia also takes a throwaway deployment for rehearsals (`deploy_remote_controller_throwaway`), recorded in the gitignored `sepolia_mock` record, which only `configure_remote_controller` reads, and only when its target argument says `throwaway`. A chain in neither family is refused by every tool; the rules are in [`deployment/README.md`](./deployment/README.md#networks).
 - Deployment requires `.env` with `<NETWORK>_RPC_URL` and `DEPLOYER_PRIVATE_KEY`.
+- `configure_remote_controller` is everything the remote controller is configured with after its cut, read from
+  `deployment/chain-config/<network>.json`: the sections are `governance` (the pauser and unpauser roles, then
+  the timelock duration last), `transport`, `market`, `fees`, `wiring` (the last three) and `all`, defaulting to
+  `governance`, and the target is `pinned` or `throwaway` — which controller on that chain to configure, named
+  rather than assumed, defaulting to `pinned`. `prepare` writes the calls for the owner to submit under `deployment/output-internal/<network>/`
+  and prints them, with the `executeTimelockedCall` line beside each one once a duration is in force; `execute`
+  submits them and needs the diamond's current owner to sign, so it serves the throwaway flow alone — its own
+  read-back sees simulated state, so the wrapper follows a broadcast with a separate `verify` run; `verify`
+  reads the chain back. A section named on its own must be complete in the file; a sweep skips an incomplete one
+  with a note. Only `execute` takes a signing key: the other two read, and a multisig owner has nothing to sign
+  with anyway.
 - All `forge script` invocations use `--offline` to skip Foundry's external selector/source lookups. Without it, runs on Flare/Songbird hang for several minutes — likely external signature/source database calls timing out for these chains. The chain RPC itself is unaffected.
 
 ### Required Checks
@@ -306,9 +319,11 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
     is that contract verbatim plus an `eid` getter), because the compose queue's rules are relied on rather than
     implemented. Both files are `--skip`ped by `pnpm coverage`: LayerZero's composer does not compile with the
     optimizer disabled, which is how `forge coverage` builds. `test/unit/deployment/DeploySmartAccountsGuards.t.sol`
-    is skipped for the same class of reason: `DeploySmartAccounts` copies a memory array of structs into storage,
-    which only the IR pipeline compiles (solc 1834), so a test importing it cannot build under coverage - deploy
-    scripts are pruned from the figure anyway, so the skip costs nothing. The fork suites skip themselves
+    and `test/unit/deployment/DeployRemoteControllerThrowaway.t.sol` are skipped for the same class of reason:
+    `DeploySmartAccounts` copies a memory array of structs into storage, which only the IR pipeline compiles
+    (solc 1834), and `DeployRemoteControllerThrowaway` assembles the controller's constructor arguments, which
+    without the IR pipeline is stack-too-deep - so a test importing either cannot build under coverage. Deploy
+    scripts are pruned from the figure anyway, so the skips cost nothing. The fork suites skip themselves
     unless the network they need is configured, so an offline run is inert rather than failing;
     `MorphoLoanSubaccountRemoteFork.t.sol` needs `ETHEREUM_RPC_URL` to name an endpoint that serves state at its
     pinned block (an archive read), and runs with

@@ -17,7 +17,10 @@ to its family there before anything is deployed to it:
 - the Flare family, `flare`, `songbird`, `coston` and `coston2`, where the home accounts live. Each
   has a public RPC the tooling defaults to, and a `-staging` alias with its own record and chain config;
 - the loan chains, `ethereum` and `sepolia` (its testnet), where the remote accounts live. Each has
-  only the pinned deployment, so no `-staging` alias, and its `<NETWORK>_RPC_URL` is required.
+  one tracked deployment, the pinned one, so no `-staging` alias, and its `<NETWORK>_RPC_URL` is
+  required. Sepolia also takes a throwaway deployment for rehearsals, which records itself in the
+  gitignored `sepolia_mock` record rather than the tracked one and is named explicitly by every tool
+  that can touch it.
 
 A chain in neither family has no name, no record and no chain config here, and every tool refuses it
 whatever the wrapper called it. There is deliberately no local-development network: a rehearsal runs
@@ -68,6 +71,51 @@ After a cut, run `pnpm verify_diamond <network> [cut-file-name]` to read the dia
 ## Verifying an account implementation: `verify_implementation`
 
 Registering an account implementation is the deployment's one blind step: `setPersonalAccountImplementation` and `setSubaccountImplementation` check only that the address has code, so a wrong but `initialize`-compatible implementation would let permissionless creation materialize proxies over the wrong storage layout — permanently, since initialization cannot be replayed. `pnpm verify_implementation <network> <Contract> <address>` asks the same question at the three moments it has to hold, with `--stage`: `pre` before the timelocked registration is queued, `queued` after queueing and before execution, `live` after it. `<Contract>` is `PersonalAccount`, `PersonalAccountRemote`, `LoanSubaccount` or `MorphoLoanSubaccountRemote`; the contract name decides which registry is read (the Personal Account beacon, or the subaccount type) and which chain family the implementation belongs to — the Flare accounts must not be registered on a loan chain (Ethereum, or Sepolia as its testnet) and the remote accounts must not be registered on a Flare-family chain, judged from the same two sets of chain ids the deploy scripts use (`deployment/lib/DeployNetworks.sol`, mirrored by `deployment/utils/networks.ts`). Each script allows its own family and nothing else; a chain in neither family is refused by every tool (see [Networks](#networks)). Every stage checks that the address holds the reviewed artifact's functional code (the planner's `REUSE` verdict) from a source still in the repository. `pre` prints the exact calldata governance must queue; `queued` requires that exact calldata to be queued (the timelock getter reverts for a call it never recorded, which reads as "not queued"); `pre` and `queued` both require a non-zero timelock duration, since with a zero delay the calldata handed to governance registers immediately instead of queueing; `live` requires the registry to point at the address, and with `--xrpl-owner` reads a materialized account back — it reports this controller, and it was initialized with the expected owner, or parent and type for a subaccount; for a Personal Account the ERC-1967 beacon slot must also name the controller, which only `PersonalAccountProxy` records (`SubaccountProxy` is a plain proxy holding the controller and the type as immutables and resolving `implementationForType` on every call, so the registry check is what proves which implementation serves it). An account the flag names that is not materialized fails, since asking for a sample is asking for that proof; omit the flag to verify the registry alone. A registry whose facet is not cut yet is reported as such rather than crashing. All reads are made at one block; `VERIFY_BLOCK_TAG=finalized` makes it a finalized one.
+
+## Deploying the remote controller: pinned and throwaway
+
+The loan chains have two deploy scripts, and which one applies is the same choice
+[`RUNBOOK.md`](./RUNBOOK.md) Part B opens with. `pnpm deploy_remote_controller_pinned <network>` is the
+production bootstrap: historical init code through the singleton factory, reproducing the controller and its
+three base facets at the production addresses on Ethereum and on Sepolia alike, owned by the historical EOA
+that must then hand it on. `pnpm deploy_remote_controller_throwaway sepolia` is the rehearsal's: the same
+controller shape built from current source and owned by the deploying key, so it lands at a different address
+on purpose, with its facet set cut and both remote implementations deployed and registered in the one run —
+everything downstream of the bootstrap, without the ceremony. It refuses Ethereum, and its addresses go to the
+gitignored `<network>_mock` record rather than the tracked one, so nothing resolves a live deployment through
+them. Both of its sides must run the same build or the two controllers diverge; `controllerAddress(owner)`
+derives the address without deploying, for checking that in advance. Every step of it is derived and reused
+rather than freshly created, so a run that failed half way through is resumed by running it again.
+
+## Configuring the remote controller: `configure_remote_controller`
+
+The Flare deploy applies its network's settings inside its own run; the loan chains have no such run,
+because the controller there is bootstrapped from pinned bytes and owned by a multisig from its first hour.
+`pnpm configure_remote_controller <network> <prepare|execute|verify> [section] [target]` is that step, reading the same
+per-network chain config. The sections are one governance group each: `governance` (pausers, unpausers, then
+the timelock duration, which goes last because it is what makes every later timelocked call queue),
+`transport`, `market` and `fees`, plus `wiring` for the last three and `all` for every one; the section
+defaults to `governance`. The target is `pinned` or `throwaway` - which controller on that chain the run
+configures, named rather than assumed and defaulting to `pinned`; the throwaway one is found through the
+gitignored `_mock` record its deploy writes, and refused if that record turns out to name the production
+address or one with no code. A throwaway run therefore reads
+`pnpm configure_remote_controller sepolia execute all throwaway`. Order inside a run is fixed and is not a preference: the market's registration
+validates its collateral token against the transport's OFT, and the first fee-terms call is the type's
+activation, so borrowing reverts until it lands.
+
+`prepare` sends nothing and takes no key. It prints one line per call — target and calldata — and writes them
+to `deployment/output-internal/<network>/configuration-<section>.txt`, the way a cut file with
+`"execute": false` prepares a cut for governance. Once a duration is in force it prints the matching
+`executeTimelockedCall` beside each one, so nobody re-encodes it by hand, and it reports who actually holds
+the diamond, since calls prepared for an owner that has not been handed it cannot be submitted by anyone.
+`execute` submits them and requires the signer to be the current owner with the duration still zero, which is
+the throwaway flow alone — a multisig can never sign here, and a diamond that already has a duration would
+queue every call while the run reported it sent them. `verify` reads the chain back and fails unless the roles
+are exactly the configured set (no extra member either), the duration matches to the second, and every wired
+field agrees; that is the half `verify_diamond` does not cover, since it checks ownership and the diamond's
+surface and says nothing about roles, delay, transport, market or fees. A section named on its own must be
+complete in the config or the run stops naming what is missing; a sweep skips an incomplete one with a note,
+which is how a transport is prepared while the market's loan token and oracle are still to be deployed.
 
 ## Proxy storage layouts
 

@@ -236,17 +236,23 @@ the other is named here so nobody reaches for the wrong one.
 | the rest of the init code | historical bytes, deployed as they were | current source, rebuilt |
 | controller address | the production one, on every chain | another one, deliberately |
 | who broadcasts | any funded key; CREATE2 ignores the sender | the deployer, who must be the owner |
-| cut and configuration | the multisig, after the transfer | the deployer, in the run, timelock zero |
-| ownership transfer | one transaction from the initial owner | the run's last step, if governance is set |
+| the cut | the multisig, after the transfer | the deploy run itself |
+| the configuration | `configure_remote_controller`: prepared, multisig submits | the same, `execute` |
+| ownership transfer | one transaction from the initial owner | none: the deployer keeps it, or hands it on by hand |
 | what it rehearses | the real thing, ceremony included | everything but the bootstrap and that |
-| the script | `deploy_ethereum_controller` (loan chains only) | `deploy_contracts` (Flare family only) |
+| the script | `deploy_remote_controller_pinned` | `deploy_remote_controller_throwaway` (sepolia only) |
 
 This is the sequence Coston2 followed in January: base facets deployed from an ordinary key with
 the historical owner passed in, that owner transferring to the multisig in a separate transaction,
 and every cut and setting arriving from the multisig afterwards. Its staging controller is the other
-mode and sits at another address, still owned by the key that deployed it. Note the last row: the
-throwaway script is Flare-family only today, so on a loan chain the pinned mode is the only one
-there is.
+mode and sits at another address, still owned by the key that deployed it. On the loan chain the
+throwaway script deploys the controller, cuts its facet set and registers both implementations in
+one run, leaving the roles, the duration and the wiring to `configure_remote_controller`'s `execute`
+phase; it refuses Ethereum, where a throwaway would sit beside real money for nothing. Its addresses
+go to the gitignored `<network>_mock` record, so no tool resolves a real deployment through them.
+Both sides must run the SAME build or their controllers land at different addresses:
+`controllerAddress(owner)` on the script derives it without deploying, which is the cheap way to
+check that before anything is sent.
 
 ### B1. Prove control of the bootstrap owner, then bootstrap
 
@@ -256,7 +262,7 @@ key**: obtain signing evidence from the holder before deploying anything, becaus
 nobody can transfer is a dead deployment at a frozen address, with no way to cut a facet into it.
 
 ```bash
-pnpm deploy_ethereum_controller <network>   # ethereum, or sepolia for the rehearsal
+pnpm deploy_remote_controller_pinned <network>   # ethereum, or sepolia for the rehearsal
 pnpm verify_diamond <network> --pre-cut
 ```
 
@@ -283,8 +289,8 @@ the three pinned base facets include it. Re-verify with `--expect-owner` naming 
 
 Everything owner-gated therefore comes **after** this step, not before it: the diamond arrives owned
 by that EOA, so a cut or a role change made first would need it to sign each one. In the throwaway
-mode the order is the opposite, because there the deployer owns the diamond and configures it in the
-deploy run itself.
+mode the order is the opposite, because there the deployer owns the diamond from the start: its deploy
+cuts the facets in the same run, and its configuration follows as a second command it can sign for.
 
 ### B4. The cut and the governance configuration, from the new owner
 
@@ -292,16 +298,36 @@ deploy run itself.
 transaction as the cut. Verify after with
 `pnpm verify_diamond <network> <cut> --expect-owner <owner>`, naming the new owner.
 
-Then, in this order: pausers, unpausers, and the timelock duration **last**. The init establishes
+Then the roles and the duration, from the network's chain config:
+
+```bash
+pnpm configure_remote_controller <network> prepare governance   # the calls, for the owner to submit
+pnpm configure_remote_controller <network> verify governance    # after they land
+```
+
+`prepare` sends nothing and takes no key: it writes the calls under
+`deployment/output-internal/<network>/` and prints them, which is what a multisig owner needs. The
+throwaway mode names its own controller and signs for it, so there the whole of B4 and B6 is:
+
+```bash
+pnpm configure_remote_controller sepolia execute all throwaway
+```
+
+which sends every section in one run, the duration last of all, and then verifies against mined
+state. Leave the target off and the run configures the PINNED controller, which on a rehearsal chain
+is a different deployment entirely.
+
+The order it emits is pausers, unpausers, and the timelock duration **last**. The init establishes
 none of them. The order matters because the duration is still zero until it is set, so everything
 before it applies immediately while every **timelocked** call after it queues — adding a pauser or
 an unpauser included. The one exception is `removeUnpausers`, which this release makes immediate
-(`onlyOwner`); pauser removal stays timelocked like the rest.
+(`onlyOwner`); pauser removal stays timelocked like the rest. From here on `prepare` prints an
+`EXECUTE` line beside each call: the `executeTimelockedCall` that lands it after the delay.
 
 Read the configuration itself back, not only the owner — `verify_diamond` checks ownership and the
-diamond's surface and says nothing about roles or delay. Compare `getPausers()`, `getUnpausers()`
-and `getTimelockDurationSeconds()` against the approved configuration, as sets and as a number,
-before proceeding. A diamond with the right owner and no pauser is not configured.
+diamond's surface and says nothing about roles or delay. That is what the `verify` phase above does:
+both role lists as sets, with no member nobody configured, and the duration to the second. A diamond
+with the right owner and no pauser is not configured.
 
 ### B5. Remote implementations
 
@@ -311,11 +337,30 @@ A4 and A5, then freeze both lineages exactly as A6 describes.
 
 ### B6. Transport and market
 
-`setComposeTransport`, then `registerLoanMarket`, then `setLoanFeeTerms` — the first fee-terms call
-is the activation, and borrowing reverts until it lands, so the market is registered but inert
-across the gap. Read back the transport, the market id and parameters, the token and oracle
-addresses, the rate model, the liquidation ratio, the fee recipient and rates, and the borrowing
-status.
+The same tool as B4, and the same chain config, with the wiring sections:
+
+```bash
+pnpm configure_remote_controller <network> prepare transport
+pnpm configure_remote_controller <network> prepare market
+pnpm configure_remote_controller <network> prepare fees
+pnpm configure_remote_controller <network> verify all
+```
+
+`setComposeTransport`, then `registerLoanMarket`, then `setLoanFeeTerms` — the order is not a
+preference: the market's registration validates its collateral token against the transport's OFT, and
+the first fee-terms call is the activation, so the market is registered but inert across the gap and
+borrowing reverts until the terms land. `wiring` prepares all three at once and skips any section the
+config has not been given yet, which is how a transport is prepared while the market's loan token and
+oracle are still to be deployed. A section asked for by name and not yet filled in stops the run
+instead.
+
+The duration is in force by now, so each of these queues and then needs the `EXECUTE` line the
+prepare phase prints beside it.
+
+Read back the transport, the market id and parameters, the token and oracle addresses, the rate
+model, the liquidation ratio, the fee recipient and rates, and the borrowing status. The `verify`
+phase covers everything the chain config names; the borrowing status and the market id are read by
+hand.
 
 ## Part C — the release-readiness gate
 
