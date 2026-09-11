@@ -33,10 +33,10 @@ const PROTECTED = PROTECTED_ETHEREUM_NAMES.map((name) => ({
 function scratch(fileName: string): { dir: string; file: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "update-facet-address-"));
   fs.mkdirSync(path.join(dir, "deployment/deploys"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "deployment/scripts"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "deployment/lib"), { recursive: true });
   fs.copyFileSync(
-    path.join(deploymentDir, "scripts/PinnedControllerInitCode.sol"),
-    path.join(dir, "deployment/scripts/PinnedControllerInitCode.sol")
+    path.join(deploymentDir, "lib/PinnedControllerInitCode.sol"),
+    path.join(dir, "deployment/lib/PinnedControllerInitCode.sol")
   );
   const file = path.join(dir, `deployment/deploys/${fileName}`);
   fs.writeFileSync(file, JSON.stringify([{ name: "PauseFacet", contractName: "PauseFacet.sol", address: ORDINARY }]));

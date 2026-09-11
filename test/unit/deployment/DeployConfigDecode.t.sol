@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {DeployConfigTypes} from "../../../deployment/types/DeployConfigTypes.sol";
+import {DeployConfigTypes} from "../../../deployment/lib/DeployConfigTypes.sol";
 import {IReaderFacet} from "../../../contracts/userInterfaces/facets/IReaderFacet.sol";
 import {IVaultsFacet} from "../../../contracts/userInterfaces/facets/IVaultsFacet.sol";
 

@@ -6,7 +6,7 @@ import {FAssetRedeemComposer} from "../../contracts/composer/implementation/FAss
 import {FAssetRedeemerAccount} from "../../contracts/composer/implementation/FAssetRedeemerAccount.sol";
 import {FAssetRedeemComposerProxy} from "../../contracts/composer/proxy/FAssetRedeemComposerProxy.sol";
 import {IOwnableWithTimelock} from "../../contracts/userInterfaces/IOwnableWithTimelock.sol";
-import {DeployNetworks} from "./DeployNetworks.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 
 // solhint-disable no-console
 contract DeployComposer is Script {

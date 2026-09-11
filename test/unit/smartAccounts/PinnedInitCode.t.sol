@@ -3,10 +3,10 @@ pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
-import {PinnedControllerInitCode} from "../../../deployment/scripts/PinnedControllerInitCode.sol";
+import {PinnedControllerInitCode} from "../../../deployment/lib/PinnedControllerInitCode.sol";
 import {PersonalAccounts} from "../../../contracts/smartAccounts/library/PersonalAccounts.sol";
 import {Subaccounts} from "../../../contracts/smartAccounts/library/Subaccounts.sol";
-import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../../deployment/scripts/SubaccountTypes.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../../deployment/lib/SubaccountTypes.sol";
 
 /**
  * @title PinnedInitCodeTest

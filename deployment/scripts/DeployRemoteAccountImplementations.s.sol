@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {MorphoLoanSubaccountRemote} from "../../contracts/smartAccounts/implementation/MorphoLoanSubaccountRemote.sol";
-import {DeployNetworks} from "./DeployNetworks.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 import {
     PersonalAccountRemote
 } from "../../contracts/smartAccounts/implementation/PersonalAccountRemote.sol";

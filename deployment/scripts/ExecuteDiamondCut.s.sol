@@ -6,8 +6,8 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {IDiamondCut} from "../../contracts/diamond/interfaces/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../contracts/diamond/interfaces/IDiamondLoupe.sol";
-import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
-import {DeployNetworks} from "./DeployNetworks.sol";
+import {PinnedControllerInitCode} from "../lib/PinnedControllerInitCode.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 
 // solhint-disable no-console
 contract ExecuteDiamondCut is Script {

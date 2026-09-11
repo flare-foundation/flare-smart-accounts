@@ -231,7 +231,7 @@ function scratchRepo(): string {
   const root = mkdtempSync(join(tmpdir(), "verify-diamond-cli-"));
   mkdirSync(join(root, "deployment/deploys"), { recursive: true });
   mkdirSync(join(root, "deployment/cuts/coston2"), { recursive: true });
-  mkdirSync(join(root, "deployment/scripts"), { recursive: true });
+  mkdirSync(join(root, "deployment/lib"), { recursive: true });
   mkdirSync(join(root, "contracts/smartAccounts/facets"), { recursive: true });
   const record = [
     { name: "MasterAccountController", contractName: "MasterAccountController.sol", address: DIAMOND },
@@ -361,8 +361,8 @@ function prepareLoanChain(network: string): void {
     readFileSync(join(repo, "deployment/deploys/coston2.json"), "utf8")
   );
   copyFileSync(
-    join(__dirname, "../../deployment/scripts/PinnedControllerInitCode.sol"),
-    join(repo, "deployment/scripts/PinnedControllerInitCode.sol")
+    join(__dirname, "../../deployment/lib/PinnedControllerInitCode.sol"),
+    join(repo, "deployment/lib/PinnedControllerInitCode.sol")
   );
 }
 

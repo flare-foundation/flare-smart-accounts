@@ -124,7 +124,7 @@ function constantPrefix(facetName: string): string {
  * hold to the real bytes.
  */
 function pinnedSourceAccepting(accepted: Map<string, string>): string {
-  let source = fs.readFileSync(path.join(repoRoot, "deployment/scripts/PinnedControllerInitCode.sol"), "utf8");
+  let source = fs.readFileSync(path.join(repoRoot, "deployment/lib/PinnedControllerInitCode.sol"), "utf8");
   for (const [name, code] of accepted) {
     const declaration = new RegExp(`(${constantPrefix(name)}_RUNTIME_CODE_HASH\\s*=\\s*)0x[0-9a-fA-F]{64}`, "g");
     const matches = source.match(declaration) ?? [];
@@ -155,7 +155,7 @@ function scratchRepo(network: string, record: Record_[], options: RepoOptions = 
   const { cut, pinnedSource, omitProxyArtifact } = options;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "check-cut-plan-"));
   fs.mkdirSync(path.join(dir, "deployment/deploys"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "deployment/scripts"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "deployment/lib"), { recursive: true });
   if (cut) {
     fs.mkdirSync(path.join(dir, `deployment/cuts/${network}`), { recursive: true });
     fs.writeFileSync(
@@ -167,11 +167,11 @@ function scratchRepo(network: string, record: Record_[], options: RepoOptions = 
   fs.writeFileSync(path.join(dir, `deployment/deploys/${network}.json`), JSON.stringify(record, null, 2));
   if (pinnedSource === undefined) {
     fs.copyFileSync(
-      path.join(repoRoot, "deployment/scripts/PinnedControllerInitCode.sol"),
-      path.join(dir, "deployment/scripts/PinnedControllerInitCode.sol")
+      path.join(repoRoot, "deployment/lib/PinnedControllerInitCode.sol"),
+      path.join(dir, "deployment/lib/PinnedControllerInitCode.sol")
     );
   } else {
-    fs.writeFileSync(path.join(dir, "deployment/scripts/PinnedControllerInitCode.sol"), pinnedSource);
+    fs.writeFileSync(path.join(dir, "deployment/lib/PinnedControllerInitCode.sol"), pinnedSource);
   }
   if (omitProxyArtifact !== true) {
     fs.writeFileSync(

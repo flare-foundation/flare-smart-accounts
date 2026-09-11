@@ -45,7 +45,7 @@ import {
     ISubaccountsFacet,
     SUBACCOUNT_TYPE_NONE
 } from "../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
-import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../../deployment/scripts/SubaccountTypes.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../../../deployment/lib/SubaccountTypes.sol";
 import {IBridgeRoutesFacet} from "../../../contracts/userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {IMasterAccountController} from "../../../contracts/userInterfaces/IMasterAccountController.sol";
 import {IPersonalAccount} from "../../../contracts/userInterfaces/IPersonalAccount.sol";

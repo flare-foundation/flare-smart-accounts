@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Test} from "forge-std/Test.sol";
-import {DeployNetworks} from "../../../deployment/scripts/DeployNetworks.sol";
+import {DeployNetworks} from "../../../deployment/lib/DeployNetworks.sol";
 import {DeploySmartAccounts} from "../../../deployment/scripts/DeploySmartAccounts.s.sol";
 
 /**

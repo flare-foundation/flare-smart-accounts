@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
-import {DeployNetworks} from "./DeployNetworks.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 
 // solhint-disable no-console
 contract DeployPersonalAccountImplementation is Script {

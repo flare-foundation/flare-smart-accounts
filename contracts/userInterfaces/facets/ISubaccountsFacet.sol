@@ -3,7 +3,7 @@ pragma solidity >=0.8.4 <0.9;
 
 /// @dev Reserved subaccount type: "not configured". Never has an implementation. Every other
 /// value is an allocation this deployment made, not a protocol concept: the ids in use are in
-/// `deployment/scripts/SubaccountTypes.sol` and published in `docs/specs/ApiReference.md`.
+/// `deployment/lib/SubaccountTypes.sol` and published in `docs/specs/ApiReference.md`.
 uint256 constant SUBACCOUNT_TYPE_NONE = 0;
 
 /**

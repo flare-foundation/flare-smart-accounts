@@ -145,10 +145,10 @@ void test("the pins hold even when the override names the controller", () => {
   // a recorder that checked the stored record instead of the incoming one would refuse for the
   // wrong reason and this test could not tell
   const dir = setUp("ethereum", [controller(PINNED_CONTROLLER)], [controller(CONTROLLER_B)]);
-  fs.mkdirSync(path.join(dir, "deployment/scripts"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "deployment/lib"), { recursive: true });
   fs.copyFileSync(
-    path.join(repoRoot, "deployment/scripts/PinnedControllerInitCode.sol"),
-    path.join(dir, "deployment/scripts/PinnedControllerInitCode.sol")
+    path.join(repoRoot, "deployment/lib/PinnedControllerInitCode.sol"),
+    path.join(dir, "deployment/lib/PinnedControllerInitCode.sol")
   );
 
   const { status, stderr } = run(dir, "MasterAccountController");
@@ -172,10 +172,10 @@ void test("every protected name is held to its pin, on both loan chains", () => 
         [{ name, contractName: `${name}.sol`, address: pinned }],
         [{ name, contractName: `${name}.sol`, address: CONTROLLER_B }]
       );
-      fs.mkdirSync(path.join(dir, "deployment/scripts"), { recursive: true });
+      fs.mkdirSync(path.join(dir, "deployment/lib"), { recursive: true });
       fs.copyFileSync(
-        path.join(repoRoot, "deployment/scripts/PinnedControllerInitCode.sol"),
-        path.join(dir, "deployment/scripts/PinnedControllerInitCode.sol")
+        path.join(repoRoot, "deployment/lib/PinnedControllerInitCode.sol"),
+        path.join(dir, "deployment/lib/PinnedControllerInitCode.sol")
       );
       const { status, stderr } = run(dir, name);
       assert.notEqual(status, 0, `${network}/${name}: the pinned record must not be writable`);
@@ -189,10 +189,10 @@ void test("the pins hold on Sepolia exactly as on Ethereum", () => {
   // the rehearsal reproduces the production controller at the same address on Sepolia, so the
   // same four names may only ever hold the pinned values there too
   const dir = setUp("sepolia", [controller(PINNED_CONTROLLER)], [controller(CONTROLLER_B)]);
-  fs.mkdirSync(path.join(dir, "deployment/scripts"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "deployment/lib"), { recursive: true });
   fs.copyFileSync(
-    path.join(repoRoot, "deployment/scripts/PinnedControllerInitCode.sol"),
-    path.join(dir, "deployment/scripts/PinnedControllerInitCode.sol")
+    path.join(repoRoot, "deployment/lib/PinnedControllerInitCode.sol"),
+    path.join(dir, "deployment/lib/PinnedControllerInitCode.sol")
   );
   const { status, stderr } = run(dir, "MasterAccountController");
   assert.notEqual(status, 0, "the pinned record must not be writable on Sepolia either");

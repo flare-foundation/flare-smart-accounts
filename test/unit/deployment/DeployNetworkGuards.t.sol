@@ -4,8 +4,8 @@ pragma solidity ^0.8.27;
 import {Test} from "forge-std/Test.sol";
 import {DeployComposer} from "../../../deployment/scripts/DeployComposer.s.sol";
 import {DeployEthereumController} from "../../../deployment/scripts/DeployEthereumController.s.sol";
-import {DeployNetworks} from "../../../deployment/scripts/DeployNetworks.sol";
-import {PinnedControllerInitCode} from "../../../deployment/scripts/PinnedControllerInitCode.sol";
+import {DeployNetworks} from "../../../deployment/lib/DeployNetworks.sol";
+import {PinnedControllerInitCode} from "../../../deployment/lib/PinnedControllerInitCode.sol";
 import {MockSingletonFactory} from "../../../contracts/mock/MockSingletonFactory.sol";
 import {DeployLoanSubaccountImplementation} from
     "../../../deployment/scripts/DeployLoanSubaccountImplementation.s.sol";

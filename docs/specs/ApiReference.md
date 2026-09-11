@@ -32,7 +32,7 @@ implementation. The ids in use:
 An allocation is what this repository assigns, not what a given chain has: whether a type is usable
 there is `implementationForType(type)` on that chain's controller, and a loan type's market is
 `getLoanMarket(type)` on the loan-chain diamond. The allocations live with the deployment, in
-[`deployment/scripts/SubaccountTypes.sol`](../../deployment/scripts/SubaccountTypes.sol); read a
+[`deployment/lib/SubaccountTypes.sol`](../../deployment/lib/SubaccountTypes.sol); read a
 type's market from the chain rather than from a name, since a second market is a second type.
 
 ### Per-facet

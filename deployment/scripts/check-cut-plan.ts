@@ -144,7 +144,7 @@ async function main() {
 // --- Section 1: which facet contracts need (re)deploying ---
 
 // The Ethereum bootstrap reproduces the diamond's base facets from pinned historical init
-// code, not from current-source artifacts (see deployment/scripts/PinnedControllerInitCode.sol
+// code, not from current-source artifacts (see deployment/lib/PinnedControllerInitCode.sol
 // and deployment/pinned-init-code/). Comparing them against today's build would wrongly
 // propose replacing them; instead they are verified against the pinned Flare runtime-code
 // hashes (keccak256 of the deployed code) and reported as intentional reuse. Applies only on

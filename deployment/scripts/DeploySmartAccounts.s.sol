@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 // solhint-disable no-console
 
 import {Script, console2} from "forge-std/Script.sol";
-import {DeployConfigTypes} from "../types/DeployConfigTypes.sol";
+import {DeployConfigTypes} from "../lib/DeployConfigTypes.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
 import {LoanSubaccount} from "../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
 import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
@@ -13,7 +13,7 @@ import {IIMasterAccountController} from "../../contracts/smartAccounts/interface
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.sol";
-import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "./SubaccountTypes.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../lib/SubaccountTypes.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
@@ -33,7 +33,7 @@ import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol"
 import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
 import {ReaderFacet} from "../../contracts/smartAccounts/facets/ReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
-import {DeployNetworks} from "./DeployNetworks.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 
 // solhint-disable no-console
 // solhint-disable-next-line max-line-length

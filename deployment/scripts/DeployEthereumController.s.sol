@@ -4,8 +4,8 @@ pragma solidity ^0.8.27;
 import {Script, console2} from "forge-std/Script.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
-import {PinnedControllerInitCode} from "./PinnedControllerInitCode.sol";
-import {DeployNetworks} from "./DeployNetworks.sol";
+import {PinnedControllerInitCode} from "../lib/PinnedControllerInitCode.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 
 /**
  * Reproduces the production MasterAccountController deployment on a loan chain - Ethereum, or

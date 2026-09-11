@@ -169,6 +169,7 @@ deployment/
   deploys/           # Deployed contract addresses per network
   build-info-v2.0.0/ # Reconstructed v2.0.0 build of the three live implementations: the upgrade validator's reference
   cuts/              # Diamond cut files per network
+  lib/               # Solidity the scripts share: the network table, the pinned Ethereum init code, the type allocations, the config decode structs
   scripts/           # Forge deploy scripts (.s.sol), bash wrappers, TS helpers - no tests
   utils/             # Deployment utility scripts - no tests; both are tested from test/tooling/
 scripts/             # Repository utility scripts

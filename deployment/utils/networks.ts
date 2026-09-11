@@ -1,5 +1,5 @@
 // The one place the TypeScript tooling agrees on which network is which, the counterpart of
-// deployment/scripts/DeployNetworks.sol for the Forge scripts: the two chain families, the chain
+// deployment/lib/DeployNetworks.sol for the Forge scripts: the two chain families, the chain
 // id each name must answer, and where each RPC comes from. A chain in neither family has no name
 // here and every tool refuses it; a rehearsal runs against a fork of the real chain, under its name.
 import { existsSync, readFileSync } from "node:fs";
