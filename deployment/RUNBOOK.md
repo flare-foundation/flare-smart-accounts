@@ -337,7 +337,17 @@ A4 and A5, then freeze both lineages exactly as A6 describes.
 
 ### B6. Transport and market
 
-The same tool as B4, and the same chain config, with the wiring sections:
+On Sepolia the market is ours to make before it can be registered — on Ethereum it is the live
+FXRP/RLUSD market and this paragraph does not apply. `pnpm deploy_sepolia_market assets`, then
+`market`, then `fund`, each re-runnable: a rerun deploys, creates or supplies only what is missing,
+judged by the deployment record, the market id and the supplier's own position, and never touches
+the feeds — `reset-feeds` is the one phase that does, explicitly. Record from the run: the oracle's
+address, its registration with Morpho's factory (`isMorphoChainlinkOracleV2`), its code hash and its
+explorer status (its source is Morpho's and not this repository's, so it is not ours to verify), and
+the market's id and parameters from `deployment/output-internal/sepolia/market.json`. Those last two
+are what the chain config's `loanMarket` section is filled in from.
+
+Then the same tool as B4, and the same chain config, with the wiring sections:
 
 ```bash
 pnpm configure_remote_controller <network> prepare transport

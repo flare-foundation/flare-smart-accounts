@@ -35,6 +35,67 @@ V2 key for every chain) and is skipped with a note without it; and Sourcify ever
 public Blockscout instances rate-limit a run's worth of back-to-back submissions; `VERIFY_SUBMIT_DELAY_MS`
 overrides the spacing, and `0` disables it for a re-run of one already-verified contract.
 
+## The Sepolia rehearsal market
+
+The Coston2 ↔ Sepolia rehearsal borrows against a market of our own making on the public Sepolia
+Morpho: `pnpm deploy_sepolia_market <phase>` with `deployment/market-config/sepolia.json` as its one
+configuration. It is Sepolia-only - a market over feeds we control has no place on a production chain,
+Ethereum included - and its four phases are each re-runnable. `assets` deploys the loan token
+(`TestnetLoanToken`: owner-only mint, no burn) and two operator-controlled feeds (`TestnetPriceFeed`, the
+Chainlink aggregator shape with a dated-answer setter and a failure switch), skipping whatever the
+deployment record already holds; a recorded asset is accepted, here and in every later phase, only
+with code at its address, the deployer as its owner and the configured decimals, since the phases
+mint and move feeds as the owner and the oracle's scale is built from the decimals. `market` checks
+the infrastructure it builds on - the collateral's decimals, the LLTV and rate model enabled on that
+Morpho, the rate model's own Morpho - builds the oracle through Morpho's factory over the two feeds,
+asserts `2e48` for a $2 collateral over a $1 loan token at creation, and creates the market unless
+its id already exists. Fresh or recorded, the oracle is held to the factory's registry and to its
+immutable wiring - our two feeds, one per side, no vaults, the scale the decimals give - so a record
+pointing at some other factory oracle is refused; only the price is not re-asserted on reuse, since
+the feeds may deliberately be elsewhere by then. `fund` supplies the configured liquidity once, judged
+by the supplier's own position rather than the pool's totals, and mints only what the supplier does
+not already hold, so an attempt that minted and stopped is completed rather than repeated.
+`reset-feeds` returns both feeds to their configured answers and lifts any failure; it is the only
+phase that moves a feed, so a rerun of the others never ends a scenario in progress, and it fails the
+collateral feed first and restores it last, so no block prices the market against one answer
+restored and the other not. The market's parameters, id and the oracle's code hash are written to
+`deployment/output-internal/sepolia/market.json` - by the script's simulation, so before the
+broadcast; the fork suite writes a file of its own beside it and removes it.
+
+Nothing here redeploys quietly. Assets are deployed only where the record lacks them, and the
+factory's `CREATE2` refuses a second oracle under the same salt, so a lost oracle record stops the
+market phase rather than doubling the oracle. The wrapper keeps `forge-deploy-output.txt` when forge
+or the recorder fails, and refuses to run again while that file names a deployment (`DEPLOYED:`
+lines) that was never recorded.
+
+Recovering from that is a manual step, because the `DEPLOYED:` lines come from the simulation: they
+name every deployment the run intended, whether or not its transaction landed, and the recorder
+writes every line it is given. Every deploy wrapper here tees to that one path, so read the file
+first: the network it names and the contracts it lists say which script's run to recover, and the
+hash of every transaction that run sent is under `broadcast/<that script>.s.sol/<chain id>/run-latest.json`
+(for this one, `DeploySepoliaMarket.s.sol` and `11155111`). Settle each hash against the chain
+(`cast tx <hash>`, `cast receipt <hash>`) before deciding anything. A missing receipt is not proof: the transaction may still be in
+the mempool, and it can land minutes later, after a rerun has decided it never would. Wait for a
+pending one, or replace it at its nonce, until every hash is either mined or gone for good.
+
+Then: if nothing landed, delete the output file and run the phase again. If some did, delete the
+lines whose deployment did not, keep the rest, run `npx tsx
+deployment/scripts/save-deployed-addresses.ts`, and run the phase again for what is still missing.
+The oracle is the one address not to look for as a receipt's own contract: Morpho's factory creates
+it, so it appears in that transaction's logs, and `isMorphoChainlinkOracleV2` on the factory is the
+confirmation. A phantom record is not silently fatal either way - every phase demands code at the
+addresses it reads, so an entry for a deployment that never landed stops the next run with `has no
+code` rather than building on it. A leftover output without `DEPLOYED:` lines came from a run that
+deployed nothing and is overwritten.
+
+Two facts about that oracle, read from its source and pinned by the fork suite: its feed reader
+requires only a non-negative answer, so a zero collateral answer prices the collateral at nothing
+rather than reverting, while a zero loan-token answer - the quote the price is divided by - reverts
+the oracle, as a reverting feed does; and it never reads a timestamp, so a stale answer is priced
+like a fresh one. The oracle's source is Morpho's, GPL and deliberately not in this repository, so
+`verify_contracts` reports it as having no source here; the factory's registration and the recorded
+code hash are its provenance.
+
 ## Deployment records
 
 ```bash

@@ -17,7 +17,8 @@ fs_permissions = [
     { access = "read", path = "deployment/pinned-init-code/" },
     { access = "read-write", path = "deployment/output-internal" },
     { access = "read", path = "deployment/cuts/" },
-    { access = "read", path = "artifacts/" }
+    { access = "read", path = "artifacts/" },
+    { access = "read", path = "deployment/market-config/" }
 ]
 ffi = true
 via_ir = true

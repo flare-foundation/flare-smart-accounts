@@ -150,7 +150,8 @@ async function main(): Promise<void> {
   let attempted = 0;
   for (const contract of contracts) {
     const contractName = contract.contractName.replace(/\.sol$/, "");
-    const matches = globSync(`contracts/{smartAccounts,diamond,composer}/**/${contract.contractName}`);
+    // the rehearsal market's assets live in contracts/mock, so the search covers it as well
+    const matches = globSync(`contracts/{smartAccounts,diamond,composer,mock}/**/${contract.contractName}`);
     if (matches.length === 0) {
       console.log(
         `Skipping ${contract.address} (${contract.contractName}): source file not in repo (removed contract)`

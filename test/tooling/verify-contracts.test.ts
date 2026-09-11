@@ -404,6 +404,53 @@ void test("a delay that is not a number fails the run before any submission", as
   }
 });
 
+void test("sources under contracts/mock are submitted, and a record with no source is skipped", async () => {
+  // the rehearsal market's assets live in contracts/mock, and its factory-made oracle has no source
+  // here at all: the first must reach forge, the second be reported and passed over
+  const rpc = new FakeRpc(CHAIN_ID_HEX["sepolia"]!);
+  const base = await rpc.start();
+  try {
+    const { dir, log } = scratch("sepolia");
+    fs.mkdirSync(path.join(dir, "contracts/mock"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "contracts/mock/TestnetLoanToken.sol"), "");
+    fs.writeFileSync(
+      path.join(dir, "deployment/deploys/sepolia.json"),
+      JSON.stringify([
+        { name: "TestnetLoanToken", contractName: "TestnetLoanToken.sol", address: FACET },
+        { name: "RehearsalMarketOracle", contractName: "MorphoChainlinkOracleV2.sol", address: FACET },
+      ])
+    );
+    const { status, output } = await run(dir, "sepolia", { SEPOLIA_RPC_URL: base });
+    assert.equal(status, 0, output);
+    // the token, to both verifiers a keyless Sepolia run has; the oracle to neither
+    assert.deepEqual(vectors(log), [
+      [
+        "verify-contract",
+        FACET,
+        "contracts/mock/TestnetLoanToken.sol:TestnetLoanToken",
+        "--rpc-url",
+        base,
+        ...blockscout("eth-sepolia.blockscout.com"),
+        "--skip-is-verified-check",
+        "--watch",
+      ],
+      [
+        "verify-contract",
+        FACET,
+        "contracts/mock/TestnetLoanToken.sol:TestnetLoanToken",
+        "--rpc-url",
+        base,
+        ...SOURCIFY,
+        "--skip-is-verified-check",
+        "--watch",
+      ],
+    ]);
+    assert.match(output, /Skipping .*MorphoChainlinkOracleV2\.sol.*: source file not in repo/);
+  } finally {
+    await rpc.stop();
+  }
+});
+
 void test("a failed submission is reported, the others still run, and the exit code says so", async () => {
   const rpc = new FakeRpc(CHAIN_ID_HEX["sepolia"]!);
   const base = await rpc.start();

@@ -144,6 +144,34 @@ test-tooling:
   - corepack enable pnpm
   - pnpm test:tooling
 
+# The one tooling test that needs Foundry itself: it runs the Sepolia market script against a
+# local anvil chain and reads back what it deployed, so it only skips in the node-only job above.
+# `REQUIRE_FORGE_TOOLING` turns those skips into a failure, so a missing prerequisite here is
+# reported rather than passed over silently.
+test-tooling-forge:
+  image: flarefoundation/foundry-custom:latest
+  stage: test
+  tags: [ flarenetwork-md ]
+  timeout: 10 minutes
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  variables:
+    REQUIRE_FORGE_TOOLING: "1"
+  before_script:
+  - corepack enable pnpm
+  - pnpm install --frozen-lockfile
+  - forge soldeer install
+  - forge install --no-git
+  - forge build
+  # the phase deploys only what the record lacks, and once Sepolia is deployed the record names
+  # three contracts that are on Sepolia and not on the local chain. This checkout is disposable,
+  # so it is cleared here; the test itself never touches a record it finds.
+  - rm -f deployment/deploys/sepolia.json
+  script:
+  - npx tsx --test test/tooling/deploy-sepolia-market.output.test.ts
+
 # Builds the isolated upgrade-validation profile (full build-info + storage layout) and hands
 # it to the validator job as an artifact. A clean build is required: the validator needs a full
 # compilation and rejects a directory that also holds stale build-info from earlier runs.

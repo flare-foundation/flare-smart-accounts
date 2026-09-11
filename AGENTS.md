@@ -76,6 +76,7 @@ pnpm deploy_remote_account_implementations <network>
 pnpm deploy_remote_controller_pinned <network>
 pnpm deploy_remote_controller_throwaway <network>
 pnpm configure_remote_controller <network> <prepare|execute|verify> [section] [target]
+pnpm deploy_sepolia_market <assets|market|fund|reset-feeds>
 pnpm diamond_cut <network> <cut-file-name>
 pnpm check_cut <network> [cut-file-name] [--no-build]
 pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]
@@ -134,11 +135,14 @@ pnpm test:tooling
 
 `test:tooling` runs everything in `test/tooling/`: the node tests of the deployment utilities, the verifier CLI's
 own test against a fake JSON-RPC server, the recorder's and the explorer submission's tests (the latter against a
-stubbed `forge`, so the argument vector itself is pinned) and the cut wrapper's shell scenarios
-(`execute-diamond-cut.test.sh`, run after the node tests). They live under `test/` like every other suite and are
-held to the same lint rules as the tooling they exercise, not the looser ones the shared config gives
-`test/**/*.ts` - `eslint.config.mjs` exempts this directory from that relaxation. Run them from the repository
-root: several read pinned sources by a path relative to it. CI runs the script too.
+stubbed `forge`, so the argument vector itself is pinned), the market script's own output against a local chain
+answering with Sepolia's id (`deploy-sepolia-market.output.test.ts`, which needs `anvil`, `forge` and no Sepolia
+deployment record, skips without them, and turns those skips into a failure when `REQUIRE_FORGE_TOOLING` is set -
+which is what the Foundry-equipped `test-tooling-forge` job does, since the node-only job cannot run it) and the
+shell scenarios of the cut wrapper, the configuration wrapper and the market wrapper. They live under `test/` like
+every other suite and are held to the same lint rules as the tooling they exercise, not the looser ones the shared
+config gives `test/**/*.ts` - `eslint.config.mjs` exempts this directory from that relaxation. Run them from the
+repository root: several read pinned sources by a path relative to it. CI runs the script too.
 
 For shell scripts:
 
@@ -330,6 +334,8 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
     `ETHEREUM_RPC_URL=<url> forge test --match-path "test/integration/*"`. Most free tiers prune that far back;
     `https://eth-pokt.nodies.app` served it on 2026-09-09, and `cast block <FORK_BLOCK> --rpc-url <url>` plus one
     `eth_call` at that block is the quickest way to test a candidate before running the suite.
+    `SepoliaMarketFork.t.sol` needs `SEPOLIA_RPC_URL` - any current Sepolia endpoint, since it forks the latest
+    block - and drives the rehearsal market script's phases against Morpho's real oracle factory and Morpho itself.
   - `test/tooling/`: the deployment tooling's own tests, in TypeScript and shell rather than Solidity, run by
     `pnpm test:tooling` rather than by forge, which ignores them. They sit here rather than beside the scripts so
     that `deployment/` holds only what an operator runs, and they are held to the tooling's lint rules, not the
