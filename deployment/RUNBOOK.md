@@ -98,7 +98,12 @@ order to do it in and the evidence for each step.
 
 List every outstanding timelocked call on the diamond, in particular any queued
 `removeUnpausers`: that call is becoming immediate, and one queued under the old facet **cannot
-execute after the cut**. Note them now; A3 clears them.
+execute after the cut**. Note them now; A3 clears them. The queue is a mapping keyed by calldata
+hash and cannot be enumerated on chain, so this is a `CallTimelocked` log scan.
+
+**Answered for Coston2 on 2026-09-12: nothing is queued, and nothing will be queued before the
+cut.** A3 is therefore a no-op there and the release is six governance calls. Re-confirm on the day
+if anything has been submitted since; the question stands unanswered for every other network.
 
 ### A1. Safety checks, before anything is executed
 
@@ -161,10 +166,14 @@ behind is recoverable only by a separate governance action — which is the work
 
 ### A3. The unpauser migration, immediately after the cut
 
-`removeUnpausers` is now immediate rather than timelocked. Using the A0 inventory: remove the
-intended unpausers directly, cancel the obsolete queued removals — cancellation still works after
-the cut — and verify both the resulting role set and that nothing stale remains queued. See
-[Pause](../docs/specs/SmartAccounts/Pause.md).
+**Skip where the A0 inventory came back empty and no unpauser is to be removed — which is Coston2's
+case for this release.** Nothing here is owed by the cut itself: the step exists because the change
+of guard strands calls queued under the old one, so with nothing queued there is nothing to strand.
+
+Where it does apply: `removeUnpausers` is now immediate rather than timelocked. Using the A0
+inventory, remove the intended unpausers directly, cancel the obsolete queued removals —
+cancellation still works after the cut — and verify both the resulting role set and that nothing
+stale remains queued. See [Pause](../docs/specs/SmartAccounts/Pause.md).
 
 ### A4. The home Personal Account implementation
 
@@ -300,22 +309,24 @@ by that EOA, so a cut or a role change made first would need it to sign each one
 mode the order is the opposite, because there the deployer owns the diamond from the start: its deploy
 cuts the facets in the same run, and its configuration follows as a second command it can sign for.
 
-### B4. The cut and the governance configuration, from the new owner
+### B4. The cut, from the new owner
 
 `EthereumControllerInit.init()` sets the four ERC-165 flags and nothing else, in the same
 transaction as the cut. Verify after with
 `pnpm verify_diamond <network> <cut> --expect-owner <owner>`, naming the new owner.
 
-Then the roles and the duration, from the network's chain config:
-
-```bash
-pnpm configure_remote_controller <network> prepare governance   # the calls, for the owner to submit
-pnpm configure_remote_controller <network> verify governance    # after they land
-```
+Nothing else is configured here, and the timelock duration is still zero — deliberately. It is set
+once, near the end (B7), after every setting the deployment needs is in place. While it is zero,
+every owner call applies in the transaction that submits it, so the whole configuration below is
+one signature per call: no queue, no deadline, no second transaction, and no chance of the trap
+where re-submitting a queued call only pushes its deadline further out. What it costs is that a
+zero-delay window exists at all — the owner can change anything instantly until B7 closes it —
+which is why B7 is not optional and why reading the duration back is the gate rather than a
+formality.
 
 `prepare` sends nothing and takes no key: it writes the calls under
 `deployment/output-internal/<network>/` and prints them, which is what a multisig owner needs. The
-throwaway mode names its own controller and signs for it, so there the whole of B4 and B6 is:
+throwaway mode names its own controller and signs for it, so there the whole of B4 to B7 is:
 
 ```bash
 pnpm configure_remote_controller sepolia execute all throwaway
@@ -323,25 +334,25 @@ pnpm configure_remote_controller sepolia execute all throwaway
 
 which sends every section in one run, the duration last of all, and then verifies against mined
 state. Leave the target off and the run configures the PINNED controller, which on a rehearsal chain
-is a different deployment entirely.
-
-The order it emits is pausers, unpausers, and the timelock duration **last**. The init establishes
-none of them. The order matters because the duration is still zero until it is set, so everything
-before it applies immediately while every **timelocked** call after it queues — adding a pauser or
-an unpauser included. The one exception is `removeUnpausers`, which this release makes immediate
-(`onlyOwner`); pauser removal stays timelocked like the rest. From here on `prepare` prints an
-`EXECUTE` line beside each call: the `executeTimelockedCall` that lands it after the delay.
-
-Read the configuration itself back, not only the owner — `verify_diamond` checks ownership and the
-diamond's surface and says nothing about roles or delay. That is what the `verify` phase above does:
-both role lists as sets, with no member nobody configured, and the duration to the second. A diamond
-with the right owner and no pauser is not configured.
+is a different deployment entirely. That sweep's own order is the one B5 to B7 follow — the roles
+and the wiring first, the duration last of everything — so the pinned flow differs only in being
+split across commands a multisig can submit one at a time.
 
 ### B5. Remote implementations
 
 `pnpm deploy_remote_account_implementations <network>`, then register `PersonalAccountRemote` and
-type-1 `MorphoLoanSubaccountRemote` through the same three-stage verification and timelocked procedure as
-A4 and A5, then freeze both lineages exactly as A6 describes.
+type-1 `MorphoLoanSubaccountRemote`, then freeze both lineages exactly as A6 describes.
+
+Unlike A4 and A5, there is no queued stage to verify here: the registrations are
+`onlyOwnerWithTimelock` like everything else, so at zero delay each applies in the transaction that
+submits it.
+
+Still run `--stage pre` **before** registering, and accept exactly one failed check,
+`timelock: the duration is non-zero` — the tool stating what this part has already decided, that the
+call is not a queue step. Its other checks are the reviewed artifact's bytecode at the address, that
+source still being in the repository, and the chain family, and they are the only ones that can stop
+a wrong implementation from being registered at all. `--stage live` afterwards proves what was
+registered, which detects a wrong one rather than preventing it. Run both.
 
 ### B6. Transport and market
 
@@ -355,30 +366,60 @@ explorer status (its source is Morpho's and not this repository's, so it is not 
 the market's id and parameters from `deployment/output-internal/sepolia/market.json`. Those last two
 are what the chain config's `loanMarket` section is filled in from.
 
-Then the same tool as B4, and the same chain config, with the wiring sections:
+Then the same tool as B4, and the same chain config, with the three wiring sections:
 
 ```bash
-pnpm configure_remote_controller <network> prepare transport
-pnpm configure_remote_controller <network> prepare market
-pnpm configure_remote_controller <network> prepare fees
-pnpm configure_remote_controller <network> verify all
+pnpm configure_remote_controller <network> prepare wiring
+pnpm configure_remote_controller <network> verify wiring
 ```
 
 `setComposeTransport`, then `registerLoanMarket`, then `setLoanFeeTerms` — the order is not a
-preference: the market's registration validates its collateral token against the transport's OFT, and
-the first fee-terms call is the activation, so the market is registered but inert across the gap and
-borrowing reverts until the terms land. `wiring` prepares all three at once and skips any section the
-config has not been given yet, which is how a transport is prepared while the market's loan token and
-oracle are still to be deployed. A section asked for by name and not yet filled in stops the run
-instead.
+preference and the tool does not offer another: the market's registration validates its collateral
+token against the transport's OFT, and `setLoanFeeTerms` reverts unless the market for that type is
+already registered. All three still apply in the transaction that submits them, since the duration
+is set after them, in B7.
 
-The duration is in force by now, so each of these queues and then needs the `EXECUTE` line the
-prepare phase prints beside it.
+The fee terms are the activation. `registerLoanMarket` leaves borrowing blocked on purpose, so the
+market can be registered, read back and inspected while nothing can borrow against it; the first
+fee-terms call opens the type, and its recipient is a marker that can never return to zero. So it
+is the last setting of the deployment, and the one to arrive at deliberately.
+
+`wiring` prepares all three at once and **skips**, with a note, any section the config has not been
+given yet — which is how a transport is prepared while the market's loan token and oracle are still
+to be deployed. Read what it printed: a skipped section here is one that will have to be set after
+the duration is in force, and will queue. A section asked for **by name** and not filled in stops
+the run instead, which is the safer form once the config is complete.
 
 Read back the transport, the market id and parameters, the token and oracle addresses, the rate
 model, the liquidation ratio, the fee recipient and rates, and the borrowing status. The `verify`
 phase covers everything the chain config names; the borrowing status and the market id are read by
 hand.
+
+### B7. The roles and the duration, last of all
+
+```bash
+pnpm configure_remote_controller <network> prepare governance   # the calls, for the owner to submit
+pnpm configure_remote_controller <network> verify governance    # after they land
+```
+
+The order it emits is pausers, unpausers, and the timelock duration **last**. The init established
+none of them. Within this run the roles still apply immediately, because the duration is the final
+call in it; from the moment it lands, every **timelocked** call queues — adding a pauser or an
+unpauser included. The one exception is `removeUnpausers`, which this release makes immediate
+(`onlyOwner`); pauser removal stays timelocked like the rest. From here `prepare` prints an
+`EXECUTE` line beside each call: the `executeTimelockedCall` that lands it after the delay,
+permissionless once matured, so whoever submits a call need not be the one to send it.
+
+Everything before this point applied in the transaction that submitted it, which is the whole
+reason the duration is last: the deployment is one signature per call, with no queue, no deadline
+and no second transaction, and the timelock takes effect over a diamond that is already configured
+and read back rather than over one still being assembled.
+
+The failure this order makes possible is forgetting it — a live deployment left at zero delay.
+`verify governance` compares the duration to the second and both role lists as sets, so run it as
+the closing gate rather than a formality. And read the configuration back, not only the owner:
+`verify_diamond` checks ownership and the diamond's surface and says nothing about roles, delay,
+transport, market or fees. A diamond with the right owner and no duration is not configured.
 
 ## Part C — the release-readiness gate
 
