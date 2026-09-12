@@ -304,6 +304,12 @@ the three pinned base facets include it. Re-verify with
 pre-cut shape, and the pre-cut default expects the pinned owner it no longer has, so the new owner is
 named explicitly here.
 
+A handover made from a **key** rather than a wallet - the deployer-owned rehearsal variant, where
+the diamond is handed to governance at the end instead of the start - is
+`pnpm transfer_ownership <network> <expected-current-owner> <new-owner>`, which compares the owner
+against the one named before it sends and reads it back afterwards. The bootstrap owner's transfer
+here is not that case: it is signed from a wallet, which no wrapper can drive.
+
 Everything owner-gated therefore comes **after** this step, not before it: the diamond arrives owned
 by that EOA, so a cut or a role change made first would need it to sign each one. In the throwaway
 mode the order is the opposite, because there the deployer owns the diamond from the start: its deploy

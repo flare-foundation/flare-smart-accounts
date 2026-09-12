@@ -76,6 +76,7 @@ pnpm deploy_remote_account_implementations <network>
 pnpm deploy_remote_controller_pinned <network>
 pnpm deploy_remote_controller_throwaway <network>
 pnpm configure_remote_controller <network> <prepare|execute|verify> [section] [target]
+pnpm transfer_ownership <network> <expected-current-owner> <new-owner>
 pnpm deploy_sepolia_market <assets|market|fund|reset-feeds>
 pnpm diamond_cut <network> <cut-file-name>
 pnpm check_cut <network> [cut-file-name] [--no-build]
@@ -106,6 +107,15 @@ pnpm verify_contracts <network>
   registered. A section named on its own must be complete in the file; a sweep skips an incomplete one
   with a note. Only `execute` takes a signing key: the other two read, and a multisig owner has nothing to sign
   with anyway.
+- `transfer_ownership` hands the pinned remote controller to a new owner, and exists for the preflight rather
+  than the call: `transferOwnership` is one step, has no acceptance from the new owner, is not timelocked, and a
+  wrong address ends that diamond's governance for good. The expected current owner is an argument, compared
+  against the chain, so a run pointed at the wrong network stops instead of handing away whatever it found; the
+  signing key must be that owner; the zero address, the diamond itself and the current owner are refused, and a
+  new owner with no code is called out rather than refused. It serves the deployer-owned handover alone - the
+  bootstrap owner signs its own transfer from a wallet, and a throwaway is never handed on - so there is no
+  target argument. The broadcast is followed by a separate `verify` run, since the script's own read-back would
+  see simulated state.
 - All `forge script` invocations use `--offline` to skip Foundry's external selector/source lookups. Without it, runs on Flare/Songbird hang for several minutes — likely external signature/source database calls timing out for these chains. The chain RPC itself is unaffected.
 
 ### Required Checks
