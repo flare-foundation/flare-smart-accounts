@@ -92,13 +92,18 @@ pnpm verify_contracts <network>
 - Deployment requires `.env` with `<NETWORK>_RPC_URL` and `DEPLOYER_PRIVATE_KEY`.
 - `configure_remote_controller` is everything the remote controller is configured with after its cut, read from
   `deployment/chain-config/<network>.json`: the sections are `governance` (the pauser and unpauser roles, then
-  the timelock duration last), `transport`, `market`, `fees`, `wiring` (the last three) and `all`, defaulting to
-  `governance`, and the target is `pinned` or `throwaway` — which controller on that chain to configure, named
+  the timelock duration last), `implementations`, `transport`, `market`, `fees`, `wiring` (the last
+  three) and `all`, defaulting to `governance`, and the target is `pinned` or `throwaway` — which
+  controller on that chain to configure, named
   rather than assumed, defaulting to `pinned`. `prepare` writes the calls for the owner to submit under `deployment/output-internal/<network>/`
   and prints them, with the `executeTimelockedCall` line beside each one once a duration is in force; `execute`
   submits them and needs the diamond's current owner to sign, so it serves the throwaway flow alone — its own
   read-back sees simulated state, so the wrapper follows a broadcast with a separate `verify` run; `verify`
-  reads the chain back. A section named on its own must be complete in the file; a sweep skips an incomplete one
+  reads the chain back. `implementations` is the one section whose two addresses are not in the chain config:
+  the remote Personal Account and the type's remote subaccount are deploy outputs, read from the target's own
+  deployment record, and a record naming neither leaves the section unready. It registers; it does not replace
+  `verify_implementation --stage pre`, which is the check that can still refuse a wrong address before it is
+  registered. A section named on its own must be complete in the file; a sweep skips an incomplete one
   with a note. Only `execute` takes a signing key: the other two read, and a multisig owner has nothing to sign
   with anyway.
 - All `forge script` invocations use `--offline` to skip Foundry's external selector/source lookups. Without it, runs on Flare/Songbird hang for several minutes — likely external signature/source database calls timing out for these chains. The chain RPC itself is unaffected.

@@ -14,6 +14,8 @@ contract ConfigureRemoteControllerHarness is ConfigureRemoteController {
     string[] public lines;
     /// @dev Set, the record the resolver reads instead of the deployment's own.
     string public recordPath;
+    /// @dev The same for the pinned target's record.
+    string public pinnedRecordPath;
     string public written;
     string public writtenTo;
 
@@ -69,6 +71,24 @@ contract ConfigureRemoteControllerHarness is ConfigureRemoteController {
         returns (string memory)
     {
         return bytes(recordPath).length > 0 ? recordPath : super.throwawayRecordPath(_network);
+    }
+
+    /// @notice The pinned target's record, likewise pointed at a file a test may write.
+    function setDeploymentRecordPath(
+        string memory _path
+    )
+        external
+    {
+        pinnedRecordPath = _path;
+    }
+
+    function deploymentRecordPath(
+        string memory _network
+    )
+        public view override
+        returns (string memory)
+    {
+        return bytes(pinnedRecordPath).length > 0 ? pinnedRecordPath : super.deploymentRecordPath(_network);
     }
 
     /// @notice The range check, exposed: a configuration value that does not fit its field must

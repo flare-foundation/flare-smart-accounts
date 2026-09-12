@@ -7,15 +7,26 @@ import {ConfigureRemoteControllerHarness} from "../../utils/ConfigureRemoteContr
 import {ConfigureRemoteController} from "../../../deployment/scripts/ConfigureRemoteController.s.sol";
 import {PinnedControllerInitCode} from "../../../deployment/lib/PinnedControllerInitCode.sol";
 import {MockSingletonFactory} from "../../../contracts/mock/MockSingletonFactory.sol";
+import {PinnedControllerStub} from "../../utils/PinnedControllerStub.sol";
 import {DiamondArgs} from "../../../contracts/diamond/implementation/Diamond.sol";
 import {IDiamond} from "../../../contracts/diamond/interfaces/IDiamond.sol";
 import {IDiamondCut} from "../../../contracts/diamond/interfaces/IDiamondCut.sol";
 import {MasterAccountController} from "../../../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {PauseFacet} from "../../../contracts/smartAccounts/facets/PauseFacet.sol";
 import {TimelockFacet} from "../../../contracts/smartAccounts/facets/TimelockFacet.sol";
+import {PersonalAccountsFacet} from "../../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
+import {SubaccountsFacet} from "../../../contracts/smartAccounts/facets/SubaccountsFacet.sol";
+import {
+    IIPersonalAccountsFacet
+} from "../../../contracts/smartAccounts/interface/IIPersonalAccountsFacet.sol";
+import {IISubaccountsFacet} from "../../../contracts/smartAccounts/interface/IISubaccountsFacet.sol";
 import {IIPauseFacet} from "../../../contracts/smartAccounts/interface/IIPauseFacet.sol";
 import {IITimelockFacet} from "../../../contracts/smartAccounts/interface/IITimelockFacet.sol";
 import {IPauseFacet} from "../../../contracts/userInterfaces/facets/IPauseFacet.sol";
+import {
+    IPersonalAccountsFacet
+} from "../../../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
+import {ISubaccountsFacet} from "../../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
 import {ITimelockFacet} from "../../../contracts/userInterfaces/facets/ITimelockFacet.sol";
 import {
     IIMorphoLoanMarketsFacet
@@ -55,9 +66,10 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
 
     function testTheScriptRefusesANetworkNameThatIsNotTheChainItIsPointedAt() public {
         // the wrapper dials the RPC by name while the script reads the chain id: a mismatch means
-        // the configuration of one chain is about to be sent to another
+        // the configuration of one chain is about to be sent to another. Named exactly, since a
+        // bare expectation would be satisfied by the missing-controller error further down
         vm.chainId(SEPOLIA);
-        vm.expectRevert();
+        vm.expectRevert(bytes("RPC chain is sepolia, not the named network ethereum"));
         harness.run("ethereum", "prepare", "governance", "pinned");
     }
 
@@ -533,6 +545,263 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
 
     /// A diamond with the two facets this script calls, owned by the harness so its calls carry the
     /// owner's authority.
+    function testTheImplementationsSectionRegistersBothInOrder() public {
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        ConfigureRemoteController.Call[] memory calls = harness.callsFor("implementations", config);
+
+        assertEq(calls.length, 2);
+        assertEq(calls[0].description, "setPersonalAccountImplementation");
+        assertEq(
+            calls[0].data,
+            abi.encodeCall(
+                IIPersonalAccountsFacet.setPersonalAccountImplementation,
+                (config.personalAccountImplementation)
+            )
+        );
+        assertEq(calls[1].description, "setSubaccountImplementation");
+        assertEq(
+            calls[1].data,
+            abi.encodeCall(
+                IISubaccountsFacet.setSubaccountImplementation,
+                (config.subaccountType, config.loanSubaccountImplementation)
+            )
+        );
+    }
+
+    function testTheImplementationsSectionIsUnreadyUntilTheyAreDeployed() public {
+        // neither named is the ordinary state of every run before the implementations exist, and
+        // the chain config carries no such field, so this is what `_configuration` leaves behind
+        ConfigureRemoteController.Configuration memory config = _configuration();
+
+        vm.expectRevert(bytes("the deployment record names no remote implementations"));
+        harness.callsFor("implementations", config);
+
+        // swept, it is skipped with the note and the rest of the run is unaffected
+        ConfigureRemoteController.Call[] memory calls = harness.callsFor("all", config);
+        assertEq(calls.length, 6);
+        assertTrue(harness.printed("SKIPPED: the deployment record names no remote implementations"));
+    }
+
+    function testASweepCarriesTheImplementationsBeforeTheWiringAndTheDurationLast() public {
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        ConfigureRemoteController.Call[] memory calls = harness.callsFor("all", config);
+
+        assertEq(calls.length, 8);
+        assertEq(calls[0].description, "addPausers");
+        assertEq(calls[1].description, "addUnpausers");
+        assertEq(calls[2].description, "setPersonalAccountImplementation");
+        assertEq(calls[3].description, "setSubaccountImplementation");
+        assertEq(calls[4].description, "setComposeTransport");
+        assertEq(calls[5].description, "registerLoanMarket");
+        assertEq(calls[6].description, "setLoanFeeTerms");
+        assertEq(calls[7].description, "setTimelockDuration");
+    }
+
+    function testTheWiringSweepLeavesTheImplementationsAlone() public {
+        // `wiring` is what connects the two chains; registering an implementation out of a record
+        // the caller never named is not part of that, and a sweep must not do it silently
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        ConfigureRemoteController.Call[] memory calls = harness.callsFor("wiring", config);
+
+        assertEq(calls.length, 3);
+        assertEq(calls[0].description, "setComposeTransport");
+        assertEq(calls[1].description, "registerLoanMarket");
+        assertEq(calls[2].description, "setLoanFeeTerms");
+    }
+
+    function testTheImplementationsAreReadOutOfTheRecordByName() public {
+        address personalAccount = makeAddr("personalAccountRemote");
+        address loanSubaccount = makeAddr("loanSubaccountRemote");
+
+        (address readPersonalAccount, address readLoanSubaccount) =
+            harness.implementationsFromRecord(_recordWithImplementations(personalAccount, loanSubaccount));
+        assertEq(readPersonalAccount, personalAccount);
+        assertEq(readLoanSubaccount, loanSubaccount);
+
+        // a record from before `deploy_remote_account_implementations` names neither, which is the
+        // section's unready state rather than an error: nothing has been deployed to register
+        (readPersonalAccount, readLoanSubaccount) = harness.implementationsFromRecord(_record(makeAddr("diamond")));
+        assertEq(readPersonalAccount, address(0));
+        assertEq(readLoanSubaccount, address(0));
+    }
+
+    function testEachTargetReadsItsOwnRecord() public {
+        // the section's two addresses come from a record, and which record is the target's answer:
+        // a pinned run reading the throwaway's would register the wrong deployment's contracts
+        vm.chainId(SEPOLIA);
+        vm.createDir("deployment/output-internal", true);
+        string memory pinnedPath = "deployment/output-internal/configure-pinned-record.json";
+        string memory throwawayPath = "deployment/output-internal/configure-throwaway-record.json";
+        harness.setDeploymentRecordPath(pinnedPath);
+        harness.setThrowawayRecordPath(throwawayPath);
+        address pinnedAccount = makeAddr("pinned personal account");
+        address pinnedSubaccount = makeAddr("pinned loan subaccount");
+        address throwawayAccount = makeAddr("throwaway personal account");
+        address throwawaySubaccount = makeAddr("throwaway loan subaccount");
+        vm.writeFile(pinnedPath, _recordWithImplementations(pinnedAccount, pinnedSubaccount));
+        vm.writeFile(throwawayPath, _recordWithImplementations(throwawayAccount, throwawaySubaccount));
+
+        // through the seam a run builds its configuration with, not through the reader alone
+        ConfigureRemoteController.Configuration memory config = harness.configurationFor("sepolia", "pinned");
+        assertEq(config.personalAccountImplementation, pinnedAccount);
+        assertEq(config.loanSubaccountImplementation, pinnedSubaccount);
+
+        config = harness.configurationFor("sepolia", "throwaway");
+        assertEq(config.personalAccountImplementation, throwawayAccount);
+        assertEq(config.loanSubaccountImplementation, throwawaySubaccount);
+
+        // and a record that does not exist yet - every run before the implementations are deployed -
+        // leaves the section unready rather than stopping the run that is configuring something else
+        vm.removeFile(pinnedPath);
+        config = harness.configurationFor("sepolia", "pinned");
+        assertEq(config.personalAccountImplementation, address(0));
+        assertEq(config.loanSubaccountImplementation, address(0));
+        vm.removeFile(throwawayPath);
+    }
+
+    function testAPreparedRunHandsOverTheAddressesTheRecordNames() public {
+        // driven through the entry point rather than the seam behind it: what has to hold is that a
+        // run reads a record at all, and that what it read reaches the calldata governance signs
+        vm.chainId(SEPOLIA);
+        address account = makeAddr("recorded personal account");
+        address subaccount = makeAddr("recorded loan subaccount");
+        string memory path = "deployment/output-internal/configure-run-record.json";
+        vm.createDir("deployment/output-internal", true);
+        vm.writeFile(path, _recordWithImplementations(account, subaccount));
+        harness.setDeploymentRecordPath(path);
+        // prepare asks the diamond who owns it and what its duration is, and nothing else
+        vm.etch(PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER, address(new PinnedControllerStub()).code);
+
+        harness.run("sepolia", "prepare", "implementations", "pinned");
+
+        string memory target = vm.toString(PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER);
+        uint256 subaccountType = harness.readConfiguration("sepolia").subaccountType;
+        assertTrue(
+            harness.printed(
+                string.concat(
+                    "1. setPersonalAccountImplementation | ", target, " | ",
+                    vm.toString(
+                        abi.encodeCall(IIPersonalAccountsFacet.setPersonalAccountImplementation, (account))
+                    )
+                )
+            ),
+            "the prepared call does not name the recorded Personal Account implementation"
+        );
+        assertTrue(
+            harness.printed(
+                string.concat(
+                    "2. setSubaccountImplementation | ", target, " | ",
+                    vm.toString(
+                        abi.encodeCall(
+                            IISubaccountsFacet.setSubaccountImplementation,
+                            (subaccountType, subaccount)
+                        )
+                    )
+                )
+            ),
+            "the prepared call does not name the recorded subaccount implementation"
+        );
+        vm.removeFile(path);
+    }
+
+    function testARecordThatNamesOneImplementationButNotTheOtherStopsEveryRun() public {
+        // not the state of a deployment that has not got there yet: something was deployed and the
+        // record is half written. A sweep that passed over it would arm the timelock on a
+        // deployment whose accounts resolve no implementation at all
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        config.loanSubaccountImplementation = address(0);
+
+        vm.expectRevert(bytes("the deployment record names one remote implementation but not the other"));
+        harness.callsFor("all", config);
+
+        config.loanSubaccountImplementation = address(new PauseFacet());
+        config.personalAccountImplementation = address(0);
+        vm.expectRevert(bytes("the deployment record names one remote implementation but not the other"));
+        harness.callsFor("all", config);
+    }
+
+    function testARecordThatNamesAnImplementationTwiceIsRefused() public {
+        // the recorder updates the FIRST entry of a name; a reader taking the last would register
+        // the address a re-deployment left behind
+        address first = makeAddr("first");
+        address second = makeAddr("second");
+        string memory twice = string.concat(
+            "[{\"name\": \"PersonalAccountRemoteImplementation\", ",
+            "\"contractName\": \"PersonalAccountRemote.sol\", \"address\": \"", vm.toString(first), "\"},",
+            "{\"name\": \"PersonalAccountRemoteImplementation\", ",
+            "\"contractName\": \"PersonalAccountRemote.sol\", \"address\": \"", vm.toString(second), "\"}]"
+        );
+        vm.expectRevert(bytes("the deployment record names PersonalAccountRemoteImplementation twice"));
+        harness.implementationsFromRecord(twice);
+
+        string memory subaccountTwice = string.concat(
+            "[{\"name\": \"MorphoLoanSubaccountRemoteImplementation\", ",
+            "\"contractName\": \"MorphoLoanSubaccountRemote.sol\", \"address\": \"",
+            vm.toString(first), "\"},",
+            "{\"name\": \"MorphoLoanSubaccountRemoteImplementation\", ",
+            "\"contractName\": \"MorphoLoanSubaccountRemote.sol\", \"address\": \"",
+            vm.toString(second), "\"}]"
+        );
+        vm.expectRevert(bytes("the deployment record names MorphoLoanSubaccountRemoteImplementation twice"));
+        harness.implementationsFromRecord(subaccountTwice);
+
+        // and the shape a check on the ADDRESS would let through: a zero-valued entry is still an
+        // entry, so the second one is a duplicate whatever the first one held
+        string memory zeroThenReal = string.concat(
+            "[{\"name\": \"PersonalAccountRemoteImplementation\", ",
+            "\"contractName\": \"PersonalAccountRemote.sol\", \"address\": \"", vm.toString(address(0)), "\"},",
+            "{\"name\": \"PersonalAccountRemoteImplementation\", ",
+            "\"contractName\": \"PersonalAccountRemote.sol\", \"address\": \"", vm.toString(second), "\"}]"
+        );
+        vm.expectRevert(bytes("the deployment record names PersonalAccountRemoteImplementation twice"));
+        harness.implementationsFromRecord(zeroThenReal);
+
+        string memory zeroThenRealSubaccount = string.concat(
+            "[{\"name\": \"MorphoLoanSubaccountRemoteImplementation\", ",
+            "\"contractName\": \"MorphoLoanSubaccountRemote.sol\", \"address\": \"",
+            vm.toString(address(0)), "\"},",
+            "{\"name\": \"MorphoLoanSubaccountRemoteImplementation\", ",
+            "\"contractName\": \"MorphoLoanSubaccountRemote.sol\", \"address\": \"",
+            vm.toString(second), "\"}]"
+        );
+        vm.expectRevert(bytes("the deployment record names MorphoLoanSubaccountRemoteImplementation twice"));
+        harness.implementationsFromRecord(zeroThenRealSubaccount);
+    }
+
+    function testTheImplementationsAreSubmittedAndThenReadBackOffTheChain() public {
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+
+        harness.submit(diamond, "implementations", config);
+        harness.requireApplied(diamond, "implementations", config);
+
+        assertEq(IPersonalAccountsFacet(diamond).implementation(), config.personalAccountImplementation);
+        assertEq(
+            ISubaccountsFacet(diamond).implementationForType(config.subaccountType),
+            config.loanSubaccountImplementation
+        );
+    }
+
+    function testTheReadBackFailsOnAnImplementationNobodyRecorded() public {
+        // the registration is the deployment's one blind step - the setters check only for code -
+        // so a registry pointing at something the record does not name is a finding, not a detail
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        harness.submit(diamond, "implementations", config);
+
+        // one field at a time, restored between: a memory struct assigned to a second variable is
+        // the same struct, so there is no copy to mutate independently
+        address recorded = config.personalAccountImplementation;
+        config.personalAccountImplementation = address(new PauseFacet());
+        vm.expectRevert(bytes("the Personal Account implementation on chain is not the recorded one"));
+        harness.requireApplied(diamond, "implementations", config);
+
+        config.personalAccountImplementation = recorded;
+        config.loanSubaccountImplementation = address(new TimelockFacet());
+        vm.expectRevert(bytes("the subaccount implementation on chain is not the recorded one"));
+        harness.requireApplied(diamond, "implementations", config);
+    }
+
     function _deployDiamond() private {
         DiamondArgs memory args = DiamondArgs({
             owner: address(harness),
@@ -540,11 +809,47 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
             initCalldata: ""
         });
         diamond = address(new MasterAccountController(deployBaseFacets(), args));
-        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](2);
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](4);
         cuts[0] = _buildFacetCut(address(new PauseFacet()), "PauseFacet", IDiamond.FacetCutAction.Add);
         cuts[1] = _buildFacetCut(address(new TimelockFacet()), "TimelockFacet", IDiamond.FacetCutAction.Add);
+        // the two registries the implementations section writes and reads back
+        cuts[2] = _buildFacetCut(
+            address(new PersonalAccountsFacet()),
+            "PersonalAccountsFacet",
+            IDiamond.FacetCutAction.Add
+        );
+        cuts[3] = _buildFacetCut(address(new SubaccountsFacet()), "SubaccountsFacet", IDiamond.FacetCutAction.Add);
         vm.prank(address(harness));
         IDiamondCut(diamond).diamondCut(cuts, address(0), "");
+    }
+
+    /// The configuration with the two deploy outputs the record would have supplied. Any address
+    /// with code will do: the setters check for code, not for an artifact.
+    function _withImplementations()
+        private
+        returns (ConfigureRemoteController.Configuration memory _config)
+    {
+        _config = _configuration();
+        _config.personalAccountImplementation = address(new PauseFacet());
+        _config.loanSubaccountImplementation = address(new TimelockFacet());
+    }
+
+    /// A deployment record naming both remote implementations, as either deploy path writes one.
+    function _recordWithImplementations(
+        address _personalAccount,
+        address _loanSubaccount
+    )
+        private pure
+        returns (string memory)
+    {
+        return string.concat(
+            "[{\"name\": \"PersonalAccountRemoteImplementation\", ",
+            "\"contractName\": \"PersonalAccountRemote.sol\", \"address\": \"",
+            vm.toString(_personalAccount), "\"},",
+            "{\"name\": \"MorphoLoanSubaccountRemoteImplementation\", ",
+            "\"contractName\": \"MorphoLoanSubaccountRemote.sol\", \"address\": \"",
+            vm.toString(_loanSubaccount), "\"}]"
+        );
     }
 
     /// The shipped Sepolia configuration with the values it is still waiting for filled in, so the

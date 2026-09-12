@@ -85,6 +85,10 @@ expect "prepare: the whole argument vector" \
 expect "wiring/throwaway: wrapper exits 0" "$(run_wrapper sepolia prepare wiring throwaway)" "0"
 expect "wiring/throwaway: the whole argument vector" \
   "$(call 1)" "$(expected_call "$SEPOLIA_RPC_URL" sepolia prepare wiring throwaway)"
+expect "implementations: accepted and passed through" \
+  "$(run_wrapper sepolia prepare implementations)" "0"
+expect "implementations: the whole argument vector" \
+  "$(call 1)" "$(expected_call "$SEPOLIA_RPC_URL" sepolia prepare implementations pinned)"
 expect "ethereum: dials its own RPC" "$(run_wrapper ethereum prepare)" "0"
 expect "ethereum: the whole argument vector" \
   "$(call 1)" "$(expected_call "$ETHEREUM_RPC_URL" ethereum prepare governance pinned)"

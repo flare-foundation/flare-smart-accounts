@@ -9,10 +9,12 @@ set -euo pipefail
 #
 # Everything the remote controller is configured with after its cut, from
 # deployment/chain-config/<network>.json: the roles and timelock duration (governance), the compose
-# transport, the loan market and its fee terms (wiring).
+# transport, the loan market and its fee terms (wiring). The implementations section is the one
+# exception: its two addresses are deploy outputs, read from the target's deployment record.
 #
-# Sections: governance (roles, then the timelock duration), transport, market, fees, wiring (the
-# last three) and all. Default: governance.
+# Sections: governance (roles, then the timelock duration), implementations (the remote Personal
+# Account and the type's remote subaccount), transport, market, fees, wiring (the last three) and
+# all. Default: governance.
 #
 # Target: which controller on this chain to configure - `pinned` (the production one the bootstrap
 # reproduces) or `throwaway` (the one deploy-remote-controller-throwaway.sh built, found through its
@@ -53,9 +55,10 @@ case "$PHASE" in
 esac
 
 case "$SECTION" in
-  governance|transport|market|fees|wiring|all) ;;
+  governance|implementations|transport|market|fees|wiring|all) ;;
   *)
-    echo "Unsupported section: $SECTION (governance, transport, market, fees, wiring or all)" >&2
+    echo "Unsupported section: $SECTION (governance, implementations, transport, market, fees," \
+      "wiring or all)" >&2
     exit 2
     ;;
 esac

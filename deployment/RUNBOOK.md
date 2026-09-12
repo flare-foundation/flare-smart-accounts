@@ -340,8 +340,18 @@ split across commands a multisig can submit one at a time.
 
 ### B5. Remote implementations
 
-`pnpm deploy_remote_account_implementations <network>`, then register `PersonalAccountRemote` and
-type-1 `MorphoLoanSubaccountRemote`, then freeze both lineages exactly as A6 describes.
+```bash
+pnpm deploy_remote_account_implementations <network>
+pnpm verify_implementation <network> PersonalAccountRemote <address> --stage pre
+pnpm verify_implementation <network> MorphoLoanSubaccountRemote <address> --stage pre
+pnpm configure_remote_controller <network> prepare implementations   # execute, where the deployer owns it
+pnpm configure_remote_controller <network> verify implementations
+```
+
+Then freeze both lineages exactly as A6 describes. The section reads both addresses out of the
+target's deployment record, so there is nothing to fill in and nothing to encode by hand; a record
+that names neither - a run before the deploy above - leaves it unready rather than registering
+something.
 
 Unlike A4 and A5, there is no queued stage to verify here: the registrations are
 `onlyOwnerWithTimelock` like everything else, so at zero delay each applies in the transaction that

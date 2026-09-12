@@ -6,10 +6,14 @@ import {IERC173} from "../../contracts/diamond/interfaces/IERC173.sol";
 import {IIComposeTransportFacet} from "../../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
 import {IIMorphoLoanMarketsFacet} from "../../contracts/smartAccounts/interface/IIMorphoLoanMarketsFacet.sol";
 import {IIPauseFacet} from "../../contracts/smartAccounts/interface/IIPauseFacet.sol";
+import {IIPersonalAccountsFacet} from "../../contracts/smartAccounts/interface/IIPersonalAccountsFacet.sol";
+import {IISubaccountsFacet} from "../../contracts/smartAccounts/interface/IISubaccountsFacet.sol";
 import {IITimelockFacet} from "../../contracts/smartAccounts/interface/IITimelockFacet.sol";
 import {IComposeTransportFacet} from "../../contracts/userInterfaces/facets/IComposeTransportFacet.sol";
 import {IMorphoLoanMarketsFacet} from "../../contracts/userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
 import {IPauseFacet} from "../../contracts/userInterfaces/facets/IPauseFacet.sol";
+import {IPersonalAccountsFacet} from "../../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
+import {ISubaccountsFacet} from "../../contracts/userInterfaces/facets/ISubaccountsFacet.sol";
 import {ITimelockFacet} from "../../contracts/userInterfaces/facets/ITimelockFacet.sol";
 import {IMorpho} from "../../contracts/smartAccounts/interface/IMorpho.sol";
 import {DeployNetworks} from "../lib/DeployNetworks.sol";
@@ -22,20 +26,29 @@ import {PinnedControllerInitCode} from "../lib/PinnedControllerInitCode.sol";
  * read-back afterwards. The step the Flare deploy performs inside its own run and the loan chains
  * had nowhere to do ([`RUNBOOK.md`](../RUNBOOK.md) B4 and B6).
  *
- * Four sections, each one governance group:
+ * Five sections, each one governance group:
  *
  * - `governance`: the pauser and unpauser roles, and the timelock duration. The duration is emitted
  *   last of everything a run carries, not merely last of this section, because it is what makes
  *   every later timelocked call queue - a role change or a wiring call included. (`removeUnpausers`
- *   is immediate and unaffected.) So `all` sets it after the wiring, while the pinned flow, which
- *   runs the sections separately, sets it at B4 and has B5 and B6 queue behind it on purpose.
+ *   is immediate and unaffected.) So it is last wherever it appears, and the pinned flow, which
+ *   runs the sections separately, leaves it to the end for the same reason ([`RUNBOOK.md`](../RUNBOOK.md) B7).
+ * - `implementations`: the remote Personal Account and the type's remote subaccount. Alone among
+ *   the sections its two addresses are not in the chain config: they are deploy outputs, read from
+ *   the deployment record of whichever controller the run targets - `<network>.json` for the pinned
+ *   one, the gitignored `<network>_mock.json` for a throwaway. A record that names neither leaves
+ *   the section unready, which is what a run before `deploy_remote_account_implementations` is.
+ *   The check that can still PREVENT a wrong implementation being registered is
+ *   `verify_implementation --stage pre`, not this: the read-back here proves only what the registry
+ *   ended up pointing at.
  * - `transport`: the LayerZero endpoint, the OFT and the pinned origin. It precedes the market,
  *   which validates the collateral token against the transport's OFT.
  * - `market`: the write-once market binding for the subaccount type.
  * - `fees`: the type's fee terms. The first such call is the activation - borrowing reverts until
  *   it lands - so it comes last of all.
  *
- * `wiring` is the last three together and `all` is every section. A section named on its own must
+ * `wiring` is the last three together - the implementations are not part of it - and `all` is every
+ * section. A section named on its own must
  * be complete in the file or the run stops naming what is missing; a sweep skips an incomplete one
  * with a note, so a config that does not yet carry a market still prepares the transport.
  *
@@ -73,6 +86,9 @@ contract ConfigureRemoteController is Script {
         IComposeTransportFacet.Transport transport;
         IMorphoLoanMarketsFacet.Market market;
         IMorphoLoanMarketsFacet.FeeTerms fees;
+        // not from the chain config: deploy outputs, filled in from the target's deployment record
+        address personalAccountImplementation;
+        address loanSubaccountImplementation;
     }
 
     struct Call {
@@ -102,7 +118,7 @@ contract ConfigureRemoteController is Script {
         DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
 
         address diamond = resolveDiamond(network, _target);
-        Configuration memory config = readConfiguration(network);
+        Configuration memory config = configurationFor(network, _target);
         _print(string.concat("NETWORK: ", network));
         _print(string.concat("TARGET: ", vm.toString(diamond), " (", _target, ")"));
         bytes32 phase = keccak256(bytes(_phase));
@@ -230,6 +246,15 @@ contract ConfigureRemoteController is Script {
                 _print("SUBMITTED: addUnpausers");
             }
         }
+        if (_wants(_section, "implementations") && _ready(_config, "implementations", sweep)) {
+            IIPersonalAccountsFacet(_diamond).setPersonalAccountImplementation(_config.personalAccountImplementation);
+            _print("SUBMITTED: setPersonalAccountImplementation");
+            IISubaccountsFacet(_diamond).setSubaccountImplementation(
+                _config.subaccountType,
+                _config.loanSubaccountImplementation
+            );
+            _print("SUBMITTED: setSubaccountImplementation");
+        }
         if (_wants(_section, "transport") && _ready(_config, "transport", sweep)) {
             IIComposeTransportFacet(_diamond).setComposeTransport(_config.transport);
             _print("SUBMITTED: setComposeTransport");
@@ -289,6 +314,18 @@ contract ConfigureRemoteController is Script {
             _print(string.concat("VERIFIED: unpausers ", vm.toString(unpausers.length)));
             _print(string.concat("VERIFIED: timelockDurationSeconds ", vm.toString(duration)));
         }
+        if (_wants(_section, "implementations") && _ready(_config, "implementations", sweep)) {
+            require(
+                IPersonalAccountsFacet(_diamond).implementation() == _config.personalAccountImplementation,
+                "the Personal Account implementation on chain is not the recorded one"
+            );
+            require(
+                ISubaccountsFacet(_diamond).implementationForType(_config.subaccountType) ==
+                    _config.loanSubaccountImplementation,
+                "the subaccount implementation on chain is not the recorded one"
+            );
+            _print("VERIFIED: implementations");
+        }
         if (_wants(_section, "transport") && _ready(_config, "transport", sweep)) {
             IComposeTransportFacet.Transport memory live = IComposeTransportFacet(_diamond).getComposeTransport();
             require(
@@ -341,13 +378,14 @@ contract ConfigureRemoteController is Script {
     {
         bool sweep = _isSweep(_section);
         bool governance = _wants(_section, "governance");
+        bool implementations = _wants(_section, "implementations") && _ready(_config, "implementations", sweep);
         bool transport = _wants(_section, "transport") && _ready(_config, "transport", sweep);
         bool market = _wants(_section, "market") && _ready(_config, "market", sweep);
         bool fees = _wants(_section, "fees") && _ready(_config, "fees", sweep);
 
         uint256 count =
             (governance ? 1 + (_config.pausers.length > 0 ? 1 : 0) + (_config.unpausers.length > 0 ? 1 : 0) : 0) +
-            (transport ? 1 : 0) + (market ? 1 : 0) + (fees ? 1 : 0);
+            (implementations ? 2 : 0) + (transport ? 1 : 0) + (market ? 1 : 0) + (fees ? 1 : 0);
         require(count > 0, "nothing to do: the named section is empty for this configuration");
         _calls = new Call[](count);
         uint256 next = 0;
@@ -367,6 +405,24 @@ contract ConfigureRemoteController is Script {
                 );
                 next++;
             }
+        }
+        if (implementations) {
+            _calls[next] = Call(
+                "setPersonalAccountImplementation",
+                abi.encodeCall(
+                    IIPersonalAccountsFacet.setPersonalAccountImplementation,
+                    (_config.personalAccountImplementation)
+                )
+            );
+            next++;
+            _calls[next] = Call(
+                "setSubaccountImplementation",
+                abi.encodeCall(
+                    IISubaccountsFacet.setSubaccountImplementation,
+                    (_config.subaccountType, _config.loanSubaccountImplementation)
+                )
+            );
+            next++;
         }
         if (transport) {
             _calls[next] = Call(
@@ -422,6 +478,21 @@ contract ConfigureRemoteController is Script {
     /// @notice The configuration for `_network`. Every key is read, so a file missing one is a file
     /// that stops the run rather than a section that silently does nothing; an unknown value is
     /// written as zero and its section reported as not ready.
+    /// @notice The whole configuration a run works from: the chain config, plus the two addresses
+    /// that are not in it. Kept as one seam rather than assembled inside `run`, so that which record
+    /// a target reads - and that a run reads one at all - is drivable from a test.
+    function configurationFor(
+        string memory _network,
+        string memory _target
+    )
+        public view
+        returns (Configuration memory _config)
+    {
+        _config = readConfiguration(_network);
+        (_config.personalAccountImplementation, _config.loanSubaccountImplementation) =
+            readImplementations(_network, _target);
+    }
+
     function readConfiguration(
         string memory _network
     )
@@ -528,7 +599,18 @@ contract ConfigureRemoteController is Script {
         bytes32 name = keccak256(bytes(_name));
         bool ready;
         string memory reason;
-        if (name == keccak256("transport")) {
+        if (name == keccak256("implementations")) {
+            // one without the other is not the early state a sweep may pass over: something WAS
+            // deployed and the record is half written. Skipping that silently would arm the
+            // timelock over a deployment whose accounts resolve no implementation at all
+            require(
+                (_config.personalAccountImplementation == address(0)) ==
+                    (_config.loanSubaccountImplementation == address(0)),
+                "the deployment record names one remote implementation but not the other"
+            );
+            ready = _implementationsReady(_config);
+            reason = "the deployment record names no remote implementations";
+        } else if (name == keccak256("transport")) {
             ready = _transportReady(_config);
             reason = "the composeTransport section is not filled in";
         } else if (name == keccak256("market")) {
@@ -583,6 +665,77 @@ contract ConfigureRemoteController is Script {
         returns (string memory)
     {
         return string.concat("deployment/deploys/", _network, "_mock.json");
+    }
+
+    /// @dev The record the pinned target's implementations are read from, which the deploy flow
+    /// writes and every other tool resolves addresses through.
+    function deploymentRecordPath(
+        string memory _network
+    )
+        public view virtual
+        returns (string memory)
+    {
+        return string.concat("deployment/deploys/", _network, ".json");
+    }
+
+    /// @notice The two remote implementations the target's record names, zero for either it does
+    /// not. A missing record is not an error here: before `deploy_remote_account_implementations`
+    /// has run there is nothing to register, and the section reports itself unready rather than
+    /// stopping a run that is about to configure something else.
+    function readImplementations(
+        string memory _network,
+        string memory _target
+    )
+        public view virtual
+        returns (address _personalAccount, address _loanSubaccount)
+    {
+        string memory path;
+        if (keccak256(bytes(_target)) == keccak256("throwaway")) {
+            path = throwawayRecordPath(_network);
+        } else {
+            path = deploymentRecordPath(_network);
+        }
+        if (!vm.exists(path)) {
+            return (address(0), address(0));
+        }
+        return implementationsFromRecord(vm.readFile(path));
+    }
+
+    /// @notice The same, from the record's contents, so a test can drive a record that is not in
+    /// the tree. Both deploy paths write these two names - the throwaway's own run and
+    /// `deploy_remote_account_implementations` - so one reader serves either target.
+    function implementationsFromRecord(
+        string memory _record
+    )
+        public pure
+        returns (address _personalAccount, address _loanSubaccount)
+    {
+        RecordedContract[] memory records = abi.decode(vm.parseJson(_record), (RecordedContract[]));
+        // whether the name was SEEN, not whether it produced an address: a zero-valued entry is
+        // still an entry, and counting it as unseen would let a second one through
+        bool seenPersonalAccount;
+        bool seenLoanSubaccount;
+        for (uint256 i = 0; i < records.length; i++) {
+            bytes32 name = keccak256(bytes(records[i].name));
+            // refused rather than resolved: the recorder updates the FIRST entry of a name, so a
+            // record holding two of one name would leave a re-deployment writing to one of them
+            // and this reading the other - a stale address, registered as if it were current
+            if (name == keccak256("PersonalAccountRemoteImplementation")) {
+                require(
+                    !seenPersonalAccount,
+                    "the deployment record names PersonalAccountRemoteImplementation twice"
+                );
+                seenPersonalAccount = true;
+                _personalAccount = records[i].contractAddress;
+            } else if (name == keccak256("MorphoLoanSubaccountRemoteImplementation")) {
+                require(
+                    !seenLoanSubaccount,
+                    "the deployment record names MorphoLoanSubaccountRemoteImplementation twice"
+                );
+                seenLoanSubaccount = true;
+                _loanSubaccount = records[i].contractAddress;
+            }
+        }
     }
 
     /// @notice The controller a deployment record names, from the record's own contents - the
@@ -652,7 +805,10 @@ contract ConfigureRemoteController is Script {
             return true;
         }
         if (section == keccak256("wiring")) {
-            return keccak256(bytes(_name)) != keccak256("governance");
+            // named rather than "everything but governance": the implementations are not wiring,
+            // and a sweep that silently carried them would register from a record nobody named
+            bytes32 name = keccak256(bytes(_name));
+            return name == keccak256("transport") || name == keccak256("market") || name == keccak256("fees");
         }
         return section == keccak256(bytes(_name));
     }
@@ -665,6 +821,18 @@ contract ConfigureRemoteController is Script {
     {
         bytes32 section = keccak256(bytes(_section));
         return section == keccak256("all") || section == keccak256("wiring");
+    }
+
+    /// @dev Both, or neither: one implementation without the other is half a registration, and the
+    /// section exists to make the pair land together.
+    function _implementationsReady(
+        Configuration memory _config
+    )
+        internal pure
+        returns (bool)
+    {
+        return _config.personalAccountImplementation != address(0) &&
+            _config.loanSubaccountImplementation != address(0);
     }
 
     function _transportReady(
