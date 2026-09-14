@@ -32,6 +32,18 @@ function fakeCode(name: string): Buffer {
   return Buffer.concat([Buffer.from("6080604052", "hex"), Buffer.from(name, "utf8")]);
 }
 
+/**
+ * The same functional code with a solc-shaped metadata trailer: the payload, then two bytes giving
+ * its length, which is how the stripper finds it. Two builds of one contract differ exactly here,
+ * so a comparison that did not strip it would call a rebuild a change.
+ */
+function fakeCodeWithMetadata(name: string, metadata: string): Buffer {
+  const trailer = Buffer.from(metadata, "hex");
+  const length = Buffer.alloc(2);
+  length.writeUInt16BE(trailer.length);
+  return Buffer.concat([fakeCode(name), trailer, length]);
+}
+
 const repo: RepoReader = {
   hasArtifact: () => true,
   hasSource: (name) => name in IMPLEMENTATIONS || name === "PersonalAccountProxy",
@@ -74,7 +86,11 @@ class FakeChain implements ChainReader {
     this.queued.set(encodeRegistration(spec, implementation).toLowerCase(), maturity);
   }
 
+  /** Every address a run asked for code, so a needless lookup is visible. */
+  codeReads: string[] = [];
+
   code(address: string): Promise<string> {
+    this.codeReads.push(address.toLowerCase());
     return Promise.resolve(this.codes.get(address.toLowerCase()) ?? "0x");
   }
   storage(address: string, slot: string): Promise<string> {
@@ -126,6 +142,7 @@ function actualOf(checks: Check[], name: string): string {
   return entry.actual ?? "";
 }
 
+const ZERO = "0x0000000000000000000000000000000000000000";
 const CODE_CHECK = `code: PersonalAccountRemote at ${IMPL} matches the artifact`;
 const BEACON_NOT_YET = "registry: the Personal Account beacon is not already the implementation";
 const BEACON_LIVE = "registry: the Personal Account beacon points at the implementation";
@@ -144,6 +161,157 @@ void test("before queueing: the reviewed code, the right chain family, and the c
   );
   assert.ok(result.notes.some((note) => note.includes(`currently holds ${OTHER_IMPL}`)));
   assert.ok(result.notes.some((note) => note.includes("duration 3600 seconds")));
+});
+
+void test("a registry already carrying this exact code is called out before registering", async () => {
+  // the redeploy nobody needed: the address about to be registered holds the same code as the one
+  // already registered, so the call would buy a new address and no new behavior - a timelocked
+  // call, its signatures and its execution for nothing
+  const chain = new FakeChain();
+  chain.beaconImpl = OTHER_IMPL;
+  chain.codes.set(OTHER_IMPL.toLowerCase(), `0x${fakeCode("PersonalAccountRemote").toString("hex")}`);
+
+  const result = await verifyImplementation(inputs(chain));
+
+  assert.deepEqual(failed(result.checks), [], "it is a note, not a failure: a replacement is legitimate");
+  assert.ok(
+    result.notes.some((note) => note.includes(OTHER_IMPL) && note.includes("already carries this exact code")),
+    "the note must name the address that already carries it"
+  );
+});
+
+void test("a rebuild's metadata trailer does not read as different code", async () => {
+  // the whole point of comparing modulo the trailer: two builds of one contract differ exactly
+  // there, and calling that a change would mean the note never fires for the case it exists for
+  const chain = new FakeChain();
+  chain.beaconImpl = OTHER_IMPL;
+  chain.codes.set(
+    OTHER_IMPL.toLowerCase(),
+    `0x${fakeCodeWithMetadata("PersonalAccountRemote", "a2646970667358221220aabbccdd").toString("hex")}`
+  );
+  chain.codes.set(
+    IMPL.toLowerCase(),
+    `0x${fakeCodeWithMetadata("PersonalAccountRemote", "a264697066735822122099887766").toString("hex")}`
+  );
+
+  const result = await verifyImplementation(inputs(chain));
+
+  assert.deepEqual(failed(result.checks), [], "a differing trailer is not a differing implementation");
+  assert.ok(
+    result.notes.some((note) => note.includes("already carries this exact code")),
+    "the note must fire across a rebuild, which is exactly the redeploy worth questioning"
+  );
+});
+
+void test("the note is made for the subaccount registry too, not just the beacon", async () => {
+  // the helper takes the contract under verification; hardcoding one implementation would lose the
+  // advisory for every other, and the two registries are read by different getters
+  const chain = new FakeChain("MorphoLoanSubaccountRemote");
+  chain.typeImpl = OTHER_IMPL;
+  chain.codes.set(OTHER_IMPL.toLowerCase(), `0x${fakeCode("MorphoLoanSubaccountRemote").toString("hex")}`);
+
+  const result = await verifyImplementation(
+    inputs(chain, { contract: "MorphoLoanSubaccountRemote", chainId: ETHEREUM })
+  );
+
+  assert.deepEqual(failed(result.checks), []);
+  assert.ok(result.notes.some((note) => note.includes(OTHER_IMPL) && note.includes("already carries this exact code")));
+});
+
+void test("the comparison is against THIS contract, not whichever one it was first asked about", async () => {
+  // a helper hardcoded to one artifact would call any registry holding that artifact's code a
+  // match, whatever implementation is being verified
+  const chain = new FakeChain("MorphoLoanSubaccountRemote");
+  chain.typeImpl = OTHER_IMPL;
+  chain.codes.set(OTHER_IMPL.toLowerCase(), `0x${fakeCode("PersonalAccountRemote").toString("hex")}`);
+
+  const result = await verifyImplementation(
+    inputs(chain, { contract: "MorphoLoanSubaccountRemote", chainId: ETHEREUM })
+  );
+
+  assert.equal(
+    result.notes.some((note) => note.includes("already carries this exact code")),
+    false,
+    "another implementation's code is not this one's"
+  );
+});
+
+void test("a failing candidate gets no explanation that contradicts the failure", async () => {
+  // the run correctly fails on the address about to be registered, and saying alongside it that the
+  // registration "would change the address and nothing else" would be false - an operator reading
+  // the note could conclude the call is merely redundant rather than wrong
+  for (const [label, candidate] of [
+    ["different code", `0x${fakeCode("PersonalAccountRemote-v2").toString("hex")}`],
+    ["no code at all", undefined],
+  ] as [string, string | undefined][]) {
+    const chain = new FakeChain();
+    chain.beaconImpl = OTHER_IMPL;
+    chain.codes.set(OTHER_IMPL.toLowerCase(), `0x${fakeCode("PersonalAccountRemote").toString("hex")}`);
+    if (candidate === undefined) {
+      chain.codes.delete(IMPL.toLowerCase());
+    } else {
+      chain.codes.set(IMPL.toLowerCase(), candidate);
+    }
+
+    const result = await verifyImplementation(inputs(chain));
+
+    assert.deepEqual(failed(result.checks), [CODE_CHECK], `${label}: the code check is the failure`);
+    assert.equal(
+      result.notes.some((note) => note.includes("already carries this exact code")),
+      false,
+      `${label}: no note may explain away a failing candidate`
+    );
+  }
+});
+
+void test("a registry carrying DIFFERENT code says nothing about it", async () => {
+  const chain = new FakeChain();
+  chain.beaconImpl = OTHER_IMPL;
+  chain.codes.set(OTHER_IMPL.toLowerCase(), `0x${fakeCode("PersonalAccountRemote-v1").toString("hex")}`);
+
+  const result = await verifyImplementation(inputs(chain));
+
+  assert.equal(
+    result.notes.some((note) => note.includes("already carries this exact code")),
+    false,
+    "an upgrade is the ordinary case and needs no remark"
+  );
+});
+
+void test("an empty registry is not compared against at all", async () => {
+  // a first registration has nothing to compare against. The zero address never carries code, so
+  // the note could not fire anyway - what the guard actually saves is a chain call made on every
+  // first registration, which is the run this check exists for
+  const chain = new FakeChain();
+  chain.beaconImpl = ZERO;
+
+  const result = await verifyImplementation(inputs(chain));
+
+  assert.equal(
+    result.notes.some((note) => note.includes("already carries this exact code")),
+    false
+  );
+  assert.equal(chain.codeReads.includes(ZERO), false, "the zero address is never asked for code");
+});
+
+void test("the same-code note is made before registering and at no later stage", async () => {
+  // at `queued` and `live` the question is whether the EXACT requested registration landed, and
+  // equal code at another address does not answer it - so repeating the note there would invite
+  // reading a match as a pass
+  for (const stage of ["queued", "live"] as Stage[]) {
+    const chain = new FakeChain();
+    chain.codes.set(OTHER_IMPL.toLowerCase(), `0x${fakeCode("PersonalAccountRemote").toString("hex")}`);
+    chain.queue(IMPLEMENTATIONS.PersonalAccountRemote!, IMPL);
+    if (stage === "queued") {
+      chain.beaconImpl = OTHER_IMPL;
+    }
+    const result = await verifyImplementation(inputs(chain, { stage }));
+    assert.equal(
+      result.notes.some((note) => note.includes("already carries this exact code")),
+      false,
+      `stage ${stage} must not repeat the note`
+    );
+  }
 });
 
 void test("a wrong runtime behind the address fails, at every stage", async () => {

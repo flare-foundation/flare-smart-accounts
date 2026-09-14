@@ -160,7 +160,8 @@ export async function verifyImplementation(inputs: VerificationInputs): Promise<
       hasSource ? "present" : "removed from source"
     )
   );
-  checks.push(await codeCheck(chain, repo, inputs.contract, implementation));
+  const candidateCode = await codeCheck(chain, repo, inputs.contract, implementation);
+  checks.push(candidateCode);
 
   // 2. the chain family: the Flare accounts and the remote accounts lay out storage for
   // different proxy lineages, and each looks like a legitimate artifact on the other's chain.
@@ -213,6 +214,25 @@ export async function verifyImplementation(inputs: VerificationInputs): Promise<
         already ? "already registered - this stage has already happened" : "not yet registered"
       )
     );
+    // What the registry holds may BE this code at another address: a redeploy of an unchanged
+    // implementation, so the registration would buy a new address and no new behavior - a
+    // timelocked call, its signatures and its execution for nothing. Said only here, and only as a
+    // note: a replacement is a legitimate registration, and which address a deployment should name
+    // is not this check's to decide. Not said at `queued` or `live`, where the question is whether
+    // the exact requested registration landed, and equal code at another address does not answer
+    // it.
+    // only when the candidate itself checked out: if the address about to be registered carries
+    // different code, or none, the run already fails on that, and "the registration would change
+    // the address and nothing else" would be a false explanation printed beside a true failure
+    if (stage === "pre" && !already && registered !== ZERO_ADDRESS && candidateCode.ok) {
+      const sameCode = await isSameCode(chain, repo, inputs.contract, registered);
+      if (sameCode) {
+        notes.push(
+          `registry: ${registered} already carries this exact code, so registering ${implementation} ` +
+            `would change the address and nothing else - check a redeploy was intended`
+        );
+      }
+    }
   }
   if (stage === "queued") {
     checks.push(
@@ -357,6 +377,30 @@ function addressInWord(word: string): string {
 }
 
 /** The planner's REUSE verdict as a check: the on-chain code is the artifact's functional code. */
+/**
+ * Whether an address already carries the contract's current code, compared the way the cut planner
+ * compares facets: runtime modulo its own trailing metadata, so a rebuild does not read as a change.
+ * A missing artifact or an address with no code is simply "not this code", since this answers a
+ * note rather than a check and has no business failing a run on its own.
+ */
+async function isSameCode(chain: ChainReader, repo: RepoReader, name: string, address: string): Promise<boolean> {
+  if (!repo.hasArtifact(name)) {
+    return false;
+  }
+  const deployedCodeHex = await chain.code(address);
+  if (deployedCodeHex === ZERO_CODE) {
+    return false;
+  }
+  const plan = compareFacet(
+    name,
+    address,
+    hexToBytes(deployedCodeHex),
+    repo.deployedCode(name),
+    repo.creationCode(PROXY_CONTRACT)
+  );
+  return plan.action === "REUSE";
+}
+
 async function codeCheck(chain: ChainReader, repo: RepoReader, name: string, address: string): Promise<Check> {
   const title = `code: ${name} at ${address} matches the artifact`;
   if (!repo.hasArtifact(name)) {
