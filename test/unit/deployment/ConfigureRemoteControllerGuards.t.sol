@@ -158,9 +158,10 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
             bytes32(uint256(uint160(0xCd3d2127935Ae82Af54Fc31cCD9D3440dbF46639)))
         );
         assertEq(config.market.marketParams.lltv, 0.77e18);
-        // the two the rehearsal has still to deploy
-        assertEq(config.market.marketParams.loanToken, address(0));
-        assertEq(config.market.marketParams.oracle, address(0));
+        // the rehearsal market's two deploy outputs, from the run of 2026-09-14: rUSD, and the
+        // oracle Morpho's factory built over the two rehearsal feeds
+        assertEq(config.market.marketParams.loanToken, 0x1B5A184869aD208E736BFecF53560e9940c3E67f);
+        assertEq(config.market.marketParams.oracle, 0x38866de4F3e3Ec99F02a5E169713729D6C8a29F0);
         // the fee terms, decided 2026-09-11: a 7% floor, a 1% spread, the deployer collecting
         assertEq(config.fees.feeFloor, 0.07e18);
         assertEq(config.fees.feeSpread, 0.01e18);
@@ -223,21 +224,29 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
     }
 
     function testAnIncompleteSectionStopsTheRunWhenItIsNamedAndIsSkippedInASweep() public {
-        ConfigureRemoteController.Configuration memory config = harness.readConfiguration("sepolia");
-
-        // named on its own: asking for the market and getting nothing is not an answer
-        vm.expectRevert(bytes("the loanMarket section is not filled in"));
-        harness.callsFor("market", config);
-
-        // the same config swept: the sections it has are prepared, the market is skipped
-        ConfigureRemoteController.Call[] memory calls = harness.callsFor("wiring", config);
-        assertEq(calls.length, 2);
+        // the shipped config is complete now, so the incomplete cases are driven over configurations
+        // built here, and the shipped one shows the other side: a sweep that prepares all three
+        ConfigureRemoteController.Call[] memory calls =
+            harness.callsFor("wiring", harness.readConfiguration("sepolia"));
+        assertEq(calls.length, 3);
         assertEq(calls[0].description, "setComposeTransport");
-        assertEq(calls[1].description, "setLoanFeeTerms");
+        assertEq(calls[1].description, "registerLoanMarket");
+        assertEq(calls[2].description, "setLoanFeeTerms");
+
+        // a market without its loan token: named on its own, asking for it and getting nothing is
+        // not an answer; swept, it is skipped with the note (and so are the fees, which this
+        // synthetic config gives no recipient)
+        ConfigureRemoteController.Configuration memory noMarket =
+            harness.parseConfiguration(_configJson(_withLoanToken(ZERO)));
+        vm.expectRevert(bytes("the loanMarket section is not filled in"));
+        harness.callsFor("market", noMarket);
+        calls = harness.callsFor("wiring", noMarket);
+        assertEq(calls.length, 1);
+        assertEq(calls[0].description, "setComposeTransport");
         assertTrue(harness.printed("SKIPPED: the loanMarket section is not filled in"));
 
         // the fee terms are ready on a recipient rather than on a rate, so that case is driven
-        // over a configuration naming none - the shipped one names the deployer
+        // over a configuration naming none
         ConfigureRemoteController.Configuration memory noRecipient =
             harness.parseConfiguration(_configJson(_text()));
         vm.expectRevert(bytes("the loanFeeTerms section names no recipient"));
@@ -252,12 +261,13 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
         // the readiness rule is not the prepare phase's alone: submitting or verifying a section
         // the config has not been given would report success over a section that does not exist
         _deployDiamond();
-        ConfigureRemoteController.Configuration memory config = harness.readConfiguration("sepolia");
+        ConfigureRemoteController.Configuration memory noMarket =
+            harness.parseConfiguration(_configJson(_withLoanToken(ZERO)));
 
         vm.expectRevert(bytes("the loanMarket section is not filled in"));
-        harness.submit(diamond, "market", config);
+        harness.submit(diamond, "market", noMarket);
         vm.expectRevert(bytes("the loanMarket section is not filled in"));
-        harness.requireApplied(diamond, "market", config);
+        harness.requireApplied(diamond, "market", noMarket);
         ConfigureRemoteController.Configuration memory noRecipient =
             harness.parseConfiguration(_configJson(_text()));
         vm.expectRevert(bytes("the loanFeeTerms section names no recipient"));
@@ -446,13 +456,14 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
         string governance;
         string duration;
         string subaccountType;
+        string loanToken;
     }
 
     function _text()
         private pure
         returns (ConfigText memory _config)
     {
-        _config = ConfigText("0", "0", "[]", "[]", "40294", GOVERNANCE, "3600", "1");
+        _config = ConfigText("0", "0", "[]", "[]", "40294", GOVERNANCE, "3600", "1", SOME);
     }
 
     function _configJson(
@@ -468,7 +479,7 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
             ", \"unpausers\": ", _config.unpausers,
             ", \"subaccountType\": ", _config.subaccountType,
             _transportJson(_config.originEid),
-            _marketJson(),
+            _marketJson(_config.loanToken),
             ", \"loanFeeTerms\": {\"feeFloor\": ", _config.feeFloor,
             ", \"feeSpread\": ", _config.feeSpread,
             ", \"feeRecipient\": \"", ZERO, "\"}}"
@@ -489,18 +500,25 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
         );
     }
 
-    function _marketJson()
+    function _marketJson(
+        string memory _loanToken
+    )
         private pure
         returns (string memory)
     {
         return string.concat(
             ", \"loanMarket\": {\"morpho\": \"", SOME,
-            "\", \"loanToken\": \"", SOME,
+            "\", \"loanToken\": \"", _loanToken,
             "\", \"collateralToken\": \"", SOME,
             "\", \"oracle\": \"", SOME,
             "\", \"irm\": \"", SOME,
             "\", \"lltv\": \"770000000000000000\"}"
         );
+    }
+
+    function _withLoanToken(string memory _value) private pure returns (ConfigText memory _config) {
+        _config = _text();
+        _config.loanToken = _value;
     }
 
     function _withFeeFloor(string memory _value) private pure returns (ConfigText memory _config) {
