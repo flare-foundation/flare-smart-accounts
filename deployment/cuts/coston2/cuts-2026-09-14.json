@@ -1,0 +1,21 @@
+{
+  "note": "EXECUTED on Coston2 2026-09-14; kept as the record of that cut. It CANNOT be re-executed from this branch: its init, Coston2PreFreezeAccountsMigration, is a one-time migration that lives only on coston2-sepolia-deploy and has no place in the product. check_cut and verify_diamond read this file fine; diamond_cut will stop at the missing init artifact, which is the intended outcome.",
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "SubaccountsFacet",
+    "BridgeRoutesFacet",
+    "PersonalAccountsFacet",
+    "PauseFacet",
+    "InstructionsFacet",
+    "MemoInstructionsFacet",
+    "XrplProviderWalletsFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "init": {
+    "contract": "Coston2PreFreezeAccountsMigration",
+    "method": "migrate",
+    "args": []
+  },
+  "execute": false
+}
