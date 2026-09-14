@@ -8,7 +8,7 @@ import {ConfigureRemoteController} from "../../../deployment/scripts/ConfigureRe
 import {PinnedControllerInitCode} from "../../../deployment/lib/PinnedControllerInitCode.sol";
 import {MockSingletonFactory} from "../../../contracts/mock/MockSingletonFactory.sol";
 import {PinnedControllerStub} from "../../utils/PinnedControllerStub.sol";
-import {DiamondArgs} from "../../../contracts/diamond/implementation/Diamond.sol";
+import {DiamondArgs, FunctionNotFound} from "../../../contracts/diamond/implementation/Diamond.sol";
 import {IDiamond} from "../../../contracts/diamond/interfaces/IDiamond.sol";
 import {IDiamondCut} from "../../../contracts/diamond/interfaces/IDiamondCut.sol";
 import {MasterAccountController} from "../../../contracts/smartAccounts/implementation/MasterAccountController.sol";
@@ -373,6 +373,165 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
         assertEq(harness.writtenTo(), "deployment/output-internal/sepolia/configuration-transport.txt");
     }
 
+    function testPrepareEmitsTheCallsForADiamondThatIsNotCutYet() public {
+        // a freshly bootstrapped remote controller serves only its three base facets, so the
+        // duration read reverts; the calls depend on the config and the record and not on the
+        // chain, so a sheet can be prepared before the cut - marked provisional, in the notes and
+        // as the file's first line, since the duration it could not read is unknown rather than zero
+        DiamondArgs memory args = DiamondArgs({owner: address(harness), initAddress: address(0), initCalldata: ""});
+        address bare = address(new MasterAccountController(deployBaseFacets(), args));
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+
+        harness.prepare("sepolia", bare, "all", config);
+
+        assertTrue(harness.printed(string.concat("SUBMIT FROM: ", vm.toString(address(harness)))));
+        assertTrue(harness.printed("PROVISIONAL: TimelockFacet is not cut"));
+        assertFalse(harness.printed("NOTE: the duration is zero"), "unknown is not zero");
+        string memory written = harness.written();
+        assertTrue(
+            _startsWith(written, "PROVISIONAL: TimelockFacet is not cut"),
+            "the file itself carries the marker"
+        );
+        assertTrue(
+            _contains(
+                written,
+                vm.toString(
+                    abi.encodeCall(
+                        IISubaccountsFacet.setSubaccountImplementation,
+                        (config.subaccountType, config.loanSubaccountImplementation)
+                    )
+                )
+            ),
+            "the registration's calldata"
+        );
+        assertTrue(
+            _contains(
+                written,
+                vm.toString(abi.encodeCall(IIComposeTransportFacet.setComposeTransport, (config.transport)))
+            ),
+            "the wiring's calldata"
+        );
+        assertTrue(
+            _contains(
+                written,
+                vm.toString(abi.encodeCall(IITimelockFacet.setTimelockDuration, (config.timelockDurationSeconds)))
+            ),
+            "the duration's calldata, last"
+        );
+        // nothing queues on a diamond whose duration will be zero when the cut lands
+        assertFalse(_contains(written, ". EXECUTE "), "no EXECUTE line before a duration exists");
+    }
+
+    function testPrepareBubblesADurationReadThatRevertsForAnotherReason() public {
+        // only the diamond's own answer for a selector it does not serve means "not cut yet". A
+        // facet that is there and fails must stop the run: reported as a fresh diamond, its sheet
+        // would promise immediate application over calls that in fact queue
+        _deployDiamond();
+        // built before the expectation: an inline argument would be evaluated first and take it
+        ConfigureRemoteController.Configuration memory config = _configuration();
+        vm.mockCallRevert(diamond, abi.encodeCall(ITimelockFacet.getTimelockDurationSeconds, ()), "boom");
+
+        vm.expectRevert(
+            bytes("the timelock duration read reverted, and not because TimelockFacet is missing: 0x626f6f6d")
+        );
+        harness.prepare("sepolia", diamond, "transport", config);
+    }
+
+    function testPrepareBubblesFunctionNotFoundNamingAnotherSelector() public {
+        // the shape alone is not the diamond's answer about THIS selector: a `FunctionNotFound`
+        // carrying a different one comes from somewhere else in the call, and reading it as "the
+        // timelock is not cut" would mark an output provisional over a diamond that may well queue
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _configuration();
+        bytes memory otherSelector = abi.encodeWithSelector(
+            FunctionNotFound.selector,
+            ISubaccountsFacet.implementationForType.selector
+        );
+        vm.mockCallRevert(
+            diamond,
+            abi.encodeCall(ITimelockFacet.getTimelockDurationSeconds, ()),
+            otherSelector
+        );
+
+        vm.expectRevert(
+            bytes(
+                "the timelock duration read reverted, and not because TimelockFacet is missing: "
+                "0x5416eb98c6dd726700000000000000000000000000000000000000000000000000000000"
+            )
+        );
+        harness.prepare("sepolia", diamond, "transport", config);
+    }
+
+    function testPrepareBubblesATruncatedFunctionNotFound() public {
+        // the selector argument cut short: right error, wrong payload, and nothing a diamond emits
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _configuration();
+        vm.mockCallRevert(
+            diamond,
+            abi.encodeCall(ITimelockFacet.getTimelockDurationSeconds, ()),
+            abi.encodePacked(FunctionNotFound.selector)
+        );
+
+        vm.expectRevert(
+            bytes(
+                "the timelock duration read reverted, and not because TimelockFacet is missing: "
+                "0x5416eb98"
+            )
+        );
+        harness.prepare("sepolia", diamond, "transport", config);
+    }
+
+    function testPrepareBubblesAFunctionNotFoundWithTrailingBytes() public {
+        // the right error and the right selector, followed by bytes the diamond never appends: a
+        // prefix match would take it, so the comparison covers the whole payload
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _configuration();
+        bytes memory padded = abi.encodePacked(
+            abi.encodeWithSelector(
+                FunctionNotFound.selector,
+                ITimelockFacet.getTimelockDurationSeconds.selector
+            ),
+            bytes1(0x01)
+        );
+        vm.mockCallRevert(diamond, abi.encodeCall(ITimelockFacet.getTimelockDurationSeconds, ()), padded);
+
+        vm.expectRevert(
+            bytes(
+                "the timelock duration read reverted, and not because TimelockFacet is missing: "
+                "0x5416eb98f1dd663e0000000000000000000000000000000000000000000000000000000001"
+            )
+        );
+        harness.prepare("sepolia", diamond, "transport", config);
+    }
+
+    function testPrepareStaysProvisionalWhenTheGetterIsGoneButADelayRemains() public {
+        // the getter's absence does not prove a zero delay: a TimelockFacet cut, its getter removed
+        // and an hour then set through the setter that remains leaves the hour in storage while the
+        // read reverts exactly as on a fresh diamond. The sheet must say unknown, never zero
+        _deployDiamond();
+        bytes4[] memory getter = new bytes4[](1);
+        getter[0] = ITimelockFacet.getTimelockDurationSeconds.selector;
+        IDiamond.FacetCut[] memory cuts = new IDiamond.FacetCut[](1);
+        cuts[0] = IDiamond.FacetCut({
+            facetAddress: address(0),
+            action: IDiamond.FacetCutAction.Remove,
+            functionSelectors: getter
+        });
+        vm.prank(address(harness));
+        IDiamondCut(diamond).diamondCut(cuts, address(0), "");
+        vm.prank(address(harness));
+        IITimelockFacet(diamond).setTimelockDuration(DURATION);
+
+        harness.prepare("sepolia", diamond, "transport", _configuration());
+
+        assertTrue(harness.printed("PROVISIONAL: TimelockFacet is not cut"));
+        assertFalse(harness.printed("NOTE: the duration is zero"), "an hour is in storage, not zero");
+        assertFalse(
+            _contains(harness.written(), ". EXECUTE "),
+            "no EXECUTE line can be right when the delay is unknown"
+        );
+    }
+
     function testTheReadBackFailsOnARoleHolderNobodyConfigured() public {
         // the diamond's roles are a set, not a superset: a pauser from an earlier run or another
         // hand is a finding, and counting is what catches it
@@ -401,6 +560,26 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
     }
 
     /// Whether `_haystack` contains `_needle`, for asserting on one prepared line inside the file.
+    function _startsWith(
+        string memory _text,
+        string memory _prefix
+    )
+        private pure
+        returns (bool)
+    {
+        bytes memory text = bytes(_text);
+        bytes memory prefix = bytes(_prefix);
+        if (prefix.length > text.length) {
+            return false;
+        }
+        for (uint256 i = 0; i < prefix.length; i++) {
+            if (text[i] != prefix[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     function _contains(
         string memory _haystack,
         string memory _needle

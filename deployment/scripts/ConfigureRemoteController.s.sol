@@ -3,6 +3,7 @@ pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {IERC173} from "../../contracts/diamond/interfaces/IERC173.sol";
+import {FunctionNotFound} from "../../contracts/diamond/implementation/Diamond.sol";
 import {IIComposeTransportFacet} from "../../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
 import {IIMorphoLoanMarketsFacet} from "../../contracts/smartAccounts/interface/IIMorphoLoanMarketsFacet.sol";
 import {IIPauseFacet} from "../../contracts/smartAccounts/interface/IIPauseFacet.sol";
@@ -105,6 +106,12 @@ contract ConfigureRemoteController is Script {
         string name;
     }
 
+    /// @dev The marker on a sheet prepared before the cut, printed and written as the file's first
+    /// line: the duration is unknown, so it carries no EXECUTE lines and is not the one to submit from.
+    string internal constant PROVISIONAL =
+        "PROVISIONAL: TimelockFacet is not cut, so the duration is UNKNOWN - an absent getter does not prove a "
+        "zero delay - and this output has no EXECUTE lines. Run prepare again after the cut and submit from that";
+
     function run(
         string calldata _expectedNetwork,
         string calldata _phase,
@@ -177,8 +184,32 @@ contract ConfigureRemoteController is Script {
     )
         public virtual
     {
+        // the owner is served by a pinned base facet and is always readable; the duration lives
+        // on TimelockFacet, which the cut installs, so before the cut the read reverts. A prepare
+        // before the cut is legitimate - the calls depend on the config and the record, not on
+        // the chain - so that ONE revert is tolerated: the diamond's own answer for a selector it
+        // does not serve. Any other failure of the read is a real one and stops the run, since
+        // reporting it as "not cut yet" would promise immediate application over a diamond whose
+        // calls in fact queue
         address owner = IERC173(_diamond).owner();
-        uint256 duration = ITimelockFacet(_diamond).getTimelockDurationSeconds();
+        uint256 duration = 0;
+        bool timelockCut = true;
+        try ITimelockFacet(_diamond).getTimelockDurationSeconds() returns (uint256 live) {
+            duration = live;
+        } catch (bytes memory reason) {
+            bytes memory notServed = abi.encodeWithSelector(
+                FunctionNotFound.selector,
+                ITimelockFacet.getTimelockDurationSeconds.selector
+            );
+            require(
+                keccak256(reason) == keccak256(notServed),
+                string.concat(
+                    "the timelock duration read reverted, and not because TimelockFacet is missing: ",
+                    vm.toString(reason)
+                )
+            );
+            timelockCut = false;
+        }
         _print(string.concat("TARGET: ", vm.toString(_diamond)));
         _print(string.concat("SUBMIT FROM: ", vm.toString(owner)));
         if (owner != _config.governance) {
@@ -189,7 +220,12 @@ contract ConfigureRemoteController is Script {
                 )
             );
         }
-        if (duration == 0) {
+        // an absent getter does not prove a zero delay: a facet cut, set and removed leaves its
+        // duration in storage while the read reverts exactly as on a fresh diamond. So the output
+        // is marked, in the notes and in the file itself, and is not the one to submit from
+        if (!timelockCut) {
+            _print(PROVISIONAL);
+        } else if (duration == 0) {
             _print("NOTE: the duration is zero, so each call below applies when it is submitted");
         } else {
             _print(
@@ -203,7 +239,7 @@ contract ConfigureRemoteController is Script {
 
         _warnOnEmptyRoles(_section, _config);
         Call[] memory calls = callsFor(_section, _config);
-        string memory lines = "";
+        string memory lines = timelockCut ? "" : string.concat(PROVISIONAL, "\n");
         for (uint256 i = 0; i < calls.length; i++) {
             string memory line = string.concat(
                 vm.toString(i + 1), ". ", calls[i].description, " | ",

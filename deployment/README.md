@@ -174,6 +174,13 @@ to `deployment/output-internal/<network>/configuration-<section>.txt`, the way a
 `"execute": false` prepares a cut for governance. Once a duration is in force it prints the matching
 `executeTimelockedCall` beside each one, so nobody re-encodes it by hand, and it reports who actually holds
 the diamond, since calls prepared for an owner that has not been handed it cannot be submitted by anyone.
+The calls themselves depend on the config and the record rather than on the chain, so a run against a diamond
+whose `TimelockFacet` is not cut yet still emits them, marked `PROVISIONAL` in the print and as the output
+file's first line: an absent getter does not prove a zero delay — a facet cut, set and removed leaves its
+duration in storage while the read reverts exactly as on a fresh diamond — so that output carries no
+`executeTimelockedCall` lines and is not the one to submit from. Run `prepare` again after the cut, and the
+post-cut run becomes the cross-check. Only that one revert is tolerated, matched in full against the
+diamond's own `FunctionNotFound` for that selector; any other failure of the read stops the run.
 `execute` submits them and requires the signer to be the current owner with the duration still zero, which is
 the throwaway flow alone — a multisig can never sign here, and a diamond that already has a duration would
 queue every call while the run reported it sent them. `verify` reads the chain back and fails unless the roles
