@@ -32,7 +32,7 @@
   {
     "name": "InstructionsFacet",
     "contractName": "InstructionsFacet.sol",
-    "address": "0xd7b8D88603De93dD9b430ea5f81dC32C117Df250"
+    "address": "0xEAA885fDa7Bf285101d92F6dEc0622E1967F5fa5"
   },
   {
     "name": "PaymentProofsFacet",
@@ -42,7 +42,7 @@
   {
     "name": "PersonalAccountsFacet",
     "contractName": "PersonalAccountsFacet.sol",
-    "address": "0xa071b43060DaA8eaA0d14DBE5Ea03ed18c9ed1d6"
+    "address": "0x8F8Bd315E240D674520C8Be1B3338487924f712b"
   },
   {
     "name": "TimelockFacet",
@@ -57,7 +57,7 @@
   {
     "name": "XrplProviderWalletsFacet",
     "contractName": "XrplProviderWalletsFacet.sol",
-    "address": "0xA1E3fA95d38EAD8b45d318e65351416411Cce5a2"
+    "address": "0x7e5F45660bf028E3F6E7E3BB378625EEe92de1bb"
   },
   {
     "name": "MasterAccountControllerInit",
@@ -72,7 +72,7 @@
   {
     "name": "PersonalAccountImplementation",
     "contractName": "PersonalAccount.sol",
-    "address": "0xe900cf0C3f1320816700c669B002835aCc9A93A6"
+    "address": "0x08A9a294FF6E8745FCd3B3Aeb5c4483ABA15C312"
   },
   {
     "name": "FAssetRedeemerAccountImplementation",
@@ -92,16 +92,36 @@
   {
     "name": "MemoInstructionsFacet",
     "contractName": "MemoInstructionsFacet.sol",
-    "address": "0x32c6379B2978A9aB75993cA82e3ADc77dd50010C"
+    "address": "0x2054188F6d309923EFb247E863eBc5EDC0B183EB"
   },
   {
     "name": "PauseFacet",
     "contractName": "PauseFacet.sol",
-    "address": "0xBa7b5ef7bFd0B092CAD4eF5b0AdfFcd607Aaf1AC"
+    "address": "0x766150cff70161D1a5084F70F1f670DC1aAe4d4d"
   },
   {
     "name": "ReaderFacet",
     "contractName": "ReaderFacet.sol",
     "address": "0xbcE1972De5d1598a948A36186eCeBFD4690F3a5C"
+  },
+  {
+    "name": "LoanSubaccountImplementation",
+    "contractName": "LoanSubaccount.sol",
+    "address": "0xeAC08019597c9C09018BACa46fEACfCfB6386093"
+  },
+  {
+    "name": "SubaccountsFacet",
+    "contractName": "SubaccountsFacet.sol",
+    "address": "0xECde53e357911c436511570FC9D4a3ff5304f6A5"
+  },
+  {
+    "name": "BridgeRoutesFacet",
+    "contractName": "BridgeRoutesFacet.sol",
+    "address": "0x401dBEcb1cAf61b4600D3D98b967c8435A1F716d"
+  },
+  {
+    "name": "Coston2PreFreezeAccountsMigration",
+    "contractName": "Coston2PreFreezeAccountsMigration.sol",
+    "address": "0xb7Db53d42B9Ff553A21CC493E1791c820E8DB3cc"
   }
 ]
