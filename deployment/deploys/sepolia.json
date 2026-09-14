@@ -18,5 +18,70 @@
     "name": "RehearsalMarketOracle",
     "contractName": "MorphoChainlinkOracleV2.sol",
     "address": "0x38866de4F3e3Ec99F02a5E169713729D6C8a29F0"
+  },
+  {
+    "name": "DiamondCutFacet",
+    "contractName": "DiamondCutFacet.sol",
+    "address": "0xbBfDC00D4a230eB2cBf2623f8ca67C23D31E094D"
+  },
+  {
+    "name": "DiamondLoupeFacet",
+    "contractName": "DiamondLoupeFacet.sol",
+    "address": "0x39Da5ec984c0E5797E0BD24706Ab35F21EB065d1"
+  },
+  {
+    "name": "OwnershipFacet",
+    "contractName": "OwnershipFacet.sol",
+    "address": "0x615eAdb82F2c3b84Ee4cd7ac5DefdF381d585978"
+  },
+  {
+    "name": "MasterAccountController",
+    "contractName": "MasterAccountController.sol",
+    "address": "0x434936d47503353f06750Db1A444DBDC5F0AD37c"
+  },
+  {
+    "name": "SubaccountsFacet",
+    "contractName": "SubaccountsFacet.sol",
+    "address": "0xEaA8968E9B70dd2559066E3e801Df1596a4CFA23"
+  },
+  {
+    "name": "TimelockFacet",
+    "contractName": "TimelockFacet.sol",
+    "address": "0x05ad5ABCA6738f94C7b6CdFd9Da7E47F34966F01"
+  },
+  {
+    "name": "PauseFacet",
+    "contractName": "PauseFacet.sol",
+    "address": "0x13bD1F2cFf4237df3F1C7D7B8C9BF682940297AE"
+  },
+  {
+    "name": "PersonalAccountsFacet",
+    "contractName": "PersonalAccountsFacet.sol",
+    "address": "0xEF8880130f8D0e9fF35980afcC284df30D657e4a"
+  },
+  {
+    "name": "ComposeTransportFacet",
+    "contractName": "ComposeTransportFacet.sol",
+    "address": "0x280aD40A0A965c8Abfa1c9cec0c4d3551917e25e"
+  },
+  {
+    "name": "MorphoLoanMarketsFacet",
+    "contractName": "MorphoLoanMarketsFacet.sol",
+    "address": "0x6056366c7a5Cec3e3b79B9Cb1a8c588ECDdba5bc"
+  },
+  {
+    "name": "EthereumControllerInit",
+    "contractName": "EthereumControllerInit.sol",
+    "address": "0x767b25A658E8FC8ab6eBbd52043495dB61b4ea91"
+  },
+  {
+    "name": "MorphoLoanSubaccountRemoteImplementation",
+    "contractName": "MorphoLoanSubaccountRemote.sol",
+    "address": "0xA5E161DC265bb0fe50CAeE7A3772E72Fe3d8836F"
+  },
+  {
+    "name": "PersonalAccountRemoteImplementation",
+    "contractName": "PersonalAccountRemote.sol",
+    "address": "0xf4Cb397e97a99788014c74bA5B0356D1BcfDc84b"
   }
 ]
