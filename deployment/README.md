@@ -181,6 +181,9 @@ duration in storage while the read reverts exactly as on a fresh diamond — so 
 `executeTimelockedCall` lines and is not the one to submit from. Run `prepare` again after the cut, and the
 post-cut run becomes the cross-check. Only that one revert is tolerated, matched in full against the
 diamond's own `FunctionNotFound` for that selector; any other failure of the read stops the run.
+`pnpm describe_calls <network> [section] [--sheet] [--flat]` names the parameters of what `prepare` wrote, decoding each
+payload against the compiled ABI, so a governance sheet can be filled from the tool rather than by reading hex; the
+decode reads back what was encoded, which a rendering written beside the encoder could not.
 `execute` submits them and requires the signer to be the current owner with the duration still zero, which is
 the throwaway flow alone — a multisig can never sign here, and a diamond that already has a duration would
 queue every call while the run reported it sent them. `verify` reads the chain back and fails unless the roles

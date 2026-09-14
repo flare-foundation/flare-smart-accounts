@@ -27,6 +27,7 @@
     "deploy_remote_controller_throwaway": "bash deployment/scripts/deploy-remote-controller-throwaway.sh",
     "deploy_remote_account_implementations": "bash deployment/scripts/deploy-remote-account-implementations.sh",
     "configure_remote_controller": "bash deployment/scripts/configure-remote-controller.sh",
+    "describe_calls": "tsx deployment/scripts/describe-calls.ts",
     "transfer_ownership": "bash deployment/scripts/transfer-ownership.sh",
     "deploy_sepolia_market": "bash deployment/scripts/deploy-sepolia-market.sh",
     "deploy_my_erc4626_coston2": "dotenv -e .env -- sh -c 'forge script deployment/scripts/DeployMyERC4626.s.sol:DeployMyERC4626 --rpc-url $COSTON2_RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --offline --broadcast'",

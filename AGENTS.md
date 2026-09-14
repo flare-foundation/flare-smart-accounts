@@ -76,6 +76,7 @@ pnpm deploy_remote_account_implementations <network> <all|name[,name...]>
 pnpm deploy_remote_controller_pinned <network>
 pnpm deploy_remote_controller_throwaway <network>
 pnpm configure_remote_controller <network> <prepare|execute|verify> [section] [target]
+pnpm describe_calls <network> [section] [--sheet] [--flat]
 pnpm transfer_ownership <network> <expected-current-owner> <new-owner>
 pnpm deploy_sepolia_market <assets|market|fund|reset-feeds>
 pnpm diamond_cut <network> <cut-file-name>
@@ -115,6 +116,22 @@ pnpm verify_contracts <network>
   it is registered. A section named on its own must be complete in the file; a sweep skips an incomplete one
   with a note. Only `execute` takes a signing key: the other two read, and a multisig owner has nothing to sign
   with anyway.
+- `describe_calls` names the parameters of the calls `prepare` wrote. It reads the file under
+  `deployment/output-internal/<network>/`, makes no chain call and takes no key, and prints one
+  `name = value` line per parameter. A STRUCT is one parameter whose value is the bracketed form a
+  governance sheet cell and the Safe Transaction Builder both take
+  (`_market = ["0xd011...",["0x1B5A...",...,"770000000000000000"]]`), nested to any depth and in
+  declaration order. EVERY scalar inside the brackets is quoted, integers included: the builder
+  parses them with `JSON.parse` and takes a decimal string for any integer field, while a bare
+  integer is read as a double and is exact only to about 9.0e15 in either direction. A top-level
+  scalar stays plain, since its own cell is not JSON. `--sheet` emits the pairs tab separated for
+  pasting, naming a selector it could not decode rather than leaving the row looking argument-free; `--flat`
+  gives one line per leaf, walking arrays with an index (`_cuts[0].facetAddress`), for reading a
+  call rather than pasting it. The names come from the compiled ABI, searched internal interfaces
+  first because a selector fixes the signature but not the parameter names, so the decode is a
+  SECOND SOURCE on what was encoded rather than a restatement of the inputs. The suite needs a
+  `forge build`; without artifacts it skips, and `REQUIRE_FORGE_TOOLING` turns that into a failure,
+  which is how the Foundry CI job demands it run.
 - `deploy_remote_account_implementations` takes a mandatory selection: `all`, or a comma-separated
   list of `personal-account` and `morpho-loan-subaccount`. Names rather than a flag each, so a new
   subaccount type is a new name rather than a moved argument. A preflight
