@@ -2,6 +2,7 @@
 pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {IERC173} from "../../contracts/diamond/interfaces/IERC173.sol";
 import {FunctionNotFound} from "../../contracts/diamond/implementation/Diamond.sol";
 import {IIComposeTransportFacet} from "../../contracts/smartAccounts/interface/IIComposeTransportFacet.sol";
@@ -238,7 +239,7 @@ contract ConfigureRemoteController is Script {
         }
 
         _warnOnEmptyRoles(_section, _config);
-        Call[] memory calls = callsFor(_section, _config);
+        Call[] memory calls = pendingCallsFor(_diamond, _section, _config);
         string memory lines = timelockCut ? "" : string.concat(PROVISIONAL, "\n");
         for (uint256 i = 0; i < calls.length; i++) {
             string memory line = string.concat(
@@ -283,13 +284,41 @@ contract ConfigureRemoteController is Script {
             }
         }
         if (_wants(_section, "implementations") && _ready(_config, "implementations", sweep)) {
-            IIPersonalAccountsFacet(_diamond).setPersonalAccountImplementation(_config.personalAccountImplementation);
-            _print("SUBMITTED: setPersonalAccountImplementation");
-            IISubaccountsFacet(_diamond).setSubaccountImplementation(
-                _config.subaccountType,
-                _config.loanSubaccountImplementation
+            // the same skip `prepare` makes, so the two phases send the same set: a registration
+            // the diamond has already made costs a timelocked call to change nothing
+            (address personalAccount, address subaccount, bool known) = _registeredImplementations(
+                _diamond,
+                _config.subaccountType
             );
-            _print("SUBMITTED: setSubaccountImplementation");
+            // the flag decides once, here, rather than qualifying each comparison below: an
+            // unreadable registry reports the zero address, a configured implementation is never
+            // zero, and a comparison that can only ever be false is not a guard - it is a reader's
+            // trap. What "unknown" actually changes is that it is SAID
+            bool skipPersonalAccount;
+            bool skipSubaccount;
+            if (known) {
+                skipPersonalAccount = personalAccount == _config.personalAccountImplementation;
+                skipSubaccount = subaccount == _config.loanSubaccountImplementation;
+            } else {
+                _print("NOTE: the implementation registry is not cut yet, so no registration is filtered");
+            }
+            if (skipPersonalAccount) {
+                _print("SKIPPED: setPersonalAccountImplementation - already registered");
+            } else {
+                IIPersonalAccountsFacet(_diamond).setPersonalAccountImplementation(
+                    _config.personalAccountImplementation
+                );
+                _print("SUBMITTED: setPersonalAccountImplementation");
+            }
+            if (skipSubaccount) {
+                _print("SKIPPED: setSubaccountImplementation - already registered");
+            } else {
+                IISubaccountsFacet(_diamond).setSubaccountImplementation(
+                    _config.subaccountType,
+                    _config.loanSubaccountImplementation
+                );
+                _print("SUBMITTED: setSubaccountImplementation");
+            }
         }
         if (_wants(_section, "transport") && _ready(_config, "transport", sweep)) {
             IIComposeTransportFacet(_diamond).setComposeTransport(_config.transport);
@@ -490,6 +519,190 @@ contract ConfigureRemoteController is Script {
                 abi.encodeCall(IITimelockFacet.setTimelockDuration, (_config.timelockDurationSeconds))
             );
         }
+    }
+
+    /**
+     * @notice The section's calls, minus the registrations the diamond has already made.
+     * @param _diamond The diamond the calls are for; its registries are what is consulted.
+     * @param _section The section name.
+     * @param _config The configuration.
+     * @return The calls still worth submitting.
+     * @dev Only the `implementations` section is filtered, and only because the no-op is its
+     * NORMAL case rather than an exception: the deploy reuses an implementation whose code has not
+     * changed, so a sweep after it would re-register the address the diamond already serves. That
+     * costs a timelocked call, three signatures and an execution to change nothing, and on a chain
+     * with a delay it also parks a matured call anyone can execute later.
+     *
+     * The other sections are deliberately left alone. Re-registering a market is refused on chain
+     * (write-once), and a request to register a DIFFERENT one is a disagreement with the config
+     * that must reach a person rather than be filtered out of the output; the transport and the
+     * fee terms are legitimately re-set to the same values as part of a rotation; and the duration
+     * is the deliberate last call of every run.
+     *
+     * A registry that cannot be read - the facet is not cut yet - filters nothing: before the cut
+     * every registration is still due, which is exactly what an unfiltered list says.
+     */
+    function pendingCallsFor(
+        address _diamond,
+        string memory _section,
+        Configuration memory _config
+    )
+        public virtual
+        returns (Call[] memory)
+    {
+        Call[] memory calls = callsFor(_section, _config);
+        // what the list HOLDS, not what the section asked for: a sweep over a record that names no
+        // implementations emits no registrations, and reading a registry for calls that are not
+        // there would let a failing getter stop a run with nothing to filter - which `submit`, on
+        // the same inputs, completes
+        bool registers = false;
+        for (uint256 i = 0; i < calls.length; i++) {
+            if (
+                _isCall(calls[i], "setPersonalAccountImplementation") ||
+                _isCall(calls[i], "setSubaccountImplementation")
+            ) {
+                registers = true;
+                break;
+            }
+        }
+        if (!registers) {
+            return calls;
+        }
+        (address personalAccount, address subaccount, bool known) = _registeredImplementations(
+            _diamond,
+            _config.subaccountType
+        );
+        // an unreadable registry is stated rather than assumed away: it filters nothing, and the
+        // note is what tells the operator that the absence of SKIPPED lines is ignorance rather
+        // than a diamond that disagrees
+        if (!known) {
+            _print("NOTE: the implementation registry is not cut yet, so no registration is filtered");
+            return calls;
+        }
+        bool[] memory keep = new bool[](calls.length);
+        uint256 kept = 0;
+        for (uint256 i = 0; i < calls.length; i++) {
+            keep[i] = true;
+            if (
+                _isCall(calls[i], "setPersonalAccountImplementation") &&
+                personalAccount == _config.personalAccountImplementation
+            ) {
+                keep[i] = false;
+                _print(
+                    string.concat(
+                        "SKIPPED: setPersonalAccountImplementation - the diamond already registers ",
+                        vm.toString(personalAccount)
+                    )
+                );
+            }
+            if (
+                _isCall(calls[i], "setSubaccountImplementation") &&
+                subaccount == _config.loanSubaccountImplementation
+            ) {
+                keep[i] = false;
+                _print(
+                    string.concat(
+                        "SKIPPED: setSubaccountImplementation - the diamond already registers ",
+                        vm.toString(subaccount)
+                    )
+                );
+            }
+            if (keep[i]) {
+                kept++;
+            }
+        }
+        Call[] memory pending = new Call[](kept);
+        uint256 next = 0;
+        for (uint256 i = 0; i < calls.length; i++) {
+            if (keep[i]) {
+                pending[next] = calls[i];
+                next++;
+            }
+        }
+        return pending;
+    }
+
+    /**
+     * @dev Both registries, and whether they answered at all. Read together because they live on
+     * facets the same cut installs: either both are there or neither is, and one flag for the pair
+     * keeps the caller from filtering half a section on half an answer.
+     */
+    function _registeredImplementations(
+        address _diamond,
+        uint256 _subaccountType
+    )
+        internal view
+        returns (address, address, bool)
+    {
+        (address personalAccount, bool personalAccountKnown) = _registeredPersonalAccount(_diamond);
+        (address subaccount, bool subaccountKnown) = _registeredSubaccount(_diamond, _subaccountType);
+        return (personalAccount, subaccount, personalAccountKnown && subaccountKnown);
+    }
+
+    /**
+     * @dev The registered Personal Account implementation, and whether it could be read at all.
+     * The getter lives on a facet the cut installs, so before the cut it reverts exactly as a
+     * diamond answers any selector it does not serve. That ONE revert means "not cut yet" and
+     * nothing else: the whole payload is compared, since the same error naming another selector
+     * came from somewhere else in the call, and reading it as an absent facet would file a failed
+     * registry read as "still to register".
+     */
+    function _registeredPersonalAccount(
+        address _diamond
+    )
+        internal view
+        returns (address, bool)
+    {
+        try IPersonalAccountsFacet(_diamond).implementation() returns (address live) {
+            return (live, true);
+        } catch (bytes memory reason) {
+            _requireNotServed(reason, IBeacon.implementation.selector, "the Personal Account");
+            return (address(0), false);
+        }
+    }
+
+    /// @dev The registered implementation of a subaccount type, and whether it could be read.
+    function _registeredSubaccount(
+        address _diamond,
+        uint256 _subaccountType
+    )
+        internal view
+        returns (address, bool)
+    {
+        try ISubaccountsFacet(_diamond).implementationForType(_subaccountType) returns (address live) {
+            return (live, true);
+        } catch (bytes memory reason) {
+            _requireNotServed(reason, ISubaccountsFacet.implementationForType.selector, "the subaccount");
+        }
+        return (address(0), false);
+    }
+
+    /// @dev Passes only the diamond's own answer for the selector it was asked about.
+    function _requireNotServed(
+        bytes memory _reason,
+        bytes4 _selector,
+        string memory _what
+    )
+        internal pure
+    {
+        bytes memory notServed = abi.encodeWithSelector(FunctionNotFound.selector, _selector);
+        require(
+            keccak256(_reason) == keccak256(notServed),
+            string.concat(
+                "reading ", _what, " implementation registry reverted, and not because its facet is missing"
+            )
+        );
+    }
+
+    /// @dev Whether a built call is the named one.
+    function _isCall(
+        Call memory _call,
+        string memory _description
+    )
+        internal pure
+        returns (bool)
+    {
+        return keccak256(bytes(_call.description)) == keccak256(bytes(_description));
     }
 
     /// @notice What must hold before `execute` sends anything: the signer owns the diamond, and the

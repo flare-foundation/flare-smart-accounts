@@ -365,7 +365,9 @@ that deploys nothing is a success that leaves the record untouched.
 Then freeze both lineages exactly as A6 describes. The section reads both addresses out of the
 target's deployment record, so there is nothing to fill in and nothing to encode by hand; a record
 that names neither - a run before the deploy above - leaves it unready rather than registering
-something.
+something. It also SKIPS a registration the diamond has already made, so a rerun after a deploy that
+reused an unchanged implementation emits only what is actually still due - a registration nobody
+needs is still a timelocked call, three signatures and an execution.
 
 Unlike A4 and A5, there is no queued stage to verify here: the registrations are
 `onlyOwnerWithTimelock` like everything else, so at zero delay each applies in the transaction that

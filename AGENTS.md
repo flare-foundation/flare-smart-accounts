@@ -102,9 +102,17 @@ pnpm verify_contracts <network>
   read-back sees simulated state, so the wrapper follows a broadcast with a separate `verify` run; `verify`
   reads the chain back. `implementations` is the one section whose two addresses are not in the chain config:
   the remote Personal Account and the type's remote subaccount are deploy outputs, read from the target's own
-  deployment record, and a record naming neither leaves the section unready. It registers; it does not replace
-  `verify_implementation --stage pre`, which is the check that can still refuse a wrong address before it is
-  registered. A section named on its own must be complete in the file; a sweep skips an incomplete one
+  deployment record, and a record naming neither leaves the section unready. It is also the one section
+  whose calls are FILTERED against the chain: a registration the diamond has already made is skipped with a
+  note, because the deploy reuses an implementation whose code has not changed and re-registering the address
+  the diamond already serves costs a timelocked call, three signatures and an execution to change nothing.
+  `prepare` and `execute` skip the same ones; a registry that cannot be read yet (the facet is not cut) filters
+  nothing, and a registry pointing at an address the config does not name is never filtered, since the
+  registration is how that disagreement gets resolved. No other section is filtered: re-registering a market is
+  refused on chain and a different one is a disagreement a person must see, the transport and the fee terms are
+  legitimately re-set to the same values, and the duration is every run's last call. It registers; it does not
+  replace `verify_implementation --stage pre`, which is the check that can still refuse a wrong address before
+  it is registered. A section named on its own must be complete in the file; a sweep skips an incomplete one
   with a note. Only `execute` takes a signing key: the other two read, and a multisig owner has nothing to sign
   with anyway.
 - `deploy_remote_account_implementations` takes a mandatory selection: `all`, or a comma-separated

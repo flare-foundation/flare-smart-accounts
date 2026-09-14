@@ -8,6 +8,7 @@ import {ConfigureRemoteController} from "../../../deployment/scripts/ConfigureRe
 import {PinnedControllerInitCode} from "../../../deployment/lib/PinnedControllerInitCode.sol";
 import {MockSingletonFactory} from "../../../contracts/mock/MockSingletonFactory.sol";
 import {PinnedControllerStub} from "../../utils/PinnedControllerStub.sol";
+import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 import {DiamondArgs, FunctionNotFound} from "../../../contracts/diamond/implementation/Diamond.sol";
 import {IDiamond} from "../../../contracts/diamond/interfaces/IDiamond.sol";
 import {IDiamondCut} from "../../../contracts/diamond/interfaces/IDiamondCut.sol";
@@ -976,6 +977,241 @@ contract ConfigureRemoteControllerGuardsTest is Test, FacetsDeploy {
         assertEq(
             ISubaccountsFacet(diamond).implementationForType(config.subaccountType),
             config.loanSubaccountImplementation
+        );
+    }
+
+    function testARegistrationTheDiamondAlreadyMadeIsNotSubmittedAgain() public {
+        // the no-op is this section's NORMAL case, not an exception: the deploy reuses an
+        // implementation whose code has not changed, so a sweep after it would re-register the
+        // address the diamond already serves - a timelocked call, three signatures and an
+        // execution to change nothing, and on a chain with a delay a matured call left parked
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        harness.submit(diamond, "implementations", config);
+
+        ConfigureRemoteController.Call[] memory pending =
+            harness.pendingCallsFor(diamond, "implementations", config);
+
+        assertEq(pending.length, 0, "both are already registered");
+        assertTrue(harness.printed("SKIPPED: setPersonalAccountImplementation"));
+        assertTrue(harness.printed("SKIPPED: setSubaccountImplementation"));
+    }
+
+    function testPrepareWritesOnlyTheRegistrationsStillDue() public {
+        // driven through `prepare` and read off the FILE it writes, because that file is the sheet
+        // a multisig signs from: a filter the entry point does not use is a filter that changes
+        // nothing about what anyone is asked to sign
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        harness.submit(diamond, "implementations", config);
+        address stillDue = address(new PauseFacet());
+        config.loanSubaccountImplementation = stillDue;
+
+        harness.prepare("sepolia", diamond, "implementations", config);
+
+        string memory written = harness.written();
+        assertTrue(_contains(written, "setSubaccountImplementation"), "the due one reaches the sheet");
+        assertFalse(
+            _contains(written, "setPersonalAccountImplementation"),
+            "a registration the diamond already made must not reach the sheet"
+        );
+        assertTrue(_startsWith(written, "1. setSubaccountImplementation"), "and it is numbered from one");
+    }
+
+    function testOnlyTheRegistrationAlreadyMadeIsSkipped() public {
+        // the case that makes the filter worth having rather than an all-or-nothing check: one
+        // implementation was redeployed and the other reused
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        harness.submit(diamond, "implementations", config);
+
+        config.loanSubaccountImplementation = address(new PersonalAccountsFacet());
+        ConfigureRemoteController.Call[] memory pending =
+            harness.pendingCallsFor(diamond, "implementations", config);
+
+        assertEq(pending.length, 1, "one is still due");
+        assertEq(pending[0].description, "setSubaccountImplementation");
+        assertEq(
+            pending[0].data,
+            abi.encodeCall(
+                IISubaccountsFacet.setSubaccountImplementation,
+                (config.subaccountType, config.loanSubaccountImplementation)
+            )
+        );
+    }
+
+    function testSubmitSkipsTheRegistrationItWouldRepeat() public {
+        // prepare and submit must agree on what is due, or the throwaway flow would send a call
+        // the multisig flow was told it did not need
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        harness.submit(diamond, "implementations", config);
+        address registered = IPersonalAccountsFacet(diamond).implementation();
+        // the setters are made to revert rather than merely watched: re-registering the same
+        // address moves no state, so unchanged state proves nothing about whether the call was
+        // made - and it is the CALL that costs a timelocked slot, three signatures and a send
+        vm.mockCallRevert(
+            diamond,
+            abi.encodeCall(
+                IIPersonalAccountsFacet.setPersonalAccountImplementation,
+                (config.personalAccountImplementation)
+            ),
+            "the skipped registration was sent"
+        );
+        vm.mockCallRevert(
+            diamond,
+            abi.encodeCall(
+                IISubaccountsFacet.setSubaccountImplementation,
+                (config.subaccountType, config.loanSubaccountImplementation)
+            ),
+            "the skipped registration was sent"
+        );
+
+        harness.submit(diamond, "implementations", config);
+
+        assertTrue(harness.printed("SKIPPED: setPersonalAccountImplementation - already registered"));
+        assertTrue(harness.printed("SKIPPED: setSubaccountImplementation - already registered"));
+        assertEq(IPersonalAccountsFacet(diamond).implementation(), registered, "nothing moved");
+    }
+
+    function testARegistryThatIsNotCutYetFiltersNothing() public {
+        // before the cut every registration is still due, which is exactly what the unfiltered
+        // list says; a diamond that cannot answer must not be read as one that already agrees
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        vm.etch(PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER, address(new PinnedControllerStub()).code);
+
+        ConfigureRemoteController.Call[] memory pending = harness.pendingCallsFor(
+            PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER,
+            "implementations",
+            config
+        );
+
+        assertEq(pending.length, 2, "an unreadable registry filters nothing");
+        assertFalse(harness.printed("SKIPPED:"));
+        assertTrue(
+            harness.printed("NOTE: the implementation registry is not cut yet"),
+            "the absence of SKIPPED lines must read as ignorance, not as a diamond that disagrees"
+        );
+    }
+
+    function testTheRegistryReadBubblesFunctionNotFoundNamingAnotherSelector() public {
+        // the shape alone is not the diamond's answer about THIS selector: the same error carrying
+        // another one came from somewhere else in the call, and reading it as "the facet is not cut"
+        // would file a failed registry read as an ordinary pre-cut state
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        vm.mockCallRevert(
+            diamond,
+            abi.encodeCall(IBeacon.implementation, ()),
+            abi.encodeWithSelector(FunctionNotFound.selector, ITimelockFacet.getTimelockDurationSeconds.selector)
+        );
+
+        vm.expectRevert(
+            bytes(
+                "reading the Personal Account implementation registry reverted, and not because "
+                "its facet is missing"
+            )
+        );
+        harness.pendingCallsFor(diamond, "implementations", config);
+    }
+
+    function testASectionThatRegistersNothingNeverConsultsTheRegistry() public {
+        // a failing registry read must not stop a run that was never going to register anything:
+        // the filter belongs to one section, and so does its exposure to that read
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _configuration();
+        vm.mockCallRevert(diamond, abi.encodeCall(IBeacon.implementation, ()), "boom");
+
+        assertEq(harness.pendingCallsFor(diamond, "transport", config).length, 1);
+        assertEq(harness.pendingCallsFor(diamond, "market", config).length, 1);
+        assertEq(harness.pendingCallsFor(diamond, "fees", config).length, 1);
+    }
+
+    function testSubmitSaysSoWhenItCannotReadTheRegistry() public {
+        // a send that skips nothing because it could not look is not the same as one that found
+        // nothing to skip, and only the note tells them apart. Driven with the getter mocked away
+        // while the setters stay live, since a diamond that serves neither cannot be submitted to
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        vm.mockCallRevert(
+            diamond,
+            abi.encodeCall(IBeacon.implementation, ()),
+            abi.encodeWithSelector(FunctionNotFound.selector, IBeacon.implementation.selector)
+        );
+
+        harness.submit(diamond, "implementations", config);
+
+        assertTrue(harness.printed("NOTE: the implementation registry is not cut yet"));
+        assertTrue(harness.printed("SUBMITTED: setPersonalAccountImplementation"));
+        assertTrue(harness.printed("SUBMITTED: setSubaccountImplementation"));
+        assertFalse(harness.printed("SKIPPED: set"));
+    }
+
+    function testHalfAnAnswerIsNotAnAnswer() public {
+        // both getters live on facets the same cut installs, so one answering while the other does
+        // not is a diamond in a state nothing here understands. Filtering on the half that replied
+        // would skip a registration on the strength of a registry that could not be read
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        harness.submit(diamond, "implementations", config);
+        vm.mockCallRevert(
+            diamond,
+            abi.encodeCall(IBeacon.implementation, ()),
+            abi.encodeWithSelector(FunctionNotFound.selector, IBeacon.implementation.selector)
+        );
+
+        ConfigureRemoteController.Call[] memory pending =
+            harness.pendingCallsFor(diamond, "implementations", config);
+
+        assertEq(pending.length, 2, "neither is filtered on half an answer");
+        assertFalse(harness.printed("SKIPPED: setSubaccountImplementation"));
+        assertTrue(harness.printed("NOTE: the implementation registry is not cut yet"));
+    }
+
+    function testARegistryReadThatFailsForAnotherReasonStopsTheRun() public {
+        // reporting a failed read as "still to register" would be harmless; reporting it as
+        // "already registered" would drop a registration out of the sheet, so neither is guessed
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        vm.mockCallRevert(diamond, abi.encodeCall(IBeacon.implementation, ()), "boom");
+
+        vm.expectRevert(
+            bytes(
+                "reading the Personal Account implementation registry reverted, and not because "
+                "its facet is missing"
+            )
+        );
+        harness.pendingCallsFor(diamond, "implementations", config);
+    }
+
+    function testARegistryPointingElsewhereStillRegisters() public {
+        // an implementation registered that the config does not name is a disagreement, and the
+        // registration the config asks for is exactly how it gets resolved - never filtered out
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _withImplementations();
+        harness.submit(diamond, "implementations", config);
+
+        config.personalAccountImplementation = address(new PersonalAccountsFacet());
+        ConfigureRemoteController.Call[] memory pending =
+            harness.pendingCallsFor(diamond, "implementations", config);
+
+        assertEq(pending.length, 1);
+        assertEq(pending[0].description, "setPersonalAccountImplementation");
+    }
+
+    function testTheOtherSectionsAreNeverFiltered() public {
+        // only the implementations section is filtered: a market re-registration is refused on
+        // chain and a different one is a disagreement a person must see, the transport and fees
+        // are legitimately re-set to the same values, and the duration is every run's last call
+        _deployDiamond();
+        ConfigureRemoteController.Configuration memory config = _configuration();
+
+        assertEq(harness.pendingCallsFor(diamond, "transport", config).length, 1);
+        assertEq(harness.pendingCallsFor(diamond, "market", config).length, 1);
+        assertEq(harness.pendingCallsFor(diamond, "fees", config).length, 1);
+        assertEq(
+            harness.pendingCallsFor(diamond, "governance", config).length,
+            harness.callsFor("governance", config).length
         );
     }
 
