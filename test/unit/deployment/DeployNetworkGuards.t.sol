@@ -83,9 +83,9 @@ contract DeployNetworkGuardsTest is Test {
         loanScript.run("coston2", false);
         personalAccountScript.run("coston2", false);
         vm.chainId(ETHEREUM);
-        remoteScript.run("ethereum", false);
+        remoteScript.run("ethereum", false, _all());
         vm.chainId(SEPOLIA);
-        remoteScript.run("sepolia", false);
+        remoteScript.run("sepolia", false, _all());
     }
 
     function testAWrongNetworkNameIsRefusedOnAPermittedChain() public {
@@ -99,7 +99,7 @@ contract DeployNetworkGuardsTest is Test {
         personalAccountScript.run("songbird", false);
         vm.chainId(ETHEREUM);
         vm.expectRevert(bytes("RPC chain is ethereum, not the named network sepolia"));
-        remoteScript.run("sepolia", false);
+        remoteScript.run("sepolia", false, _all());
     }
 
     function testRemoteImplementationsRefuseEveryFlareFamilyChain() public {
@@ -107,7 +107,7 @@ contract DeployNetworkGuardsTest is Test {
         for (uint256 i = 0; i < flare.length; i++) {
             vm.chainId(flare[i]);
             vm.expectRevert(bytes("remote implementations belong on a loan chain"));
-            remoteScript.run(DeployNetworks.networkName(flare[i]), false);
+            remoteScript.run(DeployNetworks.networkName(flare[i]), false, _all());
         }
     }
 
@@ -125,9 +125,9 @@ contract DeployNetworkGuardsTest is Test {
         vm.expectRevert(bytes("the Flare Personal Account belongs on a Flare-family chain"));
         personalAccountScript.run("scdev", false);
         vm.expectRevert(bytes("remote implementations belong on a loan chain"));
-        remoteScript.run("ethereum", false);
+        remoteScript.run("ethereum", false, _all());
         vm.expectRevert(bytes("remote implementations belong on a loan chain"));
-        remoteScript.run("scdev", false);
+        remoteScript.run("scdev", false, _all());
         vm.expectRevert(bytes("the composer belongs on a Flare-family chain"));
         composerScript.run("coston2", true);
         vm.expectRevert(bytes("the composer belongs on a Flare-family chain"));
@@ -142,7 +142,7 @@ contract DeployNetworkGuardsTest is Test {
         for (uint256 i = 0; i < loan.length; i++) {
             vm.chainId(loan[i]);
             vm.expectRevert(bytes("the loan chains have no staging deployment"));
-            remoteScript.run(DeployNetworks.networkName(loan[i]), true);
+            remoteScript.run(DeployNetworks.networkName(loan[i]), true, _all());
         }
     }
 
@@ -231,5 +231,16 @@ contract DeployNetworkGuardsTest is Test {
         }
         assertFalse(DeployNetworks.isFlareFamily(UNKNOWN), "an unknown chain is in neither family");
         assertFalse(DeployNetworks.isLoanChain(UNKNOWN), "an unknown chain is in neither family");
+    }
+
+    /// @dev Every remote implementation, as the preflight would hand them over.
+    function _all()
+        private pure
+        returns (string[] memory)
+    {
+        string[] memory contracts = new string[](2);
+        contracts[0] = "PersonalAccountRemote";
+        contracts[1] = "MorphoLoanSubaccountRemote";
+        return contracts;
     }
 }

@@ -347,12 +347,20 @@ split across commands a multisig can submit one at a time.
 ### B5. Remote implementations
 
 ```bash
-pnpm deploy_remote_account_implementations <network>
+pnpm deploy_remote_account_implementations <network> all
 pnpm verify_implementation <network> PersonalAccountRemote <address> --stage pre
 pnpm verify_implementation <network> MorphoLoanSubaccountRemote <address> --stage pre
 pnpm configure_remote_controller <network> prepare implementations   # execute, where the deployer owns it
 pnpm configure_remote_controller <network> verify implementations
 ```
+
+The selection is mandatory: `all`, or a comma-separated list of `personal-account` and
+`morpho-loan-subaccount`. A first deployment wants `all`; a later change to one of them wants that
+one named, because redeploying the other would move a record this tooling resolves through and cost
+a timelocked re-registration for nothing. Naming one does not force a deploy either way - a
+preflight compares each named implementation against the address already recorded and SKIPS one
+that already carries this code, so `all` can legitimately deploy one and reuse the rest, and a run
+that deploys nothing is a success that leaves the record untouched.
 
 Then freeze both lineages exactly as A6 describes. The section reads both addresses out of the
 target's deployment record, so there is nothing to fill in and nothing to encode by hand; a record

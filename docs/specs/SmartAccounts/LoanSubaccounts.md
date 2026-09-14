@@ -1479,7 +1479,7 @@ names it as its `init` block with no arguments — see `deployment/cuts/ethereum
 (the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
 `deployment/deploys/ethereum.json` is written by the bootstrap when it runs — the record exists
 only once the contracts do, and the cut planner refuses to plan without it), and both
-implementations ship with `pnpm deploy_remote_account_implementations ethereum` (the script
+implementations ship with `pnpm deploy_remote_account_implementations ethereum all` (the script
 refuses the Flare-family chain ids: a remote implementation recorded on Flare would look like a
 legitimate artifact and, registered there, corrupt every Personal Account's storage). There is
 deliberately no `deployment/chain-config/ethereum.json`: the generic full-deploy script must

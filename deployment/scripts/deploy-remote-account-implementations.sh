@@ -1,16 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: deployment/scripts/deploy-remote-account-implementations.sh <network>
-# Example: deployment/scripts/deploy-remote-account-implementations.sh coston2
-# Example: deployment/scripts/deploy-remote-account-implementations.sh coston2-staging
+# Usage: deployment/scripts/deploy-remote-account-implementations.sh <network> <selection>
+# Selection: `all`, or a comma-separated list of implementation names
+# Example: deployment/scripts/deploy-remote-account-implementations.sh sepolia all
+# Example: deployment/scripts/deploy-remote-account-implementations.sh sepolia morpho-loan-subaccount
+# Example: deployment/scripts/deploy-remote-account-implementations.sh sepolia personal-account,morpho-loan-subaccount
+#
+# The selection is mandatory. Deploying everything is a thing to ask for, not a thing to get by
+# omission: once one implementation is live, redeploying it because another changed replaces a
+# record other tooling resolves through, and costs a pointless timelocked re-registration.
+#
+# Names rather than a flag each, because more subaccount types are expected: a new one is a new
+# name here and a new row in the preflight's table, and no existing argument moves.
+#
+# Naming a selection is not the whole guard. A preflight compares each selected implementation
+# against the address already recorded, and an unchanged one is SKIPPED - a successful skip, not a
+# failure - so `all` can legitimately deploy one and reuse the rest. The preflight validates the
+# names themselves, so this wrapper does not keep a second copy of the list.
 
-if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <network>" >&2
+if [[ $# -ne 2 ]]; then
+  echo "Usage: $0 <network> <all|name[,name...]>" >&2
   exit 2
 fi
 
 NETWORK="$1"
+SELECTION="$2"
 
 # Detect staging suffix; base network is used for the RPC env var
 STAGING="false"
@@ -58,11 +73,35 @@ fi
 OUTPUT_DIR="deployment/output-internal/$NETWORK"
 mkdir -p "$OUTPUT_DIR"
 
+# the preflight runs BEFORE the broadcast so a run that would deploy nothing spends no gas and,
+# more to the point, replaces no record
+PLAN_FILE="$OUTPUT_DIR/remote-implementations-plan.txt"
+npx tsx deployment/scripts/plan-remote-implementations.ts "$BASE_NETWORK" "$SELECTION" --out "$PLAN_FILE"
+
+# one artifact name per line, in the order the script takes them; an empty file is the legitimate
+# "nothing changed" answer
+CONTRACTS=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && CONTRACTS+=("$line")
+done < "$PLAN_FILE"
+
+if [[ ${#CONTRACTS[@]} -eq 0 ]]; then
+  echo
+  echo "Nothing to deploy: every selected implementation is already on chain as this code."
+  echo "The deployment record is unchanged. If one of them is not registered yet, that is a"
+  echo "separate step: pnpm configure_remote_controller $BASE_NETWORK prepare implementations"
+  exit 0
+fi
+
+# forge takes a string[] as a bracketed, comma-separated list
+CONTRACTS_ARG="[$(IFS=,; echo "${CONTRACTS[*]}")]"
+
 forge script deployment/scripts/DeployRemoteAccountImplementations.s.sol:DeployRemoteAccountImplementations \
   --rpc-url "${!RPC_ENV_VAR}" \
   --private-key "$DEPLOYER_PRIVATE_KEY" \
   --offline \
-  --sig "run(string,bool)" "$BASE_NETWORK" "$STAGING" \
+  --sig "run(string,bool,string[])" \
+  "$BASE_NETWORK" "$STAGING" "$CONTRACTS_ARG" \
   --broadcast | tee forge-deploy-output.txt
 
 npx tsx deployment/scripts/save-deployed-addresses.ts

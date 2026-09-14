@@ -72,7 +72,7 @@ Spellcheck uses cspell with the dictionary in `.vscode/cspell.json`; add legitim
 pnpm deploy_contracts <network> <fullDeploy>
 pnpm deploy_personal_account_implementation <network>
 pnpm deploy_loan_subaccount_implementation <network>
-pnpm deploy_remote_account_implementations <network>
+pnpm deploy_remote_account_implementations <network> <all|name[,name...]>
 pnpm deploy_remote_controller_pinned <network>
 pnpm deploy_remote_controller_throwaway <network>
 pnpm configure_remote_controller <network> <prepare|execute|verify> [section] [target]
@@ -107,6 +107,15 @@ pnpm verify_contracts <network>
   registered. A section named on its own must be complete in the file; a sweep skips an incomplete one
   with a note. Only `execute` takes a signing key: the other two read, and a multisig owner has nothing to sign
   with anyway.
+- `deploy_remote_account_implementations` takes a mandatory selection: `all`, or a comma-separated
+  list of `personal-account` and `morpho-loan-subaccount`. Names rather than a flag each, so a new
+  subaccount type is a new name rather than a moved argument. A preflight
+  (`plan-remote-implementations.ts`) compares each named implementation's recorded address against
+  the artifact, modulo the runtime's trailing metadata as the cut planner does, and SKIPS one that
+  already carries this code — a successful skip, so `all` can deploy one and reuse the rest, and a
+  run that deploys nothing leaves the record untouched and never reaches the recorder. Reuse is not
+  registration: the plan reports what the diamond's registry holds separately, and where the record
+  and the registry name different addresses it says so rather than choosing.
 - `transfer_ownership` hands the pinned remote controller to a new owner, and exists for the preflight rather
   than the call: `transferOwnership` is one step, has no acceptance from the new owner, is not timelocked, and a
   wrong address ends that diamond's governance for good. The expected current owner is an argument, compared
