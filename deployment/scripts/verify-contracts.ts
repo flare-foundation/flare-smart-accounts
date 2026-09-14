@@ -24,12 +24,24 @@ interface DeployedContract {
 
 // Public Blockscout instances rate-limit hard: a run's submissions back to back exhaust the window,
 // and forge's own retries (five, five seconds apart) do not outlast it, so every Blockscout
-// submission fails at once. Spacing them trades a few minutes for not needing the retries at all.
+// submission fails at once. Spacing them trades a few minutes for not needing the retries at all;
+// where an instance's keyless quota is smaller than a run, BLOCKSCOUT_API_KEY is what raises it.
 // Zero disables the wait, for a re-run of one already-verified contract.
 const DEFAULT_SUBMIT_DELAY_MS = 20_000;
 
-function blockscout(url: string): Explorer {
-  return { label: `blockscout (${new URL(url).host})`, args: ["--verifier", "blockscout", "--verifier-url", url] };
+// Blockscout's API is Etherscan-compatible, so its key travels in the same flag forge uses for
+// Etherscan. Rate limits vary by instance and endpoint: the public Sepolia instance refused every
+// keyless submission after the first two in a run, at either spacing, while the Flare instances
+// have taken keyless runs; a key raises the limit where the instance honours it.
+function blockscout(url: string, env: Record<string, string | undefined>): Explorer {
+  const args = ["--verifier", "blockscout", "--verifier-url", url];
+  const key = env["BLOCKSCOUT_API_KEY"];
+  if (key) {
+    args.push("--etherscan-api-key", key);
+  } else {
+    console.log(`  (no BLOCKSCOUT_API_KEY - keyless submissions may be rate-limited, depending on the instance)`);
+  }
+  return { label: `blockscout (${new URL(url).host})`, args };
 }
 
 // Chain-agnostic, keyless and owned by no explorer, so the record outlives any one of them losing
@@ -56,7 +68,7 @@ function explorersFor(baseNetwork: string, env: Record<string, string | undefine
   // key, plus Sourcify wherever it lists the chain - Coston (16) it does not, so that one's source
   // lives in Blockscout's database alone
   if (FLARE_FAMILY_NETWORKS.includes(baseNetwork)) {
-    const explorers = [blockscout(`https://${baseNetwork}-explorer.flare.network/api/`)];
+    const explorers = [blockscout(`https://${baseNetwork}-explorer.flare.network/api/`, env)];
     if (baseNetwork !== "coston") {
       explorers.push(sourcify());
     }
@@ -66,9 +78,13 @@ function explorersFor(baseNetwork: string, env: Record<string, string | undefine
     candidates.filter((explorer): explorer is Explorer => explorer !== undefined);
   switch (baseNetwork) {
     case "ethereum":
-      return configured([blockscout("https://eth.blockscout.com/api/"), etherscan("mainnet", env), sourcify()]);
+      return configured([blockscout("https://eth.blockscout.com/api/", env), etherscan("mainnet", env), sourcify()]);
     case "sepolia":
-      return configured([blockscout("https://eth-sepolia.blockscout.com/api/"), etherscan("sepolia", env), sourcify()]);
+      return configured([
+        blockscout("https://eth-sepolia.blockscout.com/api/", env),
+        etherscan("sepolia", env),
+        sourcify(),
+      ]);
     default:
       throw new Error(`No explorer is configured for ${baseNetwork}`);
   }
@@ -182,10 +198,16 @@ async function main(): Promise<void> {
       ];
       console.log(`\nVerifying ${contract.name} at ${contract.address} (${contractName}) on ${explorer.label}`);
       try {
-        // the nightly banner would repeat once per submission and bury the result it precedes
+        // the nightly banner would repeat once per submission and bury the result it precedes.
+        // ETHERSCAN_API_KEY is blanked, not left alone: forge falls back to it for ANY verifier's
+        // key flag - from the environment, or from the env file forge loads on its own, which is
+        // why deleting the variable is not enough - and a keyless Blockscout submission would
+        // carry the Etherscan key to Blockscout. Each explorer is handed its own key by argument
+        // above, and an explicit empty value is what stops the fallback (verified against a local
+        // capture endpoint: the request then carries no key field at all)
         execFileSync("forge", args, {
           stdio: "inherit",
-          env: { ...process.env, FOUNDRY_DISABLE_NIGHTLY_WARNING: "1" },
+          env: { ...process.env, FOUNDRY_DISABLE_NIGHTLY_WARNING: "1", ETHERSCAN_API_KEY: "" },
         });
       } catch {
         console.log(`FAILED: ${contract.name} at ${contract.address} on ${explorer.label}`);

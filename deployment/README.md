@@ -28,12 +28,17 @@ against a fork of the real chain under the real name (anvil keeps the forked cha
 disposable worktree, since the run writes that network's tracked record.
 
 Explorer verification (`pnpm verify_contracts <network>`) holds the RPC to the network's chain id like every
-other tool, then submits to every verifier a chain has: Blockscout for the Flare family, at a predictable host
-and without a key; Blockscout and Etherscan for the loan chains, where Etherscan needs `ETHERSCAN_API_KEY` (one
-V2 key for every chain) and is skipped with a note without it; and Sourcify everywhere it lists the chain
-(Coston it does not), a keyless record no explorer owns. Submissions are spaced twenty seconds apart, since the
-public Blockscout instances rate-limit a run's worth of back-to-back submissions; `VERIFY_SUBMIT_DELAY_MS`
-overrides the spacing, and `0` disables it for a re-run of one already-verified contract.
+other tool, then submits to every verifier a chain has: Blockscout for the Flare family, at a predictable host;
+Blockscout and Etherscan for the loan chains, where Etherscan needs `ETHERSCAN_API_KEY` (one V2 key for every
+chain) and is skipped with a note without it; and Sourcify everywhere it lists the chain (Coston it does not), a
+keyless record no explorer owns. Blockscout takes `BLOCKSCOUT_API_KEY` in the same Etherscan-compatible flag.
+Its rate limits vary by instance and endpoint; the public Sepolia instance refused every keyless submission
+after the first two in a run, twenty or sixty seconds apart alike, and a key raises the limit. A keyless run
+says so once per Blockscout explorer and proceeds. Each explorer is given its own key by argument and none
+other: the run blanks `ETHERSCAN_API_KEY` in forge's environment, because forge would otherwise fall back to
+it - from the environment or from the env file it loads itself - for any verifier, and send the Etherscan key
+to Blockscout. Submissions are spaced twenty seconds apart; `VERIFY_SUBMIT_DELAY_MS` overrides the spacing, and
+`0` disables it for a re-run of one already-verified contract.
 
 ## The Sepolia rehearsal market
 

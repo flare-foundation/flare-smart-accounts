@@ -38,7 +38,13 @@ const CHAIN_ID_HEX: Record<string, string> = {
   sepolia: "0xaa36a7",
 };
 
-const blockscout = (host: string) => ["--verifier", "blockscout", "--verifier-url", `https://${host}/api/`];
+const blockscout = (host: string, key?: string) => [
+  "--verifier",
+  "blockscout",
+  "--verifier-url",
+  `https://${host}/api/`,
+  ...(key === undefined ? [] : ["--etherscan-api-key", key]),
+];
 const etherscan = (chain: string, key: string) => ["--chain", chain, "--etherscan-api-key", key];
 const SOURCIFY = ["--verifier", "sourcify"];
 
@@ -120,7 +126,10 @@ function scratch(network: string): { dir: string; log: string } {
       "#!/usr/bin/env node",
       'const fs = require("node:fs");',
       "const argv = process.argv.slice(2);",
-      `fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ at: Date.now(), argv }) + "\\n");`,
+      // the key forge would fall back to is recorded as the stub sees it, so a test can prove the
+      // runner blanked it: what reaches an explorer must come through the arguments alone
+      `fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ at: Date.now(), argv, ` +
+        `etherscanKey: process.env.ETHERSCAN_API_KEY ?? null }) + "\\n");`,
       "const fail = process.env.FORGE_FAIL_WHEN;",
       "process.exit(fail && argv.includes(fail) ? 3 : 0);",
       "",
@@ -135,6 +144,9 @@ function childEnvironment(dir: string, env: Record<string, string>): NodeJS.Proc
   const childEnv: NodeJS.ProcessEnv = { ...process.env, VERIFY_SUBMIT_DELAY_MS: "0", ...env };
   if (!("ETHERSCAN_API_KEY" in env)) {
     delete childEnv.ETHERSCAN_API_KEY;
+  }
+  if (!("BLOCKSCOUT_API_KEY" in env)) {
+    delete childEnv.BLOCKSCOUT_API_KEY;
   }
   childEnv.PATH = `${path.join(dir, "bin")}:${process.env.PATH ?? ""}`;
   return childEnv;
@@ -217,7 +229,9 @@ async function submissionsWithin(
 }
 
 /** The stub's calls in order, each with the time it ran and the argument vector it received. */
-function calls(log: string): { at: number; argv: string[] }[] {
+type Call = { at: number; argv: string[]; etherscanKey: string | null };
+
+function calls(log: string): Call[] {
   if (!fs.existsSync(log)) {
     return [];
   }
@@ -225,10 +239,14 @@ function calls(log: string): { at: number; argv: string[] }[] {
     .readFileSync(log, "utf8")
     .split("\n")
     .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as { at: number; argv: string[] });
+    .map((line) => JSON.parse(line) as Call);
 }
 
 const vectors = (log: string): string[][] => calls(log).map((call) => call.argv);
+
+/** The ETHERSCAN_API_KEY each forge run saw in its environment: forge falls back to it for any
+ * verifier's key flag, so it must be blank on every call and a key must arrive by argument alone. */
+const etherscanKeys = (log: string): (string | null)[] => calls(log).map((call) => call.etherscanKey);
 
 /** How many times the script announced a wait; one per gap between submissions. */
 const waits = (output: string): number => output.split("before the next submission").length - 1;
@@ -319,6 +337,61 @@ void test("a loan chain skips Etherscan without the key and reaches all three wi
       submission(base, etherscan("sepolia", "key")),
       submission(base, SOURCIFY),
     ]);
+  } finally {
+    await rpc.stop();
+  }
+});
+
+void test("a Blockscout key travels in the Etherscan-compatible flag, and only to Blockscout", async () => {
+  // Blockscout's rate limits vary by instance, and a key raises them where honoured; it must reach
+  // the Blockscout submission and no other, since Sourcify takes none and Etherscan has its own
+  const rpc = new FakeRpc(CHAIN_ID_HEX["sepolia"]!);
+  const base = await rpc.start();
+  try {
+    const keyed = scratch("sepolia");
+    const result = await run(keyed.dir, "sepolia", { SEPOLIA_RPC_URL: base, BLOCKSCOUT_API_KEY: "blockscout-key" });
+    assert.equal(result.status, 0, result.output);
+    assert.doesNotMatch(result.output, /no BLOCKSCOUT_API_KEY/);
+    assert.doesNotMatch(result.output, /blockscout-key/, "a key must never be printed");
+    assert.deepEqual(vectors(keyed.log), [
+      submission(base, blockscout("eth-sepolia.blockscout.com", "blockscout-key")),
+      submission(base, SOURCIFY),
+    ]);
+    // and forge's own fallback is shut on every call, so the argument is the only way in
+    assert.deepEqual(etherscanKeys(keyed.log), ["", ""]);
+
+    // and without it the run says so, once per Blockscout explorer, rather than failing
+    const keyless = scratch("sepolia");
+    const plain = await run(keyless.dir, "sepolia", { SEPOLIA_RPC_URL: base });
+    assert.equal(plain.status, 0, plain.output);
+    assert.match(plain.output, /no BLOCKSCOUT_API_KEY/);
+  } finally {
+    await rpc.stop();
+  }
+});
+
+void test("with both keys, each explorer gets its own and forge's fallback gets neither", async () => {
+  // forge reads ETHERSCAN_API_KEY from its environment - and from the env file it loads on its own -
+  // for ANY verifier's key flag, so a keyless Blockscout submission would carry the Etherscan key to
+  // Blockscout unless the runner blanks it. This is the case that would let the wrong key through:
+  // both present, distinct, and every submission checked for which one it carries and which it saw
+  const rpc = new FakeRpc(CHAIN_ID_HEX["sepolia"]!);
+  const base = await rpc.start();
+  try {
+    const both = scratch("sepolia");
+    const result = await run(both.dir, "sepolia", {
+      SEPOLIA_RPC_URL: base,
+      ETHERSCAN_API_KEY: "etherscan-key",
+      BLOCKSCOUT_API_KEY: "blockscout-key",
+    });
+    assert.equal(result.status, 0, result.output);
+    assert.deepEqual(vectors(both.log), [
+      submission(base, blockscout("eth-sepolia.blockscout.com", "blockscout-key")),
+      submission(base, etherscan("sepolia", "etherscan-key")),
+      submission(base, SOURCIFY),
+    ]);
+    assert.deepEqual(etherscanKeys(both.log), ["", "", ""], "the fallback must be blank on every call");
+    assert.doesNotMatch(result.output, /etherscan-key|blockscout-key/, "a key must never be printed");
   } finally {
     await rpc.stop();
   }
