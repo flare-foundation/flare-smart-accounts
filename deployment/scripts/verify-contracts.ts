@@ -14,6 +14,11 @@ import { FLARE_FAMILY_NETWORKS, baseNetworkName, loadEnv, resolveRpcUrl, validat
 interface Explorer {
   label: string;
   args: string[];
+  /**
+   * How long to wait before submitting to THIS explorer. Rate limits are per host, so the wait
+   * that matters is the one the next submission is about to meet, not a single figure for the run.
+   */
+  delayMs: number;
 }
 
 interface DeployedContract {
@@ -24,10 +29,20 @@ interface DeployedContract {
 
 // Public Blockscout instances rate-limit hard: a run's submissions back to back exhaust the window,
 // and forge's own retries (five, five seconds apart) do not outlast it, so every Blockscout
-// submission fails at once. Spacing them trades a few minutes for not needing the retries at all;
-// where an instance's keyless quota is smaller than a run, BLOCKSCOUT_API_KEY is what raises it.
-// Zero disables the wait, for a re-run of one already-verified contract.
-const DEFAULT_SUBMIT_DELAY_MS = 20_000;
+// submission fails at once. Spacing them trades a few minutes for not needing the retries at all.
+//
+// A KEY DOES NOT CHANGE THIS, measured 2026-09-15 against the public Sepolia instance: the same
+// read refused keyless and keyed alike, twelve of twelve each way, and `BLOCKSCOUT_API_KEY` was
+// configured throughout. A key raises the limit only where an instance honours it, which that one
+// evidently does not, so the wait cannot be conditioned on having one - a run that shortened it
+// would fail rather than finish sooner. The key is still passed: it costs nothing and an instance
+// that does honour it is the case it is there for.
+const BLOCKSCOUT_DELAY_MS = 20_000;
+
+// Etherscan and Sourcify never needed Blockscout's figure - Etherscan's free tier allows several
+// calls a second and Sourcify is generous - and paying it for them was the larger half of a run's
+// waiting: on Sepolia, two of every three submissions. Enough to stay well inside both.
+const DEFAULT_SUBMIT_DELAY_MS = 1_000;
 
 // Blockscout's API is Etherscan-compatible, so its key travels in the same flag forge uses for
 // Etherscan. Rate limits vary by instance and endpoint: the public Sepolia instance refused every
@@ -41,7 +56,11 @@ function blockscout(url: string, env: Record<string, string | undefined>): Explo
   } else {
     console.log(`  (no BLOCKSCOUT_API_KEY - keyless submissions may be rate-limited, depending on the instance)`);
   }
-  return { label: `blockscout (${new URL(url).host})`, args };
+  return {
+    label: `blockscout (${new URL(url).host})`,
+    args,
+    delayMs: BLOCKSCOUT_DELAY_MS,
+  };
 }
 
 // Chain-agnostic, keyless and owned by no explorer, so the record outlives any one of them losing
@@ -49,7 +68,7 @@ function blockscout(url: string, env: Record<string, string | undefined>): Explo
 // verifier and no Etherscan key are given, which is neither of the paths below. Only for chains
 // Sourcify lists - submitting to one it does not support fails the run for nothing.
 function sourcify(): Explorer {
-  return { label: "sourcify", args: ["--verifier", "sourcify"] };
+  return { label: "sourcify", args: ["--verifier", "sourcify"], delayMs: DEFAULT_SUBMIT_DELAY_MS };
 }
 
 // One Etherscan V2 key covers every chain they support. Absent, that explorer is skipped with a
@@ -60,7 +79,11 @@ function etherscan(chain: string, env: Record<string, string | undefined>): Expl
     console.log(`  (no ETHERSCAN_API_KEY - skipping Etherscan for ${chain})`);
     return undefined;
   }
-  return { label: "etherscan", args: ["--chain", chain, "--etherscan-api-key", key] };
+  return {
+    label: "etherscan",
+    args: ["--chain", chain, "--etherscan-api-key", key],
+    delayMs: DEFAULT_SUBMIT_DELAY_MS,
+  };
 }
 
 function explorersFor(baseNetwork: string, env: Record<string, string | undefined>): Explorer[] {
@@ -90,15 +113,20 @@ function explorersFor(baseNetwork: string, env: Record<string, string | undefine
   }
 }
 
-// Validated rather than coerced, and before any work: `Number("20s")` is NaN, and a NaN delay would
-// skip every wait while looking configured. Blank is the other coercion to refuse - `Number("")` and
-// `Number(" ")` are both 0, so an empty assignment would silently disable the spacing; it reads as
-// "not configured" here instead, which is what an empty entry in an env template means and leaves
-// the protection on. Disabling stays an explicit numeric zero.
-function submitDelayMs(env: Record<string, string | undefined>): number {
+/**
+ * The operator's override, or `undefined` to let each explorer ask for what it needs.
+ *
+ * Validated rather than coerced, and before any work: `Number("20s")` is NaN, and a NaN delay would
+ * skip every wait while looking configured. Blank is the other coercion to refuse - `Number("")` and
+ * `Number(" ")` are both 0, so an empty assignment would silently disable the spacing; it reads as
+ * "not configured" here instead, which is what an empty entry in an env template means and leaves
+ * the protection on. Disabling stays an explicit numeric zero, and an override applies to EVERY
+ * explorer, since someone who names a figure is overruling the judgement, not refining it.
+ */
+function submitDelayOverrideMs(env: Record<string, string | undefined>): number | undefined {
   const raw = env["VERIFY_SUBMIT_DELAY_MS"];
   if (raw === undefined || raw.trim() === "") {
-    return DEFAULT_SUBMIT_DELAY_MS;
+    return undefined;
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -146,7 +174,7 @@ async function main(): Promise<void> {
   validateNetwork(network);
   const isMock = process.argv[3] === "mock";
   const env = loadEnv();
-  const delayMs = submitDelayMs(env);
+  const delayOverrideMs = submitDelayOverrideMs(env);
   // the same variable the deploy wrapper dials, and the chain it answers is checked before anything
   // is submitted: an explorer does not know which chain a record belongs to
   const rpcUrl = resolveRpcUrl(network, env);
@@ -179,8 +207,11 @@ async function main(): Promise<void> {
     }
 
     for (const explorer of explorers) {
+      // the wait before a submission is the one THAT explorer needs: a Blockscout key raises its
+      // limit, and Etherscan and Sourcify never wanted the keyless Blockscout figure at all
+      const delayMs = delayOverrideMs ?? explorer.delayMs;
       if (attempted > 0 && delayMs > 0) {
-        console.log(`\nWaiting ${Math.round(delayMs / 1000)}s before the next submission...`);
+        console.log(`\nWaiting ${(delayMs / 1000).toFixed(1)}s before submitting to ${explorer.label}...`);
         pause(delayMs);
       }
       attempted += 1;

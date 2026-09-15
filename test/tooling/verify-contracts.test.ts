@@ -249,7 +249,14 @@ const vectors = (log: string): string[][] => calls(log).map((call) => call.argv)
 const etherscanKeys = (log: string): (string | null)[] => calls(log).map((call) => call.etherscanKey);
 
 /** How many times the script announced a wait; one per gap between submissions. */
-const waits = (output: string): number => output.split("before the next submission").length - 1;
+const waits = (output: string): number => output.split("before submitting to").length - 1;
+
+/** Each announced wait: how long, and which explorer it preceded, in the order they were printed. */
+const announced = (output: string): { seconds: number; explorer: string }[] =>
+  [...output.matchAll(/Waiting ([\d.]+)s before submitting to (.+?)\.\.\./g)].map((match) => ({
+    seconds: Number(match[1]),
+    explorer: String(match[2]),
+  }));
 
 void test("the RPC URL reaches forge as one argument, query string and all", async () => {
   const rpc = new FakeRpc(CHAIN_ID_HEX["coston2"]!);
@@ -432,8 +439,78 @@ void test("the wait falls between submissions, once per gap, failures included",
     const times = calls(log).map((call) => call.at);
     assert.equal(times.length, 3, output);
     assert.equal(waits(output), 2, "one announced wait per gap, and none before the first submission");
+    assert.deepEqual(
+      announced(output),
+      [
+        { seconds: delayMs / 1000, explorer: "etherscan" },
+        { seconds: delayMs / 1000, explorer: "sourcify" },
+      ],
+      "an override replaces every explorer's own figure, rather than sitting beside it"
+    );
     assert.ok(times[1]! - times[0]! >= delayMs, `first gap was ${times[1]! - times[0]!}ms`);
     assert.ok(times[2]! - times[1]! >= delayMs, `second gap was ${times[2]! - times[1]!}ms`);
+  } finally {
+    await rpc.stop();
+  }
+});
+
+void test("a key does not shorten the Blockscout wait, because it does not raise the limit", async () => {
+  // Measured 2026-09-15 against the public Sepolia instance: the same read was refused keyless and
+  // keyed alike, twelve of twelve each way, with a key configured throughout. Conditioning the wait
+  // on holding a key would make a keyed run FAIL rather than finish sooner, so the two must space
+  // identically. The key is still passed - it costs nothing, and an instance that honours it is the
+  // case it exists for.
+  const rpc = new FakeRpc(CHAIN_ID_HEX["sepolia"]!);
+  const base = await rpc.start();
+  try {
+    const reached: number[] = [];
+    for (const extra of [{}, { BLOCKSCOUT_API_KEY: "blockscout-key" }]) {
+      const { dir, log } = scratch("sepolia");
+      fs.writeFileSync(
+        path.join(dir, "deployment/deploys/sepolia.json"),
+        JSON.stringify([
+          { name: "PauseFacet", contractName: "PauseFacet.sol", address: FACET },
+          { name: "PauseFacetTwo", contractName: "PauseFacet.sol", address: FACET },
+        ])
+      );
+      reached.push(
+        await submissionsWithin(
+          dir,
+          "sepolia",
+          { SEPOLIA_RPC_URL: base, VERIFY_SUBMIT_DELAY_MS: "", ...extra },
+          log,
+          4_500
+        )
+      );
+    }
+    assert.deepEqual(reached, [2, 2], "keyed and keyless must reach the same point in the same window");
+  } finally {
+    await rpc.stop();
+  }
+});
+
+void test("each explorer waits its own figure, and the wait says which one it is for", async () => {
+  // One figure for the run meant paying Blockscout's twenty seconds to Etherscan and Sourcify too,
+  // which is two of every three gaps on Sepolia. Blockscout is submitted first, so a single
+  // contract's two gaps are exactly the ones that were being overpaid.
+  const rpc = new FakeRpc(CHAIN_ID_HEX["sepolia"]!);
+  const base = await rpc.start();
+  try {
+    const { dir } = scratch("sepolia");
+    const { status, output } = await run(dir, "sepolia", {
+      SEPOLIA_RPC_URL: base,
+      ETHERSCAN_API_KEY: "key",
+      VERIFY_SUBMIT_DELAY_MS: "",
+    });
+    assert.equal(status, 0, output);
+    assert.deepEqual(
+      announced(output),
+      [
+        { seconds: 1, explorer: "etherscan" },
+        { seconds: 1, explorer: "sourcify" },
+      ],
+      "neither of these ever wanted Blockscout's figure"
+    );
   } finally {
     await rpc.stop();
   }
@@ -444,16 +521,16 @@ void test("a blank delay is not a zero: the default spacing still applies", asyn
   const base = await rpc.start();
   try {
     // `Number("")` and `Number("   ")` are both 0, so a blank assignment would have disabled the
-    // spacing silently. The twenty-second default is not waited out: with it disabled the second
-    // submission follows the first at once, so a window far shorter than the default separates the
-    // two behaviors.
+    // spacing silently. Coston2 submits Blockscout first and Sourcify second, so the gap under test
+    // is Sourcify's second: the window is shorter than that, because with the spacing disabled the
+    // second submission follows the first at once and no window at all separates them.
     const { dir, log } = scratch("coston2");
     const landed = await submissionsWithin(
       dir,
       "coston2",
       { COSTON2_RPC_URL: base, VERIFY_SUBMIT_DELAY_MS: "   " },
       log,
-      1_000
+      500
     );
     assert.equal(landed, 1, "the second submission must still be waiting out the default delay");
   } finally {
