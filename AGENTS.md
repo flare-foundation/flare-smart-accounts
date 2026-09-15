@@ -235,6 +235,7 @@ deployment/
   deploys/           # Deployed contract addresses per network
   build-info-v2.0.0/ # Reconstructed v2.0.0 build of the three implementations live before this release
   build-info-2026-09-14/ # The three lineages first deployed 2026-09-14; both are the upgrade validator's references, recorded in reference-builds.md
+  pinned-verification/ # Recovered solc 0.8.30 inputs that verify the pinned-init-code contracts on Etherscan
   cuts/              # Diamond cut files per network
   market-config/     # The Sepolia rehearsal market's parameters: our test loan token and feeds, the oracle, the market, its liquidity
   lib/               # Solidity the scripts share: the network table, the pinned Ethereum init code, the type allocations, the config decode structs

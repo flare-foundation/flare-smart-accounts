@@ -1,3 +1,6 @@
 # The frozen build-info snapshots are multi-megabyte generated JSON: a diff of one is noise, and
 # rendering it is what makes a review of an unrelated change unreadable.
 deployment/build-info-*/*.json -diff linguist-generated
+
+# recovered compiler inputs, not source to review
+deployment/pinned-verification/*.standard-input.json -diff linguist-generated
