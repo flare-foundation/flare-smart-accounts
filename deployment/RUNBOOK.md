@@ -330,6 +330,17 @@ that cannot be undone was the one made without the preflight. It can now, and sh
 The same command with `--account <name>` covers the deployer-owned rehearsal variant, where the
 diamond is handed to governance at the end rather than the start.
 
+**Check which account the device actually offers before the day.** Foundry takes the Ledger's first
+derived account unless told otherwise; if the address you mean is not that one, the run stops with
+`No associated wallet for addresses`, naming what the device gave instead. `cast wallet address
+--ledger --mnemonic-index <n>` enumerates them without signing, and `--mnemonic-indexes <n>` on the
+run selects one. Rehearsed on Sepolia 2026-09-15: the intended account was index 1, not 0.
+
+**A refused signature leaves a leftover `forge-deploy-output.txt`** naming contracts from the
+simulation, which then blocks the next run. Nothing was signed - settle it with the three reads in
+[the recovery note](./README.md#deployment-records) (no hashes in `run-latest.json`, no code at the
+named addresses, the sender's nonce unchanged) and delete the file.
+
 Everything owner-gated therefore comes **after** this step, not before it: the diamond arrives owned
 by that EOA, so a cut or a role change made first would need it to sign each one. In the throwaway
 mode the order is the opposite, because there the deployer owns the diamond from the start: its deploy

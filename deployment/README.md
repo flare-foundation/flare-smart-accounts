@@ -189,6 +189,20 @@ addresses it reads, so an entry for a deployment that never landed stops the nex
 code` rather than building on it. A leftover output without `DEPLOYED:` lines came from a run that
 deployed nothing and is overwritten.
 
+**A failed SIGNATURE leaves the same file and is the cheapest case to settle.** A hardware or
+keystore run that forge refuses - a `--sender` the device does not derive, a declined confirmation, a
+locked Ledger - fails after the simulation has already printed its `DEPLOYED:` lines and written
+them here, so the leftover looks exactly like a run that deployed. It is not: nothing was signed.
+Three independent signals say so, and all are reads:
+
+- `run-latest.json` carries NO transaction hashes and no receipts, where a sent run carries both;
+- `cast code <address>` is `0x` for every address the file names;
+- the sender's nonce is unchanged from before the attempt.
+
+With all three agreeing, delete the file and run again. Seen on 2026-09-15, rehearsing the Ledger
+path on Sepolia: forge derived a different account than `--sender` named, stopped before signing, and
+the next run was then blocked by this guard until the file was settled.
+
 Two facts about that oracle, read from its source and pinned by the fork suite: its feed reader
 requires only a non-negative answer, so a zero collateral answer prices the collateral at nothing
 rather than reverting, while a zero loan-token answer - the quote the price is divided by - reverts
