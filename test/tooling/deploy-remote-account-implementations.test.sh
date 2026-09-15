@@ -16,6 +16,8 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 mkdir -p "$SCRATCH/bin" "$SCRATCH/repo/deployment/scripts"
 cp "$WRAPPER" "$SCRATCH/repo/deployment/scripts/deploy-remote-account-implementations.sh"
+# the wrapper sources the signer classifier at run time, so the scratch copy needs it too
+cp "$HERE/../../deployment/scripts/signer-preflight.sh" "$SCRATCH/repo/deployment/scripts/signer-preflight.sh"
 
 cat > "$SCRATCH/bin/forge" <<'STUB'
 #!/usr/bin/env bash
@@ -90,8 +92,10 @@ call() {
 }
 expected_forge() {
   printf 'forge'
-  printf ' %q' script "$SCRIPT_ARG" --rpc-url "$SEPOLIA_RPC_URL" --private-key "$DEPLOYER_PRIVATE_KEY" \
+  printf ' %q' script "$SCRIPT_ARG" --rpc-url "$SEPOLIA_RPC_URL" \
     --offline --sig "$SIG" sepolia false "$1" --broadcast
+  # the signer trails the invocation, so a caller-supplied one lands in the same position
+  printf ' %q' --private-key "$DEPLOYER_PRIVATE_KEY"
   printf '\n'
 }
 

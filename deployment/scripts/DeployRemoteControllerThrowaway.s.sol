@@ -68,11 +68,15 @@ contract DeployRemoteControllerThrowaway is Script {
         string memory network = DeployNetworks.networkName(block.chainid);
         DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
 
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+        // The signer is forge's, resolved from whatever the wrapper passed - a raw key, a keystore
+        // or a Ledger - and `msg.sender` is that account. Reading DEPLOYER_PRIVATE_KEY here would
+        // check one account and sign as another the moment the two differ, which is exactly what a
+        // hardware run is. Note this validates the sender forge was GIVEN; a device whose address
+        // is not that one fails later, at signing, rather than here.
+        address deployer = _signer();
         console2.log(string.concat("NETWORK: ", network));
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast(_signer());
         IDiamond.FacetCut[] memory baseFacets = _deployBaseFacets();
         address controller = _deployController(baseFacets, deployer);
         address init = _deployThroughFactory(type(EthereumControllerInit).creationCode);
@@ -313,4 +317,19 @@ contract DeployRemoteControllerThrowaway is Script {
         _names[4] = "ComposeTransportFacet";
         _names[5] = "MorphoLoanMarketsFacet";
     }
+
+    /**
+     * @notice The account this run signs as.
+     * @dev In a run this is the signer forge resolved from the command line - a raw key, a keystore
+     * or a Ledger - so the account the script checks and the account that signs are the same one.
+     * It is a seam because a test cannot name that account any other way: `vm.prank` and a
+     * broadcast are mutually exclusive, so a harness overrides this instead.
+     */
+    function _signer()
+        internal view virtual
+        returns (address)
+    {
+        return msg.sender;
+    }
+
 }

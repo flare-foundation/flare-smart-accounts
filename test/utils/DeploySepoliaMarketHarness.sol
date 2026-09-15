@@ -87,4 +87,25 @@ contract DeploySepoliaMarketHarness is DeploySepoliaMarket {
         printed.push(_line);
         super._print(_line);
     }
+
+    /// @notice The account the run signs as. Unset, the script's own default applies.
+    /// @dev A test cannot name that account by pranking - `vm.prank` and a broadcast are mutually
+    /// exclusive - so it names it here instead.
+    address public signerOverride;
+
+    function setSigner(
+        address _signer
+    )
+        external
+    {
+        signerOverride = _signer;
+    }
+
+    function _signer()
+        internal view override
+        returns (address)
+    {
+        return signerOverride == address(0) ? super._signer() : signerOverride;
+    }
+
 }

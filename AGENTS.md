@@ -91,7 +91,21 @@ pnpm verify_contracts <network>
 - The ordered, verified release sequence — which governance call to make when, and what proves each step landed — is [`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md). The commands below are its building blocks; the runbook is what says in which order to run them and on which networks.
 - `<fullDeploy>` is a boolean (`true` or `false`). **Both modes are a full deployment from current source** — `false` only skips the diamond cut, the init and the vault/wallet configuration — so neither is a facet-only mode or for a live network. To add or replace facets on a live network, use a cut file and `pnpm diamond_cut`. Why, and the recorder's guard on the two live entries, are in [`deployment/README.md`](./deployment/README.md).
 - Supported networks are the Flare family `coston2`, `coston`, `flare` and `songbird`, with `-staging` variants such as `coston2-staging`, and the loan chains `ethereum` and `sepolia` (its testnet), whose one tracked deployment is the pinned one and which have no staging alias. Sepolia also takes a throwaway deployment for rehearsals (`deploy_remote_controller_throwaway`), recorded in the gitignored `sepolia_mock` record, which only `configure_remote_controller` reads, and only when its target argument says `throwaway`. A chain in neither family is refused by every tool; the rules are in [`deployment/README.md`](./deployment/README.md#networks).
-- Deployment requires `.env` with `<NETWORK>_RPC_URL` and `DEPLOYER_PRIVATE_KEY`.
+- Deployment requires an environment file carrying `<NETWORK>_RPC_URL`, and something to sign with. Every
+  wrapper that broadcasts reads `DEPLOYER_PRIVATE_KEY`, and every one of them also passes arguments after
+  its own straight through to `forge` — so a **keystore** (`--account <name> --sender <address>`, after one
+  `cast wallet import <name> --interactive`) or a **Ledger** (`--ledger --sender <address>`) replaces the raw
+  key entirely. The key is a fallback, used only when nothing else signs, never an addition. A keystore keeps
+  the key out of the shell history AND the process list, which an environment variable cannot, since the shell
+  expands it before exec. The Solidity scripts take the signer from forge too — they broadcast as `_signer()`,
+  which is `msg.sender`, the account forge resolved — so nothing in the script outranks what the command line
+  chose. It is a seam because a test cannot name that account otherwise: `vm.prank` and a broadcast are
+  mutually exclusive, so a harness overrides it. What counts as a signer, and the one combination refused
+  outright, live in
+  `deployment/scripts/signer-preflight.sh`, which also refuses `--quiet`/`-q`/`--json` for the eight wrappers
+  whose output the recorder parses: forge broadcasts before the recorder runs, so silencing its output
+  deploys a contract that no record then names. Why the flags must never ship without that preflight is in
+  [`deployment/README.md`](./deployment/README.md#signing).
 - `configure_remote_controller` is everything the remote controller is configured with after its cut, read from
   `deployment/chain-config/<network>.json`: the sections are `governance` (the pauser and unpauser roles, then
   the timelock duration last), `implementations`, `transport`, `market`, `fees`, `wiring` (the last
@@ -114,7 +128,7 @@ pnpm verify_contracts <network>
   legitimately re-set to the same values, and the duration is every run's last call. It registers; it does not
   replace `verify_implementation --stage pre`, which is the check that can still refuse a wrong address before
   it is registered. A section named on its own must be complete in the file; a sweep skips an incomplete one
-  with a note. Only `execute` takes a signing key: the other two read, and a multisig owner has nothing to sign
+  with a note. Only `execute` signs: the other two read, and a multisig owner has nothing to sign
   with anyway.
 - `describe_calls` names the parameters of the calls `prepare` wrote. It reads the file under
   `deployment/output-internal/<network>/`, makes no chain call and takes no key, and prints one
@@ -145,10 +159,12 @@ pnpm verify_contracts <network>
   than the call: `transferOwnership` is one step, has no acceptance from the new owner, is not timelocked, and a
   wrong address ends that diamond's governance for good. The expected current owner is an argument, compared
   against the chain, so a run pointed at the wrong network stops instead of handing away whatever it found; the
-  signing key must be that owner; the zero address, the diamond itself and the current owner are refused, and a
-  new owner with no code is called out rather than refused. It serves the deployer-owned handover alone - the
-  bootstrap owner signs its own transfer from a wallet, and a throwaway is never handed on - so there is no
-  target argument. The broadcast is followed by a separate `verify` run, since the script's own read-back would
+  signer must be that owner - a Ledger through `--ledger --sender`, which is what the mainnet handover needs;
+  the zero address, the diamond itself and the current owner are refused, and a
+  new owner with no code is called out rather than refused. It covers BOTH handovers: the bootstrap owner's
+  transfer at the start of a chain's deployment, signed from hardware through `--ledger`, and the deployer-owned
+  one at the end of a rehearsal, signed with `--account` or the raw key. A throwaway controller is never handed
+  on, so there is still no target argument - the pinned controller is the only diamond it touches. The broadcast is followed by a separate `verify` run, since the script's own read-back would
   see simulated state.
 - All `forge script` invocations use `--offline` to skip Foundry's external selector/source lookups. Without it, runs on Flare/Songbird hang for several minutes — likely external signature/source database calls timing out for these chains. The chain RPC itself is unaffected.
 
@@ -239,7 +255,8 @@ deployment/
   cuts/              # Diamond cut files per network
   market-config/     # The Sepolia rehearsal market's parameters: our test loan token and feeds, the oracle, the market, its liquidity
   lib/               # Solidity the scripts share: the network table, the pinned Ethereum init code, the type allocations, the config decode structs
-  scripts/           # Forge deploy scripts (.s.sol), bash wrappers, TS helpers - no tests
+  scripts/           # Forge deploy scripts (.s.sol), bash wrappers, TS helpers - no tests;
+                     #   signer-preflight.sh is sourced by every wrapper that broadcasts
   utils/             # Deployment utility scripts - no tests; both are tested from test/tooling/
 scripts/             # Repository utility scripts
 audit/               # Security audit reports

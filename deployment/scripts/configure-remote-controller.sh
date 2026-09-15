@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: deployment/scripts/configure-remote-controller.sh <network> <prepare|execute|verify> [section] [target]
+# Usage: deployment/scripts/configure-remote-controller.sh <network> <prepare|execute|verify> [section] [target] [forge args...]
 # Example: deployment/scripts/configure-remote-controller.sh sepolia prepare governance
 # Example: deployment/scripts/configure-remote-controller.sh sepolia prepare wiring
 # Example: deployment/scripts/configure-remote-controller.sh sepolia execute all throwaway
 # Example: deployment/scripts/configure-remote-controller.sh sepolia verify all
+# Example: deployment/scripts/configure-remote-controller.sh sepolia prepare governance --ledger --sender 0xYourLedgerAddress
+# Example: deployment/scripts/configure-remote-controller.sh sepolia prepare governance --account my-deployer --sender 0xKeystoreAddress
 #
 # Everything the remote controller is configured with after its cut, from
 # deployment/chain-config/<network>.json: the roles and timelock duration (governance), the compose
@@ -26,8 +28,25 @@ set -euo pipefail
 #            The read-back afterwards is a separate run of the verify phase, against mined state.
 #   verify   reads the roles, the duration and the wiring back and fails unless they match the file.
 
+# Arguments up to the first one beginning with "-" are this wrapper's own; from there on they
+# are passed through to forge, which is where a signer goes: --account <name> for a keystore,
+# --ledger for the hardware path, with --sender. A positional argument never begins with "-",
+# so the two need no separator between them.
+FORGE_ARGS=()
+_own=0
+for _arg in "$@"; do
+  if [[ "$_arg" == -* ]]; then
+    break
+  fi
+  _own=$((_own + 1))
+done
+if [[ $_own -lt $# ]]; then
+  FORGE_ARGS=("${@:_own+1}")
+  set -- "${@:1:_own}"
+fi
+
 if [[ $# -lt 2 || $# -gt 4 ]]; then
-  echo "Usage: $0 <network> <prepare|execute|verify> [section] [target]" >&2
+  echo "Usage: $0 <network> <prepare|execute|verify> [section] [target] [forge args...]" >&2
   exit 2
 fi
 
@@ -99,11 +118,22 @@ run_phase() {
 # a key is the execute phase's business alone: prepare and verify only read, and asking for one
 # would invite an operator to put the owner's key somewhere it is not needed
 if [[ "$PHASE" == "execute" ]]; then
-  if [[ -z "${DEPLOYER_PRIVATE_KEY:-}" ]]; then
-    echo "DEPLOYER_PRIVATE_KEY is required for the execute phase" >&2
-    exit 2
+  # A caller-supplied signer replaces the raw key entirely. Which arguments count as one, and
+  # which combination is refused outright, live in signer-preflight.sh so the classification can
+  # be tested directly rather than inferred from a deployment.
+  # shellcheck source=deployment/scripts/signer-preflight.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/signer-preflight.sh"
+  signer_preflight ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"} || exit $?
+
+  if [[ $SIGNER_SUPPLIED -eq 0 ]]; then
+    if [[ -z "${DEPLOYER_PRIVATE_KEY:-}" ]]; then
+      echo "A signer is required for the execute phase" >&2
+      echo "  e.g. --account <name> --sender <address>, or --ledger --sender <address>" >&2
+      exit 2
+    fi
+    FORGE_ARGS+=(--private-key "$DEPLOYER_PRIVATE_KEY")
   fi
-  run_phase execute --private-key "$DEPLOYER_PRIVATE_KEY" --broadcast
+  run_phase execute ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"} --broadcast
   # the run above checks its own work against SIMULATED state: forge collects the transactions and
   # broadcasts them after the script returns. The read-back that means anything is this one, made
   # once they are mined
@@ -111,5 +141,5 @@ if [[ "$PHASE" == "execute" ]]; then
   echo "Verifying the configuration on chain, now that the transactions have been broadcast..."
   run_phase verify
 else
-  run_phase "$PHASE"
+  run_phase "$PHASE" ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"}
 fi

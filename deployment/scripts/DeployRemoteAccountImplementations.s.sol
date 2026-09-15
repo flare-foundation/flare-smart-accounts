@@ -39,8 +39,6 @@ contract DeployRemoteAccountImplementations is Script {
     )
         external
     {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-
         // the remote implementations lay out storage for the loan chain's proxy lineages; a copy
         // deployed and recorded on a Flare-family chain would look like a legitimate artifact and,
         // registered there, run the loan chain's logic over every Personal Account
@@ -59,27 +57,25 @@ contract DeployRemoteAccountImplementations is Script {
         }
 
         for (uint256 i = 0; i < _contracts.length; i++) {
-            _deploy(_contracts[i], deployerPrivateKey);
+            _deploy(_contracts[i]);
         }
     }
 
     /**
      * @notice Deploys one named implementation and announces it.
      * @param _contract The artifact name.
-     * @param _deployerPrivateKey The key to broadcast with.
      * @dev Only what was actually deployed is announced: the recorder writes one record entry per
      * `DEPLOYED:` line, so naming an implementation this run did not deploy would replace its
      * record with the address it already holds at best, and with a stale one at worst.
      */
     function _deploy(
-        string calldata _contract,
-        uint256 _deployerPrivateKey
+        string calldata _contract
     )
         internal
     {
         bytes32 name = keccak256(bytes(_contract));
         if (name == keccak256("PersonalAccountRemote")) {
-            vm.broadcast(_deployerPrivateKey);
+            vm.broadcast(_signer());
             PersonalAccountRemote deployed = new PersonalAccountRemote();
             _print(
                 string.concat(
@@ -91,7 +87,7 @@ contract DeployRemoteAccountImplementations is Script {
             return;
         }
         if (name == keccak256("MorphoLoanSubaccountRemote")) {
-            vm.broadcast(_deployerPrivateKey);
+            vm.broadcast(_signer());
             MorphoLoanSubaccountRemote deployed = new MorphoLoanSubaccountRemote();
             _print(
                 string.concat(
@@ -106,6 +102,21 @@ contract DeployRemoteAccountImplementations is Script {
     }
 
     /// @dev A seam, so a test can read what an operator reads without parsing forge's output.
+
+    /**
+     * @notice The account this run signs as.
+     * @dev In a run this is the signer forge resolved from the command line - a raw key, a keystore
+     * or a Ledger - so the account the script checks and the account that signs are the same one.
+     * It is a seam because a test cannot name that account any other way: `vm.prank` and a
+     * broadcast are mutually exclusive, so a harness overrides this instead.
+     */
+    function _signer()
+        internal view virtual
+        returns (address)
+    {
+        return msg.sender;
+    }
+
     function _print(
         string memory _line
     )

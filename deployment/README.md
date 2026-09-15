@@ -75,6 +75,67 @@ way on Sepolia on 2026-09-15; all four verified.
 again needs nothing but solc 0.8.30 and does not depend on the Flare explorer still serving that verification.
 Rebuilding them from the explorer is the fallback, not the procedure.
 
+## Signing
+
+Every wrapper that broadcasts passes arguments after its own straight through to `forge`, so the
+signer is the caller's choice:
+
+```bash
+cast wallet import my-deployer --interactive        # once
+pnpm transfer_ownership sepolia 0xCurrent 0xNew --account my-deployer --sender 0xMyAddress
+pnpm transfer_ownership sepolia 0xCurrent 0xNew --ledger --sender 0xLedgerAddress
+```
+
+A wrapper's own arguments come first and never begin with `-`, so the two need no separator. A
+caller-supplied signer REPLACES `DEPLOYER_PRIVATE_KEY` rather than joining it: the raw key is
+appended only when nothing else signs, because handing forge two signers lets forge pick, and it
+picks the keystore.
+
+**The Solidity scripts take the signer from forge, not from the environment.** They broadcast as
+`_signer()`, which is `msg.sender` - the account forge resolved from the command line.
+
+Until 2026-09-15 they called `vm.startBroadcast(vm.envUint("DEPLOYER_PRIVATE_KEY"))`, which silently
+outranked anything on the command line: a run given `--ledger` was signed by the environment key
+instead, and the wrapper's flags did nothing. The checks stayed self-consistent - `TransferOwnership`
+compared that same environment account against the owner, so it never signed with something it had
+not checked - but the account the operator ASKED for was ignored, which on a hardware run means
+either a confusing refusal naming an account they never chose, or a transfer made from the
+environment key while they watched a device that was never used.
+
+`_signer()` is a seam rather than a bare `msg.sender` because a test cannot name that account any
+other way: `vm.prank` and a broadcast are mutually exclusive in Foundry, so a harness overrides it.
+Without that, a test would broadcast from forge's default sender while the script read `msg.sender`
+as the caller - a split that cannot happen in a real run, and that would have the tests exercising a
+configuration the deployment never sees.
+
+One limit worth knowing for hardware: the comparison is against the `--sender` forge was GIVEN, so a
+device holding a different address fails later, at signing, rather than in the preflight.
+
+Prefer a keystore to the environment variable. A variable is expanded by the shell before `exec`,
+so the key reaches the process list and, typed once, the shell history; `--account` reaches neither.
+The RPC URL has the same exposure when it carries an API key, which is why `cast` reads
+`ETH_RPC_URL` from the environment instead of taking a flag.
+
+**Output flags are refused by the eight wrappers whose output is parsed.** The recorder reads
+`NETWORK:` and `DEPLOYED:` lines out of forge's output, and `--quiet`, `-q` or `--json` silences or
+reshapes them. Forge broadcasts BEFORE the recorder runs, so accepting one would put a contract on
+chain and then fail with "Network name not found in output", leaving the record naming whatever it
+named before - which re-running cannot undo, the contract being already deployed. They are refused
+before anything is sent.
+
+**The flags do not ship without the preflight.** Forge binds `ETH_KEYSTORE_ACCOUNT` to `--account`
+and `ETH_KEYSTORE` to `--keystore`, and it resolves a keystore AHEAD of every other signer. So with
+either variable set, `--ledger` signs from the keystore instead - asking only for the password of an
+account nobody named - and `--account` beside `ETH_KEYSTORE` is rejected by forge itself, citing a
+flag the caller never typed. A wrapper cannot neutralize this by unsetting the variable: forge loads
+the environment file on its own, afterwards, restoring it. So
+[`scripts/signer-preflight.sh`](./scripts/signer-preflight.sh) refuses the combination and says
+which variable caused it. Its classification is tested directly, over every spelling forge accepts
+including short clusters, in `test/tooling/signer-preflight.test.sh`; that a Ledger actually reaches
+forge, and that a stale variable actually stops the run, is pinned end to end against a stubbed
+forge in `test/tooling/transfer-ownership.test.sh` - that being the wrapper whose one call cannot be
+undone.
+
 ## The Sepolia rehearsal market
 
 The Coston2 ↔ Sepolia rehearsal borrows against a market of our own making on the public Sepolia

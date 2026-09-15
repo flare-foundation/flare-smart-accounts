@@ -133,9 +133,13 @@ contract ConfigureRemoteController is Script {
         if (phase == keccak256("prepare")) {
             prepare(network, diamond, _section, config);
         } else if (phase == keccak256("execute")) {
-            uint256 signerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-            requireExecutable(diamond, vm.addr(signerPrivateKey));
-            vm.startBroadcast(signerPrivateKey);
+            // The signer is forge's, resolved from whatever the wrapper passed - a raw key, a keystore
+            // or a Ledger - and `msg.sender` is that account. Reading DEPLOYER_PRIVATE_KEY here would
+            // check one account and sign as another the moment the two differ, which is exactly what a
+            // hardware run is. Note this validates the sender forge was GIVEN; a device whose address
+            // is not that one fails later, at signing, rather than here.
+            requireExecutable(diamond, _signer());
+            vm.startBroadcast(_signer());
             submit(diamond, _section, config);
             vm.stopBroadcast();
             requireApplied(diamond, _section, config);
@@ -897,6 +901,21 @@ contract ConfigureRemoteController is Script {
     }
 
     /// @dev The console seam the tests capture, so they can assert what an operator reads.
+
+    /**
+     * @notice The account this run signs as.
+     * @dev In a run this is the signer forge resolved from the command line - a raw key, a keystore
+     * or a Ledger - so the account the script checks and the account that signs are the same one.
+     * It is a seam because a test cannot name that account any other way: `vm.prank` and a
+     * broadcast are mutually exclusive, so a harness overrides this instead.
+     */
+    function _signer()
+        internal view virtual
+        returns (address)
+    {
+        return msg.sender;
+    }
+
     function _print(
         string memory _line
     )

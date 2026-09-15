@@ -51,6 +51,9 @@ contract DeployRemoteControllerThrowawayTest is Test {
         deployer = vm.addr(1);
         vm.etch(SINGLETON_FACTORY, address(new MockSingletonFactory()).code);
         script = new DeployRemoteControllerThrowawayHarness();
+        // the script signs as this account, so the deterministic addresses and the ownership it
+        // takes are the fixture's deployer rather than whatever called into the harness
+        script.setSigner(deployer);
     }
 
     function testRefusesAFlareFamilyChain() public {

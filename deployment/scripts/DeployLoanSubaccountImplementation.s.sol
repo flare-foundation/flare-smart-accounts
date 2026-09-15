@@ -13,7 +13,6 @@ contract DeployLoanSubaccountImplementation is Script {
     )
         external
     {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
 
         // the Flare-side implementation lays out storage for the Flare proxy lineage; the loan
         // chains register MorphoLoanSubaccountRemote instead (see DeployRemoteAccountImplementations)
@@ -28,7 +27,12 @@ contract DeployLoanSubaccountImplementation is Script {
             network = string.concat(network, "-staging");
         }
 
-        vm.startBroadcast(deployerPrivateKey);
+        // The signer is forge's, resolved from whatever the wrapper passed - a raw key, a keystore
+        // or a Ledger - and `msg.sender` is that account. Reading DEPLOYER_PRIVATE_KEY here would
+        // check one account and sign as another the moment the two differ, which is exactly what a
+        // hardware run is. Note this validates the sender forge was GIVEN; a device whose address
+        // is not that one fails later, at signing, rather than here.
+        vm.startBroadcast(msg.sender);
         LoanSubaccount loanSubaccountImpl = new LoanSubaccount();
         vm.stopBroadcast();
 

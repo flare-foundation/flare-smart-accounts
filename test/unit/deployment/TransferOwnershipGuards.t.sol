@@ -27,6 +27,9 @@ contract TransferOwnershipGuardsTest is Test, FacetsDeploy {
 
     function setUp() public {
         harness = new TransferOwnershipHarness();
+        // the signer check is against the account that will sign; name it rather than let it be
+        // whatever called the harness
+        harness.setSigner(vm.addr(1));
         owner = makeAddr("owner");
         DiamondArgs memory args = DiamondArgs({owner: owner, initAddress: address(0), initCalldata: ""});
         diamond = address(new MasterAccountController(deployBaseFacets(), args));
@@ -68,6 +71,22 @@ contract TransferOwnershipGuardsTest is Test, FacetsDeploy {
         // which must fail for an owner the chain does not hold, or it proves nothing
         vm.expectRevert(bytes("the owner on chain is not the one the transfer named"));
         harness.run("sepolia", "verify", deployer, deployer);
+    }
+
+    function testTheEntryPointRefusesASignerThatIsNotTheOwner() public {
+        // The signer arm of the preflight is only REACHABLE once the owner matches what the caller
+        // named, so a case that stops at the owner check proves nothing about it. It matters most
+        // on the hardware path: there the signer is chosen by --sender, independently of the
+        // expected owner, so the two can disagree without anything else looking wrong.
+        vm.chainId(SEPOLIA);
+        address deployer = vm.addr(1);
+        _etchPinnedOwner(deployer);
+        harness.setSigner(makeAddr("an account that is not the owner"));
+        // created before the expectation: a `new` between the two would consume it
+        address safe = address(new PinnedControllerStub());
+
+        vm.expectRevert(bytes("the signing key is not the diamond's owner"));
+        harness.run("sepolia", "execute", deployer, safe);
     }
 
     function testTheEntryPointRefusesWhatThePreflightWouldStop() public {

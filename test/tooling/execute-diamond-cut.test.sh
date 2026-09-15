@@ -16,6 +16,8 @@ trap 'rm -rf "$SCRATCH"' EXIT
 mkdir -p "$SCRATCH/bin" "$SCRATCH/repo/deployment/scripts" "$SCRATCH/repo/deployment/cuts/coston2" \
   "$SCRATCH/repo/deployment/cuts/coston2-staging"
 cp "$WRAPPER" "$SCRATCH/repo/deployment/scripts/execute-diamond-cut.sh"
+# the wrapper sources the signer classifier at run time, so the scratch copy needs it too
+cp "$HERE/../../deployment/scripts/signer-preflight.sh" "$SCRATCH/repo/deployment/scripts/signer-preflight.sh"
 # the stubs log their arguments in call order and exit as FORGE_EXIT / NPX_EXIT say (0 by default)
 cat > "$SCRATCH/bin/forge" <<'STUB'
 #!/usr/bin/env bash

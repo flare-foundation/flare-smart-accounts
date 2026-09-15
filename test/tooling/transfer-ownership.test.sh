@@ -16,6 +16,8 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 mkdir -p "$SCRATCH/bin" "$SCRATCH/repo/deployment/scripts"
 cp "$WRAPPER" "$SCRATCH/repo/deployment/scripts/transfer-ownership.sh"
+# the wrapper sources the signer classifier at run time, so the scratch copy needs it too
+cp "$HERE/../../deployment/scripts/signer-preflight.sh" "$SCRATCH/repo/deployment/scripts/signer-preflight.sh"
 # the stub logs each argument with Bash escaping to preserve its boundaries, in call order;
 # FORGE_FAIL_PHASE names the phase whose run fails, so the two failures can be staged separately
 cat > "$SCRATCH/bin/forge" <<'STUB'
@@ -93,7 +95,34 @@ expect "failed verification: wrapper exits with forge's status" \
   "$(FORGE_FAIL_PHASE=verify run_wrapper sepolia "$OWNER" "$SAFE")" "3"
 expect "failed verification: both runs happened" "$(grep -c '^forge ' "$CALL_LOG")" "2"
 
-# 4. everything that stops before forge is reached
+# 4. a caller-supplied signer replaces the raw key entirely. This is what the mainnet handover
+#    needs: that transfer is signed by a Ledger, and this wrapper is the only thing standing
+#    between a Ledger and an irreversible transferOwnership to the wrong address.
+expect "ledger: exits 0 with no key in the environment at all" \
+  "$(DEPLOYER_PRIVATE_KEY='' run_wrapper sepolia "$OWNER" "$SAFE" --ledger --sender "$OWNER")" "0"
+expect "ledger: forge is given the ledger and no private key" \
+  "$(call 1)" \
+  "$(expected_call sepolia execute "$OWNER" "$SAFE" --ledger --sender "$OWNER" --broadcast)"
+expect "keystore: exits 0, and the key present in the environment goes unused" \
+  "$(run_wrapper sepolia "$OWNER" "$SAFE" --account deployer --sender "$OWNER")" "0"
+expect "keystore: forge is given the account and no private key" \
+  "$(call 1)" \
+  "$(expected_call sepolia execute "$OWNER" "$SAFE" --account deployer --sender "$OWNER" --broadcast)"
+expect "a signer does not disturb the read-back, which still needs none" \
+  "$(call 2)" "$(expected_call sepolia verify "$OWNER" "$SAFE")"
+
+# 5. the trap the preflight exists for. Forge binds ETH_KEYSTORE_ACCOUNT to --account and resolves
+#    a keystore AHEAD of --ledger, so a stale variable would sign from an account nobody named,
+#    asking only for a password. The wrapper cannot unset it - forge reloads the environment file
+#    afterwards, restoring it - so it refuses the combination instead.
+expect "a keystore variable beside --ledger: exit 2" \
+  "$(ETH_KEYSTORE_ACCOUNT=stale run_wrapper sepolia "$OWNER" "$SAFE" --ledger --sender "$OWNER")" "2"
+expect "a keystore variable beside --ledger: forge did not run" \
+  "$(grep -c '^forge ' "$CALL_LOG")" "0"
+expect "the same variable with --account is allowed: they feed one field" \
+  "$(ETH_KEYSTORE_ACCOUNT=stale run_wrapper sepolia "$OWNER" "$SAFE" --account chosen --sender "$OWNER")" "0"
+
+# 6. everything that stops before forge is reached
 expect "unknown network: exit 2" "$(run_wrapper coston2 "$OWNER" "$SAFE")" "2"
 expect "unknown network: forge did not run" "$(grep -c '^forge ' "$CALL_LOG")" "0"
 expect "current owner not an address: exit 2" "$(run_wrapper sepolia "0xnope" "$SAFE")" "2"

@@ -13,15 +13,16 @@ import {PinnedControllerInitCode} from "../lib/PinnedControllerInitCode.sol";
  * single step with no acceptance from the new owner, it is not timelocked, and a wrong address ends
  * governance of that diamond permanently. Everything here exists to refuse before that happens.
  *
- * It serves one case, the deployer-owned handover at the end of a rehearsal
- * ([`RUNBOOK.md`](../RUNBOOK.md) Part B): the bootstrap's historical owner signs its one transfer
- * from a wallet, which no wrapper can drive, and a throwaway controller is never handed on. So there
+ * It serves both handovers ([`RUNBOOK.md`](../RUNBOOK.md) Part B): the bootstrap's historical
+ * owner, which is on hardware and signs the transfer at the start of a chain's deployment, and the
+ * deployer-owned one at the end of a rehearsal. A throwaway controller is never handed on, so there
  * is no target argument - the pinned controller is the only diamond this touches.
  *
  * The caller names the owner they believe holds it. That argument is the guard: pointed at the wrong
  * network, or at a diamond somebody else has already taken, the run stops instead of sending. The
- * signing key must be that owner too, so a transfer that could only revert is refused locally rather
- * than paid for.
+ * signer must be that owner too, so a transfer that could only revert is refused locally rather than
+ * paid for. That comparison is against the account forge resolved from the command line, so a
+ * keystore or a Ledger is checked exactly as a raw key is.
  *
  * Two phases, for the same reason the configuration script has them: forge collects a script's
  * transactions and broadcasts them after it returns, so a read-back inside the run that sends sees
@@ -50,11 +51,15 @@ contract TransferOwnership is Script {
 
         bytes32 phase = keccak256(bytes(_phase));
         if (phase == keccak256("execute")) {
-            uint256 signerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-            requireTransferable(diamond, _expectedCurrentOwner, _newOwner, vm.addr(signerPrivateKey));
+            // The signer is forge's, resolved from whatever the wrapper passed - a raw key, a keystore
+            // or a Ledger - and `msg.sender` is that account. Reading DEPLOYER_PRIVATE_KEY here would
+            // check one account and sign as another the moment the two differ, which is exactly what a
+            // hardware run is. Note this validates the sender forge was GIVEN; a device whose address
+            // is not that one fails later, at signing, rather than here.
+            requireTransferable(diamond, _expectedCurrentOwner, _newOwner, _signer());
             _print(string.concat("FROM: ", vm.toString(_expectedCurrentOwner)));
             _print(string.concat("TO: ", vm.toString(_newOwner)));
-            vm.startBroadcast(signerPrivateKey);
+            vm.startBroadcast(_signer());
             IERC173(diamond).transferOwnership(_newOwner);
             vm.stopBroadcast();
         } else if (phase == keccak256("verify")) {
@@ -102,6 +107,21 @@ contract TransferOwnership is Script {
         address current = IERC173(_diamond).owner();
         require(current == _expectedOwner, "the owner on chain is not the one the transfer named");
         _print(string.concat("VERIFIED: owner ", vm.toString(current)));
+    }
+
+
+    /**
+     * @notice The account this run signs as.
+     * @dev In a run this is the signer forge resolved from the command line - a raw key, a keystore
+     * or a Ledger - so the account the script checks and the account that signs are the same one.
+     * It is a seam because a test cannot name that account any other way: `vm.prank` and a
+     * broadcast are mutually exclusive, so a harness overrides this instead.
+     */
+    function _signer()
+        internal view virtual
+        returns (address)
+    {
+        return msg.sender;
     }
 
     function _print(

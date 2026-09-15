@@ -36,6 +36,7 @@ contract DeployRemoteAccountImplementationsTest is Test {
     function setUp() public {
         vm.setEnv("DEPLOYER_PRIVATE_KEY", "1");
         script = new DeployRemoteAccountImplementationsHarness();
+        script.setSigner(vm.addr(DEPLOYER_KEY));
         vm.chainId(SEPOLIA);
     }
 
@@ -115,24 +116,29 @@ contract DeployRemoteAccountImplementationsTest is Test {
     function testAnUnknownNameStopsTheRunBeforeTheOnesAfterIt() public {
         // the refusal is not a warning to be collected at the end: an implementation deployed
         // beside a refused one leaves a contract on chain that no record will ever name
-        address deployer = vm.addr(DEPLOYER_KEY);
-        uint256 before = vm.getNonce(deployer);
+        uint256 before = vm.getNonce(_broadcaster());
         vm.expectRevert(bytes("not a remote implementation this script can deploy: LoanSubaccount"));
         script.run("sepolia", false, _names(["LoanSubaccount", PERSONAL_ACCOUNT]));
-        assertEq(vm.getNonce(deployer), before, "nothing was deployed");
+        assertEq(vm.getNonce(_broadcaster()), before, "nothing was deployed");
     }
 
-    /// @dev Contracts created by the run: under a broadcast the deployer's nonce moves per `new`.
+    /// @dev The account the script's broadcasts are attributed to. The script names no key: it
+    /// broadcasts as `msg.sender`, which in a real run is the signer forge resolved. A test names
+    /// that account by pranking, so this is the fixture's own deployer.
+    function _broadcaster() private view returns (address) {
+        return vm.addr(DEPLOYER_KEY);
+    }
+
+    /// @dev Contracts created by the run: under a broadcast the broadcaster's nonce moves per `new`.
     function _created(
         string[] memory _contracts
     )
         private
         returns (uint256)
     {
-        address deployer = vm.addr(DEPLOYER_KEY);
-        uint256 before = vm.getNonce(deployer);
+        uint256 before = vm.getNonce(_broadcaster());
         script.run("sepolia", false, _contracts);
-        return vm.getNonce(deployer) - before;
+        return vm.getNonce(_broadcaster()) - before;
     }
 
     /**

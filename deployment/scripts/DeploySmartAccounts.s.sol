@@ -113,8 +113,12 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
             "the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap"
         );
 
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+        // The signer is forge's, resolved from whatever the wrapper passed - a raw key, a keystore
+        // or a Ledger - and `msg.sender` is that account. Reading DEPLOYER_PRIVATE_KEY here would
+        // check one account and sign as another the moment the two differ, which is exactly what a
+        // hardware run is. Note this validates the sender forge was GIVEN; a device whose address
+        // is not that one fails later, at signing, rather than here.
+        address deployer = msg.sender;
 
         string memory configFile = "deployment/chain-config/";
         string memory network = DeployNetworks.networkName(block.chainid);
@@ -146,7 +150,10 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
             params.initialOwner = deployer;
         }
 
-        vm.startBroadcast();
+        // Broadcast AS the validated account rather than leaving it implicit. In a script run the
+        // two are the same - forge resolves the signer and `msg.sender` is it - but naming it keeps
+        // the account this script checked and the account that signs from ever drifting apart.
+        vm.startBroadcast(msg.sender);
 
         // (re)deploy personal account implementation
         personalAccountImpl = new PersonalAccount();

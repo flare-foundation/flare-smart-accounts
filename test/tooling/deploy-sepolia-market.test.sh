@@ -15,6 +15,8 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 mkdir -p "$SCRATCH/bin" "$SCRATCH/repo/deployment/scripts"
 cp "$WRAPPER" "$SCRATCH/repo/deployment/scripts/deploy-sepolia-market.sh"
+# the wrapper sources the signer classifier at run time, so the scratch copy needs it too
+cp "$HERE/../../deployment/scripts/signer-preflight.sh" "$SCRATCH/repo/deployment/scripts/signer-preflight.sh"
 # the stubs log the command and then one argument per line, so an argument holding a space of its
 # own reads differently from two arguments; they print what FORGE_PRINTS says (the wrapper tees
 # forge's stdout into the recorder's file) and exit as FORGE_EXIT / NPX_EXIT say (0 by default)
@@ -66,8 +68,10 @@ commands() {
 forge_vector() {
   local phase="$1" rpc="${2:-http://stub.invalid}" key="${3:-0x01}"
   printf 'forge\n  script\n  deployment/scripts/DeploySepoliaMarket.s.sol:DeploySepoliaMarket\n'
-  printf '  --rpc-url\n  %s\n  --private-key\n  %s\n  --offline\n' "$rpc" "$key"
+  printf '  --rpc-url\n  %s\n  --offline\n' "$rpc"
+  # the signer trails the invocation: a caller-supplied one replaces it in the same position
   printf '  --sig\n  run(string,string)\n  sepolia\n  %s\n  --broadcast\n' "$phase"
+  printf '  --private-key\n  %s\n' "$key"
 }
 recorder_vector() {
   printf 'npx\n  tsx\n  deployment/scripts/save-deployed-addresses.ts\n'
@@ -176,6 +180,17 @@ rm "$SCRATCH/repo/.env"
 # and with no file, the exported settings are what reach forge
 expect "no env file: wrapper exits 0" "$(run_wrapper fund)" "0"
 expect "no env file: forge got the exported RPC and key" "$(cat "$CALL_LOG")" "$(forge_vector fund)"
+
+# An output flag must be refused BEFORE forge runs. The recorder reads NETWORK: and DEPLOYED: out
+# of forge's output, and forge BROADCASTS first - so accepting one would put contracts on chain and
+# then fail the recorder, leaving a record that names none of them. Re-running cannot undo that.
+for flag in --quiet --silent --json -q -vq; do
+  expect "$flag: exit 2" "$(run_wrapper market "$flag")" "2"
+  expect "$flag: forge never ran" "$(commands)" ""
+done
+# ...and the flags a caller legitimately passes still reach forge
+expect "-vvv: wrapper exits 0" "$(run_wrapper fund -vvv)" "0"
+expect "-vvv: forge ran" "$(commands)" "forge "
 
 if [[ $failures -ne 0 ]]; then
   echo "$failures scenario(s) failed"

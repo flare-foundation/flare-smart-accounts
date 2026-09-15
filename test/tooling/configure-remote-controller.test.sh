@@ -16,6 +16,8 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 mkdir -p "$SCRATCH/bin" "$SCRATCH/repo/deployment/scripts"
 cp "$WRAPPER" "$SCRATCH/repo/deployment/scripts/configure-remote-controller.sh"
+# the wrapper sources the signer classifier at run time, so the scratch copy needs it too
+cp "$HERE/../../deployment/scripts/signer-preflight.sh" "$SCRATCH/repo/deployment/scripts/signer-preflight.sh"
 # the stub logs each argument with Bash escaping to preserve its boundaries, in call order;
 # FORGE_FAIL_PHASE names the phase whose run fails, so the two failures can be staged separately
 cat > "$SCRATCH/bin/forge" <<'STUB'
