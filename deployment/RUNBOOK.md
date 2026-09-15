@@ -213,15 +213,24 @@ pnpm verify_implementation <network> LoanSubaccount <address> --stage pre
 **Governance call: `setSubaccountImplementation(1, address)`** (`1` is the loan type). Timelocked
 procedure, then `--stage live`. Then freeze the lineage — see A6.
 
-### A6. Freeze the reference for every lineage that just went live
+### A6. Freeze the reference for every lineage whose layout just changed
 
-Any implementation deployed above is now the reference every future upgrade is validated against,
-and the window closes with the deployment because CI artifacts expire. For **each** newly live
-lineage — the home Personal Account and the home loan subaccount included, not only the remote ones
-— copy that build's `artifacts-upgrades/build-info` into a tracked `deployment/build-info-<version>/`
-and add it to `validate-upgrade` with `--referenceBuildInfoDirs` and
-`--reference <dirname>:<Contract> --requireReference`. Until that is done the validator runs the
-weaker checks that need no reference, and a later layout change would pass unnoticed.
+Any implementation deployed above is now the layout every future upgrade must preserve. For each
+lineage that is newly live **or whose layout changed in this deployment**, copy that build's
+`artifacts-upgrades/build-info` into a tracked `deployment/build-info-<name>/` and point
+`validate-upgrade` at it with `--referenceBuildInfoDirs` and
+`--reference <dirname>:<Contract> --requireReference`.
+
+**Not only the first deployment.** A reference protects the layout it HOLDS, not the one a chain is
+running: once a deployment appends a field, a later implementation can delete that field and still
+pass, because against the original both the append and its removal are appends. Measured, with the
+table, in [`reference-builds.md`](./reference-builds.md). So freezing is part of shipping an
+implementation whose layout moved, and the validator must point at the newest reference. Until it
+does, the window between the last freeze and the live layout is unprotected.
+
+Record the new directory in `reference-builds.md`: the source commit, the exact build, the compiled
+runtime hashes and the addresses they match. Storage compatibility says nothing about WHICH
+compilation a chain runs, and that record is what does.
 
 ### A7. Governance state, read back
 

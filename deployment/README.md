@@ -213,9 +213,10 @@ reference: the build-info of those three compilation units rebuilt from the `v2.
 metadata hashes, including the one embedded in the redeemer-proxy creation code, and the UUPS
 immutable), so an incompatible layout change fails with field-level diagnostics while a safe append
 passes. The remote
-Personal Account and both loan subaccounts have no proxy on any network yet and run the checks that
-need no reference (constructor and initializer safety, unsafe operations, annotated namespaces); before
-re-laying one of those layouts, check the lineage is still empty with
+Personal Account and both loan subaccounts were first deployed on 2026-09-14 and are checked against
+`deployment/build-info-2026-09-14/`, frozen at that deployment, so all six now run with
+`--requireReference`; before re-laying a layout that has no proxy yet, check the lineage is still
+empty with
 `pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]`. It is decisive on chain only through
 the beacon or the registration event history, which needs an RPC serving full-range logs (a private
 node); otherwise it answers from the retained git history of the network's deployment record and cut
@@ -227,6 +228,13 @@ deployment, copy that build's `artifacts-upgrades/build-info` into a tracked
 `deployment/build-info-<version>/` directory right away (CI artifacts expire, so the window closes
 with the deployment) and add it to `validate-upgrade` with `--referenceBuildInfoDirs` and
 `--reference <dirname>:<Contract> --requireReference`.
+
+The three lineages first deployed on 2026-09-14 — the remote Personal Account, the Flare loan
+subaccount and the remote one — are checked against `deployment/build-info-2026-09-14/`, frozen at
+that deployment, so all six now run with `--requireReference`. Each directory, its build command,
+its checksum and the addresses it matches are recorded in
+[`reference-builds.md`](./reference-builds.md); storage compatibility does not establish which
+compilation a chain is running, and that record does.
 
 Two things to know about the validator's output. The implementations' constructors carry the
 `@custom:oz-upgrades-unsafe-allow constructor` waiver (`ControlledAccountBase` for the four accounts, the

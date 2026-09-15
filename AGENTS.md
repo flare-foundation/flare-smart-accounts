@@ -233,7 +233,8 @@ test/
 deployment/
   chain-config/      # Per-network chain config JSON
   deploys/           # Deployed contract addresses per network
-  build-info-v2.0.0/ # Reconstructed v2.0.0 build of the three live implementations: the upgrade validator's reference
+  build-info-v2.0.0/ # Reconstructed v2.0.0 build of the three implementations live before this release
+  build-info-2026-09-14/ # The three lineages first deployed 2026-09-14; both are the upgrade validator's references, recorded in reference-builds.md
   cuts/              # Diamond cut files per network
   market-config/     # The Sepolia rehearsal market's parameters: our test loan token and feeds, the oracle, the market, its liquidity
   lib/               # Solidity the scripts share: the network table, the pinned Ethereum init code, the type allocations, the config decode structs
@@ -455,8 +456,12 @@ pnpm build:upgrade-info && pnpm validate-upgrade
 
 The three live implementations — the Flare Personal Account, `FAssetRedeemComposer` and
 `FAssetRedeemerAccount` — are checked against the reconstructed v2.0.0 reference in
-`deployment/build-info-v2.0.0/`; the remote Personal Account and both loan subaccounts have no proxy
-on any network yet and run only the checks that need no reference. Before re-laying one of those
+`deployment/build-info-v2.0.0/`, and the remote Personal Account, the Flare loan subaccount and the
+remote one against `deployment/build-info-2026-09-14/`, frozen at their first deployment. All six
+therefore run with `--requireReference`; what each directory holds, how it was built and which
+addresses it matches are in [`deployment/reference-builds.md`](./deployment/reference-builds.md).
+A reference is frozen AT the deployment: what decays is not the CI artifact, which a local build
+reproduces, but the certainty of which source a chain is running. Before re-laying one of those
 layouts, check the lineage is still empty with `pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]`.
 How the reference was reconstructed, what the validator's two expected findings mean (the waived
 constructors, the diamond libraries' namespace warnings), how the lineage check decides, and what to

@@ -189,18 +189,22 @@ upgrade-build-info:
   - forge install --no-git
   script:
   - forge clean
-  - forge build
+  # tests and scripts are most of the file by volume and none of what the validator reads. This is
+  # the CANDIDATE build and must hold all six validated contracts, so it is not built as narrowly
+  # as a reference, which needs only the contracts it is a reference for; the two share the
+  # compiler profile rather than the command
+  - forge build --skip test --skip script
   artifacts:
     expire_in: 1 day
     paths:
     - artifacts-upgrades/build-info/
 
 # Blocking: the OpenZeppelin upgrade-safety validator over the six proxy-backed implementations.
-# The three live ones (Personal Account, FAssetRedeemComposer, FAssetRedeemerAccount) are checked
-# against the reconstructed v2.0.0 reference build (deployment/build-info-v2.0.0): an incompatible
-# layout change fails with field-level diagnostics, a safe append passes; the lineages
-# with no proxy yet run the checks that need no reference (constructor/initializer, unsafe operations,
-# namespaces) until their first deployment freezes one too.
+# All six now have a frozen reference and run with --requireReference: the three live before this
+# release against deployment/build-info-v2.0.0, and the three first deployed 2026-09-14 against
+# deployment/build-info-2026-09-14. An incompatible layout change fails with field-level
+# diagnostics, a safe append passes. A reference protects the layout it HOLDS, so a deployment that
+# changes a lineage's layout needs a new one; see deployment/reference-builds.md.
 validate-upgrade:
   image: node:24
   stage: test
