@@ -33,11 +33,32 @@ Blockscout and Etherscan for the loan chains, where Etherscan needs `ETHERSCAN_A
 chain) and is skipped with a note without it; and Sourcify everywhere it lists the chain (Coston it does not), a
 keyless record no explorer owns. Blockscout takes `BLOCKSCOUT_API_KEY` in the same Etherscan-compatible flag.
 Its rate limits vary by instance and endpoint; the public Sepolia instance refused every keyless submission
-after the first two in a run, twenty or sixty seconds apart alike. A KEY DOES NOT RAISE THAT LIMIT: measured
-2026-09-15 against that instance, the same read was refused keyless and keyed alike, twelve of twelve each way,
-with the key presented as a query parameter, an `x-api-key` header and a bearer token. The key is still passed,
-because it costs nothing and an instance that honours it is the case it is there for. A keyless run says so once
-per Blockscout explorer and proceeds. Each explorer is given its own key by argument and none
+after the first two in a run, twenty or sixty seconds apart alike. A KEY BUYS NOTHING HERE - measured
+2026-09-15, and worth reading with its correction attached, because the first version of this paragraph
+asserted the same thing on evidence that turned out worthless. That attempt reported "keyed and keyless
+refused alike, twelve of twelve each way"; it sent an EMPTY key on both sides, `BLOCKSCOUT_API_KEY` having
+been commented out of the environment file, so it compared keyless with keyless and measured nothing.
+
+Re-measured with a real key against the Etherscan-compatible `/api` endpoint forge verifies through - the v2
+read API was not throttling that day and cannot stand in for it - one burst of 15 rapid reads per arm, each
+the FIRST thing a freshly changed IP did, so neither arm inherited the other's penalty:
+
+| | requests served | first limited |
+|---|---:|---:|
+| keyless | 10 of 15 | 11th |
+| keyed | 10 of 15 | 11th |
+
+Identical, down to the request the limiter cut in on. The reason is not that the key is wrong but that it is
+for a different service: it is a PRO key for `api.blockscout.com`, the multichain API, which answers 402
+without it and 200 with it (as `?apikey=` or `Authorization: Bearer`; `x-api-key` is refused). The per-chain
+host is a separate service that does not know that token, and its own key page now reads "Chain-specific API
+keys are deprecated. Please migrate to the Blockscout PRO API" - so **there is no key this host will honour,
+at any price.** Its limiting is per IP and cannot be raised. Two caveats kept in view on the burst figures:
+one burst per arm, one public instance, one day.
+
+The spacing below is therefore set for the keyless case, and the wait is NOT conditioned on holding a key: a
+run that shortened it on seeing one would fail rather than finish sooner. The key is still passed whenever it
+is set, for an instance that does honour it. A keyless run says so once per Blockscout explorer and proceeds. Each explorer is given its own key by argument and none
 other: the run blanks `ETHERSCAN_API_KEY` in forge's environment, because forge would otherwise fall back to
 it - from the environment or from the env file it loads itself - for any verifier, and send the Etherscan key
 to Blockscout. Spacing is PER EXPLORER, because a rate limit is per host: twenty seconds before a Blockscout

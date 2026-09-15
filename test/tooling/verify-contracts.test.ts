@@ -454,12 +454,14 @@ void test("the wait falls between submissions, once per gap, failures included",
   }
 });
 
-void test("a key does not shorten the Blockscout wait, because it does not raise the limit", async () => {
-  // Measured 2026-09-15 against the public Sepolia instance: the same read was refused keyless and
-  // keyed alike, twelve of twelve each way, with a key configured throughout. Conditioning the wait
-  // on holding a key would make a keyed run FAIL rather than finish sooner, so the two must space
-  // identically. The key is still passed - it costs nothing, and an instance that honours it is the
-  // case it exists for.
+void test("a key does not shorten the Blockscout wait, because it buys nothing there", async () => {
+  // Measured 2026-09-15 against the `/api` endpoint this verifies through, one burst of 15 per arm,
+  // each the first thing a freshly changed IP did so neither inherited the other's penalty: keyless
+  // served 10 and was limited on the 11th, keyed served 10 and was limited on the 11th. Identical.
+  // The key is for a different service - api.blockscout.com, the multichain PRO API - and this
+  // per-chain host does not know it; its own key page now directs users there, so no key exists that
+  // it will honour and its limiting is per IP. A run that shortened its spacing on seeing a key
+  // would therefore FAIL rather than finish sooner, and the two must space identically.
   const rpc = new FakeRpc(CHAIN_ID_HEX["sepolia"]!);
   const base = await rpc.start();
   try {

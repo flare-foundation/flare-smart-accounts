@@ -31,12 +31,14 @@ interface DeployedContract {
 // and forge's own retries (five, five seconds apart) do not outlast it, so every Blockscout
 // submission fails at once. Spacing them trades a few minutes for not needing the retries at all.
 //
-// A KEY DOES NOT CHANGE THIS, measured 2026-09-15 against the public Sepolia instance: the same
-// read refused keyless and keyed alike, twelve of twelve each way, and `BLOCKSCOUT_API_KEY` was
-// configured throughout. A key raises the limit only where an instance honours it, which that one
-// evidently does not, so the wait cannot be conditioned on having one - a run that shortened it
-// would fail rather than finish sooner. The key is still passed: it costs nothing and an instance
-// that does honour it is the case it is there for.
+// A KEY BUYS NOTHING HERE, so the wait is not conditioned on holding one. Measured 2026-09-15
+// against the `/api` endpoint this verifies through, one burst of 15 per arm, each the first thing a
+// freshly changed IP did: keyless served 10 and was limited on the 11th; keyed served 10 and was
+// limited on the 11th. Identical, because the key is for a different service: it is a PRO key for
+// api.blockscout.com, and this per-chain host does not know that token. That host's own key page now
+// says chain-specific keys are deprecated and directs to the PRO API, so NO key exists that it will
+// honour - its limiting is per IP. A run that shortened its spacing on seeing a key would therefore
+// FAIL rather than finish sooner. The key is still passed whenever it is set.
 const BLOCKSCOUT_DELAY_MS = 20_000;
 
 // Etherscan and Sourcify never needed Blockscout's figure - Etherscan's free tier allows several
