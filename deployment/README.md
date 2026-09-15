@@ -33,12 +33,47 @@ Blockscout and Etherscan for the loan chains, where Etherscan needs `ETHERSCAN_A
 chain) and is skipped with a note without it; and Sourcify everywhere it lists the chain (Coston it does not), a
 keyless record no explorer owns. Blockscout takes `BLOCKSCOUT_API_KEY` in the same Etherscan-compatible flag.
 Its rate limits vary by instance and endpoint; the public Sepolia instance refused every keyless submission
-after the first two in a run, twenty or sixty seconds apart alike, and a key raises the limit. A keyless run
-says so once per Blockscout explorer and proceeds. Each explorer is given its own key by argument and none
+after the first two in a run, twenty or sixty seconds apart alike. A KEY DOES NOT RAISE THAT LIMIT: measured
+2026-09-15 against that instance, the same read was refused keyless and keyed alike, twelve of twelve each way,
+with the key presented as a query parameter, an `x-api-key` header and a bearer token. The key is still passed,
+because it costs nothing and an instance that honours it is the case it is there for. A keyless run says so once
+per Blockscout explorer and proceeds. Each explorer is given its own key by argument and none
 other: the run blanks `ETHERSCAN_API_KEY` in forge's environment, because forge would otherwise fall back to
 it - from the environment or from the env file it loads itself - for any verifier, and send the Etherscan key
-to Blockscout. Submissions are spaced twenty seconds apart; `VERIFY_SUBMIT_DELAY_MS` overrides the spacing, and
-`0` disables it for a re-run of one already-verified contract.
+to Blockscout. Spacing is PER EXPLORER, because a rate limit is per host: twenty seconds before a Blockscout
+submission and one before Etherscan's or Sourcify's, which never needed Blockscout's figure and were two of
+every three gaps on a loan chain. `VERIFY_SUBMIT_DELAY_MS` overrules all of them, and `0` disables the wait for
+a re-run of one already-verified contract.
+
+### The four pinned contracts need the original compilation
+
+On a loan chain `MasterAccountController` and the three base facets (`DiamondCutFacet`,
+`DiamondLoupeFacet`, `OwnershipFacet`) are deployed from the historical init code in
+`pinned-init-code/`, so the diamond reproduces at its Flare address - see
+`lib/PinnedControllerInitCode.sol`. That code was built with **solc 0.8.30** and flare-periphery 0.1.38;
+this repository builds 0.8.35. The functional bytes are identical either way - checked, with the metadata
+trailer stripped, against the deployed code - but the compiler version lives IN that trailer, so Blockscout
+and Sourcify compare the runtime and accept all four (two exactly, two as partial matches - `partial` is
+precisely that trailer), while Etherscan requires an exact deployment-bytecode match and refuses them with
+`Fail - Unable to verify. Compiled contract deployment bytecode does NOT match the transaction deployment
+bytecode`. `verify_contracts` will never fix that: it submits current source.
+
+They ARE verifiable, from the original compilation. The Flare mainnet explorer holds a full-match verification
+of all four at `v0.8.30+commit.73712a01` (cancun, viaIR, optimizer 200), and the Flare deployed runtime equals
+the loan chain's byte for byte, because both came from the same pinned init code. Rebuild the standard-json
+input from that verification's `source_code`, `additional_sources` and `compiler_settings`, **forcing
+`language` to `"Solidity"`**: Blockscout reports it lowercase, solc accepts only
+`Solidity`/`Yul`/`SolidityAST`/`EVMAssembly`, and an unfixed input therefore fails to COMPILE - which Etherscan
+reports as `Unable to get compiled bytecode`, reading like a bytecode mismatch when it is not one. Compile the
+assembled input locally before submitting; solc 0.8.30 reproduces all four runtimes byte for byte, metadata
+included, which is the match Etherscan wants. Only the controller takes constructor arguments - 960 bytes, the
+tail of `pinned-init-code/MasterAccountController.hex` - and Etherscan cannot infer them because the deployment
+went through the EIP-2470 singleton factory, so the creating transaction's input is factory calldata. Done this
+way on Sepolia on 2026-09-15; all four verified.
+
+**The recovered inputs are checked in**, at [`pinned-verification/`](./pinned-verification/), so doing this
+again needs nothing but solc 0.8.30 and does not depend on the Flare explorer still serving that verification.
+Rebuilding them from the explorer is the fallback, not the procedure.
 
 ## The Sepolia rehearsal market
 
