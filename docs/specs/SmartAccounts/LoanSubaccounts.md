@@ -166,9 +166,10 @@ subaccount the FXRP came from.
 ## The loan instructions: `borrow`, `depositCollateral`, `withdraw` and `cancel`
 
 The forward moves are the **loan
-instructions**: `borrow(collateralAmount, borrowAmount, destinationKind, destination,
-minComposeValue, operationId, deadline, extraOptions)`, `depositCollateral(amount, extraOptions)` and
-`withdraw(amount, operationId, deadline, options)` and `cancel(operationId, extraOptions)`: typed methods that
+instructions**: `borrow(collateralAmount, minCollateralAmount, borrowAmount, destinationKind,
+destination, minComposeValue, operationId, deadline, extraOptions)`,
+`depositCollateral(amount, minAmount, extraOptions)` and
+`withdraw(amount, minAmount, operationId, deadline, options)` and `cancel(operationId, extraOptions)`: typed methods that
 build the compose payload
 **on-chain** and bridge it to this account's own address on the loan chain, where the
 loan-chain twin executes it on arrival (supply as collateral, borrow, disburse; deposit
@@ -178,10 +179,28 @@ structured and type-checked, a malformed payload cannot reach the bridge, and th
 are validated here — before any bridge fee is paid — for the static argument shapes the loan
 chain would reject on delivery (`InvalidLoanInstruction`: zero operation id, deadline already
 passed, a zero borrow, deposit or withdrawal amount, a disbursement destination that is not a
-clean non-zero EVM address other than this account, a zero withdraw delivery-value floor).
+clean non-zero EVM address other than this account, a zero withdraw delivery-value floor, an
+arrival floor above the amount it is set against or zero on a send that carries tokens).
 Remote-state rejections — unconfigured fee terms, the pause, the borrow switch, balances,
 quotes, Morpho itself — surface only on delivery; the loan chain also re-validates the shapes
 there.
+
+**The signed arrival floor.** The FXRP OFT adapters carry LayerZero's `Fee` mixin, so what the
+adapter credits on the far side can be less than what it takes here, and the difference is the
+user's. Every token-bearing move therefore names the least it will accept: `minCollateralAmount`
+on `borrow`, `minAmount` on `depositCollateral`, and `minAmount` on `withdraw` for
+the return leg, each carried into `SendParam.minAmountLD` while `amountLD` stays the gross amount
+sent. Set it equal to the amount to tolerate no fee at all; below it to allow one. The two
+alternatives are both wrong: demanding the whole amount back refuses every non-zero fee outright
+(the pre-fix behavior — a fee would have blocked every token-bearing move), and taking whatever
+the adapter quotes accepts any fee, including one set after the instruction was signed. The
+withdraw's floor matters most, because the loan chain quotes the bridge home only when the
+instruction is delivered — after it was signed — so the allowance travels in the payload rather
+than being read there. A cut above the allowance reverts the send (`SlippageExceeded`) and, on the
+return leg, leaves the delivery retriable with the collateral still in the position; message-only
+sends carry a zero amount and a zero floor. The fee is zero on every registered adapter today, and
+the adapters' owners can change it, so this is a live dependency rather than a hypothetical one —
+see the adapter-trust note in the bridge routes.
 
 The withdraw is the one instruction with a second leg, so it takes
 `WithdrawOptions` — `{destinationOptions, returnOptions, minComposeValue}`. The first
@@ -425,9 +444,10 @@ multi-origin `acceptedOrigins[srcEid]` design deferred under Multiple remote cha
 > **The adapters are upgradeable proxies, and an upgrade is not a rotation.** Every FXRP OFT
 > checked on 2026-09-09 sits behind a proxy — Flare's adapter, its Coston2 counterpart and the
 > Ethereum OFT — so the same address can change behavior with no rotation, no runbook and no
-> event on our side. `setFxrpOft`'s four reads (`token`, `sharedDecimals`, `oftVersion`, and the
-> per-route peers) are true when read and can change afterwards, and re-reading them defends
-> nothing: an upgrade can keep all four truthful while forging compose instructions. This is an
+> event on our side. `setFxrpOft`'s five reads (`token`, `sharedDecimals`,
+> `decimalConversionRate`, `oftVersion`, and the per-route peers) are true when read and can
+> change afterwards, and re-reading them defends nothing: an upgrade can keep all five truthful
+> while forging compose instructions. This is an
 > accepted dependency on the upgrade authority. On Flare that authority is
 > `0xbe653C54DF337F13Fcb726101388F4a4803049F3`, the same Safe that owns the controller, so it is
 > the trust domain the protocol already rests on; the Ethereum OFT's owner is a different party.
@@ -1254,8 +1274,10 @@ terms accrue zero, and debt presupposes the borrow gate passed).
   meaning, once such a kind exists, is the withdraw's, and it is enforced the same way: checked
   before every branch that finalizes the packet, so an underfunded delivery reverts retriably
   instead of consuming the instruction.
-- Withdraw action data: `abi.encode(bytes32 operationId,
-  uint64 deadline, uint256 amount, uint256 minComposeValue, bytes returnOptions)`.
+- Withdraw action data: `abi.encode(bytes32 operationId, uint64 deadline, uint256 amount,
+  uint256 minAmount, uint256 minComposeValue, bytes returnOptions)`. The arrival floor
+  sits beside the amount it bounds; the loan chain re-validates it (`InvalidMinAmountReceived`)
+  before any branch that finalizes the packet.
 - Deposit-collateral action data: empty (`bytes("")`).
 - Redeem-home action data (the bridge-back, loan chain → Flare): empty (`bytes("")`), under
   `ACTION_REDEEM_HOME = 4` on the Flare receiver — the packet is an instruction to redeem, not a
@@ -1661,11 +1683,23 @@ but must be confirmed against the live contracts, together with the order of act
 - **fee terms configured before any route opens**: `registerLoanMarket`, then the one
   `setLoanFeeTerms` call (the activation — borrowing reverts until it executes); verify all
   three fields before enabling the forward route;
-- **the Ethereum FXRP OFT's decimals**: `token().decimals()` must equal its `sharedDecimals()`
-  (6) on the loan chain — the no-dust argument (`minAmountLD == amountLD`) rests on it on both
-  chains; `setComposeTransport` fails closed otherwise, so confirm the representation before
-  the transport is queued (read on Ethereum mainnet 2026-09-03: the FXRP token is the OFT
-  itself and `decimals() == sharedDecimals() == 6`; the Flare adapter's is still to be read);
+- **the Ethereum FXRP OFT's decimals and conversion rate**: `token().decimals()` must equal its
+  `sharedDecimals()` (6) on the loan chain, and `decimalConversionRate()` must be **1**. A send
+  names only the least it accepts on arrival, so an adapter that truncated sub-unit dust would
+  spend it out of the user's allowance rather than failing — the rate is the no-dust property
+  itself, and the decimals only imply it for the canonical `OFTAdapter`/`OFT`, whose constructors
+  derive local decimals from the token. `setComposeTransport` and `setFxrpOft` both read all
+  three and fail closed, so confirm them before the transport is queued. All four deployed FXRP
+  OFTs read `sharedDecimals() == 6` and `decimalConversionRate() == 1`, over a 6-decimal token,
+  with the canonical `oftVersion()`: Ethereum mainnet
+  `0xCE6170EA245dC8D1f275A710a062b70f125F0110` (the token is the OFT itself,
+  `approvalRequired() == false`), Flare mainnet `0xd70659a6396285BF7214d7Ea9673184e7C72E07E`
+  (adapter over FXRP `0xAd552A64…c5bE`, `approvalRequired() == true`), and their Sepolia
+  `0x81672c…d4E6` and Coston2 `0xcd3d…6639` counterparts. Every one is behind an ERC-1967 proxy,
+  so all of it is true when read and can change with an implementation upgrade — see the rotation
+  note above. The mainnet pair also charges nothing today: `feeBps(dstEid)` is `(0, false)` in
+  both directions, so no per-destination override is enabled and the zero `defaultFeeBps` applies
+  (an enabled override would take precedence, so re-read the route, not just the default);
 - **Each route is enabled last, and only once its remote side exists.** `setBridgeRoute`
   reads the adapter's live peer for the destination endpoint, so it cannot be set before the
   adapter's peer is wired; until the type is pointed at a live route its forward moves revert

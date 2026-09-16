@@ -525,11 +525,19 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
             bytes32 operationId,
             uint64 deadline,
             uint256 amount,
+            uint256 minAmount,
             uint256 minComposeValue,
             bytes memory returnOptions
-        ) = abi.decode(_actionData, (bytes32, uint64, uint256, uint256, bytes));
+        ) = abi.decode(_actionData, (bytes32, uint64, uint256, uint256, uint256, bytes));
         require(amount > 0, ZeroAmount());
         require(operationId != bytes32(0), InvalidOperationId());
+        // the arrival floor the sender signed for the return leg: the adapter is fee-capable
+        // and this quote happens after the instruction was signed, so the allowance travels
+        // with it rather than being read here
+        require(
+            minAmount > 0 && minAmount <= amount,
+            InvalidMinAmountReceived(amount, minAmount)
+        );
         // the signed delivery floor comes before every consuming branch: delivery is
         // permissionless and the value unauthenticated, so a below-floor delivery (a
         // zero-value front-run of an expiring packet, say) must revert and stay retriable
@@ -563,7 +571,7 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
 
         // the return leg, in the same execution; the LayerZero fee rode in as compose value
         // and its excess goes to the parent
-        _bridgeHome(_getTransport(), amount, returnOptions, msg.value);
+        _bridgeHome(_getTransport(), amount, minAmount, returnOptions, msg.value);
     }
 
     /// @dev The soft gates shared by the borrow and the withdraw - the deposit carries no id and no
@@ -586,19 +594,22 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
         return true;
     }
 
-    /// @dev The withdraw action's return leg: sends exactly `_amount` FXRP to this account's
+    /// @dev The withdraw action's return leg: sends `_amount` FXRP to this account's
     /// own Flare address (same address on every chain) with the redeem-home compose - the
     /// action and nothing else - and the Flare twin redeems whatever it then holds, this
-    /// arrival included, at the price of its own public rail. Equal validated decimals allow
-    /// `minAmountLD == amountLD`. `_options` carry the Flare-side gas and, as compose value,
-    /// the redemption's executor fee - at least the Flare controller's configured fee, or the
-    /// redeem-home parks until a delivery brings it or anyone sweeps (the operator, for a
-    /// packet a fee change caught in flight). Exactly the quoted fee is
-    /// spent from `_value` and the excess is forwarded to the parent (the endpoint is no refund
-    /// target).
+    /// arrival included, at the price of its own public rail. `_amount` is gross and
+    /// `_minAmount` the floor the sender signed on what must arrive; equal validated decimals
+    /// mean the two differ only by the fee-capable adapter's cut, and a cut above the allowance
+    /// reverts the delivery (retriable) rather than taking it from the user's collateral.
+    /// `_options` carry the Flare-side gas and, as compose value, the redemption's executor
+    /// fee - at least the Flare controller's configured fee, or the redeem-home parks until a
+    /// delivery brings it or anyone sweeps (the operator, for a packet a fee change caught in
+    /// flight). Exactly the quoted fee is spent from `_value` and the excess is forwarded to the
+    /// parent (the endpoint is no refund target).
     function _bridgeHome(
         IComposeTransportFacet.Transport memory _transport,
         uint256 _amount,
+        uint256 _minAmount,
         bytes memory _options,
         uint256 _value
     )
@@ -613,7 +624,7 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
             dstEid: _transport.originEid,
             to: bytes32(uint256(uint160(address(this)))),
             amountLD: _amount,
-            minAmountLD: _amount,
+            minAmountLD: _minAmount,
             extraOptions: _options,
             composeMsg: abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, bytes("")),
             oftCmd: ""

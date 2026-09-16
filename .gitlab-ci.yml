@@ -145,15 +145,18 @@ test-tooling:
   - pnpm test:tooling
 
 # The tooling tests that need Foundry: one runs the Sepolia market script against a local anvil
-# chain and reads back what it deployed; the other decodes prepared governance calls against the
-# COMPILED ABI, so it needs a build rather than a chain. Both skip in the node-only job above, which
-# has neither. `REQUIRE_FORGE_TOOLING` turns those skips into a failure, so a missing prerequisite
-# here is reported rather than passed over silently.
+# chain and reads back what it deployed; the second decodes prepared governance calls against the
+# COMPILED ABI, so it needs a build rather than a chain; the third drives the loan account and OFT
+# round trip over two independent forks of its own anvil, which is the only place the compose
+# credit reaches a real account action. All three skip in the node-only job above, which has
+# neither. `REQUIRE_FORGE_TOOLING` turns those skips into a failure, so a missing prerequisite
+# here is reported rather than passed over silently, and the round trip additionally sets
+# `REQUIRE_LOAN_OFT_ROUNDTRIP` for its own Solidity suite so no case inside it can skip.
 test-tooling-forge:
   image: flarefoundation/foundry-custom:latest
   stage: test
   tags: [ flarenetwork-md ]
-  timeout: 10 minutes
+  timeout: 20 minutes
   needs:
   - job: build-node-modules
     artifacts: false
@@ -172,6 +175,7 @@ test-tooling-forge:
   - rm -f deployment/deploys/sepolia.json
   script:
   - npx tsx --test test/tooling/deploy-sepolia-market.output.test.ts test/tooling/decode-calls.test.ts
+    test/tooling/loan-oft-roundtrip.test.ts
 
 # Builds the isolated upgrade-validation profile (full build-info + storage layout) and hands
 # it to the validator job as an artifact. A clean build is required: the validator needs a full

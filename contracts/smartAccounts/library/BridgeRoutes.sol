@@ -6,6 +6,7 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IOFT} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
+import {IOftDecimals} from "../interface/IOftDecimals.sol";
 import {IBridgeRoutesFacet} from "../../userInterfaces/facets/IBridgeRoutesFacet.sol";
 import {ISubaccountsFacet} from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 
@@ -50,17 +51,23 @@ library BridgeRoutes {
             return;
         }
         require(_fxrpOft.code.length > 0, IBridgeRoutesFacet.InvalidFxrpOft());
-        // the adapter must wrap FXRP with equal shared decimals (the token-bearing signed
-        // instructions send with minAmountLD == amountLD, so dust would make them revert)
+        // the adapter must wrap FXRP and send it without truncation: a send names only the least
+        // it accepts on arrival, so dropped dust would come out of the user's allowance rather
+        // than failing. The conversion rate proves that; equal decimals only imply it for the
+        // canonical subclasses (see {IOftDecimals})
         address fxrp = address(ContractRegistry.getAssetManagerFXRP().fAsset());
         require(IOFT(_fxrpOft).token() == fxrp, IBridgeRoutesFacet.InvalidFxrpOft());
         require(
             IOFT(_fxrpOft).sharedDecimals() == IERC20Metadata(fxrp).decimals(),
             IBridgeRoutesFacet.InvalidFxrpOft()
         );
+        require(
+            IOftDecimals(_fxrpOft).decimalConversionRate() == 1,
+            IBridgeRoutesFacet.InvalidFxrpOft()
+        );
         // compose authentication depends on the canonical OFT codec v1 (composeFrom = source
         // caller). The adapter IS an upgradeable proxy on every deployment checked - Flare, its
-        // Coston2 counterpart and the Ethereum OFT - so this answer, like the three above, is
+        // Coston2 counterpart and the Ethereum OFT - so this answer, like the four above, is
         // true when read and can change afterwards. That is an accepted dependency on whoever
         // holds the adapter's upgrade authority, not something re-reading defends: an upgrade
         // can keep every one of these answers truthful while forging compose instructions.

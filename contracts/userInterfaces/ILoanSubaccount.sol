@@ -28,10 +28,17 @@ import {IRedeemingSubaccount} from "./IRedeemingSubaccount.sol";
 uint8 constant ACTION_BORROW = 1;
 
 /// @dev Withdraw action: `actionData` is `abi.encode(bytes32 operationId, uint64 deadline,
-/// uint256 withdrawAmount, uint256 minComposeValue, bytes returnOptions)`. The atomic
+/// uint256 withdrawAmount, uint256 minAmount, uint256 minComposeValue,
+/// bytes returnOptions)`. The atomic
 /// withdrawal: withdraws collateral from the account's one position and bridges it back to the
 /// account's own Flare address in the same execution, with the redeem-home compose - no idle
-/// window, so the redeposit ordering race cannot touch a withdrawal. `minComposeValue` is the
+/// window, so the redeposit ordering race cannot touch a withdrawal. `minAmount` is the
+/// signed floor on what must arrive home (non-zero, at most `withdrawAmount`): the FXRP OFT
+/// adapters are fee-capable and this leg is quoted only on delivery - after the instruction was
+/// signed - so the allowance travels in the payload rather than being read there, and a cut
+/// above it reverts the delivery (`SlippageExceeded`, retriable) instead of coming out of the
+/// user's collateral. The loan chain re-validates it (`InvalidMinAmountReceived`) before any
+/// branch that finalizes the packet. `minComposeValue` is the
 /// delivery floor:
 /// compose delivery is permissionless and LayerZero does not authenticate the delivered value,
 /// so a delivery carrying less - execution and terminal skip alike - reverts
@@ -100,8 +107,8 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  */
 interface ILoanSubaccount is IBridgingSubaccount, IRedeemingSubaccount {
 
-    /// @notice The signed LayerZero options and delivery floor of the two-leg withdrawal. The
-    /// operator quotes the return leg first, against `returnOptions` - so that quote already
+    /// @notice The signed LayerZero options and delivery-value floor of the two-leg withdrawal.
+    /// The operator quotes the return leg first, against `returnOptions` - so that quote already
     /// contains the redemption's executor fee those options buy - puts it (plus headroom; the
     /// excess lands on the parent) into `destinationOptions` as compose value, then quotes and
     /// sends the first message. One payment, made on Flare, covers both legs and the
@@ -233,6 +240,10 @@ interface ILoanSubaccount is IBridgingSubaccount, IRedeemingSubaccount {
      * when the post-borrow position would fall under the cover gate
      * (`InsufficientRemainingCollateral`) - the same rule that gates {withdraw}: the collateral
      * must be worth `1.155 / LLTV` of the debt plus twice the collectible Flare fee.
+     * @param _minCollateralAmount The least FXRP that must arrive on the loan chain; zero
+     * when `_collateralAmount` is zero, otherwise non-zero and at most that amount. The
+     * adapter is fee-capable, so this is the user's signed allowance for its cut - set it to
+     * `_collateralAmount` when no fee is expected.
      * @param _collateralAmount FXRP to bridge and supply as collateral; may be zero, at most
      * the account's balance.
      * @param _borrowAmount Loan-token amount to borrow and disburse; non-zero.
@@ -260,6 +271,7 @@ interface ILoanSubaccount is IBridgingSubaccount, IRedeemingSubaccount {
      */
     function borrow(
         uint256 _collateralAmount,
+        uint256 _minCollateralAmount,
         uint256 _borrowAmount,
         uint8 _destinationKind,
         bytes32 _destination,
@@ -282,10 +294,13 @@ interface ILoanSubaccount is IBridgingSubaccount, IRedeemingSubaccount {
      * move: while the controller is paused it still executes when the position carries live
      * debt.
      * @param _amount FXRP to bridge and supply as collateral; non-zero, at most the balance.
+     * @param _minAmount The least FXRP that must arrive on the loan chain; non-zero and
+     * at most `_amount` - the user's signed allowance for the adapter's fee.
      * @param _extraOptions Caller-supplied LayerZero execution options (type-3).
      */
     function depositCollateral(
         uint256 _amount,
+        uint256 _minAmount,
         bytes calldata _extraOptions
     )
         external payable;
@@ -305,6 +320,12 @@ interface ILoanSubaccount is IBridgingSubaccount, IRedeemingSubaccount {
      * fee are repaid in loan tokens through the subaccount's `repay`, or a smaller amount is
      * signed.
      * @param _amount Collateral to withdraw on the loan chain and bridge home; non-zero.
+     * @param _minAmount The least FXRP that must arrive home on the return leg (non-zero, at
+     * most `_amount`). The FXRP OFT is fee-capable, and the loan chain quotes the bridge home
+     * only when this instruction is delivered - after it was signed - so the floor is named
+     * here and carried, never quoted there: a fee raised in between is refused rather than
+     * taken out of the user's collateral. Set it to `_amount` when no fee is expected; a fee
+     * above the allowance parks the withdrawal (retriable) until a fresh instruction allows it.
      * @param _operationId The user-chosen operation id (non-zero, unique per subaccount).
      * @param _deadline Unix time after which the loan chain skips the instruction unexecuted.
      * @param _options The two option blobs and the delivery-value floor ({WithdrawOptions});
@@ -312,6 +333,7 @@ interface ILoanSubaccount is IBridgingSubaccount, IRedeemingSubaccount {
      */
     function withdraw(
         uint256 _amount,
+        uint256 _minAmount,
         bytes32 _operationId,
         uint64 _deadline,
         WithdrawOptions calldata _options

@@ -534,6 +534,17 @@ interface IMorphoLoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccoun
     error ZeroAmount();
 
     /**
+     * @notice Reverts if a withdraw's signed arrival floor for the return leg is not one the
+     * withdrawal can honor: zero, or above the amount being withdrawn.
+     * @param amount The amount being withdrawn and bridged home.
+     * @param minAmountReceived The floor the instruction signed.
+     */
+    error InvalidMinAmountReceived(
+        uint256 amount,
+        uint256 minAmountReceived
+    );
+
+    /**
      * @notice Repays the account's debt and the accrued Flare fee with its idle loan-token
      * balance: a payment short of the two is split pro rata between them, a covering one
      * closes the debt, attempts the whole collectible (reserving anything unpaid) and returns

@@ -66,6 +66,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {MorphoMath} from "../../../contracts/smartAccounts/library/MorphoMath.sol";
 import {MockOft} from "../../../contracts/mock/MockOft.sol";
+import {IOFT} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {MockAssetManager} from "../../../contracts/mock/MockAssetManager.sol";
 import {MockMorpho} from "../../../contracts/mock/MockMorpho.sol";
 import {MockOracle} from "../../../contracts/mock/MockOracle.sol";
@@ -589,10 +590,23 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
     }
 
     function testSetComposeTransportRevertWrongSharedDecimals() public {
-        // the withdraw's return leg sends with minAmountLD == amountLD, so shared-decimal dust
-        // would make it revert; such an OFT must be rejected up front
+        // the withdraw's return leg names only the least it accepts on arrival, so shared-decimal
+        // dust would be spent out of the withdrawal rather than refused; such an OFT must be
+        // rejected up front
         fxrpOft.setPeer(originEid, originPeer);
         fxrpOft.setSharedDecimals(4);
+        _setTransportExpectRevert(
+            _defaultTransport(), IComposeTransportFacet.InvalidOft.selector
+        );
+    }
+
+    function testSetComposeTransportRevertTruncatingRateDespiteEqualDecimals() public {
+        // equal decimals do not imply a rate of one: `OFTCore` takes local decimals as a
+        // constructor argument and never reads the token, so a subclass can answer both decimal
+        // questions truthfully and still truncate every send. The guard reads the rate itself
+        fxrpOft.setPeer(originEid, originPeer);
+        fxrpOft.setDecimalConversionRate(1e12);
+        assertEq(fxrpOft.sharedDecimals(), fxrp.decimals(), "the decimals still agree");
         _setTransportExpectRevert(
             _defaultTransport(), IComposeTransportFacet.InvalidOft.selector
         );
@@ -962,6 +976,66 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(fxrpOft.lastValue(), 0.01 ether);
         assertEq(optionsSent, RETURN_OPTIONS);
         assertEq(composeMsgSent, abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, bytes("")));
+    }
+
+    function testLzComposeWithdrawAllowsTheAdapterFeeTheInstructionSigned() public {
+        // the FXRP adapters are fee-capable and this quote happens after the instruction was
+        // signed, so the floor travels with it: a fee inside the allowance goes through and
+        // the net arrives home
+        address subaccount = _borrowedSubaccount(0);
+        fxrpOft.setFeeBps(100); // 1%
+
+        _deliverWithValue(
+            subaccount, 2, 0, _withdrawPayloadWithFloor(bytes32("op-2"), 30e6, 29.7e6), 0.01 ether
+        );
+
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 70e6);
+        (,, uint256 amountLD, uint256 minAmountLD,,,) = fxrpOft.lastSendParam();
+        assertEq(amountLD, 30e6);
+        assertEq(minAmountLD, 29.7e6);
+    }
+
+    function testLzComposeWithdrawRevertFeeAboveTheSignedFloorAndRollsBack() public {
+        // a fee the instruction did not allow for fails the delivery rather than being taken
+        // from the user's collateral: the position is untouched and the packet stays retriable
+        address subaccount = _borrowedSubaccount(0);
+        fxrpOft.setFeeBps(200); // 2%, above the 1% the instruction allows
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IOFT.SlippageExceeded.selector, 29.4e6, 29.7e6)
+        );
+        _deliverWithValue(
+            subaccount, 2, 0, _withdrawPayloadWithFloor(bytes32("op-2"), 30e6, 29.7e6), 0.01 ether
+        );
+
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 100e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertFalse(IMorphoLoanSubaccountRemote(subaccount).usedOperations(bytes32("op-2")));
+    }
+
+    function testLzComposeWithdrawRevertInvalidMinAmountReceived() public {
+        // the floor must be one the withdrawal can honor: never zero, never above the amount
+        address subaccount = _borrowedSubaccount(0);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMorphoLoanSubaccountRemote.InvalidMinAmountReceived.selector, 30e6, 0
+            )
+        );
+        _deliverWithValue(
+            subaccount, 2, 0, _withdrawPayloadWithFloor(bytes32("op-2"), 30e6, 0), 0.01 ether
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMorphoLoanSubaccountRemote.InvalidMinAmountReceived.selector, 30e6, 31e6
+            )
+        );
+        _deliverWithValue(
+            subaccount, 2, 0, _withdrawPayloadWithFloor(bytes32("op-2"), 30e6, 31e6), 0.01 ether
+        );
     }
 
     function testLzComposeWithdrawRevertInsufficientReturnFee() public {
@@ -3688,8 +3762,8 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
             abi.encode(
-                bytes32("op-w"), uint64(block.timestamp), uint256(40e6), RETURN_MIN_VALUE,
-                RETURN_OPTIONS
+                bytes32("op-w"), uint64(block.timestamp), uint256(40e6), uint256(40e6),
+                RETURN_MIN_VALUE, RETURN_OPTIONS
             )
         );
         _deliverWithValue(subaccount, 2, 0, payload, 0.01 ether);
@@ -4457,7 +4531,7 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         fxrp.mint(sender, 100e6);
         vm.prank(parentPersonalAccount);
         ILoanSubaccount(sender).borrow{value: 0.01 ether}(
-            100e6, 50e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(parentPersonalAccount))), 0,
+            100e6, 100e6, 50e18, DESTINATION_KIND_EVM, bytes32(uint256(uint160(parentPersonalAccount))), 0,
             bytes32("op-b"), deadline, ""
         );
         (uint256 amountLD, bytes memory payload) = _lastSentCompose();
@@ -4472,9 +4546,13 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         // collateral and bridges it home in the same execution, under the signed return
         // options, paid by the delivered compose value (the 60 FXRP = 1200 RLUSD left cover the
         // 1.5 x 50 the cover gate wants)
+        // the arrival floor is signed here and distinct from the gross, with the adapter
+        // charging inside it: the receiver must bridge home under the floor the sender signed,
+        // so sending the amount instead would refuse the very fee the user allowed
+        fxrpOft.setFeeBps(100); // 1%: 40 FXRP out, 39.6 credited, exactly the signed floor
         vm.prank(parentPersonalAccount);
         ILoanSubaccount(sender).withdraw{value: 0.01 ether}(
-            40e6, bytes32("op-w"), deadline,
+            40e6, 39.6e6, bytes32("op-w"), deadline,
             ILoanSubaccount.WithdrawOptions({
                 destinationOptions: "",
                 returnOptions: hex"0003",
@@ -4488,6 +4566,12 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 60e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
 
+        // the return send carried the sender's floor, not the amount it withdrew
+        (, , uint256 returnAmountLD, uint256 returnMinAmountLD,,,) = fxrpOft.lastSendParam();
+        assertEq(returnAmountLD, 40e6);
+        assertEq(returnMinAmountLD, 39.6e6);
+        fxrpOft.setFeeBps(0);
+
         // the withdraw's return leg is a real bridge-back: the payload it carries is the action
         // and nothing else, which is all the Flare twin decodes before redeeming whatever it
         // holds (the redemption itself needs a Personal Account with code, and is the Flare
@@ -4500,7 +4584,7 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         // any idle residue - none here), no debt
         fxrp.mint(sender, 30e6);
         vm.prank(parentPersonalAccount);
-        ILoanSubaccount(sender).depositCollateral{value: 0.01 ether}(30e6, "");
+        ILoanSubaccount(sender).depositCollateral{value: 0.01 ether}(30e6, 30e6, "");
         (amountLD, payload) = _lastSentCompose();
         assertEq(amountLD, 30e6);
         fxrp.mint(subaccount, amountLD);
@@ -5084,6 +5168,24 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         return _withdrawPayloadWithMin(_operationId, _amount, RETURN_MIN_VALUE);
     }
 
+    function _withdrawPayloadWithFloor(
+        bytes32 _operationId,
+        uint256 _amount,
+        uint256 _minAmount
+    )
+        private
+        returns (bytes memory)
+    {
+        return abi.encode(
+            PAYLOAD_VERSION_1,
+            ACTION_WITHDRAW,
+            abi.encode(
+                _operationId, uint64(vm.getBlockTimestamp() + 1 hours), _amount,
+                _minAmount, RETURN_MIN_VALUE, RETURN_OPTIONS
+            )
+        );
+    }
+
     function _withdrawPayloadWithMin(
         bytes32 _operationId,
         uint256 _amount,
@@ -5096,8 +5198,8 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
             abi.encode(
-                _operationId, uint64(vm.getBlockTimestamp() + 1 hours), _amount, _minComposeValue,
-                RETURN_OPTIONS
+                _operationId, uint64(vm.getBlockTimestamp() + 1 hours), _amount, _amount,
+                _minComposeValue, RETURN_OPTIONS
             )
         );
     }

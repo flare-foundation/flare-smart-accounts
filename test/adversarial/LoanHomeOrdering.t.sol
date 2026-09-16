@@ -217,7 +217,7 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         vm.deal(parent, BRIDGE_FEE);
         vm.prank(parent);
         vm.expectRevert(IBridgingSubaccount.BridgeRouteNotConfigured.selector);
-        account.depositCollateral{value: BRIDGE_FEE}(1e6, "");
+        account.depositCollateral{value: BRIDGE_FEE}(1e6, 1e6, "");
         assertEq(fxrp.balanceOf(address(account)), 1e6);
         assertEq(oft.lastValue(), 0);
     }
@@ -244,11 +244,11 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         vm.deal(parent, BRIDGE_FEE);
         vm.prank(parent);
         vm.expectRevert(IPauseFacet.IsPaused.selector);
-        account.depositCollateral{value: BRIDGE_FEE}(1e6, "");
+        account.depositCollateral{value: BRIDGE_FEE}(1e6, 1e6, "");
         vm.prank(owner);
         controller.unpause();
         vm.prank(parent);
-        account.depositCollateral{value: BRIDGE_FEE}(1e6, "");
+        account.depositCollateral{value: BRIDGE_FEE}(1e6, 1e6, "");
         assertEq(fxrp.balanceOf(address(account)), 0);
         assertEq(fxrp.balanceOf(address(oft)), 1e6);
         assertEq(oft.lastValue(), BRIDGE_FEE);
@@ -357,12 +357,14 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         account.withdraw{value: BRIDGE_FEE}(
             1e6,
+            1e6,
             bytes32(0),
             uint64(block.timestamp + 1 hours),
             _homeWithdrawOptions()
         );
         vm.expectRevert(ILoanSubaccount.InvalidLoanInstruction.selector);
         account.withdraw{value: BRIDGE_FEE}(
+            1e6,
             1e6,
             bytes32("expired"),
             uint64(block.timestamp - 1),

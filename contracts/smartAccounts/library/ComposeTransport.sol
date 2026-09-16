@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {IOFT} from "@layerzerolabs/oft-evm/contracts/interfaces/IOFT.sol";
 import {IOAppCore} from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOAppCore.sol";
+import {IOftDecimals} from "../interface/IOftDecimals.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 
 library ComposeTransport {
@@ -36,14 +37,19 @@ library ComposeTransport {
             _transport.originPeer != bytes32(0) && uint256(_transport.originPeer) >> 160 == 0,
             IComposeTransportFacet.InvalidOriginPeer()
         );
-        // the OFT is the authoritative identity of the bridged token: it must share decimals
-        // with its own token (the bridge-back sends with minAmountLD == amountLD) and report
-        // the canonical interface/codec version - the compose authentication depends on its
-        // encoding
+        // the OFT is the authoritative identity of the bridged token and of the codec the compose
+        // authentication depends on. It must also send without truncation: the bridge-back names
+        // only the least it accepts, so dropped dust would come out of the user's allowance
+        // rather than failing. The conversion rate proves that; equal decimals only imply it for
+        // the canonical subclasses (see {IOftDecimals})
         require(_transport.oft.code.length > 0, IComposeTransportFacet.InvalidOft());
         require(
             IOFT(_transport.oft).sharedDecimals() ==
                 IERC20Metadata(IOFT(_transport.oft).token()).decimals(),
+            IComposeTransportFacet.InvalidOft()
+        );
+        require(
+            IOftDecimals(_transport.oft).decimalConversionRate() == 1,
             IComposeTransportFacet.InvalidOft()
         );
         (bytes4 interfaceId, uint64 version) = IOFT(_transport.oft).oftVersion();

@@ -34,6 +34,7 @@ contract LoanSubaccount is ILoanSubaccount, RedeemingSubaccountBase, BridgingSub
     /// @inheritdoc ILoanSubaccount
     function borrow(
         uint256 _collateralAmount,
+        uint256 _minCollateralAmount,
         uint256 _borrowAmount,
         uint8 _destinationKind,
         bytes32 _destination,
@@ -72,7 +73,7 @@ contract LoanSubaccount is ILoanSubaccount, RedeemingSubaccountBase, BridgingSub
             )
         );
         (uint32 destinationEid, bytes32 guid) =
-            _bridgeToSelf(_collateralAmount, _extraOptions, payload);
+            _bridgeToSelf(_collateralAmount, _minCollateralAmount, _extraOptions, payload);
         emit BorrowInstructionSent(
             _parentAccount(),
             _operationId,
@@ -88,6 +89,7 @@ contract LoanSubaccount is ILoanSubaccount, RedeemingSubaccountBase, BridgingSub
     /// @inheritdoc ILoanSubaccount
     function depositCollateral(
         uint256 _amount,
+        uint256 _minAmount,
         bytes calldata _extraOptions
     )
         external payable
@@ -98,13 +100,15 @@ contract LoanSubaccount is ILoanSubaccount, RedeemingSubaccountBase, BridgingSub
         // no operation id and no deadline: the deposit only adds the user's own collateral,
         // which the loan chain's permissionless rail can do with the same tokens anyway
         bytes memory payload = abi.encode(PAYLOAD_VERSION_1, ACTION_DEPOSIT_COLLATERAL, bytes(""));
-        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(_amount, _extraOptions, payload);
+        (uint32 destinationEid, bytes32 guid) =
+            _bridgeToSelf(_amount, _minAmount, _extraOptions, payload);
         emit CollateralDepositInstructionSent(_parentAccount(), _amount, destinationEid, guid);
     }
 
     /// @inheritdoc ILoanSubaccount
     function withdraw(
         uint256 _amount,
+        uint256 _minAmount,
         bytes32 _operationId,
         uint64 _deadline,
         WithdrawOptions calldata _options
@@ -118,9 +122,13 @@ contract LoanSubaccount is ILoanSubaccount, RedeemingSubaccountBase, BridgingSub
         // unauthenticated. destinationOptions are processed here, by the OFT at quote time;
         // only returnOptions first reach a validator remotely, which is why a bad blob there
         // is the frozen-options residual
+        // the return leg's arrival floor is signed here and carried, not quoted there: the
+        // loan chain quotes the bridge home after this instruction was signed, so a fee raised
+        // in between would otherwise be accepted silently out of the user's collateral
         require(
             _operationId != bytes32(0) && _deadline >= block.timestamp && _amount > 0 &&
-                _options.minComposeValue > 0,
+                _options.minComposeValue > 0 &&
+                _minAmount > 0 && _minAmount <= _amount,
             InvalidLoanInstruction()
         );
         bytes memory payload = abi.encode(
@@ -130,11 +138,13 @@ contract LoanSubaccount is ILoanSubaccount, RedeemingSubaccountBase, BridgingSub
                 _operationId,
                 _deadline,
                 _amount,
+                _minAmount,
                 _options.minComposeValue,
                 _options.returnOptions
             )
         );
-        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(0, _options.destinationOptions, payload);
+        (uint32 destinationEid, bytes32 guid) =
+            _bridgeToSelf(0, 0, _options.destinationOptions, payload);
         emit WithdrawInstructionSent(
             _parentAccount(), _operationId, _amount, destinationEid, guid
         );
@@ -156,7 +166,7 @@ contract LoanSubaccount is ILoanSubaccount, RedeemingSubaccountBase, BridgingSub
             ACTION_CANCEL,
             abi.encode(_operationId)
         );
-        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(0, _extraOptions, payload);
+        (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(0, 0, _extraOptions, payload);
         emit LoanCancelInstructionSent(_parentAccount(), _operationId, destinationEid, guid);
     }
 

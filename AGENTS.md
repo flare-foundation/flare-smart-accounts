@@ -405,6 +405,21 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
     `eth_call` at that block is the quickest way to test a candidate before running the suite.
     `SepoliaMarketFork.t.sol` needs `SEPOLIA_RPC_URL` - any current Sepolia endpoint, since it forks the latest
     block - and drives the rehearsal market script's phases against Morpho's real oracle factory and Morpho itself.
+    Three suites cover the OFT bridge with LayerZero's own contracts rather than a model of it, built on
+    `contracts/mock/FeeOftAdapter.sol` and `FeeOftToken.sol` (its `OFTAdapter`/`OFT` plus the `Fee` mixin, carrying
+    the deployed variants' `_debitView` verbatim) over `RelayLzEndpoint.sol` (its `MessagingComposer` plus the send
+    path an OApp touches) and `RelayLzExecutor.sol`. `OftFeeCreditToCompose.t.sol` pins the transport itself - what a
+    fee-bearing send debits, what the far side credits, and that the credited amount is what reaches the compose
+    message, in both directions; one of its cases asserts the real packet is byte-identical to the form the other
+    suites build by hand, which is what makes those suites evidence about the real wire format.
+    `PersonalAccountRemoteOftFunding.t.sol` covers native drops into the real Personal Account proxy, receive-versus-
+    compose funding and starved deliveries. `LoanOftRoundTrip.t.sol` joins the two halves: the production account
+    pair and frozen proxies on two INDEPENDENT forks of one empty local chain, so the real CREATE2 derivations and
+    the same-address compose authentication run without any account code or storage being rewritten. It needs
+    `F28_LOCAL_RPC_URL` and skips without it; `test/tooling/loan-oft-roundtrip.test.ts` starts that chain, sets
+    `REQUIRE_LOAN_OFT_ROUNDTRIP` so no case inside can skip, and is one of the three files the Foundry-equipped
+    `test-tooling-forge` job runs. All four are `--skip`ped by `pnpm coverage` for the composer's optimizer-disabled
+    build, as above - a suite that instantiates `RelayLzEndpoint` cannot build there either.
   - `test/tooling/`: the deployment tooling's own tests, in TypeScript and shell rather than Solidity, run by
     `pnpm test:tooling` rather than by forge, which ignores them. They sit here rather than beside the scripts so
     that `deployment/` holds only what an operator runs, and they are held to the tooling's lint rules, not the

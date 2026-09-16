@@ -44,6 +44,17 @@ interface IBridgingSubaccount is IComposeReceiverAccountBase, ISubaccount {
     error RefundFailed();
 
     /**
+     * @notice Reverts if a forward move's signed arrival floor is not one this send can honor:
+     * above the amount it carries, or zero on a send that carries tokens.
+     * @param amount The amount being sent.
+     * @param minAmount The floor named by the instruction.
+     */
+    error InvalidMinAmount(
+        uint256 amount,
+        uint256 minAmount
+    );
+
+    /**
      * @notice Reverts if the requested bridge amount exceeds the account's FXRP balance.
      * @param amount The requested amount.
      * @param balance The account's FXRP balance.

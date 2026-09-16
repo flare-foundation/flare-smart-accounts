@@ -38,14 +38,27 @@ abstract contract BridgingSubaccountBase is IBridgingSubaccount, SubaccountBase,
     /// skips the FAssets-registry lookup, the balance read and the approval (the adapter still
     /// runs a zero-value pull on the token); the destination is never caller-chosen.
     /// Exactly the quoted fee is spent; the caller's excess is returned.
+    /// `_minAmount` is the signed floor on what must ARRIVE: the adapter is fee-capable, so
+    /// what it credits can be less than what it takes, and the difference is the user's. The
+    /// instruction names the least it accepts rather than the send demanding its own amount
+    /// back (which refuses every non-zero fee) or taking whatever the adapter quotes (which
+    /// accepts any fee, including one raised after the instruction was signed).
     function _bridgeToSelf(
         uint256 _amount,
+        uint256 _minAmount,
         bytes memory _extraOptions,
         bytes memory _composeMsg
     )
         internal
         returns (uint32 _destinationEid, bytes32 _guid)
     {
+        // no send may demand back more than it carries, and a token-bearing one must name a
+        // floor: zero there would accept a fee of the entire amount
+        require(
+            _minAmount <= _amount && (_amount == 0 || _minAmount > 0),
+            InvalidMinAmount(_amount, _minAmount)
+        );
+
         // only a token-bearing send resolves FXRP through the registry and reads the balance; a
         // message-only send (a borrow against existing collateral, a withdraw) skips both
         IERC20 fxrp = _amount > 0
@@ -74,14 +87,14 @@ abstract contract BridgingSubaccountBase is IBridgingSubaccount, SubaccountBase,
             WrongDestinationPeer()
         );
 
-        // this account has the same address on every chain, so it is its own destination;
-        // FXRP and the OFT share 6 decimals, so the full amount arrives and `minAmountLD`
-        // can equal `amountLD`
+        // this account has the same address on every chain, so it is its own destination.
+        // `amountLD` is gross - what leaves here - and `minAmountLD` the signed floor on what
+        // arrives; equal validated decimals mean the two differ only by the adapter's fee
         SendParam memory sendParam = SendParam({
             dstEid: destinationEid,
             to: bytes32(uint256(uint160(address(this)))),
             amountLD: _amount,
-            minAmountLD: _amount,
+            minAmountLD: _minAmount,
             extraOptions: _extraOptions,
             composeMsg: _composeMsg,
             oftCmd: ""

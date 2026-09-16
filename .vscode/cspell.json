@@ -19,6 +19,9 @@
     "*.json"
   ],
   "words": [
+    "staticcall",
+    "messagelib",
+    "LZRECEIVE",
     "abicoder",
     "addrs",
     "Addrs",

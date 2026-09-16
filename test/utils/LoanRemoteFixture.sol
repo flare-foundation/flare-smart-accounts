@@ -271,7 +271,14 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         return abi.encode(
             PAYLOAD_VERSION_1,
             ACTION_WITHDRAW,
-            abi.encode(_id, uint64(vm.getBlockTimestamp() + 1 hours), _amount, _floor, bytes(hex"0003"))
+            abi.encode(
+                _id,
+                uint64(vm.getBlockTimestamp() + 1 hours),
+                _amount,
+                _amount,
+                _floor,
+                bytes(hex"0003")
+            )
         );
     }
 
