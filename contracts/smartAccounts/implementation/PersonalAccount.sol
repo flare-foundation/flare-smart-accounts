@@ -282,21 +282,46 @@ contract PersonalAccount is
         nonReentrantSubaccountRedemption
         returns (uint256 _redeemedAmount)
     {
-        // value is optional here: sweepRedeem enforces the fee at the public entry, while an
-        // authenticated compose redemption may appoint the executor unpaid. Whatever arrives
-        // travels whole as the fee
+        // the fee floor is the subaccount's: every entry there checks the controller's
+        // executor fee before calling here, so whatever arrives travels whole as the fee
         // slither-disable-next-line unused-return
         (address payable executor, ) = IExecutorsFacet(controllerAddress).getExecutorInfo();
 
-        // pull and redeem exactly the caller's amount; this account's pre-existing FXRP is
-        // never included, and what FAssets does not fill stays here, under the user's control
+        // pull exactly the caller's amount; this account's pre-existing FXRP is never included
         IAssetManager assetManager = ContractRegistry.getAssetManagerFXRP();
-        assetManager.fAsset().safeTransferFrom(msg.sender, address(this), _amount);
+        IERC20 fxrp = assetManager.fAsset();
+        fxrp.safeTransferFrom(msg.sender, address(this), _amount);
+        // FAssets rejects a redemption below its minimum: such a balance stays here unredeemed,
+        // the value with it (this account's float), where a signed instruction reaches both.
+        // The boundary is FAssets' own (`redeemAmount`, read 2026-09-17 on the FAssets main
+        // branch: `convertUBAToAmg(amount) >= minimumRedeemAmountAMG`, the conversion a floor
+        // division by the minting granularity, the UBA minimum that granularity times the AMG
+        // one), so `>= minimumRedeemAmountUBA()` is exactly what FAssets accepts, at any
+        // granularity - and FXRP's is 1
+        uint256 minimumRedeemAmount = assetManager.minimumRedeemAmountUBA();
+        if (_amount < minimumRedeemAmount) {
+            emit FXrpRedeemedFromSubaccount(
+                msg.sender,
+                _amount,
+                0,
+                executor,
+                msg.value
+            );
+            return 0;
+        }
         _redeemedAmount = assetManager.redeemAmount{value: msg.value}(
             _amount,
             xrplOwner,
             executor
         );
+        // what FAssets did not fill (its tickets ran out) goes back to the subaccount when it
+        // is itself redeemable, so that the next sweep - anyone's - finishes it; a smaller
+        // remainder stays here, where a signed instruction reaches it
+        uint256 unfilled = _amount - _redeemedAmount;
+        if (unfilled != 0 && unfilled >= minimumRedeemAmount) {
+            fxrp.safeTransfer(msg.sender, unfilled);
+            emit FXrpReturnedToSubaccount(msg.sender, unfilled);
+        }
         emit FXrpRedeemedFromSubaccount(
             msg.sender,
             _amount,

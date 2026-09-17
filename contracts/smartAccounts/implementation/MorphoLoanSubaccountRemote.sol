@@ -14,11 +14,11 @@ import {
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_CANCEL,
+    ACTION_REDEEM_HOME,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanSubaccount.sol";
 import {IComposeTransportFacet} from "../../userInterfaces/facets/IComposeTransportFacet.sol";
 import {IMorphoLoanMarketsFacet} from "../../userInterfaces/facets/IMorphoLoanMarketsFacet.sol";
-import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../userInterfaces/IBridgingSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
 import {IPauseFacet} from "../../userInterfaces/facets/IPauseFacet.sol";
 import {IMorpho} from "../interface/IMorpho.sol";
@@ -587,12 +587,15 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
     }
 
     /// @dev The withdraw action's return leg: sends exactly `_amount` FXRP to this account's
-    /// own Flare address (same address on every chain) with the redeem-home compose - a
-    /// deadline, this block time plus `REDEEM_HOME_TTL`, and nothing else - so the Flare twin
-    /// redeems at most this amount on arrival. Equal validated decimals allow
-    /// `minAmountLD == amountLD`. `_options` carry the Flare-side gas and, optionally, the
-    /// redemption's executor fee as compose value. Exactly the quoted fee is spent from
-    /// `_value` and the excess is forwarded to the parent (the endpoint is no refund target).
+    /// own Flare address (same address on every chain) with the redeem-home compose - the
+    /// action and nothing else - and the Flare twin redeems whatever it then holds, this
+    /// arrival included, at the price of its own public rail. Equal validated decimals allow
+    /// `minAmountLD == amountLD`. `_options` carry the Flare-side gas and, as compose value,
+    /// the redemption's executor fee - at least the Flare controller's configured fee, or the
+    /// redeem-home parks until a delivery brings it or anyone sweeps (the operator, for a
+    /// packet a fee change caught in flight). Exactly the quoted fee is
+    /// spent from `_value` and the excess is forwarded to the parent (the endpoint is no refund
+    /// target).
     function _bridgeHome(
         IComposeTransportFacet.Transport memory _transport,
         uint256 _amount,
@@ -612,11 +615,7 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
             amountLD: _amount,
             minAmountLD: _amount,
             extraOptions: _options,
-            composeMsg: abi.encode(
-                PAYLOAD_VERSION_1,
-                ACTION_REDEEM_HOME,
-                abi.encode(uint64(block.timestamp) + REDEEM_HOME_TTL)
-            ),
+            composeMsg: abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, bytes("")),
             oftCmd: ""
         });
 

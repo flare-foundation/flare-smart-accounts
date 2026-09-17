@@ -11,6 +11,7 @@ import {PersonalAccount} from "../../contracts/smartAccounts/implementation/Pers
 import {LoanSubaccount} from "../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
 import {
     ILoanSubaccount,
+    ACTION_REDEEM_HOME,
     DESTINATION_KIND_EVM
 } from "../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {IIBridgeRoutesFacet} from "../../contracts/smartAccounts/interface/IIBridgeRoutesFacet.sol";
@@ -21,10 +22,6 @@ import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRe
 import {IRedeemExtended} from "flare-periphery/src/flare/IRedeemExtended.sol";
 import {OFTComposeMsgCodec} from "@layerzerolabs/oft-evm/contracts/libs/OFTComposeMsgCodec.sol";
 import {GUID} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/GUID.sol";
-import {
-    ACTION_REDEEM_HOME,
-    REDEEM_HOME_TTL
-} from "../../contracts/userInterfaces/IBridgingSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
 
 /**
@@ -137,11 +134,7 @@ abstract contract LoanHomeFixture is FacetsDeploy {
         internal
         returns (bytes memory _message, bytes32 _guid)
     {
-        bytes memory payload = abi.encode(
-            PAYLOAD_VERSION_1,
-            ACTION_REDEEM_HOME,
-            abi.encode(uint64(block.timestamp) + REDEEM_HOME_TTL)
-        );
+        bytes memory payload = abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, bytes(""));
         _message = OFTComposeMsgCodec.encode(
             _nonce,
             REMOTE_EID,

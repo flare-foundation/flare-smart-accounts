@@ -8,10 +8,8 @@ import {
 } from "../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {ISubaccount} from "../../contracts/userInterfaces/ISubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../contracts/userInterfaces/IComposeReceiverAccountBase.sol";
-import {
-    IBridgingSubaccount,
-    REDEEM_HOME_TTL
-} from "../../contracts/userInterfaces/IBridgingSubaccount.sol";
+import {IBridgingSubaccount} from "../../contracts/userInterfaces/IBridgingSubaccount.sol";
+import {IRedeemingSubaccount} from "../../contracts/userInterfaces/IRedeemingSubaccount.sol";
 import {IPauseFacet} from "../../contracts/userInterfaces/facets/IPauseFacet.sol";
 import {ITimelockFacet} from "../../contracts/userInterfaces/facets/ITimelockFacet.sol";
 import {Errors} from "@layerzerolabs/lz-evm-protocol-v2/contracts/libs/Errors.sol";
@@ -29,8 +27,8 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
     }
 
     /// @notice A public sweep cannot redirect funds; failed compose value stays with its caller,
-    /// and an expired retry forwards its entire value to the fixed parent without touching later credit.
-    function testSweepBeforeComposeRetainsRetryValueAndExpiresToParent() public {
+    /// and the packet stays retriable over what later arrives - all of it, at the rail's price.
+    function testSweepBeforeComposeLeavesThePacketRetriableOverWhatLaterArrives() public {
         fxrp.mint(address(account), 100e6);
         (bytes memory message, bytes32 guid) = _queueHome(1, 100e6);
         uint256 nativeBefore = address(this).balance;
@@ -43,7 +41,7 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         _assertHomeRequest(1, 100e6);
         assertEq(address(assetManager).balance, 2 * EXECUTOR_FEE);
 
-        vm.expectRevert(IBridgingSubaccount.NothingToRedeem.selector);
+        vm.expectRevert(IRedeemingSubaccount.NothingToRedeem.selector);
         _deliverHome(message, guid, EXECUTOR_FEE);
         assertEq(address(this).balance, nativeBefore - 2 * EXECUTOR_FEE);
         assertEq(
@@ -53,18 +51,14 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         assertEq(parent.balance, 0);
         assertEq(address(endpoint).balance, 0);
 
-        vm.warp(block.timestamp + REDEEM_HOME_TTL + 1);
         fxrp.mint(address(account), 20e6);
-        vm.expectEmit(address(account));
-        emit IBridgingSubaccount.NativeSweptToParent(parent, EXECUTOR_FEE);
-        vm.expectEmit(address(account));
-        emit IBridgingSubaccount.RedeemHomeSkipped(parent, guid);
+        _expectHomeRedemption(20e6, EXECUTOR_FEE);
         _deliverHome(message, guid, EXECUTOR_FEE);
-        assertEq(parent.balance, EXECUTOR_FEE);
+        _assertHomeRequest(2, 20e6);
         assertEq(address(this).balance, nativeBefore - 3 * EXECUTOR_FEE);
-        assertEq(fxrp.balanceOf(address(account)), 20e6);
+        assertEq(fxrp.balanceOf(address(account)), 0);
         assertEq(fxrp.balanceOf(parent), 0);
-        assertEq(assetManager.lastRequestId(), 1);
+        assertEq(parent.balance, 0);
         assertEq(address(account).balance, 0);
         assertEq(address(endpoint).balance, 0);
         assertEq(
@@ -87,7 +81,7 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         assertEq(fxrp.balanceOf(address(account)), 0);
         assertEq(fxrp.balanceOf(parent), 0);
 
-        vm.expectRevert(IBridgingSubaccount.NothingToRedeem.selector);
+        vm.expectRevert(IRedeemingSubaccount.NothingToRedeem.selector);
         account.sweepRedeem{value: EXECUTOR_FEE}();
         fxrp.mint(address(account), 50e6);
         vm.expectRevert(
@@ -106,9 +100,9 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         assertEq(address(endpoint).balance, 0);
     }
 
-    /// @notice Accepted TTL residual: after a public sweep, the pending packet may redeem later
-    /// credit before expiry, but only its own amount and only through the fixed parent's XRPL destination.
-    function testPendingComposeAfterSweepCapsItsUseOfLaterCredit() public {
+    /// @notice The accepted residual: after a public sweep, the pending packet redeems whatever
+    /// arrives later - all of it, only through the fixed parent's XRPL destination, and never for free.
+    function testPendingComposeAfterSweepRedeemsLaterCreditAtTheRailsPrice() public {
         // The public sweep includes 20 FXRP donated beside the queued packet's 60 FXRP credit.
         fxrp.mint(address(account), 80e6);
         (bytes memory message, bytes32 guid) = _queueHome(1, 60e6);
@@ -118,52 +112,89 @@ contract LoanHomeOrderingTest is LoanHomeFixture {
         _assertHomeRequest(1, 80e6);
 
         fxrp.mint(address(account), 100e6);
-        _expectHomeRedemption(60e6, 0);
+        vm.expectRevert(
+            abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, EXECUTOR_FEE)
+        );
         _deliverHome(message, guid, 0);
-        _assertHomeRequest(2, 60e6);
-        assertEq(fxrp.balanceOf(address(account)), 40e6);
+        assertEq(fxrp.balanceOf(address(account)), 100e6);
+
+        _expectHomeRedemption(100e6, EXECUTOR_FEE);
+        _deliverHome(message, guid, EXECUTOR_FEE);
+        _assertHomeRequest(2, 100e6);
+        assertEq(fxrp.balanceOf(address(account)), 0);
         assertEq(fxrp.balanceOf(parent), 0);
-        assertEq(assetManager.lastRedeemValue(), 0);
-        assertEq(address(assetManager).balance, EXECUTOR_FEE);
-        assertEq(address(this).balance, nativeBefore - EXECUTOR_FEE);
+        assertEq(assetManager.lastRedeemValue(), EXECUTOR_FEE);
+        assertEq(address(assetManager).balance, 2 * EXECUTOR_FEE);
+        assertEq(address(this).balance, nativeBefore - 2 * EXECUTOR_FEE);
         assertEq(parent.balance, 0);
         assertEq(address(account).balance, 0);
     }
 
-    /// @notice Both dust paths conserve FXRP and native at the fixed parent, including excess
-    /// compose value; neither may spend the parent's preexisting FXRP or pay the permissionless caller.
-    function testDustComposeThenSweepForwardExactBalancesToParent() public {
+    /// @notice The dust path conserves FXRP and native at the fixed parent - the whole balance and
+    /// all compose value; nothing pays the permissionless caller, and the parent's own FXRP is untouched.
+    function testDustComposePushesTheWholeBalanceAndValueToParent() public {
         assetManager.setMinimumRedeemAmountUBA(100e6);
         fxrp.mint(parent, 900e6);
         fxrp.mint(address(account), 80e6);
         (bytes memory message, bytes32 guid) = _queueHome(1, 30e6);
         uint256 nativeBefore = address(this).balance;
         vm.expectEmit(address(account));
-        emit IBridgingSubaccount.NativeSweptToParent(parent, 2 * EXECUTOR_FEE);
+        emit IRedeemingSubaccount.NativeSweptToParent(parent, 2 * EXECUTOR_FEE);
         vm.expectEmit(address(account));
-        emit IBridgingSubaccount.TokenSweptToParent(
+        emit IRedeemingSubaccount.TokenSweptToParent(
             parent,
             address(fxrp),
-            30e6
+            80e6
         );
         _deliverHome(message, guid, 2 * EXECUTOR_FEE);
-        assertEq(fxrp.balanceOf(parent), 930e6);
-        assertEq(fxrp.balanceOf(address(account)), 50e6);
-        assertEq(parent.balance, 2 * EXECUTOR_FEE);
-
-        (uint256 amount, uint256 redeemed) = account.sweepRedeem{
-            value: EXECUTOR_FEE
-        }();
-        assertEq(amount, 50e6);
-        assertEq(redeemed, 0);
         assertEq(fxrp.balanceOf(parent), 980e6);
         assertEq(fxrp.balanceOf(address(account)), 0);
-        assertEq(parent.balance, 3 * EXECUTOR_FEE);
-        assertEq(address(this).balance, nativeBefore - 3 * EXECUTOR_FEE);
+        assertEq(parent.balance, 2 * EXECUTOR_FEE);
+
+        // nothing is left for a sweep, whose value comes back to its caller
+        vm.expectRevert(IRedeemingSubaccount.NothingToRedeem.selector);
+        account.sweepRedeem{value: EXECUTOR_FEE}();
+        assertEq(address(this).balance, nativeBefore - 2 * EXECUTOR_FEE);
         assertEq(address(account).balance, 0);
         assertEq(address(endpoint).balance, 0);
         assertEq(address(assetManager).balance, 0);
         assertEq(assetManager.lastRequestId(), 0);
+    }
+
+    /// @notice A queued packet caught by a fee raise parks without losing its queue entry, and is
+    /// finished - long past the former hour - by a delivery that brings the current fee.
+    function testQueuedComposeCaughtByAFeeRaiseParksThenRedeemsAtTheCurrentFee() public {
+        fxrp.mint(address(account), 100e6);
+        (bytes memory message, bytes32 guid) = _queueHome(1, 100e6);
+        uint256 nativeBefore = address(this).balance;
+        vm.prank(owner);
+        controller.setExecutorFee(2 * EXECUTOR_FEE);
+        vm.warp(block.timestamp + 2 hours);
+
+        // the value the return leg bought is now short: nothing is consumed, the caller's value
+        // comes back, the queue entry stays
+        vm.expectRevert(
+            abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, 2 * EXECUTOR_FEE)
+        );
+        _deliverHome(message, guid, EXECUTOR_FEE);
+        assertEq(address(this).balance, nativeBefore);
+        assertEq(fxrp.balanceOf(address(account)), 100e6);
+        assertEq(
+            endpoint.composeQueue(address(oft), address(account), guid, 0),
+            keccak256(message)
+        );
+
+        // the operator's retry with the current fee finishes it; no deadline stood in the way
+        _expectHomeRedemption(100e6, 2 * EXECUTOR_FEE);
+        _deliverHome(message, guid, 2 * EXECUTOR_FEE);
+        _assertHomeRequest(1, 100e6);
+        assertEq(assetManager.lastRedeemValue(), 2 * EXECUTOR_FEE);
+        assertEq(fxrp.balanceOf(address(account)), 0);
+        assertEq(address(this).balance, nativeBefore - 2 * EXECUTOR_FEE);
+        assertEq(
+            endpoint.composeQueue(address(oft), address(account), guid, 0),
+            bytes32(uint256(1))
+        );
     }
 
     /// @notice A queued route suspension still matures during pause; anyone may execute it,

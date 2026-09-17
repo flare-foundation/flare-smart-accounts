@@ -7,9 +7,11 @@ import {
     ACTION_WITHDRAW,
     ACTION_DEPOSIT_COLLATERAL,
     ACTION_CANCEL,
+    ACTION_REDEEM_HOME,
     DESTINATION_KIND_EVM
 } from "../../userInterfaces/ILoanSubaccount.sol";
 import {PAYLOAD_VERSION_1} from "../../userInterfaces/IComposeReceiverAccountBase.sol";
+import {RedeemingSubaccountBase} from "./RedeemingSubaccountBase.sol";
 import {BridgingSubaccountBase} from "./BridgingSubaccountBase.sol";
 
 /**
@@ -18,14 +20,16 @@ import {BridgingSubaccountBase} from "./BridgingSubaccountBase.sol";
  * instructions - {borrow}, {depositCollateral} and {withdraw} - each a typed payload the
  * loan-chain twin executes on arrival, built here so a malformed payload cannot reach the
  * bridge, and sent through the shared forward move of {BridgingSubaccountBase} (the type's
- * route, the live peer re-check, the exact quoted fee). Everything else the account does on
- * Flare - the permissionless `sweepRedeem`, redeeming its twin's bridge-back on arrival - is
- * the bridging surface every such type shares, in the base.
+ * route, the live peer re-check, the exact quoted fee). The rest is the two bases it joins:
+ * {RedeemingSubaccountBase} - the permissionless `sweepRedeem` and the redemption core it
+ * shares with the redeem-home compose of the twin's bridge-back, which this type dispatches
+ * ({_dispatch}) to redeem the whole balance at the rail's price on arrival - and
+ * {BridgingSubaccountBase}, the forward move and the compose ingress.
  * @dev The controller (MasterAccountController Diamond) is the beacon: the proxy and this
  * implementation resolve through `implementationForType`. No `receive()` and no native exit -
- * see the base.
+ * see the bases.
  */
-contract LoanSubaccount is ILoanSubaccount, BridgingSubaccountBase {
+contract LoanSubaccount is ILoanSubaccount, RedeemingSubaccountBase, BridgingSubaccountBase {
 
     /// @inheritdoc ILoanSubaccount
     function borrow(
@@ -154,5 +158,36 @@ contract LoanSubaccount is ILoanSubaccount, BridgingSubaccountBase {
         );
         (uint32 destinationEid, bytes32 guid) = _bridgeToSelf(0, _extraOptions, payload);
         emit LoanCancelInstructionSent(_parentAccount(), _operationId, destinationEid, guid);
+    }
+
+    /// @dev The account's action set as a compose receiver (see {ComposeReceiverAccountBase._dispatch}):
+    /// the redeem-home action of its own twin's bridge-back, which carries nothing but the
+    /// action - no amount to honor, no deadline - and redeems whatever the account holds, the
+    /// packet's credit included, exactly as the public sweep would and at its price, with the
+    /// compose value as the fee.
+    function _dispatch(
+        uint8 _action,
+        bytes memory /* _actionData */,
+        bytes32 /* _guid */,
+        uint256 /* _amountLD */
+    )
+        internal override
+    {
+        if (_action == ACTION_REDEEM_HOME) {
+            _sweepRedeem(msg.value);
+        } else {
+            revert UnsupportedAction(_action);
+        }
+    }
+
+    /// @dev The redeem-home compose carries the executor fee as compose value and spends it in
+    /// the same call; no other action here may carry value.
+    function _acceptsComposeValue(
+        uint8 _action
+    )
+        internal pure override
+        returns (bool)
+    {
+        return _action == ACTION_REDEEM_HOME;
     }
 }

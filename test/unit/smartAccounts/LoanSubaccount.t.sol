@@ -6,6 +6,7 @@ import {IControlledAccount} from "../../../contracts/userInterfaces/IControlledA
 import {IPersonalAccountsFacet} from "../../../contracts/userInterfaces/facets/IPersonalAccountsFacet.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IBridgingSubaccount} from "../../../contracts/userInterfaces/IBridgingSubaccount.sol";
+import {IRedeemingSubaccount} from "../../../contracts/userInterfaces/IRedeemingSubaccount.sol";
 import {PackedUserOperation} from "@openzeppelin/contracts/interfaces/draft-IERC4337.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IAssetManager} from "flare-periphery/src/flare/IAssetManager.sol";
@@ -40,7 +41,7 @@ import {
     ACTION_DEPOSIT_COLLATERAL,
     DESTINATION_KIND_EVM
 } from "../../../contracts/userInterfaces/ILoanSubaccount.sol";
-import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../../contracts/userInterfaces/IBridgingSubaccount.sol";
+import {ACTION_REDEEM_HOME} from "../../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {
     ISubaccountsFacet,
     SUBACCOUNT_TYPE_NONE
@@ -332,9 +333,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testPrePersonalAccountRailMatrix() public {
-        // the pre-PA state is only PARTLY inert - this pins exactly which rails work:
-        // onlyParent and the parent-reading sweep revert; the below-minimum dust push
-        // works, parking at the future PA address
+        // the pre-PA state is inert until the parent exists - this pins exactly how: onlyParent
+        // methods have no possible caller, and every sweep reverts, since every redemption -
+        // a below-minimum balance included - goes through the parent; the balance waits here,
+        // and anyone can materialize the parent
         address subaccount = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
         address parent = LoanSubaccount(payable(subaccount)).parentPersonalAccount();
 
@@ -344,40 +346,36 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             1, bytes32("op"), uint64(block.timestamp + 1), _withdrawOptions()
         );
 
-        // at or above the minimum, sweepRedeem reverts calling the codeless parent (no
-        // ABI-encoded return from an address without code)
+        // sweepRedeem reverts calling the codeless parent (no ABI-encoded return from an
+        // address without code), at or above the FAssets minimum and below it alike
         fxrp.mint(subaccount, 250e6);
         mockAssetManager.setMinimumRedeemAmountUBA(10e6);
         vm.deal(address(this), 2 * executorFee);
         vm.expectRevert(bytes(""));
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
-
-        // below the minimum it never calls parent code: the FXRP and the fee park at the
-        // future PA address, which the owner's Personal Account later deploys at and owns
         mockAssetManager.setMinimumRedeemAmountUBA(1_000e6);
-        (uint256 parked, uint256 redeemed) =
-            ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
-        assertEq(parked, 250e6);
-        assertEq(redeemed, 0);
-        assertEq(fxrp.balanceOf(parent), 250e6);
-        assertEq(parent.balance, executorFee);
+        vm.expectRevert(bytes(""));
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(fxrp.balanceOf(subaccount), 250e6);
+        assertEq(fxrp.balanceOf(parent), 0);
         mockAssetManager.setMinimumRedeemAmountUBA(10e6);
 
         // a plain native send reverts (no receive, no native exit)
         vm.deal(address(this), 1 ether);
         (bool ok, ) = subaccount.call{value: 1 ether}("");
         assertFalse(ok);
-        // the fee the dust push parked at the parent earlier
-        assertEq(parent.balance, executorFee);
 
-        // parked assets do not block the CREATE2 deployment: the PA still materializes
-        // at exactly the recorded parent, owning everything parked there - the dust push's
-        // FXRP and fee
+        // the waiting balance does not block the CREATE2 deployment: the PA materializes at
+        // exactly the recorded parent, and the sweep then works
         vm.deal(address(this), collateralReservationFee + executorFee);
         address personalAccount = _createPersonalAccount(xrplOwner);
         assertEq(personalAccount, parent);
-        assertEq(fxrp.balanceOf(personalAccount), 250e6);
-        assertEq(personalAccount.balance, executorFee);
+        vm.deal(address(this), executorFee);
+        (uint256 amount, uint256 redeemed) =
+            ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(amount, 250e6);
+        assertEq(redeemed, 250e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
     }
 
     function testCreateSubaccountEmptyOwnerIsPermanentOrphan() public {
@@ -734,7 +732,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
             subaccount, balance, balance, executor, executorFee
         );
         vm.expectEmit();
-        emit IBridgingSubaccount.FXrpRedeemed(personalAccount, balance, balance);
+        emit IRedeemingSubaccount.FXrpRedeemed(personalAccount, balance, balance);
         (uint256 amount, uint256 redeemed) =
             ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
 
@@ -752,22 +750,58 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(requested, balance);
     }
 
-    function testSweepRedeemPartialFillLeavesTheRemainderOnTheParent() public {
+    function testSweepRedeemPartialFillReturnsARedeemableRemainderToTheSubaccount() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 250e6);
-        // FAssets can redeem less than requested when tickets run out; the pushed remainder
-        // stays with the redeemer - the parent - where the user controls it
+        // FAssets can redeem less than requested when tickets run out; a remainder that is
+        // itself redeemable comes back here, so the next sweep - anyone's - finishes the job
+        // instead of the user needing a signed instruction to reach it on the parent
+        mockAssetManager.setMinimumRedeemAmountUBA(50e6);
         mockAssetManager.setMaxRedeemPerCall(100e6);
+
+        vm.deal(address(this), 3 * executorFee);
+        vm.expectEmit();
+        emit IPersonalAccount.FXrpReturnedToSubaccount(subaccount, 150e6);
+        vm.expectEmit();
+        emit IRedeemingSubaccount.FXrpRedeemed(personalAccount, 250e6, 100e6);
+        (uint256 amount, uint256 redeemed) =
+            ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(amount, 250e6);
+        assertEq(redeemed, 100e6);
+        assertEq(fxrp.balanceOf(subaccount), 150e6);
+        assertEq(fxrp.balanceOf(personalAccount), 0);
+
+        // the next sweep takes the next 100, and the one after redeems the last 50 in full: a
+        // remainder exactly at the minimum is redeemable and comes back too
+        (amount, redeemed) = ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(amount, 150e6);
+        assertEq(redeemed, 100e6);
+        assertEq(fxrp.balanceOf(subaccount), 50e6);
+        (amount, redeemed) = ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(amount, 50e6);
+        assertEq(redeemed, 50e6);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertEq(fxrp.balanceOf(personalAccount), 0);
+    }
+
+    function testSweepRedeemPartialFillKeepsADustRemainderOnTheParent() public {
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 250e6);
+        // a remainder below the FAssets minimum could never be redeemed by a sweep, so it stays
+        // with the redeemer - the parent - where a signed instruction reaches it
+        mockAssetManager.setMinimumRedeemAmountUBA(60e6);
+        mockAssetManager.setMaxRedeemPerCall(200e6);
 
         vm.deal(address(this), executorFee);
         (uint256 amount, uint256 redeemed) =
             ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
 
         assertEq(amount, 250e6);
-        assertEq(redeemed, 100e6);
+        assertEq(redeemed, 200e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
-        assertEq(fxrp.balanceOf(personalAccount), 150e6);
+        assertEq(fxrp.balanceOf(personalAccount), 50e6);
     }
 
     function testSweepRedeemCanBeCalledByAnyone() public {
@@ -786,7 +820,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         address subaccount = _createSubaccountFor(xrplOwner);
 
         vm.deal(address(this), executorFee);
-        vm.expectRevert(IBridgingSubaccount.NothingToRedeem.selector);
+        vm.expectRevert(IRedeemingSubaccount.NothingToRedeem.selector);
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
     }
 
@@ -802,9 +836,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         address caller = makeAddr("executorBot");
         vm.deal(caller, 2 * executorFee);
         vm.expectEmit();
-        emit IBridgingSubaccount.NativeSweptToParent(parent, executorFee);
+        emit IRedeemingSubaccount.NativeSweptToParent(parent, executorFee);
         vm.expectEmit();
-        emit IBridgingSubaccount.TokenSweptToParent(parent, address(fxrp), 100e6 - 1);
+        emit IRedeemingSubaccount.TokenSweptToParent(parent, address(fxrp), 100e6 - 1);
         vm.prank(caller);
         (uint256 amount, uint256 redeemed) =
             ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
@@ -824,20 +858,6 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(redeemed, 100e6);
         assertEq(mockAssetManager.lastRedeemValue(), executorFee);
         assertEq(caller.balance, 0);
-    }
-
-    function testSweepRedeemBelowMinimumRevertNativeSweepFailed() public {
-        // a parent that cannot take native (impossible for a real Personal Account, which has a
-        // receive function) fails the whole call rather than stranding the fee here
-        SubaccountProxy proxy =
-            new SubaccountProxy(address(controller), address(fxrp), SUBACCOUNT_TYPE_MORPHO_LOAN);
-        address subaccount = address(proxy);
-        mockAssetManager.setMinimumRedeemAmountUBA(100e6);
-        fxrp.mint(subaccount, 1e6);
-
-        vm.deal(address(this), executorFee);
-        vm.expectRevert(IBridgingSubaccount.NativeSweepFailed.selector);
-        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
     }
 
     function testSweepRedeemForwardsWholeValueToAssetManager() public {
@@ -886,7 +906,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         calls[0] = IPersonalAccount.Call({
             target: subaccount,
             value: executorFee,
-            data: abi.encodeCall(IBridgingSubaccount.sweepRedeem, ())
+            data: abi.encodeCall(IRedeemingSubaccount.sweepRedeem, ())
         });
         _executeUserOp(personalAccount, calls, bytes32("dmSweepRedeem"));
 
@@ -912,7 +932,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // the callback pays the rail's fee out of the value the asset manager just received, so
         // the nested attempt gets past the fee check and is stopped by the guard itself
         mockAssetManager.setRedeemCallback(
-            second, abi.encodeCall(IBridgingSubaccount.sweepRedeem, ()), executorFee
+            second, abi.encodeCall(IRedeemingSubaccount.sweepRedeem, ()), executorFee
         );
 
         vm.deal(address(this), executorFee);
@@ -1114,20 +1134,20 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // minimum alike: forcing the backward direction is never gas-only
         vm.deal(address(this), executorFee);
         vm.expectRevert(
-            abi.encodeWithSelector(IBridgingSubaccount.InsufficientFundsForRedeem.selector, executorFee)
+            abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, executorFee)
         );
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee - 1}();
         mockAssetManager.setMinimumRedeemAmountUBA(1_000e6);
         vm.expectRevert(
-            abi.encodeWithSelector(IBridgingSubaccount.InsufficientFundsForRedeem.selector, executorFee)
+            abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, executorFee)
         );
         ILoanSubaccount(subaccount).sweepRedeem();
     }
 
     function testRedeemFromSubaccountAcceptsZeroValue() public {
-        // the fee policy lives at the entry: the parent itself forwards whatever value came, so
-        // an authenticated route (the compose-driven bridge-back redemption) can send none - the
-        // controller's executor is appointed regardless, just unpaid
+        // the fee policy lives on the subaccount, where every entry checks the floor before
+        // calling here; the parent itself forwards whatever value came, zero included, and the
+        // controller's executor is appointed regardless
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         fxrp.mint(subaccount, 100e6);
@@ -1207,12 +1227,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     //
 
     function testRedeemHomeComposeRedeemsThroughTheParent() public {
-        // the loan-chain twin's withdraw action bridges FXRP here with the redeem-home compose (a
-        // deadline and nothing else); this account authenticates it against its bridge route
-        // (the adapter, its endpoint,
-        // the loan chain, the pinned peer) and runs the sweep-redeem logic with the compose
-        // value as the executor fee - no public-entry fee check, the packet already cost its
-        // sender the LayerZero fee
+        // the loan-chain twin's withdraw action bridges FXRP here with the redeem-home compose
+        // (the action and nothing else); this account authenticates it against its bridge route
+        // (the adapter, its endpoint, the loan chain, the pinned peer) and runs the redemption
+        // the public sweep runs, at the same price: the compose value is the executor fee and
+        // must reach the controller's configured one
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);
         _configureLoanBridge();
@@ -1221,7 +1240,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.expectEmit();
         emit IPersonalAccount.FXrpRedeemedFromSubaccount(subaccount, 100e6, 100e6, executor, executorFee);
         vm.expectEmit();
-        emit IBridgingSubaccount.FXrpRedeemed(personalAccount, 100e6, 100e6);
+        emit IRedeemingSubaccount.FXrpRedeemed(personalAccount, 100e6, 100e6);
         _deliverRedeemHome(subaccount, 1, 100e6, executorFee);
 
         assertEq(fxrp.balanceOf(subaccount), 0);
@@ -1230,9 +1249,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(redeemer, personalAccount);
     }
 
-    function testRedeemHomeComposeWithZeroValueAndWhilePaused() public {
-        // zero compose value appoints the executor unpaid; and the backward move is an exit
-        // toward the user, so the pause does not gate it
+    function testRedeemHomeComposePaysTheRailsPriceAndIgnoresThePause() public {
+        // the backward move is an exit toward the user, so the pause does not gate it; but it is
+        // not free either: a delivery below the controller's executor fee - zero, or one short -
+        // reverts and stays retriable, and only one that brings the fee redeems
         address subaccount = _createSubaccountFor(xrplOwner);
         _configureLoanBridge();
         fxrp.mint(subaccount, 100e6);
@@ -1244,10 +1264,20 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(pauser);
         controller.pause();
 
+        vm.expectRevert(
+            abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, executorFee)
+        );
         _deliverRedeemHome(subaccount, 1, 100e6, 0);
+        vm.expectRevert(
+            abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, executorFee)
+        );
+        _deliverRedeemHome(subaccount, 1, 100e6, executorFee - 1);
+        assertEq(fxrp.balanceOf(subaccount), 100e6);
+        assertEq(mockAssetManager.lastRequestId(), 0);
 
+        _deliverRedeemHome(subaccount, 1, 100e6, executorFee);
         assertEq(fxrp.balanceOf(subaccount), 0);
-        assertEq(mockAssetManager.lastRedeemValue(), 0);
+        assertEq(mockAssetManager.lastRedeemValue(), executorFee);
     }
 
     function testRedeemHomeComposeBelowMinimumPushesToParent() public {
@@ -1259,6 +1289,12 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         mockAssetManager.setMinimumRedeemAmountUBA(1_000e6);
         fxrp.mint(subaccount, 100e6);
 
+        // the price comes first, dust or not: a short delivery is refused before the balance is
+        // looked at
+        vm.expectRevert(
+            abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, executorFee)
+        );
+        _deliverRedeemHome(subaccount, 1, 100e6, executorFee - 1);
         _deliverRedeemHome(subaccount, 1, 100e6, executorFee);
 
         assertEq(fxrp.balanceOf(personalAccount), 100e6);
@@ -1266,74 +1302,66 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(mockAssetManager.lastRequestId(), 0);
     }
 
-    function testRedeemHomeComposeIsCappedAtItsPacketAmount() public {
-        // two bridge-back packets can credit the account before either compose runs; each
-        // compose redeems at most its own packet's amount (the codec amount), so the first
-        // cannot consume more than one packet's worth, and the rest of the balance stays for
-        // the public rail
+    function testRedeemHomeComposeChargesTheFeeCurrentAtDelivery() public {
+        // the fee is read when the packet is delivered, not when it was sent: a return leg that
+        // bought the old fee parks once governance raises it, until a delivery brings the new
+        // one - and a sweep at the old price is refused the same way. One floor, read at the
+        // same moment, on both entries; and no deadline, so the packet is as deliverable an
+        // hour later as it was on arrival
+        address subaccount = _createSubaccountFor(xrplOwner);
+        _configureLoanBridge();
+        fxrp.mint(subaccount, 100e6);
+        (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, _redeemHomePayload());
+        uint256 raised = 3 * executorFee;
+        vm.prank(governance);
+        controller.setExecutorFee(raised);
+        vm.warp(block.timestamp + 2 hours);
+
+        vm.deal(lzEndpoint, executorFee + raised);
+        vm.prank(lzEndpoint);
+        vm.expectRevert(abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, raised));
+        ILoanSubaccount(subaccount).lzCompose{value: executorFee}(address(fxrpOft), guid, message, executor, "");
+        vm.deal(address(this), executorFee);
+        vm.expectRevert(abi.encodeWithSelector(IRedeemingSubaccount.InsufficientFundsForRedeem.selector, raised));
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        assertEq(fxrp.balanceOf(subaccount), 100e6);
+
+        vm.prank(lzEndpoint);
+        ILoanSubaccount(subaccount).lzCompose{value: raised}(address(fxrpOft), guid, message, executor, "");
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        assertEq(mockAssetManager.lastRedeemValue(), raised);
+    }
+
+    function testRedeemHomeComposeRedeemsTheWholeBalance() public {
+        // the packet is an instruction to redeem, not a number: whatever the account holds when
+        // it runs goes home - two credits that landed before either compose ran, and idle FXRP
+        // beside them - exactly as a public sweep would take it. The second compose then finds
+        // nothing and stays retriable; whatever lands later is what it redeems
         address subaccount = _createSubaccountFor(xrplOwner);
         _configureLoanBridge();
         fxrp.mint(subaccount, 100e6); // 60 + 40 credited, no compose yet
 
-        _deliverRedeemHome(subaccount, 1, 60e6, 0);
-        assertEq(fxrp.balanceOf(subaccount), 40e6);
-        (,, uint256 requested) = mockAssetManager.requests(mockAssetManager.lastRequestId());
-        assertEq(requested, 60e6);
-
-        _deliverRedeemHome(subaccount, 2, 40e6, 0);
+        _deliverRedeemHome(subaccount, 1, 60e6, executorFee);
         assertEq(fxrp.balanceOf(subaccount), 0);
+        (,, uint256 requested) = mockAssetManager.requests(mockAssetManager.lastRequestId());
+        assertEq(requested, 100e6);
 
-        // a packet finding more than its amount leaves the rest alone
+        vm.expectRevert(IRedeemingSubaccount.NothingToRedeem.selector);
+        _deliverRedeemHome(subaccount, 2, 40e6, executorFee);
+
+        // a packet finding less than its own amount takes what is there; more, all of it
         fxrp.mint(subaccount, 30e6);
-        _deliverRedeemHome(subaccount, 3, 10e6, 0);
-        assertEq(fxrp.balanceOf(subaccount), 20e6);
+        _deliverRedeemHome(subaccount, 2, 40e6, executorFee);
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        (,, requested) = mockAssetManager.requests(mockAssetManager.lastRequestId());
+        assertEq(requested, 30e6);
     }
 
-    function testRedeemHomeComposeSkipsPastItsDeadline() public {
-        // a packet delivered after the sender-stamped deadline does nothing to the balance:
-        // whatever is on the account stays for the public rail and its value joins the
-        // parent's float - a packet cannot outlive its window as an instruction over later funds
-        address subaccount = _createSubaccountFor(xrplOwner);
-        address personalAccount = _personalAccountOf(xrplOwner);
-        _configureLoanBridge();
-        fxrp.mint(subaccount, 100e6);
-        bytes memory stale = _redeemHomePayloadAt(uint64(block.timestamp - 1));
-        (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, stale);
-
-        vm.deal(lzEndpoint, executorFee);
-        vm.expectEmit();
-        emit IBridgingSubaccount.NativeSweptToParent(personalAccount, executorFee);
-        vm.expectEmit();
-        emit IBridgingSubaccount.RedeemHomeSkipped(personalAccount, guid);
-        vm.prank(lzEndpoint);
-        ILoanSubaccount(subaccount).lzCompose{value: executorFee}(address(fxrpOft), guid, message, executor, "");
-
-        assertEq(fxrp.balanceOf(subaccount), 100e6);
-        assertEq(personalAccount.balance, executorFee);
-        assertEq(mockAssetManager.lastRequestId(), 0);
-    }
-
-    function testRedeemHomeComposeExpiredRevertNativeSweepFailed() public {
-        // an expired packet forwards its value to the parent; a parent that cannot take native
-        // (impossible for a real Personal Account) fails the delivery rather than stranding it
-        SubaccountProxy proxy =
-            new SubaccountProxy(address(controller), address(fxrp), SUBACCOUNT_TYPE_MORPHO_LOAN);
-        address subaccount = address(proxy);
-        _configureLoanBridge();
-        fxrp.mint(subaccount, 100e6);
-        bytes memory stale = _redeemHomePayloadAt(uint64(block.timestamp - 1));
-        (bytes memory message, bytes32 guid) = _composeFromLoanChain(subaccount, 1, 100e6, stale);
-
-        vm.deal(lzEndpoint, executorFee);
-        vm.prank(lzEndpoint);
-        vm.expectRevert(IBridgingSubaccount.NativeSweepFailed.selector);
-        ILoanSubaccount(subaccount).lzCompose{value: executorFee}(address(fxrpOft), guid, message, executor, "");
-    }
-
-    function testStaleRedeemHomeComposeIsBoundedInAmountAndTime() public {
-        // the residual accepted risk, pinned: a packet whose credit a public rail already moved
-        // stays retriable, but can redeem at most its own amount out of later funds, and only
-        // until its deadline - never the whole balance, never forever
+    function testRedeemHomeComposeAfterASweepStaysRetriableOverWhatLaterArrives() public {
+        // the accepted residual, pinned: a packet whose credit a public sweep already moved
+        // stays retriable, and when funds arrive later it redeems all of them - which is exactly
+        // what anyone could do with a sweep, at the same price and through the same user-owned
+        // redemption, so the standing packet adds no capability
         address subaccount = _createSubaccountFor(xrplOwner);
         _configureLoanBridge();
         fxrp.mint(subaccount, 100e6);
@@ -1342,23 +1370,18 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // an executor's public sweep takes the credit before the compose runs
         vm.deal(address(this), executorFee);
         ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+        vm.deal(lzEndpoint, 2 * executorFee);
         vm.prank(lzEndpoint);
-        vm.expectRevert(IBridgingSubaccount.NothingToRedeem.selector);
-        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        vm.expectRevert(IRedeemingSubaccount.NothingToRedeem.selector);
+        ILoanSubaccount(subaccount).lzCompose{value: executorFee}(address(fxrpOft), guid, message, executor, "");
 
-        // later funds arrive for a new attempt: within the TTL the old packet redeems at most
-        // its own 100 of them
+        // later funds arrive: the old packet redeems the whole of them, not its own 100
         fxrp.mint(subaccount, 500e6);
         vm.prank(lzEndpoint);
-        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
-        assertEq(fxrp.balanceOf(subaccount), 400e6);
-
-        // past the TTL a stale packet skips - the balance is untouched
-        (message, guid) = _composeFromLoanChain(subaccount, 2, 100e6, _redeemHomePayload());
-        vm.warp(block.timestamp + REDEEM_HOME_TTL + 1);
-        vm.prank(lzEndpoint);
-        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
-        assertEq(fxrp.balanceOf(subaccount), 400e6);
+        ILoanSubaccount(subaccount).lzCompose{value: executorFee}(address(fxrpOft), guid, message, executor, "");
+        assertEq(fxrp.balanceOf(subaccount), 0);
+        (,, uint256 requested) = mockAssetManager.requests(mockAssetManager.lastRequestId());
+        assertEq(requested, 500e6);
     }
 
     function testRedeemHomeComposeAuthentication() public {
@@ -1436,9 +1459,10 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         // nothing idle to redeem: reverts, retriable (the credit always precedes the compose)
         fxrp.burn(subaccount, 100e6);
         (message, guid) = _composeFromLoanChain(subaccount, 1, 100e6, _redeemHomePayload());
+        vm.deal(lzEndpoint, executorFee);
         vm.prank(lzEndpoint);
-        vm.expectRevert(IBridgingSubaccount.NothingToRedeem.selector);
-        ILoanSubaccount(subaccount).lzCompose(address(fxrpOft), guid, message, executor, "");
+        vm.expectRevert(IRedeemingSubaccount.NothingToRedeem.selector);
+        ILoanSubaccount(subaccount).lzCompose{value: executorFee}(address(fxrpOft), guid, message, executor, "");
     }
 
     //
@@ -1968,7 +1992,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         _createSubaccountFor(xrplOwner);
         address baseSubaccount = controller.createSubaccount(xrplOwner, baseType);
         fxrp.mint(baseSubaccount, 100e6);
-        bytes memory payload = _redeemHomePayloadAt(uint64(block.timestamp + 1 hours));
+        bytes memory payload = _redeemHomePayload();
         bytes memory composeFrom = abi.encodePacked(bytes32(uint256(uint160(baseSubaccount))), payload);
 
         // from Ethereum (the loan type's chain): wrong source for a Base-typed account
@@ -2889,11 +2913,6 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         return controller.getPersonalAccount(_xrplOwner);
     }
 
-    /// The redeem-home payload as the loan-chain twin stamps it: its block time plus the TTL.
-    function _redeemHomePayload() private view returns (bytes memory) {
-        return _redeemHomePayloadAt(uint64(block.timestamp) + REDEEM_HOME_TTL);
-    }
-
     /// The compose the loan-chain twin's bridge-back arrives as: canonical wrapper, source = the
     /// loan chain, composeFrom = the account itself, guid as Flare's endpoint computes it for a
     /// packet from the pinned peer.
@@ -2952,8 +2971,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         });
     }
 
-    function _redeemHomePayloadAt(uint64 _deadline) private pure returns (bytes memory) {
-        return abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, abi.encode(_deadline));
+    /// The redeem-home payload as the loan-chain twin sends it: the action and nothing else.
+    function _redeemHomePayload() private pure returns (bytes memory) {
+        return abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, bytes(""));
     }
 
     /// Two-leg options for a withdraw. Both blobs may be empty (enforced options can make an

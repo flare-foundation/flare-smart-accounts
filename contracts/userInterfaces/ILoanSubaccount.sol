@@ -2,6 +2,7 @@
 pragma solidity >=0.8.4 <0.9;
 
 import {IBridgingSubaccount} from "./IBridgingSubaccount.sol";
+import {IRedeemingSubaccount} from "./IRedeemingSubaccount.sol";
 
 /*
  * The wire schema of a loan subaccount pair: the actions a compose payload can carry and the
@@ -36,8 +37,10 @@ uint8 constant ACTION_BORROW = 1;
 /// so a delivery carrying less - execution and terminal skip alike - reverts
 /// (`InsufficientDeliveryValue`), which is what stops a zero-value front-run from consuming
 /// the packet and burning the prepaid value. `returnOptions` are the signed return-send
-/// options (Flare-side gas and, optionally, the redemption's executor fee as compose value,
-/// best-effort on that leg - the Flare redeem-home accepts zero value by design); the return
+/// options (Flare-side gas and, as compose value, the redemption's executor fee - at least
+/// the Flare controller's configured fee, which the redeem-home charges exactly as the public
+/// sweep does; a delivery bringing less parks, retriable, until one brings it or anyone
+/// sweeps); the return
 /// fee is paid from the compose value delivered with this action - the only action that
 /// accepts value - and the excess goes to the parent. Every failure reverts and leaves the
 /// delivery retriable; what recovers it differs by cause, and for the Morpho pair
@@ -51,6 +54,18 @@ uint8 constant ACTION_WITHDRAW = 2;
 /// the account's idle collateral and moves no debt.
 uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
 
+/// @dev Redeem-home action, the one the Flare half receives: the compose the loan-chain twin's
+/// bridge-back attaches to the FXRP it returns - the withdraw action's return leg.
+/// Its `actionData` is empty: the packet is an instruction to redeem, not a number, and the
+/// Flare account redeems whatever it holds on arrival - the packet's credit and any idle
+/// balance beside it - exactly as {IRedeemingSubaccount.sweepRedeem} would, and at the same
+/// price: the compose value is the executor fee and must reach the controller's configured one
+/// ({IRedeemingSubaccount.InsufficientFundsForRedeem}), so a delivery bringing less reverts and
+/// stays retriable, for a `lzCompose` retry carrying the current fee or for anyone's sweep -
+/// which is what the operator can for a packet a fee change caught in flight. No deadline: a
+/// late packet finds the balance a sweep would find and does with it only what anyone may do.
+uint8 constant ACTION_REDEEM_HOME = 4;
+
 /// @dev Cancel action: `actionData` is `abi.encode(bytes32 operationId)`. Message-only, and the
 /// one action that withdraws an authority instead of using one: it consumes the id so the packet
 /// that carried it can never execute, and does nothing else. It carries no deadline of its own (a
@@ -62,7 +77,6 @@ uint8 constant ACTION_DEPOSIT_COLLATERAL = 3;
 /// and either ends the instruction's live state. Cancelling an id that was never issued is
 /// allowed and simply burns it, which is what makes the action idempotent and its delivery
 /// terminal on the first attempt.
-/// Action id 4 is retired (the removed sweep-to-origin) and is never reused.
 uint8 constant ACTION_CANCEL = 5;
 
 /// @dev The destination is an EVM address (cleanly zero-padded into the `bytes32`), paid by a
@@ -79,23 +93,36 @@ uint8 constant DESTINATION_KIND_XRPL_WORMHOLE = 2;
  * @title ILoanSubaccount
  * @notice User interface for deterministic loan subaccounts on Flare: the parent-driven loan
  * instructions, typed payload encoders over the shared forward move. The permissionless rail
- * (`sweepRedeem`) and the redeem-home compose of the loan-chain twin's bridge-back are the
- * bridging surface every such type shares, declared on {IBridgingSubaccount}.
+ * (`sweepRedeem`) is the redeeming surface every type whose idle FXRP means home shares, declared
+ * on {IRedeemingSubaccount}; the compose ingress of the loan-chain twin's messages is the bridging
+ * surface, declared on {IBridgingSubaccount}; the redeem-home action those messages carry
+ * ({ACTION_REDEEM_HOME}) is this type's own, dispatched into the same redemption as the rail.
  */
-interface ILoanSubaccount is IBridgingSubaccount {
+interface ILoanSubaccount is IBridgingSubaccount, IRedeemingSubaccount {
 
     /// @notice The signed LayerZero options and delivery floor of the two-leg withdrawal. The
-    /// operator quotes the return leg first, puts that fee (plus headroom; the excess lands on
-    /// the parent) into `destinationOptions` as compose value, then quotes and sends the first
-    /// message.
+    /// operator quotes the return leg first, against `returnOptions` - so that quote already
+    /// contains the redemption's executor fee those options buy - puts it (plus headroom; the
+    /// excess lands on the parent) into `destinationOptions` as compose value, then quotes and
+    /// sends the first message. One payment, made on Flare, covers both legs and the
+    /// redemption.
     struct WithdrawOptions {
         /// @notice Flare -> loan chain: the withdraw compose's gas and, as compose value, the
-        /// native that pays the return leg's LayerZero fee.
+        /// native that pays for the whole way back - the return leg's LayerZero fee, which
+        /// itself buys the native the Flare compose arrives with, the redemption's executor
+        /// fee. Nothing is paid on the loan chain out of the user's own funds.
         bytes destinationOptions;
-        /// @notice Loan chain -> Flare: the redeem-home compose's gas and, optionally, the
-        /// redemption's executor fee as compose value. Signed end-to-end and frozen into the
-        /// instruction - a bad value parks the withdrawal until a fresh instruction (reuse the
-        /// same operation id, so the parked packet terminal-skips as a duplicate).
+        /// @notice Loan chain -> Flare: the redeem-home compose's gas and, as compose value,
+        /// the redemption's executor fee - at least the Flare controller's configured fee, the
+        /// price the public sweep pays too; a delivery bringing less parks the redemption
+        /// (retriable) until a `lzCompose` retry brings the current fee or anyone sweeps - the
+        /// operator can do either, when a fee change caught a packet in
+        /// flight. The fee is read when the packet arrives, and a change to it is timelocked -
+        /// known in advance, so a return leg signed before one can be sized for it. Signed
+        /// end-to-end
+        /// and frozen into the instruction - a bad blob parks the withdrawal until a fresh
+        /// instruction (reuse the same operation id, so the parked packet terminal-skips as a
+        /// duplicate).
         bytes returnOptions;
         /// @notice The delivery-value floor (non-zero): compose delivery is permissionless and
         /// LayerZero does not authenticate the delivered value, so the loan chain refuses any
@@ -270,8 +297,9 @@ interface ILoanSubaccount is IBridgingSubaccount {
      * @dev Restricted to the parent Personal Account; same validation, guards, and fee
      * handling as {borrow}. No FXRP travels with it, but `_options.destinationOptions` must
      * carry, as compose value, the native that prepays the return leg's LayerZero fee (quoted
-     * against `_options.returnOptions` on the loan chain; the excess lands on the parent, and
-     * too little parks the delivery as retriable). See {WithdrawOptions} for the signed
+     * against `_options.returnOptions` on the loan chain, so it includes the redemption's
+     * executor fee those options buy; the excess lands on the parent, and too little parks the
+     * delivery as retriable). See {WithdrawOptions} for the signed
      * delivery-value floor. A withdrawal that would leave the position under the loan chain's
      * exit gate reverts there (`InsufficientRemainingCollateral`, retriable) until debt and
      * fee are repaid in loan tokens through the subaccount's `repay`, or a smaller amount is

@@ -39,7 +39,7 @@ import {
     DESTINATION_KIND_EVM,
     DESTINATION_KIND_XRPL_WORMHOLE
 } from "../../../contracts/userInterfaces/ILoanSubaccount.sol";
-import {ACTION_REDEEM_HOME, REDEEM_HOME_TTL} from "../../../contracts/userInterfaces/IBridgingSubaccount.sol";
+import {ACTION_REDEEM_HOME} from "../../../contracts/userInterfaces/ILoanSubaccount.sol";
 import {IPersonalAccount} from "../../../contracts/userInterfaces/IPersonalAccount.sol";
 import {IPersonalAccountRemote} from "../../../contracts/userInterfaces/IPersonalAccountRemote.sol";
 import {IFlareContractRegistry} from "flare-periphery/src/flare/IFlareContractRegistry.sol";
@@ -961,14 +961,7 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(fxrpOft.lastRefundAddress(), parentPersonalAccount);
         assertEq(fxrpOft.lastValue(), 0.01 ether);
         assertEq(optionsSent, RETURN_OPTIONS);
-        assertEq(
-            composeMsgSent,
-            abi.encode(
-                PAYLOAD_VERSION_1,
-                ACTION_REDEEM_HOME,
-                abi.encode(uint64(block.timestamp) + REDEEM_HOME_TTL)
-            )
-        );
+        assertEq(composeMsgSent, abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, bytes("")));
     }
 
     function testLzComposeWithdrawRevertInsufficientReturnFee() public {
@@ -1341,8 +1334,8 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
 
     function testBorrowRejectsTheRetiredFiveWordPayload() public {
         // `abi.decode` tolerates trailing data for a static tuple, so a round trip alone would
-        // still pass against a stale five-word decoder. This pins the other direction: the
-        // six-word schema is required, and the retired shape no longer decodes
+        // still pass against a five-word decoder. This pins the other direction: the six-word
+        // schema is required, and a five-word payload does not decode
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         (bytes memory message, bytes32 guid) =
@@ -4277,14 +4270,15 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
     }
 
-    function testRetiredSweepDepositActionIsUnsupported() public {
-        // action id 4 is retired, never reused: a packet carrying it fails closed
+    function testUnknownActionIsUnsupported() public {
+        // an action this receiver does not know fails closed, whatever it carries - here the
+        // Flare side's own redeem-home, which the loan chain sends and never executes
         address subaccount = _createConfiguredSubaccount();
         fxrp.mint(subaccount, 100e6);
         _deliverExpectRevert(
-            subaccount, 1, abi.encode(PAYLOAD_VERSION_1, uint8(4), bytes("")),
+            subaccount, 1, abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, bytes("")),
             abi.encodeWithSelector(
-                IComposeReceiverAccountBase.UnsupportedAction.selector, uint8(4)
+                IComposeReceiverAccountBase.UnsupportedAction.selector, ACTION_REDEEM_HOME
             )
         );
     }
@@ -4494,17 +4488,13 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 60e6);
         assertEq(fxrp.balanceOf(subaccount), 0);
 
-        // the withdraw's return leg is a real bridge-back: deliver it to the Flare twin on
-        // this same diamond, which authenticates it against its bridge route and runs the
-        // sweep-redeem logic on arrival - here its dust branch, since the parent has no code
-        // on this diamond (the redemption itself is covered in the Flare suite)
+        // the withdraw's return leg is a real bridge-back: the payload it carries is the action
+        // and nothing else, which is all the Flare twin decodes before redeeming whatever it
+        // holds (the redemption itself needs a Personal Account with code, and is the Flare
+        // suite's to cover)
         (amountLD, payload) = _lastSentCompose();
         assertEq(amountLD, 40e6);
-        flareAssetManager.setMinimumRedeemAmountUBA(1_000e6);
-        fxrp.mint(sender, amountLD);
-        _deliverToFlareReceiver(sender, 6, amountLD, payload);
-        assertEq(fxrp.balanceOf(sender), 0);
-        assertEq(fxrp.balanceOf(parentPersonalAccount), 40e6);
+        assertEq(payload, abi.encode(PAYLOAD_VERSION_1, ACTION_REDEEM_HOME, bytes("")));
 
         // the signed deposit: exactly the signed amount travels; the loan chain supplies it (with
         // any idle residue - none here), no debt
@@ -4960,24 +4950,6 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
     /// Delivers a loan-chain-built compose to a Flare-side receiver on this diamond: srcEid is
     /// this (loan) chain, the pinned peer is the bridge route's one (this OFT), the guid the
     /// endpoint here would compute.
-    function _deliverToFlareReceiver(
-        address _receiver,
-        uint64 _nonce,
-        uint256 _amountLD,
-        bytes memory _payload
-    )
-        private
-    {
-        bytes memory message = OFTComposeMsgCodec.encode(
-            _nonce, dstEid, _amountLD, abi.encodePacked(bytes32(uint256(uint160(_receiver))), _payload)
-        );
-        bytes32 guid = GUID.generate(
-            _nonce, dstEid, address(fxrpOft), dstEid, bytes32(uint256(uint160(address(fxrpOft))))
-        );
-        vm.prank(lzEndpoint);
-        ILoanSubaccount(_receiver).lzCompose(address(fxrpOft), guid, message, executor, "");
-    }
-
     function _deliverToRemotePa(address _parent, uint64 _nonce, bytes memory _payload) private {
         (bytes memory message, bytes32 guid) = _composeMessage(_parent, _nonce, 0, _payload);
         vm.prank(lzEndpoint);
@@ -5326,7 +5298,7 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         );
     }
 
-    /// The retired five-word borrow payload, for the pin that the decoder rejects it.
+    /// A five-word borrow payload, for the pin that the decoder rejects it.
     function _borrowPayloadFiveWords(
         bytes32 _operationId,
         uint64 _deadline,

@@ -15,8 +15,6 @@ uint8 constant SKIP_REASON_DUPLICATE = 1;
 
 /// @dev Skip reason: the deadline passed before delivery; the user's intent is stale. The
 /// operation id is not consumed, so the same intent can be retried with a fresh deadline.
-/// (Reason 3, the signed fee-terms bound, was retired before any deployment and is never
-/// reused.)
 uint8 constant SKIP_REASON_EXPIRED = 2;
 
 /**

@@ -161,9 +161,12 @@ interface IPersonalAccount is IPersonalAccountBase {
      * and this account redeemed it to its XRPL owner.
      * @param subaccount The subaccount that pushed the FXRP.
      * @param amount Amount pulled from the subaccount and requested for redemption.
-     * @param redeemedAmount Amount actually redeemed, which can be less; the rest stays here.
+     * @param redeemedAmount Amount actually redeemed, which can be less - zero when the pushed
+     * amount was below the FAssets minimum; the rest stays here, or went back to the subaccount
+     * when it is itself redeemable ({FXrpReturnedToSubaccount}).
      * @param executor Executor used for the redemption.
-     * @param valueForwarded Native value forwarded with the redemption (covers the executor fee).
+     * @param valueForwarded Native value forwarded with the redemption (covers the executor
+     * fee), or kept here when nothing was redeemed.
      */
     event FXrpRedeemedFromSubaccount(
         address indexed subaccount,
@@ -171,6 +174,17 @@ interface IPersonalAccount is IPersonalAccountBase {
         uint256 redeemedAmount,
         address executor,
         uint256 valueForwarded
+    );
+
+    /**
+     * @notice Emitted when the part of a subaccount's pushed FXRP that FAssets did not fill went
+     * back to the subaccount, being itself redeemable, so that its next sweep finishes it.
+     * @param subaccount The subaccount that pushed the FXRP and received the remainder.
+     * @param amount The remainder returned.
+     */
+    event FXrpReturnedToSubaccount(
+        address indexed subaccount,
+        uint256 amount
     );
 
     /**
@@ -292,20 +306,25 @@ interface IPersonalAccount is IPersonalAccountBase {
 
     /**
      * @notice Redeems FXRP pushed here by one of this account's subaccounts to this account's
-     * XRPL owner: pulls exactly `_amount` from the calling subaccount and redeems exactly that.
+     * XRPL owner: pulls exactly `_amount` from the calling subaccount and requests redemption of
+     * exactly that - what FAssets fills of it is FAssets' to decide.
      * @dev Callable only by this account's own deterministic subaccounts (the controller's
      * prediction for this owner and the caller's type must be the caller). This account is the
      * recorded redeemer, so every outcome - a partial fill, a payment-default payout, a refund
      * - lands here, where {executeUserOp} handles anything, including triggering the default on
-     * the asset manager directly; this account's own balance is never part of it. The
-     * controller's executor is appointed and all `msg.value` is forwarded as its fee (FAssets
-     * records it in whole gwei); the caller rail, not this method, enforces any minimum fee.
+     * the asset manager directly; this account's own balance is never part of it. A pushed
+     * amount below the FAssets minimum is kept here unredeemed, the value with it, and zero is
+     * returned; an unfilled remainder of a partial fill goes back to the caller when it is
+     * itself redeemable ({FXrpReturnedToSubaccount}) and stays here otherwise. The controller's
+     * executor is appointed and all `msg.value` is forwarded as its fee (FAssets records it in
+     * whole gwei); the caller rail, not this method, enforces the minimum fee.
      * Pause-exempt (an exit toward the user) and guarded in its own reentrancy domain, so the
      * signed {executeUserOp} -> sweepRedeem path works - a bounded nesting: the method writes no
      * account state and pulls before it redeems, so it can never touch this account's
      * pre-existing FXRP, and a nested redemption is refused.
      * @param _amount The amount pushed by the subaccount, pulled and redeemed here.
-     * @return _redeemedAmount Amount actually redeemed; the remainder stays on this account.
+     * @return _redeemedAmount Amount actually redeemed, zero below the FAssets minimum; the
+     * remainder stays here or went back to the caller.
      */
     function redeemFromSubaccount(
         uint256 _amount
