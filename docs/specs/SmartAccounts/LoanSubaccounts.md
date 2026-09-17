@@ -425,21 +425,58 @@ OFT's live Flare peer still names the old adapter, it fails in `lzReceive`, befo
 credited; once that peer names the new adapter but the transport's `originPeer` does not yet,
 a token-bearing compose is credited and then fails compose authentication (retriable) and a
 message-only user operation parks. A rotation is therefore a coordinated runbook, never one
-call: **(1) pause the Flare side — the source of new traffic — but not the remote destinations,
-which must keep delivering; (2) cancel the conflicting queued setters on both sides; (3) let
-the old traffic drain fully through `lzCompose`, return packets included; (4) wire the new
-adapter's peers: on every remote chain set the remote OFT's live Flare peer to the new
-adapter, and on Flare set the new adapter's own peer for every registered route's endpoint to
-that route's stored remote peer (the adapter's owner does this on the OFT); (5) on every
-remote chain `setComposeTransport` with `originPeer` = the new adapter; (6) `setFxrpOft` on
-Flare; (7) unpause.** Only two of these orderings are enforced by code — the remote transport
-validates `originPeer` against its OFT's live Flare peer, and `setFxrpOft` re-validates every
-stored route against the new adapter's own peers, so both halves of (4) must precede (5) and
-(6) respectively; keeping `setFxrpOft` last, after the remote side is wired, is an operational
-rule, not a validation. A seamless rotation would need dual-peer acceptance for the
-transition in both the remote OFT's receive path (a standard OFT holds one peer per source
-endpoint) and the compose authentication — a separate future extension, distinct from the
-multi-origin `acceptedOrigins[srcEid]` design deferred under Multiple remote chains.
+call: **(1) quiesce — pause the Flare side, our own source of new traffic, and through the OFT's
+governance stop every other sender on every affected chain, while the remote destinations keep
+delivering; (2) cancel the conflicting queued setters on both sides; (3) let everything already in
+flight drain fully through `lzCompose`, in both directions, return legs and other senders' traffic
+included; (4) migrate the locked backing to the new adapter and reconcile it against the
+outstanding remote supply on every route; (5) wire the new adapter's peers: on every remote chain
+set the remote OFT's live Flare peer to the new adapter, and on Flare set the new adapter's own
+peer for every registered route's endpoint to that route's stored remote peer (the adapter's owner
+does this on the OFT); (6) on every remote chain `setComposeTransport` with `originPeer` = the new
+adapter; (7) `setFxrpOft` on Flare; (8) read every setting back, then unpause and release the other
+senders.** The quiet established in (1) must hold unbroken until (8). Only two of these orderings
+are enforced by code — the remote transport validates `originPeer` against its OFT's live Flare
+peer, and `setFxrpOft` re-validates every stored route against the new adapter's own peers, so
+both halves of (5) must precede (6) and (7) respectively; keeping `setFxrpOft` last, after the
+remote side is wired, is an operational rule, not a validation. A seamless rotation would need
+dual-peer acceptance for the transition in both the remote OFT's receive path (a standard OFT
+holds one peer per source endpoint) and the compose authentication — a separate future extension,
+distinct from the multi-origin `acceptedOrigins[srcEid]` design deferred under Multiple remote
+chains.
+
+**Rewiring moves the routing, not the backing — which is why (4) is a numbered step and not a
+cleanup.** The Flare adapter is a lock box: a send locks FXRP in it (`OFTAdapter._debit`) and an
+arrival releases FXRP from it (`_credit`), so its balance is what backs every FXRP circulating on a
+remote chain. A replacement starts empty, and once the remote OFTs name it the first return home
+reverts in `_credit` for want of tokens — retriable, so nothing is lost, but every user's way back
+is shut until the backing moves. Draining settles what is in flight; it does not retire the supply
+already circulating remotely, which no packet of ours represents. The migration is the OFT's
+governance to perform rather than ours — a canonical `OFTAdapter` exposes no transfer-out path at
+all, so how the locked balance moves is a property of that adapter's implementation and upgrade
+authority, and it must be established as possible before a replacement is contemplated. The
+precondition is that the new adapter hold at least the outstanding remote supply summed over every
+route; where that cannot be arranged the replacement does not proceed, and the supply is settled
+first.
+
+**A rotation is only safe against a system with no traffic in it — which is why (1) and (3) must
+reach every sender, and why the quiet has to hold rather than be checked once.** The adapter is
+shared infrastructure: our pause stops Smart Accounts as a source and nothing else, so stopping the
+rest is the OFT governance's half of (1). Two windows make that structural rather than tidy.
+Between (4) and (5) neither adapter can serve a return — the old one has given up its backing, the
+new one is not yet what the remote OFTs name — and no ordering closes that gap, because the old
+adapter must keep its backing while it is still the routing target and the new one must hold it
+before it becomes one. The window is made safe by being empty, not by being short. In the other
+direction, a send that left through the old adapter before the flip meets a remote OFT whose Flare
+peer has since changed, fails the peer check in `lzReceive`, and leaves its tokens locked in an
+adapter nothing routes to any more. Neither outcome is ours alone; both land on whichever third
+party was mid-transfer. So the cutover plan is approved by the OFT's governance and covers every
+sender on every affected chain: stop new traffic, drain what exists in both directions with return
+legs included, hold that state unbroken through the migration and the rewiring, and release it only
+once (7) reads back correctly. Where that state cannot be established and held, the replacement
+does not proceed. Rehearse the whole of it, backing and quiet included — peer authentication
+rehearsed alone proves the half that was never in doubt. This is address replacement only: an
+upgrade behind the same adapter proxy keeps the balance, and is the subject of the note below.
 
 > **The adapters are upgradeable proxies, and an upgrade is not a rotation.** Every FXRP OFT
 > checked on 2026-09-09 sits behind a proxy — Flare's adapter, its Coston2 counterpart and the
