@@ -59,11 +59,19 @@ abstract contract LoanForkFixture is LoanRemoteFixture {
     /**
      * @notice Forks Ethereum at the pinned block and deploys the stack over the live market.
      * @dev Without a configured endpoint nothing is deployed and every test skips, so the suite
-     * is inert in a run that cannot reach mainnet rather than failing it.
+     * is inert in a run that cannot reach mainnet rather than failing it. That is right for a
+     * local offline run and wrong for CI, where a silent skip is a check nobody made:
+     * `REQUIRE_FORK` turns the skip into a failure, the way `REQUIRE_FORGE_TOOLING` does for the
+     * tooling suites and `REQUIRE_LOAN_OFT_ROUNDTRIP` for the OFT round trip. The endpoint must
+     * be an ARCHIVE one - a pruning node cannot serve the pinned block.
      */
     function _setUpForkFixture() internal {
         string memory rpcUrl = vm.envOr("ETHEREUM_RPC_URL", string(""));
         if (bytes(rpcUrl).length == 0) {
+            require(
+                !vm.envOr("REQUIRE_FORK", false),
+                "REQUIRE_FORK is set: ETHEREUM_RPC_URL must name an archive endpoint serving the pinned block"
+            );
             return;
         }
         vm.createSelectFork(rpcUrl, FORK_BLOCK);

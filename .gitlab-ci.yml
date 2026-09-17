@@ -291,7 +291,45 @@ test:
   - forge install --no-git
   - forge build
   script:
-  - forge test -vvv
+  # Clear inherited RPC values in the command: project variables override YAML job variables.
+  # The dedicated fork job owns the mainnet integration evidence.
+  - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' forge test -vvv
+
+# The Morpho integration, against the live FXRP/RLUSD market on canonical Morpho Blue. It is pinned
+# to one block, so it needs an ARCHIVE endpoint: a pruning node cannot serve it. Kept out of the
+# `test` job so that job stays hermetic and network-free - this is the only place a pipeline reaches
+# mainnet. Without `ETHEREUM_RPC_URL` the suite skips itself, which would make a missing endpoint
+# indistinguishable from a passing run; `REQUIRE_FORK` turns that skip into a failure, as
+# `REQUIRE_FORGE_TOOLING` does for the tooling suites.
+#
+# `ETHEREUM_RPC_URL` is a project CI/CD variable, not a value in this file. Set it masked, and leave
+# it UNPROTECTED, or merge-request pipelines on unprotected branches - the ones a review actually
+# reads - will not receive it.
+#
+# The block's state is not cached between runs. Foundry keeps it under the user's own Foundry home,
+# and neither `FOUNDRY_CACHE_PATH` (which moves only the compiler cache) nor `FOUNDRY_DIR` relocates
+# it into `$CI_PROJECT_DIR`, which is the only place a GitLab cache may live. The cost of refetching
+# was measured rather than guessed: about 56 KB, and roughly 14 seconds against 3 with a warm cache.
+# That is not worth copying the directory in and out of the cache around every job.
+test-integration-fork:
+  image: flarefoundation/foundry-custom:latest
+  stage: test
+  tags: [ flarenetwork-md ]
+  timeout: 15 minutes
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [ .partials, cache-nodejs ] ]
+  variables:
+    REQUIRE_FORK: "1"
+  before_script:
+  - corepack enable pnpm
+  - pnpm install --frozen-lockfile
+  - forge soldeer install
+  - forge install --no-git
+  - forge build
+  script:
+  - forge test -vvv --match-path "test/integration/MorphoLoanSubaccountRemoteFork.t.sol"
 
 ##
 ## COVERAGE
@@ -317,7 +355,8 @@ coverage:
   # what puts `artifacts/` on disk for the selector script the facet fixture calls over FFI.
   - forge build
   script:
-  - pnpm coverage:forge
+  # Override inherited project variables here too, keeping coverage independent of public RPCs.
+  - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' pnpm coverage:forge
   artifacts:
     expire_in: 30 days
     paths:

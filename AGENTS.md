@@ -400,7 +400,9 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
     unless the network they need is configured, so an offline run is inert rather than failing;
     `MorphoLoanSubaccountRemoteFork.t.sol` needs `ETHEREUM_RPC_URL` to name an endpoint that serves state at its
     pinned block (an archive read), and runs with
-    `ETHEREUM_RPC_URL=<url> forge test --match-path "test/integration/*"`. Most free tiers prune that far back;
+    `ETHEREUM_RPC_URL=<url> forge test --match-path "test/integration/*"`. Setting `REQUIRE_FORK` turns that suite's
+    skip into a failure, which is what the `test-integration-fork` CI job does: a silent skip there would be a check
+    nobody made. That job is the only place a pipeline reaches mainnet, which is why it is separate from `test`. Most free tiers prune that far back;
     `https://eth-pokt.nodies.app` served it on 2026-09-09, and `cast block <FORK_BLOCK> --rpc-url <url>` plus one
     `eth_call` at that block is the quickest way to test a candidate before running the suite.
     `SepoliaMarketFork.t.sol` needs `SEPOLIA_RPC_URL` - any current Sepolia endpoint, since it forks the latest
