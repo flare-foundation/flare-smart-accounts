@@ -77,27 +77,11 @@ fi
 
 OUTPUT="forge-deploy-output.txt"
 # a run that fails after the simulation - forge in the broadcast, or the recorder - leaves its
-# output here, and one that printed record lines names deployments that may have landed. That file
-# is evidence the next run's tee would overwrite, so it stops the wrapper until it is dealt with;
-# a leftover without record lines deployed nothing and is overwritten. Every deploy wrapper here
-# tees to this one path, so the leftover is not necessarily this script's: what it says about
-# itself - the network it names, the contracts it recorded - is what points at the run to recover.
-if [[ -f "$OUTPUT" ]] && grep -q '^[[:space:]]*DEPLOYED:' "$OUTPUT"; then
-  left_network="$(sed -n 's/^[[:space:]]*NETWORK:[[:space:]]*//p' "$OUTPUT" | head -n 1)"
-  echo "$OUTPUT is left from a run that deployed something the record never got." >&2
-  echo "It names the network ${left_network:-(none named)} and these contracts:" >&2
-  sed -n 's/^[[:space:]]*DEPLOYED:[[:space:]]*/  /p' "$OUTPUT" >&2
-  echo "Any deploy wrapper writes this file, so start from those lines: they say which script's" >&2
-  echo "run to recover, and its receipts are under broadcast/<that script>.s.sol/<chain id>/." >&2
-  echo "The recorder writes every DEPLOYED line it finds, and the simulation prints one for each" >&2
-  echo "deployment the run intended, landed or not. Settle every transaction hash in that run's" >&2
-  echo "run-latest.json against the chain first: no receipt yet is not proof it never landed - a" >&2
-  echo "pending one can still be mined - so wait for it or replace it at its nonce. An oracle made" >&2
-  echo "by Morpho's factory is in its transaction's logs rather than a receipt's own contract." >&2
-  echo "Then delete the lines that did not land, record what is left" >&2
-  echo "(npx tsx deployment/scripts/save-deployed-addresses.ts), or remove the file, and run again." >&2
-  exit 2
-fi
+# output here, and the next run's tee would overwrite it. The preflight is shared with the other
+# wrappers that tee, so the leftover it describes may be any of their runs.
+# shellcheck source=deployment/scripts/deploy-output-preflight.sh
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-output-preflight.sh"
+deploy_output_preflight "$OUTPUT" || exit $?
 
 forge script deployment/scripts/DeploySepoliaMarket.s.sol:DeploySepoliaMarket \
   --rpc-url "$SEPOLIA_RPC_URL" \

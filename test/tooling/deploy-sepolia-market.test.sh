@@ -15,8 +15,11 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 mkdir -p "$SCRATCH/bin" "$SCRATCH/repo/deployment/scripts"
 cp "$WRAPPER" "$SCRATCH/repo/deployment/scripts/deploy-sepolia-market.sh"
-# the wrapper sources the signer classifier at run time, so the scratch copy needs it too
+# the wrapper sources the signer classifier and the staged-output preflight at run time, so the
+# scratch copy needs them too
 cp "$HERE/../../deployment/scripts/signer-preflight.sh" "$SCRATCH/repo/deployment/scripts/signer-preflight.sh"
+cp "$HERE/../../deployment/scripts/deploy-output-preflight.sh" \
+  "$SCRATCH/repo/deployment/scripts/deploy-output-preflight.sh"
 # the stubs log the command and then one argument per line, so an argument holding a space of its
 # own reads differently from two arguments; they print what FORGE_PRINTS says (the wrapper tees
 # forge's stdout into the recorder's file) and exit as FORGE_EXIT / NPX_EXIT say (0 by default)

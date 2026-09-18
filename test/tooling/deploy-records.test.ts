@@ -5,6 +5,7 @@ import {
   PROTECTED_RECORD_NAMES,
   mergeDeployedRecords,
   parseAllowedReplacements,
+  parseDeployOutput,
 } from "../../deployment/utils/deploy-records";
 
 const record = (name: string, address: string): ContractInfo => ({
@@ -126,4 +127,62 @@ void test("the input record is not mutated", () => {
   const existing = [record("PauseFacet", A)];
   mergeDeployedRecords(existing, [record("PauseFacet", B)]);
   assert.equal(existing[0]?.address, A, "the caller's array was mutated");
+});
+
+// The record lines, read by both steps between a run and the record: the runtime check that decides
+// whether an entry may be promoted, and the recorder that promotes it.
+
+void test("a record line gives the entry's name, its source file and its address", () => {
+  const parsed = parseDeployOutput(
+    ["NETWORK: coston2", `DEPLOYED: LoanSubaccountImplementation, LoanSubaccount.sol: ${A}`].join("\n")
+  );
+  assert.equal(parsed.network, "coston2");
+  assert.deepEqual(parsed.contracts, [
+    { name: "LoanSubaccountImplementation", contractName: "LoanSubaccount.sol", address: A },
+  ]);
+});
+
+void test("the lines are read out of a full forge transcript, in order", () => {
+  const parsed = parseDeployOutput(
+    [
+      "Compiling 3 files with Solc 0.8.35",
+      "  NETWORK: coston2-staging",
+      "Deploying facet: PauseFacet",
+      `  DEPLOYED: PauseFacet, PauseFacet.sol: ${A}`,
+      "== Logs ==",
+      `DEPLOYED: ReaderFacet, ReaderFacet.sol: ${B}`,
+      "Transactions saved to: broadcast/ExecuteDiamondCut.s.sol/114/run-latest.json",
+    ].join("\n")
+  );
+  assert.equal(parsed.network, "coston2-staging");
+  assert.deepEqual(
+    parsed.contracts.map((item) => item.name),
+    ["PauseFacet", "ReaderFacet"]
+  );
+});
+
+void test("a run that deployed nothing parses to no entries rather than failing", () => {
+  const parsed = parseDeployOutput("NETWORK: coston2\nReusing deployed facet at: 0x1\n");
+  assert.equal(parsed.network, "coston2");
+  assert.deepEqual(parsed.contracts, []);
+});
+
+void test("output with no NETWORK line names no network, so a caller can refuse it", () => {
+  const parsed = parseDeployOutput(`DEPLOYED: PauseFacet, PauseFacet.sol: ${A}\n`);
+  assert.equal(parsed.network, undefined);
+  assert.equal(parsed.contracts.length, 1);
+});
+
+void test("a malformed address is not a record line: a truncated one would name a live contract", () => {
+  const parsed = parseDeployOutput(
+    [
+      "NETWORK: coston2",
+      "DEPLOYED: PauseFacet, PauseFacet.sol: 0xabc",
+      `DEPLOYED: ReaderFacet, ReaderFacet.sol: ${B}`,
+    ].join("\n")
+  );
+  assert.deepEqual(
+    parsed.contracts.map((item) => item.name),
+    ["ReaderFacet"]
+  );
 });

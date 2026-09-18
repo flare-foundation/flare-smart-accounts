@@ -86,12 +86,7 @@ contract ExecuteDiamondCut is Script {
             } else {
                 console2.log("Deploying facet:", facetNames[i]);
                 facetAddrs[i] = _deployFacet(facetNames[i]);
-                // always update facet address in deploys file
-                _updateAddressInFile(
-                    deployedContractsFile,
-                    facetNames[i],
-                    facetAddrs[i]
-                );
+                _printDeployedRecord(facetNames[i], facetAddrs[i]);
             }
         }
 
@@ -146,11 +141,7 @@ contract ExecuteDiamondCut is Script {
             return candidate;
         }
         address deployed = _deployFacet(initName);
-        _updateAddressInFile(
-            _deployedContractsFile,
-            initName,
-            deployed
-        );
+        _printDeployedRecord(initName, deployed);
         return deployed;
     }
 
@@ -320,23 +311,6 @@ contract ExecuteDiamondCut is Script {
         vm.writeFile(_path, data);
     }
 
-    function _updateAddressInFile(
-        string memory _contractsFilePath,
-        string memory _facetName,
-        address _facetAddress
-    )
-        internal
-    {
-        string[] memory cmd = new string[](6);
-        cmd[0] = "npx";
-        cmd[1] = "tsx";
-        cmd[2] = "deployment/utils/update-facet-address.ts";
-        cmd[3] = _contractsFilePath;
-        cmd[4] = _facetName;
-        cmd[5] = _addrToString(_facetAddress);
-        vm.ffi(cmd);
-    }
-
     function _deployFacet(
         string memory _name
     )
@@ -432,6 +406,22 @@ contract ExecuteDiamondCut is Script {
             string.concat(_name, ": on-chain code does not match the pinned historical runtime")
         );
         return (pinnedAddr, true);
+    }
+
+    /// @dev The record line every deploy script prints and the wrapper's recorder consumes once
+    /// forge has exited. Printing rather than writing is what keeps a run that never broadcast out
+    /// of the deployment record: a file written from here would outlive the simulation it was
+    /// computed in. A cut deploys facets and the initializer, whose record name is the contract
+    /// name, so one string serves as both halves of the line.
+    function _printDeployedRecord(
+        string memory _name,
+        address _address
+    )
+        internal pure
+    {
+        console2.log(
+            string.concat("DEPLOYED: ", _name, ", ", _name, ".sol: ", _addrToString(_address))
+        );
     }
 
     /// @dev Hashes the code without its CBOR metadata trailer. The trailer length is read from

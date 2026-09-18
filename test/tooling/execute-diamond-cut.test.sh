@@ -6,6 +6,11 @@
 # invoked exactly when the cut executed, with the staging network name when it is one, and a
 # missing cut file or a bad argument count stops the run; a failing forge script skips the
 # verification and a failing verification fails the wrapper.
+#
+# The record steps are here for the same reason. The cut's facet addresses reach the deployment
+# record only after forge has exited, through the runtime check and then the recorder, so each
+# step's failure must stop the next one: that ordering is what keeps a run that never broadcast
+# out of the record, and it is invisible in the script itself.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,17 +21,31 @@ trap 'rm -rf "$SCRATCH"' EXIT
 mkdir -p "$SCRATCH/bin" "$SCRATCH/repo/deployment/scripts" "$SCRATCH/repo/deployment/cuts/coston2" \
   "$SCRATCH/repo/deployment/cuts/coston2-staging"
 cp "$WRAPPER" "$SCRATCH/repo/deployment/scripts/execute-diamond-cut.sh"
-# the wrapper sources the signer classifier at run time, so the scratch copy needs it too
+# the wrapper sources the signer classifier and the staged-output preflight at run time, so the
+# scratch copy needs them too
 cp "$HERE/../../deployment/scripts/signer-preflight.sh" "$SCRATCH/repo/deployment/scripts/signer-preflight.sh"
+cp "$HERE/../../deployment/scripts/deploy-output-preflight.sh" \
+  "$SCRATCH/repo/deployment/scripts/deploy-output-preflight.sh"
 # the stubs log their arguments in call order and exit as FORGE_EXIT / NPX_EXIT say (0 by default)
 cat > "$SCRATCH/bin/forge" <<'STUB'
 #!/usr/bin/env bash
 printf 'forge %s\n' "$*" >> "$CALL_LOG"
+# the wrapper tees forge's stdout into the file the record steps read, so a scenario that cares
+# what they see says it here
+printf '%s' "${FORGE_PRINTS:-}"
 exit "${FORGE_EXIT:-0}"
 STUB
 cat > "$SCRATCH/bin/npx" <<'STUB'
 #!/usr/bin/env bash
 printf 'npx %s\n' "$*" >> "$CALL_LOG"
+# three npx steps run in order, so failing them all at once cannot show which one stopped the
+# rest: NPX_FAIL_SCRIPT fails one by name and leaves the others passing
+if [[ -n "${NPX_FAIL_SCRIPT:-}" ]]; then
+  case "$*" in
+    *"$NPX_FAIL_SCRIPT"*) exit "${NPX_FAIL_STATUS:-1}" ;;
+  esac
+  exit 0
+fi
 exit "${NPX_EXIT:-0}"
 STUB
 chmod +x "$SCRATCH/bin/forge" "$SCRATCH/bin/npx"
@@ -58,6 +77,10 @@ expect() {
 cut_file() {
   printf '{"diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c", "facets": [], "execute": %s}\n' "$2" > "$1"
 }
+# the calls in order, one word each: `forge`, then the script name of every npx step
+call_sequence() {
+  sed -e 's|^forge .*|forge|' -e 's|^npx tsx deployment/scripts/\([a-z-]*\)\.ts.*|\1|' "$CALL_LOG" | tr '\n' ' '
+}
 
 echo "execute-diamond-cut.sh scenarios"
 
@@ -68,14 +91,14 @@ expect "executed cut: forge ran with the base network and staging=false" \
   "$(grep -c 'forge script .* --sig run(string,string,bool) coston2 executed false' "$CALL_LOG")" "1"
 expect "executed cut: the verifier ran for coston2 with --no-build" \
   "$(grep -c '^npx tsx deployment/scripts/verify-diamond.ts coston2 executed --no-build$' "$CALL_LOG")" "1"
-expect "executed cut: exactly two calls, forge first, then the verifier" \
-  "$(wc -l < "$CALL_LOG" | tr -d ' ') $(sed -n 1p "$CALL_LOG" | cut -d' ' -f1) $(sed -n 2p "$CALL_LOG" | cut -d' ' -f1)" "2 forge npx"
+expect "executed cut: forge, then the record steps, then the verifier" \
+  "$(call_sequence)" "forge verify-deployed-runtime save-deployed-addresses verify-diamond "
 
-# 2. a prepared-only cut is not verified by the wrapper
+# 2. a prepared-only cut still records what it deployed, and is not verified by the wrapper
 cut_file "$SCRATCH/repo/deployment/cuts/coston2/prepared.json" false
 expect "prepared cut: wrapper exits 0" "$(run_wrapper coston2 prepared)" "0"
-expect "prepared cut: forge ran" "$(grep -c '^forge ' "$CALL_LOG")" "1"
-expect "prepared cut: no verification" "$(grep -c '^npx ' "$CALL_LOG")" "0"
+expect "prepared cut: forge and the record steps ran, the verifier did not" \
+  "$(call_sequence)" "forge verify-deployed-runtime save-deployed-addresses "
 
 # 3. a non-boolean execute flag is rejected before forge runs
 cut_file "$SCRATCH/repo/deployment/cuts/coston2/numeric.json" 1
@@ -107,15 +130,44 @@ for alias in ethereum-staging sepolia-staging; do
   expect "$alias: forge did not run" "$(grep -c '^forge ' "$CALL_LOG")" "0"
 done
 
-# 7. a failing forge script stops the run with its status; nothing is verified
+# 7. a failing forge script stops the run with its status; nothing is recorded or verified. This
+# is the case the in-script record write could not survive: forge runs the whole script in
+# simulation first, so a write from in there would already have named addresses this run never
+# deployed
 expect "forge failure: wrapper exits with forge's status" "$(FORGE_EXIT=3 run_wrapper coston2 executed)" "3"
 expect "forge failure: forge ran once" "$(grep -c '^forge ' "$CALL_LOG")" "1"
-expect "forge failure: no verification" "$(grep -c '^npx ' "$CALL_LOG")" "0"
+expect "forge failure: nothing recorded and nothing verified" "$(grep -c '^npx ' "$CALL_LOG")" "0"
 
-# 8. a failing verification fails the wrapper after the cut
-expect "verifier failure: wrapper exits with the verifier's status" "$(NPX_EXIT=1 run_wrapper coston2 executed)" "1"
-expect "verifier failure: forge then the verifier ran" \
-  "$(sed -n 1p "$CALL_LOG" | cut -d' ' -f1) $(sed -n 2p "$CALL_LOG" | cut -d' ' -f1)" "forge npx"
+# 8. each record step stops the ones after it
+expect "runtime check failure: wrapper exits with its status" \
+  "$(NPX_FAIL_SCRIPT=verify-deployed-runtime.ts run_wrapper coston2 executed)" "1"
+expect "runtime check failure: the recorder never ran" "$(call_sequence)" "forge verify-deployed-runtime "
+expect "recorder failure: wrapper exits with its status" \
+  "$(NPX_FAIL_SCRIPT=save-deployed-addresses.ts NPX_FAIL_STATUS=2 run_wrapper coston2 executed)" "2"
+expect "recorder failure: the diamond was not verified against a record it never got" \
+  "$(call_sequence)" "forge verify-deployed-runtime save-deployed-addresses "
+expect "verifier failure: wrapper exits with the verifier's status" \
+  "$(NPX_FAIL_SCRIPT=verify-diamond.ts run_wrapper coston2 executed)" "1"
+expect "verifier failure: it ran last" \
+  "$(call_sequence)" "forge verify-deployed-runtime save-deployed-addresses verify-diamond "
+
+# 9. forge's record lines reach the file the record steps read
+expect "staged output: wrapper exits 0" \
+  "$(FORGE_PRINTS='NETWORK: coston2
+DEPLOYED: OwnershipFacet, OwnershipFacet.sol: 0x1234123412341234123412341234123412341234
+' run_wrapper coston2 executed)" "0"
+expect "staged output: the record line was teed to the recorder's file" \
+  "$(grep -c '^DEPLOYED: OwnershipFacet, OwnershipFacet.sol: 0x1234123412341234123412341234123412341234$' \
+    "$SCRATCH/repo/forge-deploy-output.txt")" "1"
+
+# 10. that file left behind names deployments the record never got, so the next run stops rather
+# than overwriting it - the stub recorder above does not consume it, which is what a failed one
+# would also leave
+expect "stale staged output: refused" "$(run_wrapper coston2 executed)" "2"
+expect "stale staged output: forge did not run" "$(grep -c '^forge ' "$CALL_LOG")" "0"
+expect "stale staged output: the message names what to recover" \
+  "$(grep -c 'OwnershipFacet, OwnershipFacet.sol' "$SCRATCH/out.log")" "1"
+rm -f "$SCRATCH/repo/forge-deploy-output.txt"
 
 if [[ "$failures" -ne 0 ]]; then
   echo "$failures scenario(s) FAILED"

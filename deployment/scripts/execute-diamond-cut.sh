@@ -69,6 +69,9 @@ fi
 # shellcheck source=deployment/scripts/signer-preflight.sh
 source "$(dirname "${BASH_SOURCE[0]}")/signer-preflight.sh"
 signer_preflight ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"} || exit $?
+# this wrapper's output is parsed by the recorder below, so a flag that silences or reshapes it
+# is refused here rather than after forge has already broadcast
+refuse_output_flags ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"} || exit $?
 
 if [[ $SIGNER_SUPPLIED -eq 0 ]]; then
   if [[ -z "${DEPLOYER_PRIVATE_KEY:-}" ]]; then
@@ -98,13 +101,30 @@ EXECUTED=$(node -e '
   }
   process.stdout.write(String(c.execute === true));
 ' "$CUT_FILE")
+OUTPUT="forge-deploy-output.txt"
+# a run that fails after the simulation - forge in the broadcast, the runtime check, or the
+# recorder - leaves its output here, and the next run's tee would overwrite it. The preflight is
+# shared with the other wrappers that tee, so the leftover it describes may be any of their runs.
+# shellcheck source=deployment/scripts/deploy-output-preflight.sh
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-output-preflight.sh"
+deploy_output_preflight "$OUTPUT" || exit $?
+
 # Run forge script
 forge script deployment/scripts/ExecuteDiamondCut.s.sol:ExecuteDiamondCut \
   --rpc-url "${!RPC_ENV_VAR}" \
   --offline \
   --broadcast \
   --sig "run(string,string,bool)" "$BASE_NETWORK" "$CUT_JSON" "$STAGING" \
-  ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"}
+  ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"} | tee "$OUTPUT"
+
+# The record is written here rather than from inside the script, and only now: forge runs the whole
+# script in simulation before it broadcasts, so a write from in there would name an address a failed
+# or reverted run never deployed, and would survive the failure. Reaching this line means forge
+# exited 0; the runtime check then asks the chain whether each printed address carries the code it
+# is about to be recorded as, and only then does the recorder promote the lines. A failure at either
+# step leaves both the record and the output file untouched, which is what a recovery starts from.
+npx tsx deployment/scripts/verify-deployed-runtime.ts "$NETWORK"
+npx tsx deployment/scripts/save-deployed-addresses.ts
 
 # A cut the script executed (`"execute": true`) is read back at once: the diamond must expose
 # exactly the recorded facets' selectors with the ERC-165 flags and the owner in place. A cut

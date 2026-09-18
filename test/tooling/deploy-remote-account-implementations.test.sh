@@ -16,8 +16,11 @@ trap 'rm -rf "$SCRATCH"' EXIT
 
 mkdir -p "$SCRATCH/bin" "$SCRATCH/repo/deployment/scripts"
 cp "$WRAPPER" "$SCRATCH/repo/deployment/scripts/deploy-remote-account-implementations.sh"
-# the wrapper sources the signer classifier at run time, so the scratch copy needs it too
+# the wrapper sources the signer classifier and the staged-output preflight at run time, so the
+# scratch copy needs them too
 cp "$HERE/../../deployment/scripts/signer-preflight.sh" "$SCRATCH/repo/deployment/scripts/signer-preflight.sh"
+cp "$HERE/../../deployment/scripts/deploy-output-preflight.sh" \
+  "$SCRATCH/repo/deployment/scripts/deploy-output-preflight.sh"
 
 cat > "$SCRATCH/bin/forge" <<'STUB'
 #!/usr/bin/env bash

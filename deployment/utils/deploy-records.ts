@@ -21,6 +21,39 @@ export type ContractInfo = {
   address: string;
 };
 
+/** What a deploy script's printed record lines say: which network, and which entries. */
+export type DeployOutput = {
+  /** From the `NETWORK:` line; undefined when the output carries none. */
+  network: string | undefined;
+  contracts: ContractInfo[];
+};
+
+/**
+ * Reads the record lines a deploy script prints, as the wrappers capture them.
+ *
+ * `NETWORK:` names the record file and `DEPLOYED: <name>, <Source>.sol: <address>` names one entry.
+ * The grammar lives here because two steps read the same file: the runtime check that decides
+ * whether an entry may be promoted, and the recorder that promotes it. Anything else in the output
+ * - forge's own logging, the script's progress lines - is ignored, so the file may be a full
+ * transcript rather than a prepared list.
+ */
+export function parseDeployOutput(output: string): DeployOutput {
+  const contracts: ContractInfo[] = [];
+  let network: string | undefined;
+
+  for (const line of output.split("\n")) {
+    const deployed = line.match(/^\s*DEPLOYED:\s*([^,]+),\s*([^:]+):\s*(0x[a-fA-F0-9]{40})$/);
+    const named = line.match(/^\s*NETWORK:\s*([a-zA-Z0-9_-]+)/);
+    if (deployed && deployed[1] && deployed[2] && deployed[3]) {
+      contracts.push({ name: deployed[1].trim(), contractName: deployed[2].trim(), address: deployed[3].trim() });
+    } else if (named && named[1]) {
+      network = named[1].trim();
+    }
+  }
+
+  return { network, contracts };
+}
+
 /**
  * Records that name a contract users hold a position in, whose address is not supposed to change
  * for the life of a deployment. Their existing entry may not be replaced without saying so.

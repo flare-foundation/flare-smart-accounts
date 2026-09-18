@@ -5,6 +5,7 @@ import {
   PROTECTED_RECORD_NAMES,
   mergeDeployedRecords,
   parseAllowedReplacements,
+  parseDeployOutput,
 } from "../utils/deploy-records";
 import { isLoanChainNetwork, validateNetwork } from "../utils/networks";
 
@@ -12,25 +13,9 @@ import { isLoanChainNetwork, validateNetwork } from "../utils/networks";
 const outputPath = "forge-deploy-output.txt";
 const output = fs.readFileSync(outputPath, "utf8");
 
-const lines = output.split("\n");
-const contracts: ContractInfo[] = [];
-let network: string = "unknown";
+const { network, contracts } = parseDeployOutput(output);
 
-lines.forEach((line: string) => {
-  const match = line.match(/^\s*DEPLOYED:\s*([^,]+),\s*([^:]+):\s*(0x[a-fA-F0-9]{40})$/);
-  const matchNetwork = line.match(/^\s*NETWORK:\s*([a-zA-Z0-9_-]+)/);
-  if (match && match[1] && match[2] && match[3]) {
-    contracts.push({
-      name: match[1].trim(),
-      contractName: match[2].trim(),
-      address: match[3].trim(),
-    });
-  } else if (matchNetwork && matchNetwork[1]) {
-    network = matchNetwork[1].trim();
-  }
-});
-
-if (network === "unknown") {
+if (network === undefined) {
   throw new Error("Network name not found in output");
 }
 

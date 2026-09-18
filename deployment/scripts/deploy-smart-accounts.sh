@@ -67,6 +67,13 @@ signer_preflight ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"} || exit $?
 # is refused here rather than after forge has already broadcast
 refuse_output_flags ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"} || exit $?
 
+# a run that fails after the simulation - forge in the broadcast, or the recorder - leaves its
+# output here, and the next run's tee would overwrite it. The preflight is shared with the other
+# wrappers that tee, so the leftover it describes may be any of their runs.
+# shellcheck source=deployment/scripts/deploy-output-preflight.sh
+source "$(dirname "${BASH_SOURCE[0]}")/deploy-output-preflight.sh"
+deploy_output_preflight forge-deploy-output.txt || exit $?
+
 if [[ $SIGNER_SUPPLIED -eq 0 ]]; then
   if [[ -z "${DEPLOYER_PRIVATE_KEY:-}" ]]; then
     echo "DEPLOYER_PRIVATE_KEY is required unless a signer is supplied" >&2

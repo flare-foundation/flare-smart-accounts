@@ -102,7 +102,7 @@ pnpm verify_contracts <network>
   chose. It is a seam because a test cannot name that account otherwise: `vm.prank` and a broadcast are
   mutually exclusive, so a harness overrides it. What counts as a signer, and the one combination refused
   outright, live in
-  `deployment/scripts/signer-preflight.sh`, which also refuses `--quiet`/`-q`/`--json` for the eight wrappers
+  `deployment/scripts/signer-preflight.sh`, which also refuses `--quiet`/`-q`/`--json` for the nine wrappers
   whose output the recorder parses: forge broadcasts before the recorder runs, so silencing its output
   deploys a contract that no record then names. Why the flags must never ship without that preflight is in
   [`deployment/README.md`](./deployment/README.md#signing).
@@ -203,8 +203,11 @@ own test against a fake JSON-RPC server, the recorder's and the explorer submiss
 stubbed `forge`, so the argument vector itself is pinned), the market script's own output against a local chain
 answering with Sepolia's id (`deploy-sepolia-market.output.test.ts`, which needs `anvil`, `forge` and no Sepolia
 deployment record, skips without them, and turns those skips into a failure when `REQUIRE_FORGE_TOOLING` is set -
-which is what the Foundry-equipped `test-tooling-forge` job does, since the node-only job cannot run it) and the
-shell scenarios of the cut wrapper, the configuration wrapper and the market wrapper. They live under `test/` like
+which is what the Foundry-equipped `test-tooling-forge` job does, since the node-only job cannot run it), the cut
+executor's own output against a local chain answering with Coston2's id (`execute-diamond-cut.output.test.ts`, the
+same shape and the same gate: the record lines it prints are observable nowhere else, forge swallowing console
+output before a cheatcode can see it) and the shell scenarios of the cut wrapper, the configuration wrapper and
+the market wrapper. They live under `test/` like
 every other suite and are held to the same lint rules as the tooling they exercise, not the looser ones the shared
 config gives `test/**/*.ts` - `eslint.config.mjs` exempts this directory from that relaxation. Run them from the
 repository root: several read pinned sources by a path relative to it. CI runs the script too.
@@ -256,7 +259,8 @@ deployment/
   market-config/     # The Sepolia rehearsal market's parameters: our test loan token and feeds, the oracle, the market, its liquidity
   lib/               # Solidity the scripts share: the network table, the pinned Ethereum init code, the type allocations, the config decode structs
   scripts/           # Forge deploy scripts (.s.sol), bash wrappers, TS helpers - no tests;
-                     #   signer-preflight.sh is sourced by every wrapper that broadcasts
+                     #   signer-preflight.sh is sourced by every wrapper that broadcasts, and
+                     #   deploy-output-preflight.sh by every wrapper that tees a run to the recorder
   utils/             # Deployment utility scripts - no tests; both are tested from test/tooling/
 scripts/             # Repository utility scripts
 audit/               # Security audit reports
@@ -451,6 +455,16 @@ How the tooling works — the cut planner (`check_cut`), the diamond verifier be
 guard on the live entries and the frozen creation-code rule that keeps cut plans stable — is
 [`deployment/README.md`](./deployment/README.md). The ordered release sequence is
 [`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md).
+
+One rule binds every deploy script: **none of them writes the deployment record.** A script prints a
+`DEPLOYED:` line per deployment, the wrapper tees it, and the record is written only after forge has
+exited. `forge script` runs the whole script in simulation before it broadcasts, and a filesystem
+write is not EVM state, so a record written from inside a script survives the failure of the run that
+computed it. Never add one. The cut wrapper goes one step further and confirms on chain that each
+printed address carries the runtime it is about to be recorded as; the other wrappers do not, because
+that check suits a run whose every entry is a plain contract built from this repository's artifacts.
+The steps and what a leftover output file means are in
+[`deployment/README.md`](./deployment/README.md#nothing-is-recorded-until-the-chain-has-it).
 
 Two of its rules bind code changes. The facets that inline the `PersonalAccounts` or `Subaccounts`
 address derivation bake the frozen `PROXY_CREATION_CODE` constants into their runtime bytecode, so
