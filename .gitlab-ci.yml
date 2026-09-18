@@ -245,7 +245,9 @@ slither:
   image: flarefoundation/foundry-custom:latest
   stage: test
   tags: [ flarenetwork-md ]
-  timeout: 10 minutes
+  # The via_ir build in before_script is 340-410s of this job on a loaded runner, so a
+  # 10-minute ceiling leaves the job's own work no room to absorb that variance.
+  timeout: 20 minutes
   needs:
   - job: build-node-modules
     artifacts: false
@@ -268,7 +270,9 @@ slither:
 ##  TESTS
 ##
 test:
-  timeout: 10 minutes
+  # The via_ir build in before_script is 340-410s of this job on a loaded runner, so a
+  # 10-minute ceiling leaves the job's own work no room to absorb that variance.
+  timeout: 20 minutes
   stage: test
   tags: [ flarenetwork-md ]
   image: flarefoundation/foundry-custom:latest
@@ -293,7 +297,9 @@ coverage:
   image: flarefoundation/foundry-custom:latest
   stage: test
   tags: [ flarenetwork-md ]
-  timeout: 10 minutes
+  # The via_ir build in before_script is 340-410s of this job on a loaded runner, so a
+  # 10-minute ceiling leaves the job's own work no room to absorb that variance.
+  timeout: 20 minutes
   needs:
   - job: build-node-modules
     artifacts: false
@@ -303,6 +309,8 @@ coverage:
   - pnpm install --frozen-lockfile
   - forge soldeer install
   - forge install --no-git
+  # `forge coverage` compiles its own instrumented tree and writes no artifacts, so this build is
+  # what puts `artifacts/` on disk for the selector script the facet fixture calls over FFI.
   - forge build
   script:
   - pnpm coverage:forge
