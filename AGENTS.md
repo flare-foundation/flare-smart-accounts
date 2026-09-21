@@ -387,8 +387,10 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
     plus `deployment` for the deploy scripts and cut tooling; mostly one file per contract, with the pinning
     suites (storage layout, init code, Morpho conformance) beside them.
   - `test/adversarial/`: attack and ordering tests across whole flows; every test names the attack it rules out.
-  - `test/invariants/`: stateful invariant campaigns, bounded and with a fixed seed; a smoke test pins that every
-    handler path executes.
+  - `test/invariants/`: stateful invariant campaigns, bounded and with a fixed seed. The smoke test establishes
+    handler reachability; it does not prove which paths the random campaign reaches. Targeted fuzz sequences in
+    `LoanFeeInvariants.t.sol` require rare fee transitions across randomized inputs, asserting action counts and
+    all invariants at intermediate states. Do not require every rare outcome in each ordinary invariant run.
   - `test/fuzz/`: property tests, each stated as the spec's formula computed independently of the contract.
   - `test/integration/`: suites against contracts we did not write — either real deployed ones on a pinned mainnet
     fork, or canonical ones deployed locally. `MorphoLoanSubaccountRemoteCanonicalCompose.t.sol` is the second kind: it

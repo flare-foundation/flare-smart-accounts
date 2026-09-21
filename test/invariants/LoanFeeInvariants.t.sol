@@ -8,7 +8,11 @@ import {LoanFeeHandler} from "../utils/LoanFeeHandler.sol";
  * @title LoanFeeInvariantsTest
  * @notice The Flare fee's stateful invariants over `LoanFeeHandler`: deterministic (fixed seed),
  * bounded (64 runs of depth 64) sequences over the real account logic and the local dependency
- * mocks. The smoke test below pins that every handler path executes, so the campaign is not vacuous.
+ * mocks. The smoke test proves handler reachability, not which outcomes a random run reaches.
+ * Targeted fuzz sequences require fee-bearing exits, elapsed-terms checkpoints, frozen-recipient
+ * reservations and retries, external debt changes and dust cleanup across randomized inputs.
+ * Each sequence checks successful-action counts and the invariants at its intermediate states;
+ * rare outcomes are not required from every ordinary invariant run.
  */
 /// forge-config: default.invariant.runs = 64
 /// forge-config: default.invariant.depth = 64
@@ -153,6 +157,190 @@ contract LoanFeeInvariantsTest is Test {
         assertGt(handler.successfulFeeBearingWithdrawals(), 0);
         assertGt(handler.elapsedTermsChangeCheckpoints(), 0);
         assertTrue(handler.depositsCorrect());
+        invariant_CollectibleFloorsAccumulator();
+        invariant_FeeAccountingAndTerms();
+        invariant_LoanTokenConservation();
+        invariant_RepaymentDestinations();
+        invariant_ExitSecurity();
+        invariant_DepositAccounting();
+    }
+
+    /// A healthy sequence must actually borrow and withdraw, including an elapsed period priced
+    /// with the old snapshot. Caught reverts or handler no-ops must not count as coverage.
+    function testFuzzFeeBearingWithdrawalAcrossTermsChange(
+        uint96 _borrow,
+        uint64 _floor,
+        uint32 _elapsed,
+        uint64 _withdraw
+    )
+        public
+    {
+        handler.borrow(uint96(bound(_borrow, 1e18, 500e18)), 1e6);
+        assertEq(handler.successfulBorrows(), 1, "healthy borrow did not execute");
+        _assertAllInvariants();
+
+        uint64 floor = uint64(bound(_floor, 0.03e18, 0.1e18));
+        uint32 elapsed = uint32(bound(_elapsed, 1 hours, 30 days));
+        handler.changeTerms(floor, 0);
+        handler.checkpointFee();
+        assertEq(handler.checkpoints(), 1);
+        (uint256 principal, uint256 feeBefore, ) = handler.feeState();
+        handler.advanceTime(elapsed, 0);
+        handler.changeTerms(floor + uint64(0.1e18), 0);
+        assertEq(handler.termsChanges(), 2);
+        _assertAllInvariants();
+
+        // At most 100 FXRP leaves a position worth over 19,000 RLUSD, comfortably covering
+        // the bounded debt and fee; a refused withdrawal is a regression, not a valid sample.
+        handler.withdraw(uint64(bound(_withdraw, 1, 100e6)));
+        assertEq(handler.successfulWithdrawals(), 1, "healthy withdrawal did not execute");
+        assertEq(handler.successfulFeeBearingWithdrawals(), 1);
+        assertEq(handler.elapsedTermsChangeCheckpoints(), 1);
+        (, uint256 feeAfter, uint256 collectible) = handler.feeState();
+        assertEq(feeAfter, feeBefore + principal * floor * elapsed / 365 days);
+        assertGt(collectible, 0);
+        _assertAllInvariants();
+
+        handler.repay(1e18, 1);
+        assertEq(handler.successfulRepays(), 1);
+        assertGt(handler.feeTransfers(), 0);
+        _assertAllInvariants();
+    }
+
+    /// A partial repayment defers the frozen collector's share; closing reserves it, and a
+    /// later repayment pays it while still paused. Random amounts must reach all three stages.
+    function testFuzzFrozenFeeReservationAndRetryWhilePaused(
+        uint32 _elapsed,
+        uint96 _partial,
+        uint96 _surplus,
+        uint64 _collateral
+    )
+        public
+    {
+        handler.advanceTime(uint32(bound(_elapsed, 1 hours, 30 days)), 0);
+        handler.setRecipientFrozen(true);
+        handler.setPaused(true);
+        assertEq(handler.freezes(), 1);
+        assertEq(handler.pauses(), 1);
+        handler.deposit(uint64(bound(_collateral, 1, 1_000e6)));
+        assertEq(handler.successfulDeposits(), 1, "paused defensive deposit did not execute");
+        _assertAllInvariants();
+
+        handler.repay(uint96(bound(_partial, 1e18, 100e18)), 1);
+        assertEq(handler.successfulRepays(), 1);
+        (uint256 principal, , uint256 collectible) = handler.feeState();
+        assertGt(principal, 0);
+        assertGt(collectible, 0);
+        assertEq(handler.feeTransfers(), 0);
+        assertEq(handler.feeReservations(), 0);
+        _assertAllInvariants();
+
+        handler.repay(uint96(bound(_surplus, 1, 100e18)), 0);
+        assertEq(handler.successfulRepays(), 2);
+        assertEq(handler.feeReservations(), 1);
+        assertEq(handler.surplusPushes(), 1);
+        (principal, , collectible) = handler.feeState();
+        assertEq(principal, 0);
+        assertGt(collectible, 0);
+        _assertAllInvariants();
+
+        handler.advanceTime(uint32(bound(_elapsed, 1, 30 days)), 0);
+        handler.checkpointFee();
+        assertEq(handler.zeroPrincipalCheckpoints(), 1);
+        (, , uint256 stillReserved) = handler.feeState();
+        assertEq(stillReserved, collectible);
+        _assertAllInvariants();
+
+        handler.setRecipientFrozen(false);
+        assertEq(handler.freezes(), 2);
+        handler.repay(1, 1);
+        assertEq(handler.successfulRepays(), 3);
+        assertEq(handler.feeTransfers(), 1);
+        assertEq(handler.surplusPushes(), 2);
+        (, , collectible) = handler.feeState();
+        assertEq(collectible, 0);
+        _assertAllInvariants();
+    }
+
+    /// Partial external debt changes leave the principal stale until checkpointed. A tiny
+    /// positive fee then survives closing as dust and is forgiven only by the debt-free exit.
+    function testFuzzExternalDebtChangesThenDustCleanup(
+        uint96 _externalShares,
+        uint96 _liquidationShares,
+        uint32 _elapsed,
+        bool _liquidationFirst
+    )
+        public
+    {
+        handler.changeTerms(1, 0);
+        handler.checkpointFee();
+        assertEq(handler.termsChanges(), 1);
+        assertEq(handler.checkpoints(), 1);
+        (uint256 principal, , ) = handler.feeState();
+        uint32 elapsed = uint32(bound(_elapsed, 1, 1 hours));
+        handler.advanceTime(elapsed, 0);
+
+        // Each retires at most about 100 RLUSD of the initial 5,000 RLUSD debt, so neither
+        // operation can exhaust the next one's shares or collateral precondition.
+        uint96 externalShares = uint96(bound(_externalShares, 1e24, 1e26));
+        uint96 liquidationShares = uint96(bound(_liquidationShares, 1e24, 1e26));
+        if (_liquidationFirst) {
+            handler.liquidate(liquidationShares, false);
+            assertEq(handler.liquidations(), 1);
+            _assertAllInvariants();
+            handler.externalRepay(externalShares, false);
+        } else {
+            handler.externalRepay(externalShares, false);
+            assertEq(handler.externalRepayments(), 1);
+            _assertAllInvariants();
+            handler.liquidate(liquidationShares, false);
+        }
+        assertEq(handler.externalRepayments(), 1);
+        assertEq(handler.liquidations(), 1);
+        (uint256 stalePrincipal, , ) = handler.feeState();
+        assertEq(stalePrincipal, principal);
+        _assertAllInvariants();
+
+        handler.checkpointFee();
+        assertEq(handler.checkpoints(), 2);
+        (uint256 syncedPrincipal, uint256 dust, uint256 collectible) = handler.feeState();
+        assertLt(syncedPrincipal, principal);
+        assertGt(syncedPrincipal, 0);
+        assertEq(dust, principal * elapsed / 365 days);
+        assertGt(dust, 0);
+        assertLt(dust, 1e18);
+        assertEq(collectible, 0);
+        _assertAllInvariants();
+
+        handler.repay(1, 0);
+        assertEq(handler.successfulRepays(), 1);
+        (syncedPrincipal, dust, collectible) = handler.feeState();
+        assertEq(syncedPrincipal, 0);
+        assertGt(dust, 0);
+        assertEq(collectible, 0);
+        assertEq(handler.dustForfeitures(), 0);
+        _assertAllInvariants();
+
+        handler.withdraw(1);
+        assertEq(handler.successfulWithdrawals(), 1);
+        assertEq(handler.dustForfeitures(), 1);
+        (, dust, ) = handler.feeState();
+        assertEq(dust, 0);
+        _assertAllInvariants();
+
+        uint256 zeroPrincipalBefore = handler.zeroPrincipalCheckpoints();
+        handler.advanceTime(elapsed, 0);
+        handler.checkpointFee();
+        assertEq(handler.checkpoints(), 3);
+        assertEq(handler.zeroPrincipalCheckpoints(), zeroPrincipalBefore + 1);
+        (, dust, ) = handler.feeState();
+        assertEq(dust, 0);
+        _assertAllInvariants();
+    }
+
+    function _assertAllInvariants()
+        private view
+    {
         invariant_CollectibleFloorsAccumulator();
         invariant_FeeAccountingAndTerms();
         invariant_LoanTokenConservation();
