@@ -41,7 +41,13 @@ The user can therefore sweep any of these three tokens from their redeemer accou
 
 `forceApprove` is the OZ helper that handles ERC-20s like USDT that revert on a re-approve from non-zero.
 
-`setMaxAllowances` is `onlyComposer` and is only invoked from `_getOrCreateRedeemerAccount` on the freshly-deployed branch. Existing accounts hit the early-return branch, so subsequent redemptions never re-prime allowances — there is no top-up path. In practice this never matters: each allowance starts at `type(uint256).max`, and ordinary `transferFrom` calls reduce it by amounts that are negligible compared to that ceiling.
+`setMaxAllowances` is `onlyComposer` and is only invoked from `_getOrCreateRedeemerAccount` on the freshly-deployed branch. Existing accounts hit the early-return branch, so subsequent redemptions never re-prime allowances — there is no top-up path. For the three approved tokens, ordinary recovery amounts are negligible compared to the initial `type(uint256).max` allowance; whether transfers reduce that allowance depends on the token.
+
+### Supported recovery tokens
+
+Recovery through these allowances covers only the account's three pre-approved tokens: `fAsset` (FXRP for the FXRP composer), the configured `stableCoin`, and `wNat`. It does not cover an arbitrary collateral token paid by FAssets or another token sent to the account. The owner has no general token-transfer or approval entry point, so a payout in a fourth token can remain inaccessible through the current owner API until governance provides a recovery path through an implementation upgrade.
+
+Before FAssets enables another payout collateral token, operators must compare the AssetManager's full payout-token set with the allowances on affected redeemer accounts and coordinate any necessary recovery upgrade. Check existing accounts as well as newly created ones: adding a collateral token to FAssets or making another redemption does not grant an allowance for it. Establish and test recovery before exposing composer redemptions to the new collateral.
 
 ## Redeem entry
 
