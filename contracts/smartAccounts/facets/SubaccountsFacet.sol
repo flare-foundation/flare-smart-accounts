@@ -10,7 +10,6 @@ import {
 } from "../../userInterfaces/facets/ISubaccountsFacet.sol";
 import {Subaccounts} from "../library/Subaccounts.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
-import {Pause} from "../library/Pause.sol";
 import {FacetBase} from "./FacetBase.sol";
 
 /**
@@ -21,11 +20,6 @@ import {FacetBase} from "./FacetBase.sol";
  * {MorphoLoanMarketsFacet}.
  */
 contract SubaccountsFacet is IISubaccountsFacet, FacetBase {
-
-    modifier notPaused {
-        Pause.checkNotPaused();
-        _;
-    }
 
     /// @inheritdoc IISubaccountsFacet
     function setSubaccountImplementation(
@@ -44,17 +38,13 @@ contract SubaccountsFacet is IISubaccountsFacet, FacetBase {
         uint256 _subaccountType
     )
         external
-        notPaused
         returns (address)
     {
-        // use the registered parent when present, otherwise its frozen computed address:
-        // this preserves pre-PA materialization (materialize-to-sweep, and the loan-chain
-        // diamond before the remote Personal Account exists) while matching getSubaccount
-        address parentPersonalAccount =
-            PersonalAccounts.getState().personalAccounts[_xrplOwner];
-        if (parentPersonalAccount == address(0)) {
-            parentPersonalAccount = PersonalAccounts.computePersonalAccountAddress(_xrplOwner);
-        }
+        // the parent comes into being with the subaccount: a codeless parent leaves the account
+        // with no caller and no way home on Flare, and what the remote rails push to it beyond
+        // reach; nothing here can create it later, since this holds its address while the
+        // deployment needs the owner string. Not pause-gated, as `createPersonalAccount` is not
+        address parentPersonalAccount = PersonalAccounts.getOrCreatePersonalAccount(_xrplOwner);
 
         return Subaccounts.getOrCreateSubaccount(parentPersonalAccount, _subaccountType);
     }

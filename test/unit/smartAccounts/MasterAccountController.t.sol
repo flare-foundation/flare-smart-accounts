@@ -2312,7 +2312,9 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         assertEq(masterAccountController.getPersonalAccount(xrplAddress1), created);
     }
 
-    function testCreatePersonalAccountRevertWhenPaused() public {
+    function testCreatePersonalAccountWhilePaused() public {
+        // not pause-gated: a gate would withhold the record and not the deployment, while the
+        // ungated sweepRedeem needs this account to exist
         address pauser = makeAddr("pauser");
         address[] memory pausers = new address[](1);
         pausers[0] = pauser;
@@ -2321,8 +2323,11 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         vm.prank(pauser);
         masterAccountController.pause();
 
-        vm.expectRevert(IPauseFacet.IsPaused.selector);
-        masterAccountController.createPersonalAccount(xrplAddress1);
+        address predicted = masterAccountController.getPersonalAccount(xrplAddress1);
+        vm.prank(makeAddr("anyone"));
+        address created = masterAccountController.createPersonalAccount(xrplAddress1);
+        assertEq(created, predicted);
+        assertNotEq(created.code.length, 0);
     }
 
     function testCreatePersonalAccountRevertEmptyOwner() public {

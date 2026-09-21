@@ -49,6 +49,7 @@ When the diamond is paused, all four revert with `IsPaused()`.
 
 Notably **not** behind `notPaused`:
 - View functions on every facet.
+- `createPersonalAccount` and `createSubaccount`. Both proxies' creation code is public and the EIP-2470 singleton factory permissionless, so a gate would withhold the diamond's record and not the deployment — and a frozen derivation commits each account to its owner and this controller, so there is no authority to withhold. Gating them would only break the ungated `sweepRedeem`, which redeems through a parent Personal Account that must therefore be creatable during an incident.
 - `executeUserOp` on `PersonalAccount` (it has no `notPaused` — the diamond couldn't invoke it anyway, since `MemoInstructions.execute` is gated by the facet's `notPaused`).
 - Admin functions (timelock recording, ownership transfer, executor / pauser / vault / agent management). The owner can keep performing governance during a pause; that's how an incident is resolved.
 - Pause / unpause themselves.

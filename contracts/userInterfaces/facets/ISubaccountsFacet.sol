@@ -70,13 +70,15 @@ interface ISubaccountsFacet {
 
     /**
      * @notice Creates the subaccount for an XRPL owner if it does not exist yet.
-     * @dev Permissionless and pause-gated. An executor uses it to materialize a subaccount
-     * whose predicted address already received assets, so that they can be swept; a user
-     * operation uses it as its first call, before calling a method on the subaccount. The
-     * parent is the registered Personal Account when one exists and its frozen computed address
-     * otherwise (the derivation is chain-independent, so the two can never diverge), so
-     * creation works before the parent is deployed - and on chains where Personal Accounts
-     * never exist at all. Requires a registered implementation for the type.
+     * @dev Permissionless, idempotent and not pause-gated, as `createPersonalAccount` is. An
+     * executor uses it to materialize a subaccount whose predicted address already received
+     * assets, so that they can be swept; a user operation uses it as its first call, before
+     * calling a method on the subaccount. The parent Personal Account is created along with it
+     * when it does not exist yet, on every chain: a codeless parent leaves the account with no
+     * caller and no way home on Flare, and on a remote chain leaves what the compose rails push
+     * to it spendable by no one. Nothing can create it from the subaccount afterwards, which
+     * holds its address while the deployment is keyed by the owner string. Requires a
+     * registered implementation for the type and for the Personal Account.
      * @param _xrplOwner The XRPL address of the owner.
      * @param _subaccountType The subaccount type.
      * @return The subaccount contract address.

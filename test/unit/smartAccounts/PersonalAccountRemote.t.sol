@@ -124,8 +124,8 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
 
     function testCreatePersonalAccount() public {
         // the generic creation route on the PersonalAccountsFacet: PAs are also created lazily
-        // by instructions on Flare, but no instruction machinery exists here, so this is the
-        // only route - permissionless and idempotent
+        // by instructions on Flare, but no instruction machinery exists here - the routes are
+        // this one and createSubaccount. Permissionless and idempotent
         address predicted = controller.getPersonalAccount(xrplOwner);
         assertEq(predicted.code.length, 0);
 
@@ -145,10 +145,15 @@ contract PersonalAccountRemoteTest is Test, FacetsDeploy {
         assertEq(controller.getPersonalAccount(xrplOwner), created);
     }
 
-    function testCreatePersonalAccountRevertWhenPaused() public {
+    function testCreatePersonalAccountWhilePaused() public {
+        // not pause-gated, as on Flare: the parent is what a sweep home redeems through and
+        // what a closed position's surplus rests on, so a pause may not withhold it
         _pauseController();
-        vm.expectRevert(IPauseFacet.IsPaused.selector);
-        controller.createPersonalAccount(xrplOwner);
+        address predicted = controller.getPersonalAccount(xrplOwner);
+        vm.prank(makeAddr("anyone"));
+        address created = controller.createPersonalAccount(xrplOwner);
+        assertEq(created, predicted);
+        assertNotEq(created.code.length, 0);
     }
 
     function testCreatePersonalAccountRevertEmptyOwner() public {

@@ -47,9 +47,9 @@ with `salt = bytes32(0)`. The subaccount address is therefore a pure function of
 ## Creation and prediction
 
 - `getSubaccount(xrplOwner, type)` — view; returns the registered subaccount, or the computed address if not yet deployed. Works even before the parent PA exists (the PA address itself is deterministic).
-- `createSubaccount(xrplOwner, type)` — permissionless, `notPaused` and idempotent. The parent Personal Account resolves to the registered account when one exists and to its computed address otherwise — the same fallback `getSubaccount` uses — so creation works before the Personal Account exists, and on chains where PAs never exist at all. That is what supports the executor-cleanup path: if assets already landed on the predicted address, anyone can materialize the subaccount — and, through the permissionless `createPersonalAccount`, its parent — to sweep them. A subaccount created before its PA is inert until then: `onlyParent` methods have no possible caller, and `sweepRedeem` reverts because every redemption, a below-minimum balance included, goes through the codeless parent; the balance waits on the subaccount, and does not block the parent's later CREATE2 deployment at exactly the recorded address. One qualification: this holds for a valid owner string — the route accepts any string, but a Personal Account cannot be created for an empty one, so an empty-owner subaccount is permanent caller-funded junk with no custody or collision impact.
+- `createSubaccount(xrplOwner, type)` — permissionless, idempotent and **not** pause-gated. It **creates the parent Personal Account with the subaccount**, on every chain, through the same `getOrCreatePersonalAccount` the instruction entry points use, so the executor-cleanup path needs one call: assets on a predicted address bring both accounts into being and are swept. The pair comes up together because a codeless parent costs differently on each chain and is unrepairable on both. On Flare the account is inert: nothing can be `onlyParent` (its address has no key), and `sweepRedeem` reverts, since every redemption — a below-minimum balance included — goes through the parent. On the loan chain the rails do run — an authenticated compose, `depositIdleFxrp`, `checkpointFee` and `repay` — but what `repay` pushes to the parent then rests where nobody can spend it. Neither state is repairable from the subaccount, which holds the parent's *address* while the deployment needs the owner *string*, and a hash does not run backwards. Two consequences: an empty owner refuses the whole call (`PersonalAccountNotSuccessfullyDeployed`) instead of leaving a subaccount whose parent can never exist, and on a chain whose Personal Account implementation is not registered yet, creation fails closed — the loan chain registers both implementations first. Deploying the proxy straight through the singleton factory bypasses all of this; the ungated `createPersonalAccount` is what resolves that.
 
-Unlike Personal Accounts, which are created lazily as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points) or explicitly through the permissionless `createPersonalAccount`, a loan subaccount always needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily.
+Unlike Personal Accounts, which are created lazily as a side effect of an instruction reaching the diamond (`getOrCreatePersonalAccount` inside the instruction entry points) or explicitly through the permissionless `createPersonalAccount`, a loan subaccount always needs an explicit create: its methods are called **directly** — by the parent Personal Account or by an executor — so there is no diamond hop in that path to create it lazily. The reverse does not hold: creating a subaccount creates its parent.
 
 Created subaccounts are recorded in `Subaccounts.State.subaccounts[parentPersonalAccount][subaccountType]` and announced with `SubaccountCreated`.
 
@@ -689,13 +689,12 @@ address itself commits to the pool:
   health check never binds on this path.
 
 **Creation route.** The same generic `createSubaccount(xrplOwner, type)` serves this chain —
-there is no separate loan-chain creation function. The parent Personal Account resolves the
-way `getSubaccount` already predicts it: the registered account when one exists, its
-**computed** address otherwise (the PA derivation is frozen and chain-independent, so the two
-can never diverge). On this chain the parent is the compose-driven remote Personal Account
-(see below): the registered branch runs once the remote PA has been created, the computed one
-before — either way the subaccount materializes at exactly the address the Flare side
-predicts, whether or not the remote PA exists yet.
+there is no separate loan-chain creation function — and here too it creates the parent with
+the subaccount. On this chain that parent is the compose-driven remote Personal Account (see
+below), so the pair comes up together at exactly the addresses the Flare side predicts (the
+derivations are frozen and chain-independent, so the two sides can never diverge). It also
+means the remote Personal Account implementation must be registered before the first
+subaccount is created; the configuration's `implementations` section registers both.
 
 **One market per account, bound by the type.** Positions must outlive every configuration
 decision, so the market an account operates on is not mutable state at all: the timelocked
@@ -1480,10 +1479,11 @@ sends more native than the remote PA holds, a native drop. No typed helpers by d
 wallet builds like any other, and one sender never grows a helper per use case.
 
 **Creation.** `createPersonalAccount(xrplOwner)` on the `PersonalAccountsFacet` — the generic,
-permissionless, idempotent, pause-gated route, cut on every chain, the PA analog of
+permissionless, idempotent route, not pause-gated, cut on every chain, the PA analog of
 `createSubaccount`: on Flare the instruction machinery creates PAs lazily and the explicit route
 lets anyone materialize one earlier (an executor completing a loan subaccount's `sweepRedeem`
-needs the parent to exist); here, where no instruction machinery exists, it is the only route.
+needs the parent to exist); here, where no instruction machinery exists, it and `createSubaccount`
+— which creates the parent with the subaccount — are the two routes.
 The caller gains nothing: the frozen derivation commits to the owner and the controller, and the
 created account obeys only its Flare twin's authenticated compose. It requires the registered
 remote PA implementation (the frozen BeaconProxy resolves it at construction) and registers the

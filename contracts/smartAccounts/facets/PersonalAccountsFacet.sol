@@ -4,7 +4,6 @@ pragma solidity ^0.8.27;
 import {IIPersonalAccountsFacet} from "../interface/IIPersonalAccountsFacet.sol";
 import {IPersonalAccountsFacet} from "../../userInterfaces/facets/IPersonalAccountsFacet.sol";
 import {PersonalAccounts} from "../library/PersonalAccounts.sol";
-import {Pause} from "../library/Pause.sol";
 import {FacetBase} from "./FacetBase.sol";
 import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 
@@ -15,11 +14,6 @@ import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
  * Cut on every chain.
  */
 contract PersonalAccountsFacet is IIPersonalAccountsFacet, FacetBase {
-
-    modifier notPaused {
-        Pause.checkNotPaused();
-        _;
-    }
 
     /// @inheritdoc IIPersonalAccountsFacet
     function setPersonalAccountImplementation(
@@ -36,11 +30,12 @@ contract PersonalAccountsFacet is IIPersonalAccountsFacet, FacetBase {
         string calldata _xrplOwner
     )
         external
-        notPaused
         returns (address)
     {
-        // permissionless and idempotent: the proxy derivation is frozen and commits to the owner
-        // and this controller, so the caller gains no authority over the account it materializes
+        // permissionless, idempotent and not pause-gated: the proxy's creation code is public and
+        // the singleton factory permissionless, so a gate would withhold the record, not the
+        // deployment - and the frozen derivation commits the account to its owner and this
+        // controller, leaving the caller nothing a pause would need to withhold
         return PersonalAccounts.getOrCreatePersonalAccount(_xrplOwner);
     }
 

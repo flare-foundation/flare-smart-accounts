@@ -21,6 +21,7 @@ import {IDiamond} from "../../../contracts/diamond/interfaces/IDiamond.sol";
 import {DiamondArgs} from "../../../contracts/diamond/implementation/Diamond.sol";
 import {NotContractOwner} from "../../../contracts/diamond/libraries/LibDiamond.sol";
 import {IISingletonFactory} from "../../../contracts/smartAccounts/interface/IISingletonFactory.sol";
+import {Subaccounts} from "../../../contracts/smartAccounts/library/Subaccounts.sol";
 import {MasterAccountController} from "../../../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {IIMasterAccountController} from "../../../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {MasterAccountControllerInit} from "../../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
@@ -316,10 +317,11 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(LoanSubaccount(payable(created)).parentPersonalAccount(), personalAccount);
     }
 
-    function testCreateSubaccountBeforePersonalAccount() public {
-        // the parent falls back to its computed address, so the subaccount can materialize
-        // first (assets on the predicted address can be swept without waiting for the PA);
-        // the Personal Account later deploys at exactly the parent the subaccount recorded
+    function testCreateSubaccountCreatesTheParentWithIt() public {
+        // the parent comes into being with the subaccount, so no route through the diamond
+        // leaves a subaccount that cannot be used or swept
+        assertEq(controller.getPersonalAccount(xrplOwner).code.length, 0);
+
         address created = controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_MORPHO_LOAN
@@ -327,19 +329,21 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertNotEq(created.code.length, 0);
 
         address parent = LoanSubaccount(payable(created)).parentPersonalAccount();
-        assertEq(parent.code.length, 0);
-
-        address personalAccount = _createPersonalAccount(xrplOwner);
-        assertEq(personalAccount, parent);
+        assertNotEq(parent.code.length, 0);
+        // and it is the registered account, not merely code at the predicted address
+        assertEq(controller.getPersonalAccount(xrplOwner), parent);
+        assertEq(_createPersonalAccount(xrplOwner), parent);
     }
 
     function testPrePersonalAccountRailMatrix() public {
         // the pre-PA state is inert until the parent exists - this pins exactly how: onlyParent
         // methods have no possible caller, and every sweep reverts, since every redemption -
         // a below-minimum balance included - goes through the parent; the balance waits here,
-        // and anyone can materialize the parent
-        address subaccount = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
+        // and anyone can materialize the parent. The diamond's route no longer leaves this
+        // state, so it is reached the one way that remains: the factory
+        address subaccount = _deploySubaccountPastTheDiamond(xrplOwner);
         address parent = LoanSubaccount(payable(subaccount)).parentPersonalAccount();
+        assertEq(parent.code.length, 0);
 
         // onlyParent methods have no possible caller: the parent address has no code
         vm.expectRevert(ISubaccount.OnlyParent.selector);
@@ -379,28 +383,18 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(fxrp.balanceOf(subaccount), 0);
     }
 
-    function testCreateSubaccountEmptyOwnerIsPermanentOrphan() public {
-        // the generic route accepts any string, but PersonalAccount.initialize rejects an
-        // empty owner - an empty-owner subaccount is caller-funded junk whose parent can
-        // never materialize; no custody or address-collision impact
-        address subaccount = controller.createSubaccount("", SUBACCOUNT_TYPE_MORPHO_LOAN);
-        assertNotEq(subaccount.code.length, 0);
-
-        vm.deal(address(this), collateralReservationFee + executorFee);
-        // the parent's CREATE2 fails inside the factory, so the creation reports the predicted
-        // address as not deployed - the very address the orphan is bound to
+    function testCreateSubaccountRevertEmptyOwner() public {
+        // creating the parent first refuses the whole call: initialize rejects an empty owner,
+        // so its CREATE2 fails in the factory. The route used to leave the subaccount behind
         address orphanParent = controller.getPersonalAccount("");
-        assertEq(orphanParent, LoanSubaccount(payable(subaccount)).parentPersonalAccount());
         vm.expectRevert(
             abi.encodeWithSelector(
                 IPersonalAccountsFacet.PersonalAccountNotSuccessfullyDeployed.selector, orphanParent
             )
         );
-        controller.reserveCollateral{value: collateralReservationFee + executorFee}(
-            "",
-            (bytes32(uint256(1)) << 160) | (bytes32(uint256(1)) << 144),
-            bytes32("txEmptyOwner")
-        );
+        controller.createSubaccount("", SUBACCOUNT_TYPE_MORPHO_LOAN);
+
+        assertEq(controller.getSubaccount("", SUBACCOUNT_TYPE_MORPHO_LOAN).code.length, 0);
     }
 
     function testCreateSubaccountOfFutureType() public {
@@ -495,9 +489,8 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         );
     }
 
-    function testCreateSubaccountRevertWhenPaused() public {
-        _createPersonalAccount(xrplOwner);
-
+    function testCreateSubaccountWhilePaused() public {
+        // a pause must not withhold either account: the ungated sweep needs both to exist
         address pauser = makeAddr("pauser");
         address[] memory pausers = new address[](1);
         pausers[0] = pauser;
@@ -506,11 +499,15 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         vm.prank(pauser);
         controller.pause();
 
-        vm.expectRevert(IPauseFacet.IsPaused.selector);
-        controller.createSubaccount(
+        address predicted = controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
+        vm.prank(makeAddr("anyone"));
+        address created = controller.createSubaccount(
             xrplOwner,
             SUBACCOUNT_TYPE_MORPHO_LOAN
         );
+        assertEq(created, predicted);
+        assertNotEq(created.code.length, 0);
+        assertNotEq(controller.getPersonalAccount(xrplOwner).code.length, 0);
     }
 
     function testGetSubaccountPredictionStableAcrossPersonalAccountCreation() public {
@@ -2116,13 +2113,21 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         assertEq(amount, 100e6);
     }
 
-    function testPermissionlessPaCreationUnblocksPreParentRecovery() public {
-        // the pre-PA recovery path: sweepRedeem at or above the FAssets minimum needs parent
-        // code, and anyone can materialize the parent with the permissionless creation route -
-        // no instruction machinery, no user involvement
-        address subaccount = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
+    function testPermissionlessPaCreationUnblocksPreParentRecoveryWhilePaused() public {
+        // the recovery path in the state that makes it matter: a funded subaccount with no
+        // parent, under a pause. sweepRedeem is ungated but needs parent code, so gating the
+        // parent's creation would make the balance wait for the unpause
+        address subaccount = _deploySubaccountPastTheDiamond(xrplOwner);
         fxrp.mint(subaccount, 250e6);
         mockAssetManager.setMinimumRedeemAmountUBA(10e6);
+
+        address pauser = makeAddr("pauser");
+        address[] memory pausers = new address[](1);
+        pausers[0] = pauser;
+        vm.prank(governance);
+        controller.addPausers(pausers);
+        vm.prank(pauser);
+        controller.pause();
 
         vm.deal(address(this), 2 * executorFee);
         vm.expectRevert(bytes(""));
@@ -2130,6 +2135,7 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
         vm.prank(makeAddr("anyone"));
         address parent = controller.createPersonalAccount(xrplOwner);
+        assertEq(parent, LoanSubaccount(payable(subaccount)).parentPersonalAccount());
         (uint256 amount, uint256 redeemed) =
             ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
         assertEq(amount, 250e6);
@@ -2875,6 +2881,26 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
         agentVaultAddresses[0] = agent;
         vm.prank(governance);
         _controller.addAgentVaults(agentVaultIds, agentVaultAddresses);
+    }
+
+    /// @dev The one route that still leaves a subaccount whose parent has no code: the frozen
+    /// creation code is public, so `createSubaccount` - which now creates the parent - can be
+    /// bypassed through the singleton factory.
+    function _deploySubaccountPastTheDiamond(
+        string memory _xrplOwner
+    )
+        private
+        returns (address)
+    {
+        bytes memory bytecode = abi.encodePacked(
+            Subaccounts.PROXY_CREATION_CODE,
+            abi.encode(
+                address(controller),
+                controller.getPersonalAccount(_xrplOwner),
+                SUBACCOUNT_TYPE_MORPHO_LOAN
+            )
+        );
+        return IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, bytes32(0));
     }
 
     function _createPersonalAccount(string memory _xrplOwner) private returns (address) {

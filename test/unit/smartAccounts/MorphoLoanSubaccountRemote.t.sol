@@ -4020,26 +4020,38 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(borrowShares, 100e18 * 1e6);
         assertEq(rlusd.balanceOf(destination), 100e18);
     }
-    function testCreateSubaccountWithoutPersonalAccount() public {
-        // the generic creation route works on this chain: no Personal Account exists or
-        // ever will, the parent falls back to its computed address
+    function testCreateSubaccountCreatesTheParentOnThisChainToo() public {
+        // the generic route brings the parent with it here too, the compose-driven remote
+        // Personal Account. This chain's rails do run without parent code - compose, deposit,
+        // checkpoint and repay all work - but only a live parent can spend what they leave it
         string memory xrplOwner = "rLoanChainOnlyOwner";
         address predicted = controller.getSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
         assertEq(predicted.code.length, 0);
+        assertEq(controller.getPersonalAccount(xrplOwner).code.length, 0);
 
         address created = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
         assertEq(created, predicted);
         assertNotEq(created.code.length, 0);
+        assertNotEq(controller.getPersonalAccount(xrplOwner).code.length, 0);
+        assertEq(
+            MorphoLoanSubaccountRemote(payable(created)).parentPersonalAccount(),
+            controller.getPersonalAccount(xrplOwner)
+        );
 
         // idempotent
         address again = controller.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
         assertEq(again, created);
     }
 
-    function testCreateSubaccountRevertWhenPaused() public {
+    function testCreateSubaccountWhilePaused() public {
+        // not pause-gated, as on Flare: a gate withholds the record, not the deployment
         _pauseController();
-        vm.expectRevert(IPauseFacet.IsPaused.selector);
-        controller.createSubaccount("rOwner", SUBACCOUNT_TYPE_MORPHO_LOAN);
+        address predicted = controller.getSubaccount("rOwner", SUBACCOUNT_TYPE_MORPHO_LOAN);
+        vm.prank(makeAddr("anyone"));
+        address created = controller.createSubaccount("rOwner", SUBACCOUNT_TYPE_MORPHO_LOAN);
+        assertEq(created, predicted);
+        assertNotEq(created.code.length, 0);
+        assertNotEq(controller.getPersonalAccount("rOwner").code.length, 0);
     }
 
     //
@@ -4670,37 +4682,34 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         _setDefaultFeeTerms(address(minimal), SUBACCOUNT_TYPE_MORPHO_LOAN);
         vm.stopPrank();
         string memory xrplOwner = "rMinimalTopologyOwner";
-        address subaccount = minimalController.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
-        assertGt(subaccount.code.length, 0);
 
-        // created before its parent, the subaccount is bound to the computed - still
-        // codeless - parent address, and the surplus push parks the tokens there; creating
-        // the parent later puts code and the registry entry at that same address, with the
-        // parked balance now under the user's signature
-        address parent = MorphoLoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
-        assertEq(parent.code.length, 0);
-        rlusd.mint(subaccount, 5e18);
-        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
-        assertEq(rlusd.balanceOf(parent), 5e18);
-
-        // the parent Personal Account also materializes on the minimal topology, behind the
-        // PA beacon, through the generic creation route on the PersonalAccountsFacet - but
-        // only once the implementation is registered: the frozen BeaconProxy asks the beacon
-        // at construction, and an unset beacon fails the creation closed
+        // creating a subaccount creates its parent, so the remote Personal Account
+        // implementation must be registered first - the frozen BeaconProxy asks the beacon at
+        // construction. The loan chain's configuration registers both before any account
+        address predictedParent = minimalController.getPersonalAccount(xrplOwner);
         vm.expectRevert(
             abi.encodeWithSelector(
-                IPersonalAccountsFacet.PersonalAccountNotSuccessfullyDeployed.selector, parent
+                IPersonalAccountsFacet.PersonalAccountNotSuccessfullyDeployed.selector,
+                predictedParent
             )
         );
-        minimalController.createPersonalAccount(xrplOwner);
+        minimalController.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
+
         PersonalAccountRemote remotePaImpl = new PersonalAccountRemote();
         vm.prank(initialOwner);
         minimalController.setPersonalAccountImplementation(address(remotePaImpl));
-        address remotePa = minimalController.createPersonalAccount(xrplOwner);
-        assertGt(remotePa.code.length, 0);
-        assertEq(minimalController.getPersonalAccount(xrplOwner), remotePa);
-        assertEq(remotePa, parent);
-        assertEq(rlusd.balanceOf(remotePa), 5e18);
+
+        address subaccount = minimalController.createSubaccount(xrplOwner, SUBACCOUNT_TYPE_MORPHO_LOAN);
+        assertGt(subaccount.code.length, 0);
+
+        // the pair comes up together, so the surplus push has a live parent to land on
+        address parent = MorphoLoanSubaccountRemote(payable(subaccount)).parentPersonalAccount();
+        assertEq(parent, predictedParent);
+        assertGt(parent.code.length, 0);
+        assertEq(minimalController.getPersonalAccount(xrplOwner), parent);
+        rlusd.mint(subaccount, 5e18);
+        assertEq(IMorphoLoanSubaccountRemote(subaccount).repay(), 0);
+        assertEq(rlusd.balanceOf(parent), 5e18);
 
         // the Flare-only bridge routes are not routable on this diamond
         vm.expectRevert(

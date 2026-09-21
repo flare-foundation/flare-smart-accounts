@@ -400,6 +400,12 @@ something. It also SKIPS a registration the diamond has already made, so a rerun
 reused an unchanged implementation emits only what is actually still due - a registration nobody
 needs is still a timelocked call, three signatures and an execution.
 
+Both registrations are due before any account is created on this chain, not only the subaccount's:
+`createSubaccount` creates the parent Personal Account along with the subaccount, and an
+unregistered Personal Account implementation fails that closed
+(`PersonalAccountNotSuccessfullyDeployed`). The section registers both, so following it in order is
+enough.
+
 Unlike A4 and A5, there is no queued stage to verify here: the registrations are
 `onlyOwnerWithTimelock` like everything else, so at zero delay each applies in the transaction that
 submits it.
