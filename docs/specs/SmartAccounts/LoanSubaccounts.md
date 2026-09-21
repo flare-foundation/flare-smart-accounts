@@ -718,7 +718,11 @@ collateral token is exactly the transport OFT's
 token; the first registration also pins the collateral token for every later transport and —
 transitively — every later market (see the configuration section). The loan token is
 deliberately not pinned: RLUSD is governance policy per registration, not an on-chain
-invariant. Registration policy: **only canonical immutable Morpho Blue deployments of the v1.0.0
+invariant. What that policy asks of the token: conventional transfer semantics (no
+fee-on-transfer, no rebasing) and no transfer hooks — `repay` reads the debt, moves the fee and
+then repays Morpho under an exact approval, so a callback between those steps that changed the
+market's totals or repaid for the account would leave the cached shares or the approval stale and
+the call reverting. Review a candidate's hooks before its market is registered. Registration policy: **only canonical immutable Morpho Blue deployments of the v1.0.0
 implementation this mirror is pinned to** — any other implementation needs the conformance
 verification below repeated before it may be registered. This is a pre-registration governance
 trust assumption enforced by review at the timelocked call — the contract itself checks only
