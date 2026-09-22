@@ -1,5 +1,5 @@
 {
-  "note": "Upgrade cut for the audit-fix release. No init: the diamond is already initialised, and EthereumControllerInit only sets the four ERC-165 flags it already carries. MorphoLoanSubaccountRemote is NOT part of this cut - it changed, so it needs its own deploy and a timelocked registration. PersonalAccountRemote is unchanged and its preflight reuses the recorded address.",
+  "note": "EXECUTED on Sepolia 2026-09-22; kept as the record of that cut. `verify_diamond sepolia` passes 34 of 34. No init: the diamond is already initialised, and EthereumControllerInit only sets the four ERC-165 flags it already carries. MorphoLoanSubaccountRemote is NOT part of this cut - it changed, so it needs its own deploy and a timelocked registration. PersonalAccountRemote is unchanged and its preflight reuses the recorded address.",
   "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
   "facets": [
     "SubaccountsFacet",
