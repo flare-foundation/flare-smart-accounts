@@ -2115,8 +2115,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testPermissionlessPaCreationUnblocksPreParentRecoveryWhilePaused() public {
         // the recovery path in the state that makes it matter: a funded subaccount with no
-        // parent, under a pause. sweepRedeem is ungated but needs parent code, so gating the
-        // parent's creation would make the balance wait for the unpause
+        // parent, under a pause. The balance was never trapped - the singleton factory deploys
+        // the parent whatever the diamond does - but that route means hand-built init code, so
+        // this pins that the documented one works while paused
         address subaccount = _deploySubaccountPastTheDiamond(xrplOwner);
         fxrp.mint(subaccount, 250e6);
         mockAssetManager.setMinimumRedeemAmountUBA(10e6);

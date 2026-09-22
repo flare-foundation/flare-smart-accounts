@@ -49,7 +49,9 @@ When the diamond is paused, all four revert with `IsPaused()`.
 
 Notably **not** behind `notPaused`:
 - View functions on every facet.
-- `createPersonalAccount` and `createSubaccount`. Both proxies' creation code is public and the EIP-2470 singleton factory permissionless, so a gate would withhold the diamond's record and not the deployment — and a frozen derivation commits each account to its owner and this controller, so there is no authority to withhold. Gating them would only break the ungated `sweepRedeem`, which redeems through a parent Personal Account that must therefore be creatable during an incident.
+- `createPersonalAccount` and `createSubaccount`. Both proxies' creation code is public and the EIP-2470 singleton factory permissionless, so a gate would withhold the diamond's record and not the deployment — and a frozen derivation commits each account to its owner and this controller, so there is no authority to withhold. What a gate did cost was usability during an incident: the ungated `sweepRedeem` redeems through a parent Personal Account, and with the creation routes shut the only way to materialize one was to build the proxy's init code by hand and call the factory directly.
+
+**A pause does not stop accounts from being created.** Both proxies are deployable through the singleton factory at their deterministic addresses whether or not the diamond is paused, and a Personal Account deployed that way serves `redeemFromSubaccount` without ever being registered, because the subaccount check resolves through `getSubaccount`, a view with a computed-address fallback. An incident response must therefore not rely on the pause to prevent new accounts appearing; what the pause stops is the instruction routes that move assets.
 - `executeUserOp` on `PersonalAccount` (it has no `notPaused` — the diamond couldn't invoke it anyway, since `MemoInstructions.execute` is gated by the facet's `notPaused`).
 - Admin functions (timelock recording, ownership transfer, executor / pauser / vault / agent management). The owner can keep performing governance during a pause; that's how an incident is resolved.
 - Pause / unpause themselves.
