@@ -88,85 +88,15 @@ pnpm deploy_composer <network> <onlyImpl>
 pnpm verify_contracts <network>
 ```
 
-- The ordered, verified release sequence — which governance call to make when, and what proves each step landed — is [`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md). The commands below are its building blocks; the runbook is what says in which order to run them and on which networks.
-- `<fullDeploy>` is a boolean (`true` or `false`). **Both modes are a full deployment from current source** — `false` only skips the diamond cut, the init and the vault/wallet configuration — so neither is a facet-only mode or for a live network. To add or replace facets on a live network, use a cut file and `pnpm diamond_cut`. Why, and the recorder's guard on the two live entries, are in [`deployment/README.md`](./deployment/README.md).
-- Supported networks are the Flare family `coston2`, `coston`, `flare` and `songbird`, with `-staging` variants such as `coston2-staging`, and the loan chains `ethereum` and `sepolia` (its testnet), whose one tracked deployment is the pinned one and which have no staging alias. Sepolia also takes a throwaway deployment for rehearsals (`deploy_remote_controller_throwaway`), recorded in the gitignored `sepolia_mock` record, which only `configure_remote_controller` reads, and only when its target argument says `throwaway`. A chain in neither family is refused by every tool; the rules are in [`deployment/README.md`](./deployment/README.md#networks).
-- Deployment requires an environment file carrying `<NETWORK>_RPC_URL`, and something to sign with. Every
-  wrapper that broadcasts reads `DEPLOYER_PRIVATE_KEY`, and every one of them also passes arguments after
-  its own straight through to `forge` — so a **keystore** (`--account <name> --sender <address>`, after one
-  `cast wallet import <name> --interactive`) or a **Ledger** (`--ledger --sender <address>`) replaces the raw
-  key entirely. The key is a fallback, used only when nothing else signs, never an addition. A keystore keeps
-  the key out of the shell history AND the process list, which an environment variable cannot, since the shell
-  expands it before exec. The Solidity scripts take the signer from forge too — they broadcast as `_signer()`,
-  which is `msg.sender`, the account forge resolved — so nothing in the script outranks what the command line
-  chose. It is a seam because a test cannot name that account otherwise: `vm.prank` and a broadcast are
-  mutually exclusive, so a harness overrides it. What counts as a signer, and the one combination refused
-  outright, live in
-  `deployment/scripts/signer-preflight.sh`, which also refuses `--quiet`/`-q`/`--json` for the nine wrappers
-  whose output the recorder parses: forge broadcasts before the recorder runs, so silencing its output
-  deploys a contract that no record then names. Why the flags must never ship without that preflight is in
-  [`deployment/README.md`](./deployment/README.md#signing).
-- `configure_remote_controller` is everything the remote controller is configured with after its cut, read from
-  `deployment/chain-config/<network>.json`: the sections are `governance` (the pauser and unpauser roles, then
-  the timelock duration last), `implementations`, `transport`, `market`, `fees`, `wiring` (the last
-  three) and `all`, defaulting to `governance`, and the target is `pinned` or `throwaway` — which
-  controller on that chain to configure, named
-  rather than assumed, defaulting to `pinned`. `prepare` writes the calls for the owner to submit under `deployment/output-internal/<network>/`
-  and prints them, with the `executeTimelockedCall` line beside each one once a duration is in force; `execute`
-  submits them and needs the diamond's current owner to sign, so it serves the throwaway flow alone — its own
-  read-back sees simulated state, so the wrapper follows a broadcast with a separate `verify` run; `verify`
-  reads the chain back. `implementations` is the one section whose two addresses are not in the chain config:
-  the remote Personal Account and the type's remote subaccount are deploy outputs, read from the target's own
-  deployment record, and a record naming neither leaves the section unready. It is also the one section
-  whose calls are FILTERED against the chain: a registration the diamond has already made is skipped with a
-  note, because the deploy reuses an implementation whose code has not changed and re-registering the address
-  the diamond already serves costs a timelocked call, three signatures and an execution to change nothing.
-  `prepare` and `execute` skip the same ones; a registry that cannot be read yet (the facet is not cut) filters
-  nothing, and a registry pointing at an address the config does not name is never filtered, since the
-  registration is how that disagreement gets resolved. No other section is filtered: re-registering a market is
-  refused on chain and a different one is a disagreement a person must see, the transport and the fee terms are
-  legitimately re-set to the same values, and the duration is every run's last call. It registers; it does not
-  replace `verify_implementation --stage pre`, which is the check that can still refuse a wrong address before
-  it is registered. A section named on its own must be complete in the file; a sweep skips an incomplete one
-  with a note. Only `execute` signs: the other two read, and a multisig owner has nothing to sign
-  with anyway.
-- `describe_calls` names the parameters of the calls `prepare` wrote. It reads the file under
-  `deployment/output-internal/<network>/`, makes no chain call and takes no key, and prints one
-  `name = value` line per parameter. A STRUCT is one parameter whose value is the bracketed form a
-  governance sheet cell and the Safe Transaction Builder both take
-  (`_market = ["0xd011...",["0x1B5A...",...,"770000000000000000"]]`), nested to any depth and in
-  declaration order. EVERY scalar inside the brackets is quoted, integers included: the builder
-  parses them with `JSON.parse` and takes a decimal string for any integer field, while a bare
-  integer is read as a double and is exact only to about 9.0e15 in either direction. A top-level
-  scalar stays plain, since its own cell is not JSON. `--sheet` emits the pairs tab separated for
-  pasting, naming a selector it could not decode rather than leaving the row looking argument-free; `--flat`
-  gives one line per leaf, walking arrays with an index (`_cuts[0].facetAddress`), for reading a
-  call rather than pasting it. The names come from the compiled ABI, searched internal interfaces
-  first because a selector fixes the signature but not the parameter names, so the decode is a
-  SECOND SOURCE on what was encoded rather than a restatement of the inputs. The suite needs a
-  `forge build`; without artifacts it skips, and `REQUIRE_FORGE_TOOLING` turns that into a failure,
-  which is how the Foundry CI job demands it run.
-- `deploy_remote_account_implementations` takes a mandatory selection: `all`, or a comma-separated
-  list of `personal-account` and `morpho-loan-subaccount`. Names rather than a flag each, so a new
-  subaccount type is a new name rather than a moved argument. A preflight
-  (`plan-remote-implementations.ts`) compares each named implementation's recorded address against
-  the artifact, modulo the runtime's trailing metadata as the cut planner does, and SKIPS one that
-  already carries this code — a successful skip, so `all` can deploy one and reuse the rest, and a
-  run that deploys nothing leaves the record untouched and never reaches the recorder. Reuse is not
-  registration: the plan reports what the diamond's registry holds separately, and where the record
-  and the registry name different addresses it says so rather than choosing.
-- `transfer_ownership` hands the pinned remote controller to a new owner, and exists for the preflight rather
-  than the call: `transferOwnership` is one step, has no acceptance from the new owner, is not timelocked, and a
-  wrong address ends that diamond's governance for good. The expected current owner is an argument, compared
-  against the chain, so a run pointed at the wrong network stops instead of handing away whatever it found; the
-  signer must be that owner - a Ledger through `--ledger --sender`, which is what the mainnet handover needs;
-  the zero address, the diamond itself and the current owner are refused, and a
-  new owner with no code is called out rather than refused. It covers BOTH handovers: the bootstrap owner's
-  transfer at the start of a chain's deployment, signed from hardware through `--ledger`, and the deployer-owned
-  one at the end of a rehearsal, signed with `--account` or the raw key. A throwaway controller is never handed
-  on, so there is still no target argument - the pinned controller is the only diamond it touches. The broadcast is followed by a separate `verify` run, since the script's own read-back would
-  see simulated state.
-- All `forge script` invocations use `--offline` to skip Foundry's external selector/source lookups. Without it, runs on Flare/Songbird hang for several minutes — likely external signature/source database calls timing out for these chains. The chain RPC itself is unaffected.
+- The ordered, verified release sequence — which governance call to make when, and what proves each step landed — is [`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md). The commands above are its building blocks; the runbook says in which order to run them and on which networks. How each tool decides what it does is [`deployment/README.md`](./deployment/README.md).
+- `<fullDeploy>` is a boolean. **Both modes are a full deployment from current source** — `false` only skips the diamond cut, the init and the vault/wallet configuration — so neither is a facet-only mode nor for a live network. To add or replace facets on a live network, use a cut file and `pnpm diamond_cut`.
+- Networks are the Flare family (`coston2`, `coston`, `flare`, `songbird`, plus `-staging` variants) and the loan chains `ethereum` and `sepolia`. A chain in neither family is refused by every tool. See [Networks](./deployment/README.md#networks).
+- Deployment needs `<NETWORK>_RPC_URL` in an environment file and something to sign with. A **keystore** (`--account <name> --sender <address>`) or a **Ledger** (`--ledger --sender <address>`) REPLACES `DEPLOYER_PRIVATE_KEY`, which is only the fallback when nothing else signs. Never pass `--quiet`/`-q`/`--json` to a wrapper whose output the recorder parses: forge broadcasts before the recorder runs, so silencing it deploys a contract no record then names. `deployment/scripts/signer-preflight.sh` enforces both rules; the reasoning is in [Signing](./deployment/README.md#signing). **A Solidity deploy script takes its signer from forge, never from the environment**: it broadcasts as `_signer()`, which is `msg.sender`, so nothing in the script outranks what the command line chose. Never read `DEPLOYER_PRIVATE_KEY` inside a script.
+- `configure_remote_controller <network> <prepare|execute|verify> [section] [target]` applies everything a remote controller is configured with after its cut, from `deployment/chain-config/<network>.json`. `prepare` writes calls for the owner to submit, `execute` signs them (the throwaway flow only), `verify` reads the chain back. `implementations` is the one section read from the deployment record rather than the config, and the one filtered against the chain. Details in [Configuring the remote controller](./deployment/README.md#configuring-the-remote-controller-configure_remote_controller).
+- `describe_calls` names the parameters of the calls `prepare` wrote, decoding them against the compiled ABI as a second source on what was encoded. `--sheet` formats them for a governance sheet.
+- `deploy_remote_account_implementations` takes a mandatory selection and skips an implementation whose recorded address already carries the current code, so naming `all` can legitimately deploy one and reuse the rest.
+- `transfer_ownership` exists for its preflight: `transferOwnership` applies at once, the new owner never accepts it and no timelock delays it, so a wrong address ends that diamond's governance for good.
+- All `forge script` invocations use `--offline`. Without it, runs on Flare/Songbird hang for minutes on external selector/source lookups; the chain RPC itself is unaffected.
 
 ### Required Checks
 
@@ -392,42 +322,12 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
     `LoanFeeInvariants.t.sol` require rare fee transitions across randomized inputs, asserting action counts and
     all invariants at intermediate states. Do not require every rare outcome in each ordinary invariant run.
   - `test/fuzz/`: property tests, each stated as the spec's formula computed independently of the contract.
-  - `test/integration/`: suites against contracts we did not write — either real deployed ones on a pinned mainnet
-    fork, or canonical ones deployed locally. `MorphoLoanSubaccountRemoteCanonicalCompose.t.sol` is the second kind: it
-    runs the loan account against LayerZero's own `MessagingComposer` (`contracts/mock/CanonicalComposeEndpoint.sol`
-    is that contract verbatim plus an `eid` getter), because the compose queue's rules are relied on rather than
-    implemented. Both files are `--skip`ped by `pnpm coverage`: LayerZero's composer does not compile with the
-    optimizer disabled, which is how `forge coverage` builds. `test/unit/deployment/DeploySmartAccountsGuards.t.sol`
-    and `test/unit/deployment/DeployRemoteControllerThrowaway.t.sol` are skipped for the same class of reason:
-    `DeploySmartAccounts` copies a memory array of structs into storage, which only the IR pipeline compiles
-    (solc 1834), and `DeployRemoteControllerThrowaway` assembles the controller's constructor arguments, which
-    without the IR pipeline is stack-too-deep - so a test importing either cannot build under coverage. Deploy
-    scripts are pruned from the figure anyway, so the skips cost nothing. The fork suites skip themselves
-    unless the network they need is configured, so an offline run is inert rather than failing;
-    `MorphoLoanSubaccountRemoteFork.t.sol` needs `ETHEREUM_RPC_URL` to name an endpoint that serves state at its
-    pinned block (an archive read), and runs with
-    `ETHEREUM_RPC_URL=<url> forge test --match-path "test/integration/*"`. Setting `REQUIRE_FORK` turns that suite's
-    skip into a failure, which is what the `test-integration-fork` CI job does: a silent skip there would be a check
-    nobody made. That job is the only place a pipeline reaches mainnet, which is why it is separate from `test`. Most free tiers prune that far back;
-    `https://eth-pokt.nodies.app` served it on 2026-09-09, and `cast block <FORK_BLOCK> --rpc-url <url>` plus one
-    `eth_call` at that block is the quickest way to test a candidate before running the suite.
-    `SepoliaMarketFork.t.sol` needs `SEPOLIA_RPC_URL` - any current Sepolia endpoint, since it forks the latest
-    block - and drives the rehearsal market script's phases against Morpho's real oracle factory and Morpho itself.
-    Three suites cover the OFT bridge with LayerZero's own contracts rather than a model of it, built on
-    `contracts/mock/FeeOftAdapter.sol` and `FeeOftToken.sol` (its `OFTAdapter`/`OFT` plus the `Fee` mixin, carrying
-    the deployed variants' `_debitView` verbatim) over `RelayLzEndpoint.sol` (its `MessagingComposer` plus the send
-    path an OApp touches) and `RelayLzExecutor.sol`. `OftFeeCreditToCompose.t.sol` pins the transport itself - what a
-    fee-bearing send debits, what the far side credits, and that the credited amount is what reaches the compose
-    message, in both directions; one of its cases asserts the real packet is byte-identical to the form the other
-    suites build by hand, which is what makes those suites evidence about the real wire format.
-    `PersonalAccountRemoteOftFunding.t.sol` covers native drops into the real Personal Account proxy, receive-versus-
-    compose funding and starved deliveries. `LoanOftRoundTrip.t.sol` joins the two halves: the production account
-    pair and frozen proxies on two INDEPENDENT forks of one empty local chain, so the real CREATE2 derivations and
-    the same-address compose authentication run without any account code or storage being rewritten. It needs
-    `F28_LOCAL_RPC_URL` and skips without it; `test/tooling/loan-oft-roundtrip.test.ts` starts that chain, sets
-    `REQUIRE_LOAN_OFT_ROUNDTRIP` so no case inside can skip, and is one of the three files the Foundry-equipped
-    `test-tooling-forge` job runs. All four are `--skip`ped by `pnpm coverage` for the composer's optimizer-disabled
-    build, as above - a suite that instantiates `RelayLzEndpoint` cannot build there either.
+  - `test/integration/`: suites against contracts we did not write — real deployed ones on a pinned mainnet
+    fork, or canonical ones deployed locally, including LayerZero's own composer and OFT contracts. Several
+    reach outside the repository and several are `--skip`ped by `pnpm coverage`; which, what each needs and
+    why is [`test/README.md`](./test/README.md). A fork suite skips itself unless its network is configured,
+    so an offline run is inert rather than failing, and a `REQUIRE_*` variable turns that skip into a failure
+    where CI must not let a check go unmade.
   - `test/tooling/`: the deployment tooling's own tests, in TypeScript and shell rather than Solidity, run by
     `pnpm test:tooling` rather than by forge, which ignores them. They sit here rather than beside the scripts so
     that `deployment/` holds only what an operator runs, and they are held to the tooling's lint rules, not the
@@ -452,29 +352,25 @@ keccak256(abi.encode(uint256(keccak256("smartAccounts.LibName.State")) - 1)) & ~
 - Diamond cut files: `deployment/cuts/<network>/`
 - Internal diamond-cut outputs: `deployment/output-internal/`
 
-How the tooling works — the cut planner (`check_cut`), the diamond verifier before and after a cut
-(`verify_diamond`), the implementation registration check (`verify_implementation`), the recorder's
-guard on the live entries and the frozen creation-code rule that keeps cut plans stable — is
-[`deployment/README.md`](./deployment/README.md). The ordered release sequence is
-[`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md).
+How each tool decides what it does is [`deployment/README.md`](./deployment/README.md); the ordered
+release sequence is [`deployment/RUNBOOK.md`](./deployment/RUNBOOK.md).
 
-One rule binds every deploy script: **none of them writes the deployment record.** A script prints a
-`DEPLOYED:` line per deployment, the wrapper tees it, and the record is written only after forge has
-exited. `forge script` runs the whole script in simulation before it broadcasts, and a filesystem
-write is not EVM state, so a record written from inside a script survives the failure of the run that
-computed it. Never add one. The cut wrapper goes one step further and confirms on chain that each
-printed address carries the runtime it is about to be recorded as; the other wrappers do not, because
-that check suits a run whose every entry is a plain contract built from this repository's artifacts.
-The steps and what a leftover output file means are in
-[`deployment/README.md`](./deployment/README.md#nothing-is-recorded-until-the-chain-has-it).
+Three rules bind what you may write.
 
-Two of its rules bind code changes. The facets that inline the `PersonalAccounts` or `Subaccounts`
+**No deploy script writes the deployment record.** A script prints a `DEPLOYED:` line, the wrapper
+tees it, and the record is written only after forge exits — because `forge script` simulates the
+whole run before broadcasting, and a filesystem write is not EVM state, so a record written from
+inside a script survives the failure of the run that computed it. Never add one. See
+[Nothing is recorded until the chain has it](./deployment/README.md#nothing-is-recorded-until-the-chain-has-it).
+
+The facets that inline the `PersonalAccounts` or `Subaccounts`
 address derivation bake the frozen `PROXY_CREATION_CODE` constants into their runtime bytecode, so
 editing one of those constants is a cross-chain coordination event: predicted addresses for
-not-yet-deployed accounts of that kind shift and must be recomputed after such a cut. And never decide
-what a cut must redeploy from the source import graph — internal libraries, interfaces, compiler
-settings and embedded creation code all change facet bytecode; run `pnpm check_cut <network>
-[cut-file-name]` before executing any cut.
+not-yet-deployed accounts of that kind shift and must be recomputed after such a cut.
+
+Never decide what a cut must redeploy from the source import graph — internal libraries, interfaces,
+compiler settings and embedded creation code all change facet bytecode. Run `pnpm check_cut
+<network> [cut-file-name]` before executing any cut.
 
 ## External Dependencies
 
@@ -505,18 +401,12 @@ OpenZeppelin upgrade-safety validator gates this, locally and in CI (`upgrade-bu
 pnpm build:upgrade-info && pnpm validate-upgrade
 ```
 
-The three live implementations — the Flare Personal Account, `FAssetRedeemComposer` and
-`FAssetRedeemerAccount` — are checked against the reconstructed v2.0.0 reference in
-`deployment/build-info-v2.0.0/`, and the remote Personal Account, the Flare loan subaccount and the
-remote one against `deployment/build-info-2026-09-14/`, frozen at their first deployment. All six
-therefore run with `--requireReference`; what each directory holds, how it was built and which
-addresses it matches are in [`deployment/reference-builds.md`](./deployment/reference-builds.md).
-A reference is frozen AT the deployment: what decays is not the CI artifact, which a local build
-reproduces, but the certainty of which source a chain is running. Before re-laying one of those
-layouts, check the lineage is still empty with `pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]`.
-How the reference was reconstructed, what the validator's two expected findings mean (the waived
-constructors, the diamond libraries' namespace warnings), how the lineage check decides, and what to
-copy at a lineage's first production deployment are in [`deployment/README.md`](./deployment/README.md).
+All six live lineages run with `--requireReference` against a frozen build; which directory each uses
+and what it matches is [`deployment/reference-builds.md`](./deployment/reference-builds.md), and the
+two expected validator findings, how the lineage check decides and what to freeze at a first
+deployment are in [`deployment/README.md`](./deployment/README.md). Before re-laying a layout, check
+the lineage is still empty with `pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]`.
+
 The rule the account bases follow — controller at slot 0 in every lineage, `xrplOwner` at slot 1 in
 every Personal Account lineage, every other base field in an ERC-7201 namespace — stays pinned by
 `test/unit/smartAccounts/AccountStorageLayout.t.sol`, which pins the cross-lineage layout rule the

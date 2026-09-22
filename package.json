@@ -48,7 +48,7 @@
     "lint-sol-contracts": "solhint \"contracts/**/*.sol\"",
     "lint-sol-test": "solhint \"test/**/*.sol\"",
     "lint-sol-deployment": "solhint \"deployment/**/*.sol\"",
-    "spellcheck": "cspell --config .vscode/cspell.json --no-progress \"contracts/**/*.sol\" \"test/**/*.sol\" \"test/tooling/**/*.ts\" \"deployment/**/*.{sol,ts,md}\" \"docs/**/*.md\" README.md AGENTS.md CHANGELOG.md CONTRIBUTING.md SECURITY.md",
+    "spellcheck": "cspell --config .vscode/cspell.json --no-progress \"contracts/**/*.sol\" \"test/**/*.sol\" \"test/**/*.md\" \"test/tooling/**/*.ts\" \"deployment/**/*.{sol,ts,md}\" \"docs/**/*.md\" README.md AGENTS.md CHANGELOG.md CONTRIBUTING.md SECURITY.md",
     "test:tooling": "tsx --test \"test/tooling/*.test.ts\" && bash test/tooling/signer-preflight.test.sh && bash test/tooling/execute-diamond-cut.test.sh && bash test/tooling/configure-remote-controller.test.sh && bash test/tooling/transfer-ownership.test.sh && bash test/tooling/deploy-remote-account-implementations.test.sh && bash test/tooling/deploy-sepolia-market.test.sh",
     "typecheck": "tsc --noEmit",
     "slither": "pip3 install slither-analyzer 2> /dev/null; rm -f ./slither.json ./slither_badge.json; slither . --filter-paths \"dependencies|node_modules|mock\" --json=./slither.json 2> /dev/null || true; node scripts/slither-parse.js ./slither.json",

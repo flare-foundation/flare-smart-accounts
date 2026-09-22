@@ -137,7 +137,7 @@ so the key reaches the process list and, typed once, the shell history; `--accou
 The RPC URL has the same exposure when it carries an API key, which is why `cast` reads
 `ETH_RPC_URL` from the environment instead of taking a flag.
 
-**Output flags are refused by the eight wrappers whose output is parsed.** The recorder reads
+**Output flags are refused by the nine wrappers whose output is parsed.** The recorder reads
 `NETWORK:` and `DEPLOYED:` lines out of forge's output, and `--quiet`, `-q` or `--json` silences or
 reshapes them. Forge broadcasts BEFORE the recorder runs, so accepting one would put a contract on
 chain and then fail with "Network name not found in output", leaving the record naming whatever it
@@ -302,8 +302,8 @@ because the controller there is bootstrapped from pinned bytes and owned by a mu
 `pnpm configure_remote_controller <network> <prepare|execute|verify> [section] [target]` is that step, reading the same
 per-network chain config. The sections are one governance group each: `governance` (pausers, unpausers, then
 the timelock duration, which goes last because it is what makes every later timelocked call queue),
-`transport`, `market` and `fees`, plus `wiring` for the last three and `all` for every one; the section
-defaults to `governance`. The target is `pinned` or `throwaway` - which controller on that chain the run
+`implementations`, `transport`, `market` and `fees`, plus `wiring` for the last three and `all` for every one;
+the section defaults to `governance`. The target is `pinned` or `throwaway` - which controller on that chain the run
 configures, named rather than assumed and defaulting to `pinned`; the throwaway one is found through the
 gitignored `_mock` record its deploy writes, and refused if that record turns out to name the production
 address or one with no code. A throwaway run therefore reads
@@ -316,8 +316,9 @@ to `deployment/output-internal/<network>/configuration-<section>.txt`, the way a
 `"execute": false` prepares a cut for governance. Once a duration is in force it prints the matching
 `executeTimelockedCall` beside each one, so nobody re-encodes it by hand, and it reports who actually holds
 the diamond, since calls prepared for an owner that has not been handed it cannot be submitted by anyone.
-The calls themselves depend on the config and the record rather than on the chain, so a run against a diamond
-whose `TimelockFacet` is not cut yet still emits them, marked `PROVISIONAL` in the print and as the output
+Each call's calldata comes from the config and the record rather than from the chain — WHICH calls appear can
+still depend on chain state, since `implementations` is filtered against the registry, below — so a run against a
+diamond whose `TimelockFacet` is not cut yet still emits them, marked `PROVISIONAL` in the print and as the output
 file's first line: an absent getter does not prove a zero delay — a facet cut, set and removed leaves its
 duration in storage while the read reverts exactly as on a fresh diamond — so that output carries no
 `executeTimelockedCall` lines and is not the one to submit from. Run `prepare` again after the cut, and the
@@ -325,7 +326,19 @@ post-cut run becomes the cross-check. Only that one revert is tolerated, matched
 diamond's own `FunctionNotFound` for that selector; any other failure of the read stops the run.
 `pnpm describe_calls <network> [section] [--sheet] [--flat]` names the parameters of what `prepare` wrote, decoding each
 payload against the compiled ABI, so a governance sheet can be filled from the tool rather than by reading hex; the
-decode reads back what was encoded, which a rendering written beside the encoder could not.
+decode reads back what was encoded, which a rendering written beside the encoder could not. It makes no chain call
+and takes no key, and prints one `name = value` line per parameter. A STRUCT is one parameter whose value is the
+bracketed form a governance sheet cell and the Safe Transaction Builder both take
+(`_market = ["0xd011...",["0x1B5A...",...,"770000000000000000"]]`), nested to any depth and in declaration order.
+EVERY scalar inside the brackets is quoted, integers included: the builder parses them with `JSON.parse` and takes a
+decimal string for any integer field, while a bare integer is read as a double and is exact only to about 9.0e15 in
+either direction. A top-level scalar stays plain, since its own cell is not JSON. `--sheet` emits the pairs tab
+separated for pasting, naming a selector it could not decode rather than leaving the row looking argument-free;
+`--flat` gives one line per leaf, walking arrays with an index (`_cuts[0].facetAddress`), for reading a call rather
+than pasting it. The names come from the compiled ABI, searched internal interfaces first because a selector fixes
+the signature but not the parameter names, so the decode is a SECOND SOURCE on what was encoded rather than a
+restatement of the inputs. Its suite needs a `forge build`; without artifacts it skips, and `REQUIRE_FORGE_TOOLING`
+turns that into a failure, which is how the Foundry CI job demands it run.
 `execute` submits them and requires the signer to be the current owner with the duration still zero, which is
 the throwaway flow alone — a multisig can never sign here, and a diamond that already has a duration would
 queue every call while the run reported it sent them. `verify` reads the chain back and fails unless the roles
@@ -334,6 +347,49 @@ field agrees; that is the half `verify_diamond` does not cover, since it checks 
 surface and says nothing about roles, delay, transport, market or fees. A section named on its own must be
 complete in the config or the run stops naming what is missing; a sweep skips an incomplete one with a note,
 which is how a transport is prepared while the market's loan token and oracle are still to be deployed.
+
+`implementations` is the one section FILTERED against the chain. A registration the diamond has already made is
+skipped with a note, because the deploy reuses an implementation whose code has not changed, and re-registering the
+address the diamond already serves costs a timelocked call, three signatures and an execution to change nothing.
+`prepare` and `execute` skip the same ones. A registry that cannot be read yet — the facet is not cut — filters
+nothing, and a registry pointing at an address the config does not name is never filtered, since the registration is
+how that disagreement gets resolved. It is also the one section whose two addresses are not in the chain config: the
+remote Personal Account and the type's remote subaccount are deploy outputs, read from the target's own deployment
+record, and a record naming neither leaves the section unready. No other section is filtered: re-registering a
+market is refused on chain and a different one is a disagreement a person must see, the transport and the fee terms
+are legitimately re-set to the same values, and the duration is every run's last call. Registering is not
+verification: it does not replace `verify_implementation --stage pre`, which is the check that can still refuse a
+wrong address before it is registered.
+
+## Remote account implementations: `deploy_remote_account_implementations`
+
+`pnpm deploy_remote_account_implementations <network> <all|name[,name...]>` takes a mandatory selection: `all`, or a
+comma-separated list of `personal-account` and `morpho-loan-subaccount`. Names rather than a flag each, so a new
+subaccount type is a new name rather than a moved argument.
+
+A preflight (`plan-remote-implementations.ts`) compares each named implementation's recorded address against the
+artifact, modulo the runtime's trailing metadata as the cut planner does, and SKIPS one that already carries this
+code — a successful skip, so `all` can deploy one and reuse the rest, and a run that deploys nothing leaves the
+record untouched and never reaches the recorder. Reuse is not registration: the plan reports what the diamond's
+registry holds separately, and where the record and the registry name different addresses it says so rather than
+choosing.
+
+## Handing the pinned controller on: `transfer_ownership`
+
+`pnpm transfer_ownership <network> <expected-current-owner> <new-owner>` exists for its preflight rather than for
+the call. `transferOwnership` is one step, has no acceptance from the new owner, is not timelocked, and a wrong
+address ends that diamond's governance for good.
+
+The expected current owner is an argument, compared against the chain, so a run pointed at the wrong network stops
+instead of handing away whatever it found. The signer must be that owner — a Ledger through `--ledger --sender` is
+what the mainnet handover needs. The zero address, the diamond itself and the current owner are refused, and a new
+owner with no code is called out rather than refused.
+
+It covers BOTH handovers: the bootstrap owner's transfer at the start of a chain's deployment, signed from
+hardware, and the deployer-owned one at the end of a rehearsal, signed with `--account` or the raw key. A throwaway
+controller is never handed on, so there is no target argument — the pinned controller is the only diamond it
+touches. The broadcast is followed by a separate `verify` run, since the script's own read-back would see simulated
+state.
 
 ## Proxy storage layouts
 
@@ -367,8 +423,9 @@ facet name before execution and remains reachable from the clone's refs (a facet
 historical or example record may have been installed), and fails
 closed on anything unproven. At a lineage's first production
 deployment, copy that build's `artifacts-upgrades/build-info` into a tracked
-`deployment/build-info-<version>/` directory right away (CI artifacts expire, so the window closes
-with the deployment) and add it to `validate-upgrade` with `--referenceBuildInfoDirs` and
+`deployment/build-info-<version>/` directory right away — the window is not the CI artifact's
+expiry, since `pnpm build:upgrade-info` regenerates the build locally against a pinned compiler, but
+the certainty of WHICH source a chain is running, which decays as branches move — and add it to `validate-upgrade` with `--referenceBuildInfoDirs` and
 `--reference <dirname>:<Contract> --requireReference`.
 
 The three lineages first deployed on 2026-09-14 — the remote Personal Account, the Flare loan
