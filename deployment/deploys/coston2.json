@@ -42,7 +42,7 @@
   {
     "name": "PersonalAccountsFacet",
     "contractName": "PersonalAccountsFacet.sol",
-    "address": "0x8F8Bd315E240D674520C8Be1B3338487924f712b"
+    "address": "0x420F046af867b9BD41c9beEd8dd28DAfD1af0413"
   },
   {
     "name": "TimelockFacet",
@@ -72,7 +72,7 @@
   {
     "name": "PersonalAccountImplementation",
     "contractName": "PersonalAccount.sol",
-    "address": "0x08A9a294FF6E8745FCd3B3Aeb5c4483ABA15C312"
+    "address": "0x23EeFEF172199171997768CF7DCB56BB5C90f34A"
   },
   {
     "name": "FAssetRedeemerAccountImplementation",
@@ -107,17 +107,17 @@
   {
     "name": "LoanSubaccountImplementation",
     "contractName": "LoanSubaccount.sol",
-    "address": "0xeAC08019597c9C09018BACa46fEACfCfB6386093"
+    "address": "0xAef2daA644C901CBC3dAF4D3B1E286cb1F6Ad5CA"
   },
   {
     "name": "SubaccountsFacet",
     "contractName": "SubaccountsFacet.sol",
-    "address": "0xECde53e357911c436511570FC9D4a3ff5304f6A5"
+    "address": "0xE97E049F9175cD6a562D59AeB2db79db12FF136A"
   },
   {
     "name": "BridgeRoutesFacet",
     "contractName": "BridgeRoutesFacet.sol",
-    "address": "0x401dBEcb1cAf61b4600D3D98b967c8435A1F716d"
+    "address": "0x3C0ec26C87Bc56F95db4359b308a152D209c70C7"
   },
   {
     "name": "Coston2PreFreezeAccountsMigration",

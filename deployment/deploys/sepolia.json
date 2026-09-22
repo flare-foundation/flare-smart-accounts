@@ -42,7 +42,7 @@
   {
     "name": "SubaccountsFacet",
     "contractName": "SubaccountsFacet.sol",
-    "address": "0xEaA8968E9B70dd2559066E3e801Df1596a4CFA23"
+    "address": "0xEdD0dDc68F4ED65050Ef5164431a28F1E633bACC"
   },
   {
     "name": "TimelockFacet",
@@ -57,12 +57,12 @@
   {
     "name": "PersonalAccountsFacet",
     "contractName": "PersonalAccountsFacet.sol",
-    "address": "0xEF8880130f8D0e9fF35980afcC284df30D657e4a"
+    "address": "0xcB27F9ddA6211E1b0e13d4B188AAc4d1cb866ccc"
   },
   {
     "name": "ComposeTransportFacet",
     "contractName": "ComposeTransportFacet.sol",
-    "address": "0x280aD40A0A965c8Abfa1c9cec0c4d3551917e25e"
+    "address": "0xACdf54b0B74F941B9e57aE41150d0c73C18fCE77"
   },
   {
     "name": "MorphoLoanMarketsFacet",
@@ -77,7 +77,7 @@
   {
     "name": "MorphoLoanSubaccountRemoteImplementation",
     "contractName": "MorphoLoanSubaccountRemote.sol",
-    "address": "0xA5E161DC265bb0fe50CAeE7A3772E72Fe3d8836F"
+    "address": "0xe2CD102d384E2A566A9f9c3F610591AE0fd76BEB"
   },
   {
     "name": "PersonalAccountRemoteImplementation",
