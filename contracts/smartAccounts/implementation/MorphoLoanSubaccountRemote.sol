@@ -468,6 +468,7 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
             IMorpho(_market.morpho).supplyCollateral(
                 _market.marketParams, _supplied, address(this), ""
             );
+            fxrp.forceApprove(_market.morpho, 0);
         }
     }
 

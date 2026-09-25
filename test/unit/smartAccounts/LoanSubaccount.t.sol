@@ -707,6 +707,24 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     // step 4: sweepRedeem (backward cleanup move: push to the parent, which redeems)
     //
 
+    function testSweepRedeemLeavesNoAllowanceWhenTheParentPullsLess() public {
+        // the parent pulls exactly what it is approved for, so the reset only shows against
+        // one that does not: mocked here to pull nothing, and still no allowance survives
+        address subaccount = _createSubaccountFor(xrplOwner);
+        address personalAccount = _personalAccountOf(xrplOwner);
+        fxrp.mint(subaccount, 250e6);
+        vm.mockCall(
+            personalAccount,
+            abi.encodeWithSelector(IPersonalAccount.redeemFromSubaccount.selector),
+            abi.encode(uint256(0))
+        );
+        vm.deal(address(this), executorFee);
+        ILoanSubaccount(subaccount).sweepRedeem{value: executorFee}();
+
+        assertEq(fxrp.balanceOf(subaccount), 250e6, "the mocked parent pulled nothing");
+        assertEq(fxrp.allowance(subaccount, personalAccount), 0);
+    }
+
     function testSweepRedeemRedeemsWholeBalanceToParentXrplOwner() public {
         address subaccount = _createSubaccountFor(xrplOwner);
         address personalAccount = _personalAccountOf(xrplOwner);

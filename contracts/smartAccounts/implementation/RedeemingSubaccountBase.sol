@@ -74,6 +74,7 @@ abstract contract RedeemingSubaccountBase is IRedeemingSubaccount, SubaccountBas
         // remains with the user; the whole fee rides along for the executor
         fxrp.forceApprove(parent, _amount);
         _redeemedAmount = IPersonalAccount(parent).redeemFromSubaccount{value: _fee}(_amount);
+        fxrp.forceApprove(parent, 0);
         if (_redeemedAmount == 0) {
             // FAssets would not redeem it: the parent kept the balance, and the value with it
             emit NativeSweptToParent(parent, _fee);

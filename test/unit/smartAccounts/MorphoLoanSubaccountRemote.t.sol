@@ -1274,6 +1274,18 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(collateral, 150e6);
     }
 
+    function testDepositIdleFxrpLeavesNoAllowanceWhenMorphoPullsLess() public {
+        // Morpho pulls exactly what it is approved for, so the reset only shows against one
+        // that does not: mocked here to pull nothing, and still no allowance survives
+        address subaccount = _borrowedSubaccount(500e18);
+        fxrp.mint(subaccount, 30e6);
+        vm.mockCall(address(morpho), abi.encodeWithSelector(IMorpho.supplyCollateral.selector), "");
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
+
+        assertEq(fxrp.balanceOf(subaccount), 30e6, "the mocked Morpho pulled nothing");
+        assertEq(fxrp.allowance(subaccount, address(morpho)), 0);
+    }
+
     function testDepositIdleFxrpDefendsIndebtedPositionWhilePaused() public {
         // the defensive case of the idle rail survives a pause: already-arrived collateral
         // can still protect the indebted position; the debt-free case stays gated
