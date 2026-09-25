@@ -154,6 +154,7 @@ contract LoanFeeInvariantsTest is Test {
         assertGt(handler.feeTransfers(), 0);
         assertGt(handler.surplusPushes(), 0);
         assertGt(handler.successfulDeposits(), 0);
+        assertGt(handler.depositCheckpoints(), 0);
         assertGt(handler.successfulFeeBearingWithdrawals(), 0);
         assertGt(handler.elapsedTermsChangeCheckpoints(), 0);
         assertTrue(handler.depositsCorrect());
@@ -224,6 +225,7 @@ contract LoanFeeInvariantsTest is Test {
         assertEq(handler.pauses(), 1);
         handler.deposit(uint64(bound(_collateral, 1, 1_000e6)));
         assertEq(handler.successfulDeposits(), 1, "paused defensive deposit did not execute");
+        assertEq(handler.depositCheckpoints(), 1, "the indebted deposit did not checkpoint");
         _assertAllInvariants();
 
         handler.repay(uint96(bound(_partial, 1e18, 100e18)), 1);

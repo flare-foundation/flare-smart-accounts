@@ -47,7 +47,8 @@ import {ISubaccount} from "./ISubaccount.sol";
  * non-zero) plus any residue waiting for the permissionless rail, less whatever that rail already
  * put into the position before delivery; no debt changes hands. While the controller is paused it
  * executes only when the position carries live debt (the defensive case - protecting an
- * endangered position); a debt-free deposit is new exposure and waits out the pause.
+ * endangered position); a debt-free deposit is new exposure and waits out the pause. With a
+ * principal it checkpoints the fee first, as {depositIdleFxrp} does.
  *
  * `ACTION_CANCEL`. Consumes the id and nothing more: no market read, no fee terms, no borrow
  * switch, no collateral or debt moves. It is not pause-gated, since revoking an authority is not
@@ -585,13 +586,14 @@ interface IMorphoLoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccoun
      * terms, adds the result to the fee debt, and re-baselines (principal to the canonical
      * live debt, clock to now, snapshot to the current terms).
      * @dev Permissionless and pause-exempt - notably the liquidated account's relief: an
-     * external repayment or liquidation is invisible to the account, so the floor keeps
-     * accruing on the stale principal until someone checkpoints, and only prospectively.
+     * external repayment or liquidation lowers the debt without the account seeing it, so the
+     * floor keeps accruing on the stale principal until someone checkpoints, and only
+     * prospectively; a liquidation's interest is still estimated from the recorded shares.
      * Under unchanged terms and non-decreasing debt, splitting a period typically increases
      * the total fee and never decreases it by more than one X18 unit (under 1e-18 of a base
      * unit) per checkpoint, so checkpointing cannot be used against the protocol; the
      * advertised promise is that per-checkpoint measurement. Shares-first: zero principal
-     * makes no Morpho call, zero live shares settle at zero debt without touching the IRM.
+     * makes no Morpho call, zero live shares read Morpho's stored totals without touching the IRM.
      */
     function checkpointFee()
         external;
@@ -601,7 +603,9 @@ interface IMorphoLoanSubaccountRemote is IComposeReceiverAccountBase, ISubaccoun
      * @dev Permissionless with a fixed destination (the account's own position): the retry
      * rail for FXRP that arrived without a successful composed action. It remains available
      * while paused only to defend a position with live debt; a debt-free deposit is new
-     * exposure and is pause-gated.
+     * exposure and is pause-gated. With a principal it checkpoints the fee first, and when that
+     * has to accrue (live shares, time elapsed) Morpho's accrual must succeed, as for {repay};
+     * the fee itself is never paid or gated here.
      * @return _amount The amount deposited.
      */
     function depositIdleFxrp()

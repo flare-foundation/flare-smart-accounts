@@ -45,13 +45,13 @@ library LoanMath {
     /// @dev The fee one elapsed period adds, at WAD precision (base units x 1e18):
     /// `max(P * floor * T / YEAR, I * WAD + P * spread * T / YEAR) - I * WAD` over the principal
     /// `P` at the period's start (base units), the WAD annual rates, the period's length `T` in
-    /// seconds of the 365-day year, and the market interest `I = max(0, liveDebt - P)` the period
-    /// produced in base units - an external repayment or a liquidation counts as zero interest,
-    /// so the delta never underflows. Each rate term is one `mulDiv` rounded down, the interest
-    /// exact. Zero for a zero principal or a zero period.
+    /// seconds of the 365-day year, and the market interest `I = max(0, debtReached - P)` the
+    /// period produced in base units, from the debt the principal reached - a debt that fell
+    /// counts as zero interest, so the delta never underflows. Each rate term is one `mulDiv`
+    /// rounded down, the interest exact. Zero for a zero principal or a zero period.
     function feeDeltaX18(
         uint256 _principal,
-        uint256 _liveDebt,
+        uint256 _debtReached,
         uint256 _elapsed,
         uint256 _floor,
         uint256 _spread
@@ -62,7 +62,7 @@ library LoanMath {
         if (_principal == 0 || _elapsed == 0) {
             return 0;
         }
-        uint256 interestX18 = (_liveDebt > _principal ? _liveDebt - _principal : 0) * WAD;
+        uint256 interestX18 = (_debtReached > _principal ? _debtReached - _principal : 0) * WAD;
         uint256 owedX18 = Math.max(
             Math.mulDiv(_principal * _floor, _elapsed, YEAR),
             interestX18 + Math.mulDiv(_principal * _spread, _elapsed, YEAR)

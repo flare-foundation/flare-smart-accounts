@@ -650,9 +650,10 @@ contract MorphoLoanSubaccountRemoteForkTest is LoanForkFixture {
 
         uint256 edge = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
-        _liquidateRepayingShares(_shares() / 2);
+        uint128 recordedShares = _shares();
+        _liquidateRepayingShares(recordedShares / 2);
 
-        (uint256 principal, uint256 storedFeeX18, , uint64 lastCheckpoint, uint64 floorRate, ) =
+        (uint256 principal, uint256 storedFeeX18, , uint64 lastCheckpoint, uint64 floorRate, uint64 spreadRate) =
             IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         assertGt(
             principal,
@@ -669,13 +670,16 @@ contract MorphoLoanSubaccountRemoteForkTest is LoanForkFixture {
         (uint256 reconciled, uint256 feeAfterX18, , , , ) =
             IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         // the expectation is computed here rather than read back, because the projection and the
-        // checkpoint run the same code: comparing them would pass a build that suppressed both.
-        // With the principal above the live debt the interest term clamps to zero, leaving the
-        // floor over the period since the last checkpoint
+        // checkpoint run the same code: comparing them would pass a build that suppressed both
         assertEq(
             feeAfterX18 - storedFeeX18,
+            _expectedBillAfterLiquidation(principal, recordedShares, lastCheckpoint, floorRate, spreadRate),
+            "the checkpoint folds in the period on the stale principal, net of the interest it bore"
+        );
+        assertLt(
+            feeAfterX18 - storedFeeX18,
             Math.mulDiv(principal * floorRate, vm.getBlockTimestamp() - lastCheckpoint, LoanMath.YEAR),
-            "the checkpoint folds in exactly the floor on the stale principal"
+            "which the liquidation does not hide: less than the floor alone"
         );
         assertEq(feeAfterX18, projected, "and it is what the view projected in the same block");
         assertEq(
@@ -689,25 +693,37 @@ contract MorphoLoanSubaccountRemoteForkTest is LoanForkFixture {
      * @dev Checkpointing at once versus letting it wait - the comparison SA-04 asks for, and the
      * reason a front end has to watch for liquidations rather than leave the account to notice.
      * The floor is priced on `feePrincipal`, and a liquidation leaves that describing a debt that
-     * no longer exists, so every second before the checkpoint is billed at the old size. The
-     * delayed figure is asserted exactly: with the principal above the live debt the market
-     * interest term clamps to zero, which leaves the floor alone.
+     * no longer exists, so every second before the checkpoint is billed at the old size. Both
+     * figures are asserted exactly, from the recorded shares' value at the totals the checkpoint
+     * read: the interest the position bore is credited against the floor.
      */
     function testCheckpointingLateAfterALiquidationCostsMoreThanCheckpointingAtOnce() public onlyForked {
         _openOnTheRealMarket(COLLATERAL, 5_000e18);
         vm.warp(block.timestamp + ORACLE_WINDOW);
         uint256 edge = IMorphoLoanSubaccountRemote(address(account)).getLoanPosition().liquidationPrice;
         vm.mockCall(MARKET_ORACLE, abi.encodeWithSelector(IOracle.price.selector), abi.encode(edge - 1));
-        _liquidateRepayingShares(_shares() / 2);
+        uint128 recordedShares = _shares();
+        _liquidateRepayingShares(recordedShares / 2);
 
-        (uint256 stalePrincipal, uint256 feeAtLiquidation, , uint64 lastCheckpoint, uint64 floorRate, ) =
-            IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
+        (
+            uint256 stalePrincipal,
+            uint256 feeAtLiquidation,
+            ,
+            uint64 lastCheckpoint,
+            uint64 floorRate,
+            uint64 spreadRate
+        ) = IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
         uint256 waited = 1 hours;
 
         // checkpoint at once, then let the same hour pass on the reconciled principal
         uint256 snapshot = vm.snapshotState();
         IMorphoLoanSubaccountRemote(address(account)).checkpointFee();
-        uint256 feeAfterFirst = _billTheFirstPeriod(stalePrincipal, feeAtLiquidation, lastCheckpoint, floorRate);
+        (, uint256 feeAfterFirst, , , , ) = IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
+        assertEq(
+            feeAfterFirst - feeAtLiquidation,
+            _expectedBillAfterLiquidation(stalePrincipal, recordedShares, lastCheckpoint, floorRate, spreadRate),
+            "the first period is billed on the pre-liquidation principal, net of the interest it bore"
+        );
         vm.warp(vm.getBlockTimestamp() + waited);
         uint256 feeIfPrompt = _billTheSecondPeriod(feeAfterFirst, waited);
         vm.revertToState(snapshot);
@@ -718,11 +734,11 @@ contract MorphoLoanSubaccountRemoteForkTest is LoanForkFixture {
         (, uint256 feeIfLate, , , , ) = IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
 
         // the late checkpoint prices its whole period - everything since the last one, not just
-        // the hour waited - at the floor on the principal it still held
+        // the hour waited - on the principal it still held
         assertEq(
             feeIfLate - feeAtLiquidation,
-            Math.mulDiv(stalePrincipal * floorRate, vm.getBlockTimestamp() - lastCheckpoint, LoanMath.YEAR),
-            "the whole period is billed at the floor on the pre-liquidation principal"
+            _expectedBillAfterLiquidation(stalePrincipal, recordedShares, lastCheckpoint, floorRate, spreadRate),
+            "the whole period is billed on the pre-liquidation principal"
         );
         assertLt(feeIfPrompt, feeIfLate, "and the prompt path's same hour on the live debt costs less");
         assertLe(
@@ -948,23 +964,33 @@ contract MorphoLoanSubaccountRemoteForkTest is LoanForkFixture {
         _up = MorphoMath.toAssetsUp(_shareCount, totalBorrowAssets, totalBorrowShares);
     }
 
-    /// @dev The period a checkpoint just billed, when the principal sits above the live debt:
-    /// the market interest term clamps to zero, leaving the floor alone. Returns the fee now.
-    function _billTheFirstPeriod(
+    /// @dev What a checkpoint after a liquidation bills for the period since `_lastCheckpoint`,
+    /// from the totals it read (call it right after): the recorded shares keep the interest the
+    /// position bore, valued up as canonical Morpho would, and the period owes the floor net of
+    /// that interest, or the spread on top of it, whichever is more.
+    function _expectedBillAfterLiquidation(
         uint256 _principal,
-        uint256 _feeBefore,
+        uint128 _recordedShares,
         uint64 _lastCheckpoint,
-        uint64 _floorRate
+        uint64 _floorRate,
+        uint64 _spreadRate
     )
         private view
-        returns (uint256 _feeNow)
+        returns (uint256)
     {
-        (, _feeNow, , , , ) = IMorphoLoanSubaccountRemote(address(account)).getLoanFeeState();
-        assertEq(
-            _feeNow - _feeBefore,
-            Math.mulDiv(_principal * _floorRate, vm.getBlockTimestamp() - _lastCheckpoint, LoanMath.YEAR),
-            "the first period is the floor on the pre-liquidation principal"
+        (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) = morpho.market(_marketId());
+        uint256 reached = Math.mulDiv(
+            _recordedShares,
+            uint256(totalBorrowAssets) + MorphoMath.VIRTUAL_ASSETS,
+            uint256(totalBorrowShares) + MorphoMath.VIRTUAL_SHARES,
+            Math.Rounding.Ceil
         );
+        uint256 interestX18 = (reached > _principal ? reached - _principal : 0) * WAD;
+        uint256 elapsed = vm.getBlockTimestamp() - _lastCheckpoint;
+        return Math.max(
+            Math.mulDiv(_principal * _floorRate, elapsed, LoanMath.YEAR),
+            interestX18 + Math.mulDiv(_principal * _spreadRate, elapsed, LoanMath.YEAR)
+        ) - interestX18;
     }
 
     /// @dev The market's supply total, which is what a write-off comes out of.

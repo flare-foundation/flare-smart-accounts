@@ -470,8 +470,10 @@ contract LoanOriginationAttacksTest is LoanRemoteFixture {
         vm.warp(block.timestamp + YEAR);
         oracle.setPrice(1e48);
         _liquidate(_shares());
-        fxrp.mint(address(account), 1_000e6);
-        account.depositIdleFxrp();
+        // straight into the position: the deposit rail would checkpoint, settling the principal
+        fxrp.mint(address(this), 1_000e6);
+        fxrp.approve(address(morpho), 1_000e6);
+        morpho.supplyCollateral(params, 1_000e6, address(account), "");
         // debt-free, the 700 fee needs 3x its size covered: 2100 against the 999 RLUSD the
         // 999 FXRP left are worth at the new price
         _withdrawMustRevert(

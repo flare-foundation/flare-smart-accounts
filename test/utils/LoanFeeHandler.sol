@@ -62,6 +62,10 @@ contract LoanFeeHandler is LoanRemoteFixture {
 
     Checks public checks;
     uint64 private nonce;
+    // the borrow shares at the account's last fee-base record, and whether a liquidation has
+    // taken collateral since: observed from this handler's own actions and the account's events
+    uint128 private recordedShares;
+    bool private liquidatedSinceRecord;
     uint256 public initialSupply;
     uint256 public minted;
     uint256 public burned;
@@ -79,6 +83,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
     uint256 public surplusPushes;
     uint256 public dustForfeitures;
     uint256 public successfulDeposits;
+    uint256 public depositCheckpoints;
     uint256 public successfulFeeBearingWithdrawals;
     uint256 public elapsedTermsChangeCheckpoints;
     uint256 public feeReservations;
@@ -91,6 +96,8 @@ contract LoanFeeHandler is LoanRemoteFixture {
     constructor() {
         _setUpRemoteFixture();
         _open(5_000e18);
+        // the opening borrow recorded the account's fee base before any event is observed here
+        recordedShares = _shares();
         nonce = 10;
         initialSupply = loanToken.totalSupply();
         checks = Checks(true, true, true, true, true, true, true, true, true);
@@ -274,6 +281,9 @@ contract LoanFeeHandler is LoanRemoteFixture {
         loanToken.mint(address(this), funding);
         loanToken.approve(address(morpho), funding);
         morpho.simulatePartialLiquidation(params, address(account), selected);
+        if (_collateral() < collateral) {
+            liquidatedSinceRecord = true;
+        }
         liquidations++;
         Vm.Log[] memory logs = vm.getRecordedLogs();
         _checkEvents(beforeCall, logs, false);
@@ -405,6 +415,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
     }
 
     /// Adds collateral only through the fixed public rail, including paused debt-bearing positions.
+    /// With a principal the deposit checkpoints first; without one it leaves the fee state alone.
     function deposit(
         uint64 _amount
     )
@@ -415,10 +426,12 @@ contract LoanFeeHandler is LoanRemoteFixture {
         bytes32 oldFeeState = _feeStateHash();
         uint256 collateralBefore = _collateral();
         uint256 idle = fxrp.balanceOf(address(account));
+        vm.recordLogs();
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = address(account).call(
             abi.encodeCall(account.depositIdleFxrp, ())
         );
+        Vm.Log[] memory logs = vm.getRecordedLogs();
         if (success) {
             successfulDeposits++;
             if (
@@ -427,17 +440,22 @@ contract LoanFeeHandler is LoanRemoteFixture {
             ) {
                 depositsCorrect = false;
             }
+            if (beforeCall.principal != 0) {
+                depositCheckpoints++;
+                _checkEvents(beforeCall, logs, false);
+                _checkBaseline();
+            } else if (_feeStateHash() != oldFeeState) {
+                depositsCorrect = false;
+            }
         } else {
             _checkFailure(beforeCall);
             if (
                 _collateral() != collateralBefore ||
-                fxrp.balanceOf(address(account)) != idle
+                fxrp.balanceOf(address(account)) != idle ||
+                _feeStateHash() != oldFeeState
             ) {
                 depositsCorrect = false;
             }
-        }
-        if (_feeStateHash() != oldFeeState) {
-            depositsCorrect = false;
         }
         _checkConservation();
     }
@@ -475,24 +493,26 @@ contract LoanFeeHandler is LoanRemoteFixture {
         if (_before.principal == 0 || elapsed == 0) {
             return _before;
         }
-        uint256 liveDebt;
         uint128 shares = _shares();
+        (, , uint128 totalAssets, uint128 totalShares, , ) = morpho.market(
+            MorphoMath.marketId(params)
+        );
+        // the account accrues before reading only while it owes; with no shares it reads the
+        // stored totals, so pending interest counts only then
+        uint256 assetsNow = uint256(totalAssets) + 1;
         if (shares > 0) {
-            (, , uint128 totalAssets, uint128 totalShares, , ) = morpho.market(
-                MorphoMath.marketId(params)
-            );
-            uint256 pending = morpho.pendingInterest(
-                MorphoMath.marketId(params)
-            );
-            // Equivalent integer rational conversion, independent of the production share helper.
-            uint256 numerator =
-                uint256(shares) * (uint256(totalAssets) + pending + 1);
-            uint256 denominator = uint256(totalShares) + 1_000_000;
-            liveDebt = (numerator + denominator - 1) / denominator;
+            assetsNow += morpho.pendingInterest(MorphoMath.marketId(params));
+        }
+        uint256 debtReached = _valueUp(shares, assetsNow, totalShares);
+        if (liquidatedSinceRecord) {
+            uint256 held = _valueUp(recordedShares, assetsNow, totalShares);
+            if (held > debtReached) {
+                debtReached = held;
+            }
         }
         uint256 interest =
-            liveDebt > _before.principal
-                ? (liveDebt - _before.principal) * WAD
+            debtReached > _before.principal
+                ? (debtReached - _before.principal) * WAD
                 : 0;
         uint256 minimum = (_before.principal * uint256(floor) * elapsed) / YEAR;
         uint256 spreadCharge =
@@ -519,6 +539,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
         uint256 reserved;
         uint256 surplusAmount;
         bool pushed;
+        bool recorded;
         for (uint256 i = 0; i < _logs.length; i++) {
             Vm.Log memory entry = _logs[i];
             if (entry.emitter != address(account) || entry.topics.length == 0) {
@@ -532,6 +553,8 @@ contract LoanFeeHandler is LoanRemoteFixture {
                 }
                 if (_before.principal == 0) {
                     zeroPrincipalCheckpoints++;
+                } else {
+                    recorded = true;
                 }
                 if (pendingElapsedTermsChange) {
                     elapsedTermsChangeCheckpoints++;
@@ -539,6 +562,7 @@ contract LoanFeeHandler is LoanRemoteFixture {
                 }
             } else if (entry.topics[0] == PRINCIPAL_SYNCED) {
                 synced++;
+                recorded = true;
                 if (abi.decode(entry.data, (uint256)) != _debt()) {
                     baselineCorrect = false;
                 }
@@ -600,6 +624,24 @@ contract LoanFeeHandler is LoanRemoteFixture {
         if (_expectSync != (synced == 1)) {
             baselineCorrect = false;
         }
+        if (recorded) {
+            recordedShares = _shares();
+            liquidatedSinceRecord = false;
+        }
+    }
+
+    /// Shares valued rounding up, at totals whose virtual asset is already included:
+    /// the integer rational conversion, independent of the production share helper.
+    function _valueUp(
+        uint256 _shares,
+        uint256 _assetsWithVirtual,
+        uint256 _totalShares
+    )
+        private pure
+        returns (uint256)
+    {
+        uint256 denominator = _totalShares + 1_000_000;
+        return (_shares * _assetsWithVirtual + denominator - 1) / denominator;
     }
 
     /// The cover gate's reference: the collateral left, at the oracle's price, covers

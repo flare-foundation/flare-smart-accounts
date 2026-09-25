@@ -79,6 +79,12 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
     uint64 private feeLastCheckpoint;
     uint64 private feeSnapshotFloor;
     uint64 private feeSnapshotSpread;
+    // the borrow shares the principal was recorded with, and the collateral the position should
+    // hold unless something else touched it - recorded with the principal, then moved by the
+    // account's own deposits and withdrawals - so the next checkpoint can tell a liquidation from
+    // a repayment outside the rails; zero on an account older than the fields
+    uint128 private feeBaseShares;
+    uint128 private feeBaseCollateral;
 
     // deliberately no receive() and no native exit: a withdraw delivery's compose value is
     // spent or forwarded in-call; pre-deployment, dropped or force-sent native strands
@@ -162,6 +168,10 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
     {
         IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         _checkDepositAllowed(market);
+        // with a loan the period settles first, so a deposit after a liquidation ends its credit
+        if (feePrincipal != 0) {
+            _checkpointFee(market);
+        }
         _amount = _supplyBalance(market);
         require(_amount > 0, NothingToDeposit());
         emit IdleFxrpDeposited(_parentAccount(), _amount);
@@ -200,7 +210,7 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
         _position.idleCollateral = IERC20(market.marketParams.collateralToken).balanceOf(address(this));
         _position.idleLoanToken = IERC20(market.marketParams.loanToken).balanceOf(address(this));
         _position.debt = view_.debt;
-        _position.feeDebtX18 = _projectedFeeX18(view_.debt);
+        _position.feeDebtX18 = _projectedFeeX18(market, view_);
         _position.oraclePrice = _oraclePrice(market);
         _position.collateralValue =
             Math.mulDiv(view_.collateral, _position.oraclePrice, ORACLE_PRICE_SCALE);
@@ -222,7 +232,7 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
     {
         IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         MarketView memory view_ = _marketView(market);
-        uint256 collectible = _projectedFeeX18(view_.debt) / WAD;
+        uint256 collectible = _projectedFeeX18(market, view_) / WAD;
         uint256 price = _oraclePrice(market);
         _limits.marketLiquidity = view_.liquidity;
         _limits.maxWithdraw = _maxWithdraw(view_, collectible, price, market.marketParams.lltv);
@@ -249,7 +259,7 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
         if (_borrowSharesOf(market) != 0) {
             view_ = _marketView(market);
         }
-        uint256 collectible = _projectedFeeX18(view_.debt) / WAD;
+        uint256 collectible = _projectedFeeX18(market, view_) / WAD;
         uint256 idle = IERC20(market.marketParams.loanToken).balanceOf(address(this));
         _preview = _simulateRepay(view_, collectible, idle + _additionalLoanToken);
         uint256 owed = view_.debt + collectible;
@@ -265,7 +275,7 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
     {
         IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         MarketView memory view_ = _marketView(market);
-        uint256 collectible = _projectedFeeX18(view_.debt) / WAD;
+        uint256 collectible = _projectedFeeX18(market, view_) / WAD;
         uint256 lltv = market.marketParams.lltv;
         _preview.requiredCover = LoanMath.requiredCover(view_.debt, collectible, lltv);
         _preview.remainingValue = _remainingValue(view_.collateral, _amount, _oraclePrice(market));
@@ -292,8 +302,9 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
             + _additionalCollateral;
         _preview.collateralValue = Math.mulDiv(supplied, _oraclePrice(market), ORACLE_PRICE_SCALE);
         _preview.debtAfter = _debtAfterBorrow(view_, _amount);
-        _preview.requiredCover =
-            LoanMath.requiredCover(_preview.debtAfter, _projectedFeeX18(view_.debt) / WAD, market.marketParams.lltv);
+        _preview.requiredCover = LoanMath.requiredCover(
+            _preview.debtAfter, _projectedFeeX18(market, view_) / WAD, market.marketParams.lltv
+        );
         _preview.coverSatisfied = _preview.collateralValue >= _preview.requiredCover;
         _preview.marketLiquidity = view_.liquidity;
     }
@@ -442,6 +453,10 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
         require(_bridgedAmount > 0, ZeroAmount());
         IMorphoLoanMarketsFacet.Market memory market = _myMarket();
         _checkDepositAllowed(market);
+        // settles the period first, as {depositIdleFxrp} does
+        if (feePrincipal != 0) {
+            _checkpointFee(market);
+        }
         // the credit already sits on the account (the OFT delivered it a transaction ago), so
         // it goes in with whatever else is here; the rail may already have deposited it (the
         // accepted race), in which case nothing is left to supply and that is fine
@@ -469,6 +484,9 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
                 _market.marketParams, _supplied, address(this), ""
             );
             fxrp.forceApprove(_market.morpho, 0);
+            // a delta, never the position's collateral: re-reading that would erase a liquidation
+            // earlier in the period
+            feeBaseCollateral += SafeCast.toUint128(_supplied);
         }
     }
 
@@ -568,6 +586,9 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
         IMorpho(market.morpho).withdrawCollateral(
             market.marketParams, amount, address(this), address(this)
         );
+        // saturating: with no principal the record can be stale, and it stays at or below the
+        // position, which is all the liquidation test needs
+        feeBaseCollateral = feeBaseCollateral > amount ? feeBaseCollateral - SafeCast.toUint128(amount) : 0;
         emit CollateralWithdrawn(_parentAccount(), operationId, amount, _guid);
 
         // the return leg, in the same execution; the LayerZero fee rode in as compose value
@@ -674,14 +695,15 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
     }
 
     /// @dev Prices the elapsed period at the SNAPSHOTTED terms - `owed = max(floor·P·T,
-    /// I + spread·P·T)` with `I = max(0, D − P)`, so an external repayment or liquidation
-    /// counts as zero interest and the delta never underflows - then re-baselines: principal
-    /// to the live debt, clock to now, snapshot to the current terms. The re-baseline runs
-    /// on EVERY checkpoint (a first borrow must accrue at current terms, not stale ones).
-    /// Shares-first: zero principal makes no Morpho call; a zero elapsed period skips the
-    /// fee math but still re-reads the debt raw (a same-block checkpoint after an external
-    /// repayment must not keep a stale base); zero live shares settle at `D = 0` without
-    /// touching the IRM.
+    /// I + spread·P·T)` with `I = max(0, D − P)` over the debt `D` the principal reached
+    /// ({_debtReached}), so a repayment outside the rails lowers the interest observed while a
+    /// liquidation keeps the interest the position bore - then re-baselines: principal, its
+    /// shares and the collateral to the position now, clock to now, snapshot to the current
+    /// terms. The re-baseline runs on EVERY checkpoint (a first borrow must accrue at current
+    /// terms, not stale ones). Shares-first: zero principal makes no Morpho call; a zero elapsed
+    /// period skips the fee math but still re-reads the position raw (a same-block checkpoint
+    /// after an external repayment must not keep a stale base); zero live shares read the stored
+    /// totals without accruing, so the IRM is never touched.
     function _checkpointFee(
         IMorphoLoanMarketsFacet.Market memory _market
     )
@@ -692,18 +714,22 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
         if (principal != 0) {
             uint256 elapsed = block.timestamp - feeLastCheckpoint;
             if (elapsed == 0) {
-                (, feePrincipal) = _debtOf(_market);
+                _recordFeeBase(_market);
             } else {
-                uint256 liveDebt = 0;
                 if (_borrowSharesOf(_market) > 0) {
                     IMorpho(_market.morpho).accrueInterest(_market.marketParams);
-                    (, liveDebt) = _debtOf(_market);
                 }
+                (, uint128 collateral, uint256 liveDebt, uint256 totalAssets, uint256 totalShares) =
+                    _storedPosition(_market);
                 feeDeltaX18 = LoanMath.feeDeltaX18(
-                    principal, liveDebt, elapsed, feeSnapshotFloor, feeSnapshotSpread
+                    principal,
+                    _debtReached(liveDebt, collateral, totalAssets, totalShares),
+                    elapsed,
+                    feeSnapshotFloor,
+                    feeSnapshotSpread
                 );
                 flareDebtX18 += feeDeltaX18;
-                feePrincipal = liveDebt;
+                _recordFeeBase(_market);
             }
         }
         IMorphoLoanMarketsFacet.FeeTerms memory terms =
@@ -770,8 +796,21 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
     )
         private
     {
-        (, feePrincipal) = _debtOf(_market);
+        _recordFeeBase(_market);
         emit LoanFeePrincipalSynced(_parentAccount(), feePrincipal);
+    }
+
+    /// @dev Records the fee base from the position as Morpho stores it: the principal, the
+    /// borrow shares behind it and the collateral ({_debtReached} compares against both).
+    function _recordFeeBase(
+        IMorphoLoanMarketsFacet.Market memory _market
+    )
+        private
+    {
+        (uint128 shares, uint128 collateral, uint256 debt, , ) = _storedPosition(_market);
+        feePrincipal = debt;
+        feeBaseShares = shares;
+        feeBaseCollateral = collateral;
     }
 
     /// @dev The tail of {repay}, over the balance a closed or debt-free position leaves: pay
@@ -918,6 +957,53 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
         _fullDebt = MorphoMath.toAssetsUp(_borrowShares, totalBorrowAssets, totalBorrowShares);
     }
 
+    /// @dev The position and the market's borrow totals as Morpho stores them, without accruing.
+    function _storedPosition(
+        IMorphoLoanMarketsFacet.Market memory _market
+    )
+        private view
+        returns (
+            uint128 _shares,
+            uint128 _collateral,
+            uint256 _debt,
+            uint256 _totalBorrowAssets,
+            uint256 _totalBorrowShares
+        )
+    {
+        bytes32 marketId = MorphoMath.marketId(_market.marketParams);
+        (, _shares, _collateral) = IMorpho(_market.morpho).position(marketId, address(this));
+        (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) =
+            IMorpho(_market.morpho).market(marketId);
+        _totalBorrowAssets = totalBorrowAssets;
+        _totalBorrowShares = totalBorrowShares;
+        _debt = MorphoMath.toAssetsUp(_shares, totalBorrowAssets, totalBorrowShares);
+    }
+
+    /// @dev The debt the recorded principal reached, which the fee reads its interest from: the
+    /// live debt, unless the position holds less collateral than expected - which, with every
+    /// deposit and withdrawal tracked, only a liquidation causes. A liquidation burns shares, and
+    /// with them interest the position bore; the recorded shares' value at the given totals keeps
+    /// it. A repayment outside the rails leaves collateral in place and stays a donation, unless a
+    /// liquidation falls in the same period, before or after it: the recorded shares are then
+    /// credited whole, the repaid ones included.
+    function _debtReached(
+        uint256 _liveDebt,
+        uint256 _collateral,
+        uint256 _totalBorrowAssets,
+        uint256 _totalBorrowShares
+    )
+        private view
+        returns (uint256)
+    {
+        if (_collateral >= feeBaseCollateral) {
+            return _liveDebt;
+        }
+        return Math.max(
+            _liveDebt,
+            MorphoMath.toAssetsUp(feeBaseShares, _totalBorrowAssets, _totalBorrowShares)
+        );
+    }
+
     /// @dev The market oracle's price, zero when the oracle is dead, reverting or answers zero -
     /// the gate's own treatment, so a quote reads the collateral the way the gate will.
     function _oraclePrice(
@@ -976,18 +1062,31 @@ contract MorphoLoanSubaccountRemote is IMorphoLoanSubaccountRemote, SubaccountBa
     }
 
     /// @dev The fee as a checkpoint in this block would leave it: the carry plus the running
-    /// period priced at the snapshotted terms against `_liveDebt` ({LoanMath.feeDeltaX18}, zero
-    /// with no principal or no elapsed time - exactly {_checkpointFee}'s arithmetic).
+    /// period priced at the snapshotted terms - exactly {_checkpointFee}'s arithmetic, over what
+    /// it would read: `_view`'s accrued totals while the account owes, the stored ones otherwise.
     function _projectedFeeX18(
-        uint256 _liveDebt
+        IMorphoLoanMarketsFacet.Market memory _market,
+        MarketView memory _view
     )
         private view
         returns (uint256)
     {
+        uint256 principal = feePrincipal;
+        uint256 elapsed = block.timestamp - feeLastCheckpoint;
+        if (principal == 0 || elapsed == 0) {
+            return flareDebtX18;
+        }
+        uint256 debtReached;
+        if (_view.shares > 0) {
+            debtReached =
+                _debtReached(_view.debt, _view.collateral, _view.totalBorrowAssets, _view.totalBorrowShares);
+        } else {
+            (, uint128 collateral, uint256 liveDebt, uint256 totalAssets, uint256 totalShares) =
+                _storedPosition(_market);
+            debtReached = _debtReached(liveDebt, collateral, totalAssets, totalShares);
+        }
         return flareDebtX18
-            + LoanMath.feeDeltaX18(
-                feePrincipal, _liveDebt, block.timestamp - feeLastCheckpoint, feeSnapshotFloor, feeSnapshotSpread
-            );
+            + LoanMath.feeDeltaX18(principal, debtReached, elapsed, feeSnapshotFloor, feeSnapshotSpread);
     }
 
     /// @dev The largest withdrawal the cover passes: the collateral above the amount that, at

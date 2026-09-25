@@ -417,6 +417,15 @@ source still being in the repository, and the chain family, and they are the onl
 a wrong implementation from being registered at all. `--stage live` afterwards proves what was
 registered, which detects a wrong one rather than preventing it. Run both.
 
+On a chain that already has accounts — the Sepolia rehearsal today — an upgrade that appends to the
+loan subaccount's fee base leaves those fields at zero on every existing account until its first
+checkpoint, and until then a liquidation is measured by the debt alone. Optionally, once the
+registration applies, run `checkpointFee()` on every account whose `getLoanFeeState()` shows a
+principal: it sets each baseline at once, though it cannot recover interest a liquidation already
+hid. Every subaccount emits `SubaccountInitialized` when its proxy is deployed, which enumerates
+them — one deployed straight through the factory included, which the controller's
+`SubaccountCreated` misses.
+
 ### B6. Transport and market
 
 On Sepolia the market is ours to make before it can be registered — on Ethereum it is the live

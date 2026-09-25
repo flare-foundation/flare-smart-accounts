@@ -1528,6 +1528,325 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
         assertEq(sp, 0.01e18);
     }
 
+    function testLiquidationKeepsTheInterestItHid() public {
+        // a liquidation burns shares and with them interest the position bore: a year at 6% under
+        // a 7% floor, then half the position liquidated before any checkpoint. The year costs the
+        // 10 it would have without the liquidation, not the whole floor, and the quote agrees
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 60e18);
+        (, uint128 shares, ) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 2);
+
+        uint256 quotedX18 = IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().feeDebtX18;
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, uint256 collectible, , , ) =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(collectible, 10e18, 1);
+        assertEq(feeDebtX18, quotedX18);
+    }
+
+    function testFullLiquidationKeepsTheInterestItHid() public {
+        // the whole position liquidated leaves no shares, so the checkpoint reads the stored
+        // totals without accruing; with another borrower keeping the market alive, the recorded
+        // shares still carry the year's interest: 5 on 500, not the whole 35 floor
+        address subaccount = _borrowedSubaccount(500e18);
+        _borrowOutside(100e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 36e18);
+        _liquidate(subaccount, 0);
+        (, uint128 sharesLeft, ) = morpho.position(_marketId(), subaccount);
+        assertEq(sharesLeft, 0);
+
+        uint256 quotedX18 = IMorphoLoanSubaccountRemote(subaccount).getLoanPosition().feeDebtX18;
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, uint256 feeDebtX18, uint256 collectible, , , ) =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(collectible, 5e18, 1);
+        assertEq(feeDebtX18, quotedX18);
+    }
+
+    function testRepaymentOutsideTheRailsIsNotCreditedAsInterest() public {
+        // a repayment outside the rails leaves collateral in place, so it stays a donation: a year
+        // at no market interest earns the 70 floor, and repaying 999 on Morpho, then the rate
+        // rising, cannot buy that floor back with interest nobody paid
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _externalRepay(subaccount, 999e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        morpho.addPendingInterest(_marketId(), 0.12e18);
+
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 105e18);
+    }
+
+    function testLiquidationAfterAnOutsideRepaymentCreditsTheRepaidShares() public {
+        // the accepted limit, pinned: a liquidation after a repayment outside the rails, before any
+        // checkpoint, credits the recorded shares whole. A year at no market interest, 500 of 1000
+        // repaid on Morpho, half a year at 12% on the rest, then a liquidation: 45 booked, where a
+        // ping after the repayment books 72.5 and no liquidation the whole 105 floor
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _externalRepay(subaccount, 500e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        morpho.addPendingInterest(_marketId(), 30e18);
+        (, uint128 shares, ) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 10);
+
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(collectible, 45e18, 0.01e18);
+    }
+
+    function testCollateralSuppliedOutsideTheRailsCanHideALiquidation() public {
+        // the accepted limit, pinned: collateral supplied on Morpho for the account is not
+        // expected, so replacing what a liquidation seized hides it - the year's whole 70 floor -
+        // while replacing less leaves it detected, and the year costs its 10
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 60e18);
+        (, uint128 shares, uint128 collateralBefore) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 2);
+        (, , uint128 collateralAfter) = morpho.position(_marketId(), subaccount);
+        uint256 seized = collateralBefore - collateralAfter;
+
+        uint256 snapshot = vm.snapshotState();
+        _supplyOutsideTheRails(subaccount, seized - 1);
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 detected, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(detected, 10e18, 1);
+        vm.revertToState(snapshot);
+
+        _supplyOutsideTheRails(subaccount, seized);
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 hidden, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(hidden, 70e18);
+    }
+
+    function testAnEmptiedMarketLosesTheCredit() public {
+        // the accepted limit, pinned: a sole borrower fully liquidated leaves the market's totals
+        // at zero, which value the recorded shares at ceil(shares / 1e6) - the principal here, the
+        // share price not having moved when it was recorded - so the year's 30 of interest on 500
+        // is lost and the whole 35 floor charged
+        address subaccount = _borrowedSubaccount(500e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 30e18);
+        _liquidate(subaccount, 0);
+        (, , uint128 totalBorrowAssets, uint128 totalBorrowShares, , ) = morpho.market(_marketId());
+        assertEq(totalBorrowAssets, 0, "the market is empty");
+        assertEq(totalBorrowShares, 0, "the market is empty");
+
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 35e18);
+    }
+
+    function testABorrowCarryingCollateralAfterALiquidationKeepsTheCredit() public {
+        // a borrow supplies its collateral before its checkpoint; the expectation rises with it, so
+        // a liquidation earlier in the period still reads as one, and the year costs its 10 rather
+        // than the 70 floor, although the position ends above the collateral it held before
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 60e18);
+        (, uint128 shares, ) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 2);
+        fxrp.mint(subaccount, 200e6);
+        _deliver(
+            subaccount, 2, 200e6,
+            _borrowPayload(
+                bytes32("op-borrow-2"), DESTINATION_KIND_EVM,
+                bytes32(uint256(uint160(makeAddr("exchangeDeposit")))), 10e18
+            )
+        );
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertGt(collateral, 100e6, "above the collateral held before the liquidation");
+
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(collectible, 10e18, 1);
+    }
+
+    function testALiquidationAfterADepositIsStillDetected() public {
+        // a deposit adds its amount to the expected collateral, so a liquidation after it still
+        // leaves the position short of the expectation and keeps its interest: the year costs 10
+        address subaccount = _borrowedSubaccount(1000e18);
+        fxrp.mint(subaccount, 200e6);
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 60e18);
+        (, uint128 shares, ) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 2);
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertGt(collateral, 100e6, "above the collateral held before the deposit");
+
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(collectible, 10e18, 1);
+    }
+
+    function testWithdrawalCannotDisguiseARepaymentAsALiquidation() public {
+        // a withdrawal lowers the recorded collateral with the position, so it leaves no false
+        // liquidation behind; a repayment outside the rails afterwards stays a donation and the
+        // 18 months still owe their floor, 10.5 on 100
+        address subaccount = _borrowedSubaccount(100e18);
+        _deliverWithValue(subaccount, 2, 0, _withdrawPayload(bytes32("op-w"), 30e6), 0.01 ether);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _externalRepay(subaccount, 99e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        morpho.addPendingInterest(_marketId(), 0.12e18);
+
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 10.5e18);
+    }
+
+    function testPingAfterALiquidationEndsTheCreditedPeriod() public {
+        // the recorded shares carry credit until the next checkpoint; a ping after the liquidation
+        // ends the period there. A year at no market interest earns the 70 floor, the ping right
+        // after 999/1000 is liquidated books it, and a later rate rise is credited only on the rest
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        (, uint128 shares, ) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 1000 * 999);
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 afterPing, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(afterPing, 70e18, 1);
+
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        morpho.addPendingInterest(_marketId(), 0.12e18);
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertGe(collectible, afterPing);
+        assertLt(collectible - afterPing, 0.01e18, "only the one left is priced");
+    }
+
+    function testWithoutAPingTheBurnedSharesAreCreditedUntilTheNextCheckpoint() public {
+        // the trade-off, pinned: with no checkpoint between a liquidation and a later rate rise,
+        // the burned shares' credit runs on past the liquidation and offsets the floor the year
+        // had earned - 15 booked where about 70 was owed. Any checkpoint - a ping, a deposit -
+        // is what bounds it
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        (, uint128 shares, ) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 1000 * 999);
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        morpho.addPendingInterest(_marketId(), 0.12e18);
+
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(collectible, 15e18, 0.01e18);
+    }
+
+    function testDepositCheckpointsTheFee() public {
+        // with a principal, both deposit paths settle the period first: a year at no market
+        // interest books the 70 floor at the rail's deposit, and a year later a compose deposit
+        // books the next 70
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        fxrp.mint(subaccount, 10e6);
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
+        (, , uint256 collectible, uint64 lastCheckpoint, , ) =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 70e18);
+        assertEq(lastCheckpoint, vm.getBlockTimestamp());
+
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        fxrp.mint(subaccount, 10e6);
+        _deliver(subaccount, 2, 10e6, _depositPayload());
+        (, , collectible, lastCheckpoint, , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 140e18);
+        assertEq(lastCheckpoint, vm.getBlockTimestamp());
+    }
+
+    function testDepositAfterALiquidationEndsTheCreditedPeriod() public {
+        // the deposit's checkpoint does what a ping does: collateral going back in after 999/1000
+        // is liquidated books the year's 70 floor, and a later rate rise is credited only on the rest
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        (, uint128 shares, ) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 1000 * 999);
+        fxrp.mint(subaccount, 10e6);
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
+        (, , uint256 afterDeposit, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertApproxEqAbs(afterDeposit, 70e18, 1);
+
+        vm.warp(vm.getBlockTimestamp() + 365 days / 2);
+        morpho.addPendingInterest(_marketId(), 0.12e18);
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertGe(collectible, afterDeposit);
+        assertLt(collectible - afterDeposit, 0.01e18, "only the one left is priced");
+    }
+
+    function testDepositRevertsWhenAccrualRevertsAndStaysRetriable() public {
+        // with a loan a deposit's checkpoint accrues, so a reverting IRM refuses the deposit on
+        // both paths - the FXRP stays on the account rather than entering a position the same IRM
+        // freezes - and once accrual works again the same delivery deposits and settles the year
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.setAccrueInterestReverts(true);
+        fxrp.mint(subaccount, 100e6);
+        vm.expectRevert(bytes("IRM reverted"));
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
+        _deliverExpectRevert(subaccount, 2, _depositPayload(), bytes("IRM reverted"));
+        assertEq(fxrp.balanceOf(subaccount), 100e6, "the FXRP stays on the account");
+
+        morpho.setAccrueInterestReverts(false);
+        _deliver(subaccount, 2, 100e6, _depositPayload());
+        (, , uint128 collateral) = morpho.position(_marketId(), subaccount);
+        assertEq(collateral, 200e6);
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 70e18);
+    }
+
+    function testDepositAfterAFullLiquidationCheckpointsWithoutAccruing() public {
+        // with no shares left there is nothing to accrue, so even a reverting IRM lets the
+        // deposit's checkpoint run: the recorded shares carry the year's interest, 5 on 500
+        // rather than the 35 floor
+        address subaccount = _borrowedSubaccount(500e18);
+        _borrowOutside(100e18);
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 36e18);
+        _liquidate(subaccount, 0);
+        morpho.setAccrueInterestReverts(true);
+        fxrp.mint(subaccount, 10e6);
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
+        (uint256 principal, , uint256 collectible, , , ) =
+            IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(principal, 0);
+        assertApproxEqAbs(collectible, 5e18, 1);
+    }
+
+    function testDebtFreeDepositDoesNotCheckpoint() public {
+        // with no principal there is nothing to settle, so neither deposit path touches the fee state
+        address subaccount = _borrowedSubaccount(0);
+        (, , , uint64 lastCheckpoint, , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        fxrp.mint(subaccount, 10e6);
+        IMorphoLoanSubaccountRemote(subaccount).depositIdleFxrp();
+        fxrp.mint(subaccount, 10e6);
+        _deliver(subaccount, 2, 10e6, _depositPayload());
+        (, , , uint64 checkpointAfter, , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(checkpointAfter, lastCheckpoint);
+    }
+
+    function testPrincipalRecordedWithoutTheFieldsKeepsTheDebtMeasure() public {
+        // an account whose principal predates the recorded shares and collateral has them at
+        // zero: its first period is measured by the debt alone, the liquidation exception
+        // included, and the checkpoint records them for the periods after
+        address subaccount = _borrowedSubaccount(1000e18);
+        vm.store(subaccount, bytes32(uint256(4)), bytes32(0));
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        morpho.addPendingInterest(_marketId(), 60e18);
+        (, uint128 shares, ) = morpho.position(_marketId(), subaccount);
+        _liquidate(subaccount, shares / 2);
+
+        IMorphoLoanSubaccountRemote(subaccount).checkpointFee();
+        (, , uint256 collectible, , , ) = IMorphoLoanSubaccountRemote(subaccount).getLoanFeeState();
+        assertEq(collectible, 70e18);
+        assertNotEq(vm.load(subaccount, bytes32(uint256(4))), bytes32(0), "recorded for the next period");
+    }
+
     function testCheckpointChargesFloorWhenMarketInterestIsLow() public {
         // the worked example's first year: 6% market interest under a 7% floor - the fee is
         // the difference, and the principal re-capitalizes to the live debt
@@ -4887,6 +5206,29 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
                 _defaultMarket().marketParams, _subaccount, _shares
             );
         }
+        vm.stopPrank();
+    }
+
+    /// A third party supplies `_collateral` for the subaccount directly on Morpho - outside the
+    /// rails, so the account does not expect it.
+    function _supplyOutsideTheRails(address _subaccount, uint256 _collateral) private {
+        address donor = makeAddr("collateralDonor");
+        fxrp.mint(donor, _collateral);
+        vm.startPrank(donor);
+        fxrp.approve(address(morpho), _collateral);
+        morpho.supplyCollateral(_defaultMarket().marketParams, _collateral, _subaccount, "");
+        vm.stopPrank();
+    }
+
+    /// Another borrower on the same market, outside the account, so the market's totals outlive
+    /// a full liquidation of the account.
+    function _borrowOutside(uint256 _assets) private {
+        address borrower = makeAddr("outsideBorrower");
+        fxrp.mint(borrower, 1_000e6);
+        vm.startPrank(borrower);
+        fxrp.approve(address(morpho), type(uint256).max);
+        morpho.supplyCollateral(_defaultMarket().marketParams, 1_000e6, borrower, "");
+        morpho.borrow(_defaultMarket().marketParams, _assets, 0, borrower, borrower);
         vm.stopPrank();
     }
 

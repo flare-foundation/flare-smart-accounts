@@ -809,7 +809,8 @@ a user-signed action:
 - **`depositIdleFxrp()`** supplies the whole idle FXRP balance as collateral into the
   account's one position — the executor's retry rail for FXRP that arrived without a
   successful composed action. Defending an indebted position survives a pause, like
-  repayment; a debt-free deposit is new exposure and pause-gated. Debt is read live from
+  repayment; a debt-free deposit is new exposure and pause-gated. With a principal it checkpoints
+  the fee first (see Checkpoint accounting). Debt is read live from
   Morpho on every check — nothing is cached, so an external liquidation is visible to the
   very next call. It is also the only way idle FXRP leaves the account — into the position,
   from where the signed withdraw brings it home — so the credit of a composed action can be
@@ -845,9 +846,14 @@ a user-signed action:
 
 Flare charges a spread over the market's interest, with a floor: the user's effective rate is
 **max(feeFloor, Morpho rate + feeSpread)**, measured checkpoint-to-checkpoint (the examples
-below use floor 7%, spread 1%). An origination fee was explicitly rejected — the user must
+below use floor 7%, spread 1%). Two events measure differently: a repayment outside the rails
+lowers the interest observed, and after a liquidation the old principal is billed until the next
+checkpoint (both below). An origination fee was explicitly rejected — the user must
 not start with less than they borrowed. Defensive rails stay free: the fee never gates
-`depositIdleFxrp` or the Morpho repayment itself.
+`depositIdleFxrp` or the Morpho repayment itself: a deposit pays none of it, `repay` keeps its
+pro-rata split (Collection), and neither faces the cover gate. That is about charging, not
+availability: with a recorded principal both checkpoint first, so both need that checkpoint to
+succeed (Checkpoint accounting).
 
 Three product decisions shape everything below:
 
@@ -914,12 +920,13 @@ funds are at stake, only the chance to reconsider.
 Neither Morpho's rate history nor a principal/interest split is readable on-chain (Morpho
 stores only borrow shares and market totals), so the fee is computed from checkpoints. Per
 account: `principal` — the canonical Morpho debt as of the last checkpoint (token base
-units); `flareDebtX18` — the accrued, uncollected fee at WAD precision (token base units ×
+units), with the borrow shares it was recorded with and the **expected collateral** — recorded with it, then moved by the account's own deposits and withdrawals: what the position holds unless something else touched it; `flareDebtX18` — the accrued, uncollected fee at WAD precision (token base units ×
 `1e18`); `lastCheckpoint`; the snapshotted `floor`/`spread`. The **collectible** fee is
 `flareDebtX18 / 1e18` rounded down — whole base units; every transfer and every gate works on
 the collectible, and the fractional remainder stays in the accumulator.
 
-A checkpoint runs **before** every debt-touching action and on a permissionless ping.
+A checkpoint runs **before** every debt-touching action and every deposit with a principal, and
+on a permissionless ping.
 **Every checkpoint — including `principal == 0` and `T == 0` — ends by re-baselining:**
 `lastCheckpoint := now` and the snapshot adopts the current terms. Beyond the re-baseline,
 the degenerate cases are exactly:
@@ -940,7 +947,8 @@ the degenerate cases are exactly:
 The measurement is **shares-first**, so it never adds Morpho liveness where none is needed:
 
 - If a raw position read shows zero borrow shares (externally repaid or liquidated to zero):
-  settle with `D = 0`, `I = 0` — no `accrueInterest`, no IRM.
+  settle with a live `D = 0` — no `accrueInterest`, no IRM. The debt reached (below) can still
+  credit interest a liquidation burned.
 - Only with live borrow shares: `Morpho.accrueInterest` — explicit, so a following Morpho
   action cannot capitalize interest the checkpoint never saw — then read the canonical
   rounded-up live debt `D`.
@@ -948,18 +956,49 @@ The measurement is **shares-first**, so it never adds Morpho liveness where none
 Then, at the **stored** terms, with `T = now − lastCheckpoint` and `YEAR = 365 days`:
 
 ```text
-I                 = max(0, D − principal)                    // token base units, clamped
+R                 = D, or max(D, recorded shares valued up at the totals now)
+                    when the collateral is below the expected collateral  // the debt reached
+I                 = max(0, R − principal)                    // token base units, clamped
 interestX18       = I · 1e18
 floorComponentX18 = mulDiv(principal · floor,  T, YEAR)
 spreadComponentX18= mulDiv(principal · spread, T, YEAR)
 feeDeltaX18       = max(floorComponentX18, interestX18 + spreadComponentX18) − interestX18
 flareDebtX18     += feeDeltaX18                              // never negative by construction
-principal        := D
+principal        := D; recorded shares and collateral := the position's
 lastCheckpoint   := now; snapshot := current terms
 ```
 
-The clamp means a debt decrease the account did not itself cause (an external repayment, a
-liquidation) counts as zero interest, never negative.
+The debt alone cannot tell a liquidation from a repayment outside the rails — both lower it — so
+the checkpoint reads the collateral: every deposit and withdrawal moves the expected collateral
+with the position, so only a liquidation leaves the position below it. A liquidation burns shares, and
+with them interest the position bore; the recorded shares, valued at the totals now, keep it. A
+repayment outside the rails leaves the collateral in place and lowers the interest observed,
+clamped at zero (a donation, below). The limits, accepted:
+
+- **The credit runs until the next successful checkpoint.** The burned shares keep being credited
+  past the liquidation, so a rate rise after it offsets the floor the period had earned; with no
+  shares left the totals are Morpho's stored ones, which anyone else's use of the market moves. A
+  ping, a deposit or any other rail action ends it.
+- **Events within one period are not told apart.** Liquidations and repayments outside the rails,
+  in any order and number, all value the shares recorded when the period began: a repayment before
+  or after a liquidation is credited as if its shares had stayed.
+- **Detection is all or nothing.** Any shortfall against the expected collateral credits all the recorded shares.
+  Collateral supplied on Morpho for the account, outside the rails, is not recorded, and topping the
+  position back to the expectation — before the liquidation or after it — hides the liquidation
+  entirely. That works only against the borrower, but its cost does not bound its effect: after a
+  repayment outside the rails, replacing a small seizure removes the whole period's credit.
+- **An emptied market loses the credit.** Totals at zero — a sole borrower fully liquidated, or
+  everyone else closing before the checkpoint — value the recorded shares at `ceil(shares / 1e6)`,
+  Morpho's empty-market rate: the principal only if the share price never moved, less once it rose.
+  A market reopened after that values them at its new share price.
+- **The share price is not interest alone.** A thin market's can be moved, which after a
+  liquidation inflates the credit (not cheap on the launch market); a liquidation that writes off
+  bad debt is credited as if the liquidator had repaid it (the fee then loses its collateral
+  backing, though `repay` still collects it from loan tokens on the account).
+
+A checkpoint bounds what comes after it; it cannot separate the events already in its period or
+recover a liquidation already hidden. A booked fee never falls; a pending one can, as the period's
+interest grows, though never below its spread component — and the views quote that pending figure.
 
 **Every successful debt-changing action then re-synchronizes after itself**: perform the
 Morpho borrow or repayment, re-read the canonical rounded-up debt, `principal := D_after`
@@ -969,9 +1008,18 @@ algorithm breaks both ways: a first borrow would leave `principal = 0` and the n
 checkpoint would classify the whole borrowed amount as market interest (a free first period),
 and a repayment would keep charging the old base.
 
-Scope of "debt-touching": `borrow` and `repay` (checkpoint before, sync after). A pure
-collateral top-up (`depositCollateral`, `depositIdleFxrp`) changes no debt and runs no
-transition. Terminal guards (duplicate, expired) run **before** any
+Scope of "debt-touching": `borrow` and `repay` (checkpoint before, sync after). A collateral
+top-up (`depositCollateral`, `depositIdleFxrp`) changes no debt, but with a principal it
+checkpoints first, so a deposit after a liquidation ends its credit, then adds its amount to the
+expected collateral. That checkpoint must succeed: with live shares and time elapsed it accrues, so
+the deposit needs the market's rate model to answer and enough gas for the accrual (an under-gassed deposit reverts
+and is retried with more), as a repayment does. On the reviewed launch market that costs no
+defense: Morpho accrues before a liquidation, a repayment, a borrow and a collateral withdrawal
+alike, so an IRM failing for good would freeze the position and stop its liquidation too, and a
+refused deposit leaves the FXRP on the account rather than in the frozen position. The argument
+rests on the registered market's IRM — the canonical AdaptiveCurveIrm at launch, bounded
+arithmetic with no external calls — which registration does not enforce: reassess it with every
+market registered. Terminal guards (duplicate, expired) run **before** any
 checkpoint; a reverted action rolls its checkpoint back atomically. Settling before the
 action is load-bearing: a borrow first raises `D`, and an unsettled period would count the
 borrowed amount as market interest, eroding the floor. Re-capitalizing makes the fee compound
@@ -1223,8 +1271,10 @@ between debt and fee, and that the refused packet stays unconsumed and retriable
 this gate replaced, and why, are in the resolved decisions.
 
 **Dead-Morpho residual (accepted):** with a permanently reverting IRM, a position's collateral
-is lost anyway, and so is idle FXRP on that account, whose only route home runs through the
-position (`depositIdleFxrp`, then the signed withdraw); the shares-first rule still frees the
+is lost anyway. Idle FXRP on an account with live debt stays on the account whenever its deposit's
+checkpoint has to accrue, which reverts — for the beacon upgrade below; in the block of the last
+checkpoint nothing accrues, and on an account without live debt nothing needs to, so there the
+deposit still succeeds and puts the FXRP into the frozen position. The shares-first rule still frees the
 loan-token balance of every debt-free account, because that path reads the position but never
 the IRM. A Morpho that no longer answers at all blocks even that read, and with it every
 position-dependent rail and `repay`'s surplus push; with `feePrincipal == 0`, `checkpointFee`
@@ -1236,7 +1286,7 @@ architecture already has.
 
 The clamp makes repaying outside the rails pointless as fee avoidance: the elapsed period
 still owes `max(floor·P·T − I, spread·P·T)`, computed as if the extinguished interest had not
-been observed. A third-party donor never leaves the user worse off — but part of the gift
+been observed — unless a liquidation falls in the same period, before or after it (the limit above). A third-party donor never leaves the user worse off — but part of the gift
 leaks to Flare (reducing observed `I` raises the floor-bound fee by the same amount, up to
 the floor). A user repaying their own debt directly on Morpho is their own donor and pays
 that leak; the documented flow is the rails.
@@ -1271,21 +1321,31 @@ deliberately, leaving the claim covered by the remaining position, and a covered
 the same cover standing — only liquidation can strip the claim's security and make it
 unrecoverable.
 
-Accounting stays **prospective-only**: the contract cannot learn when a liquidation happened,
-so a ping stops the floor's clock from ping time, never retroactively — the FE surfaces "I
-was liquidated → ping now" and the executor pings on observed liquidations. A
-"debt-and-collateral-both-dropped" detection heuristic was **rejected**: interest can mask a
-partial liquidation, an external repayment plus a signed withdrawal produces the same deltas,
-and a self-liquidator deserves no forgiveness. No automatic write-off: an unpaid claim on an
-emptied account simply stays outstanding.
+The principal stays **prospective**: the contract cannot learn when a liquidation happened, so
+the old principal is billed until the next checkpoint, never retroactively reduced — the FE
+surfaces "I was liquidated → ping now", and Flare's executor watches for liquidations and tries to
+checkpoint promptly after one. That is best-effort: detection and inclusion can lag, and until a
+checkpoint succeeds the limits under Checkpoint accounting apply. The interest the liquidation
+burned is estimated instead: collateral below the expectation identifies the liquidation, and the
+recorded shares valued at the totals now stand in for that interest, within the same limits. The
+credit never lowers a fee already booked, but until a checkpoint runs after the liquidation it can
+cancel floor fee earned earlier in the same period, down to its spread part. Detecting a
+liquidation from debt deltas was rejected — interest masks a partial liquidation, and an external
+repayment plus a withdrawal produces the same deltas; tracking every deposit and withdrawal is
+what makes the collateral decisive. No automatic write-off: an unpaid
+claim on an emptied account simply stays outstanding.
 
 ### Storage, activation and ABI
 
 Fee state is the remote implementation's own linear state, starting right after the one
 linear base field (slot 0, `controllerAddress`; every other base field is namespaced — see the
-storage rule below), append-only; the frozen proxy and CREATE2 addresses are untouched. The loan chain is not
-deployed, so the fee **ships before the first live position** — no lazy-migration semantics
-needed. The fee touches **three coordinated surfaces**, and activation verifies the
+storage rule below), append-only; the frozen proxy and CREATE2 addresses are untouched. The
+production loan chain is not deployed, so there the fee **ships before the first live position**
+and needs no lazy migration. The Sepolia rehearsal does have accounts, which the last two
+fields — the principal's recorded shares and the expected collateral, appended after the snapshot — reach by
+upgrade: nothing initializes them then, so an account whose principal predates the upgrade reads
+them as zero until its first checkpoint or sync records them, and that first period — which can
+reach back before the upgrade — is measured by the debt alone. The fee touches **three coordinated surfaces**, and activation verifies the
 reviewed version of every one before any route opens: the remote `MorphoLoanSubaccountRemote`
 (accrual, gates, collection), the Flare `LoanSubaccount` (the extended borrow/withdraw
 payload encoders), and `MorphoLoanMarketsFacet` (the timelocked terms setter and the activation
