@@ -15,11 +15,17 @@ RUN apt-get update -y \
 #
 # Set this to a release tag - `stable`, a version like `v1.7.1`, or a full
 # `nightly-<sha>` - to pin the toolchain, and retag the image when you change it.
-# `stable` resolves at build time, so rebuilding this image can still move forge
-# underneath CI without any commit; a concrete tag is what makes it reproducible.
-# Note the bare `nightly` tag is not the latest nightly - it resolved to a build
+# The default is concrete rather than `stable`. `stable` resolves at build time,
+# so rebuilding would move forge underneath CI with no commit recording it - and
+# it lags badly: it installed 1.5.1 while v1.8.3 was current. The published tag
+# is built by hand, so git is the only place the version is written down. The
+# bare `nightly` tag is not the latest nightly either - it resolved to a build
 # ten weeks old when this was written - so pin the full `nightly-<sha>`.
-ARG FOUNDRY_VERSION=stable
+#
+# v1.8.3 is the first stable release with everything the consuming repos need:
+# solar >= v0.2.0 (solc 0.8.35's `erc7201` builtin), foundry-rs/foundry#16100
+# (coverage keyed by build ID) and #16098 (coverage of file-level functions).
+ARG FOUNDRY_VERSION=v1.8.3
 
 # The previous version of this ran `foundryup --version latest || true` followed
 # by a bare `foundryup || true`. `--version` prints foundryup's own version and

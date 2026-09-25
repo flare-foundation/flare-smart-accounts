@@ -105,9 +105,10 @@ abstract contract LoanRemoteFixture is FacetsDeploy {
         );
         MasterAccountControllerInit init = new MasterAccountControllerInit();
         address personalImpl = address(new PersonalAccount());
+        IDiamond.FacetCut[] memory cuts = deploySmartAccountsFacets();
         vm.prank(owner);
         controller.diamondCut(
-            deploySmartAccountsFacets(),
+            cuts,
             address(init),
             abi.encodeWithSelector(
                 MasterAccountControllerInit.init.selector,

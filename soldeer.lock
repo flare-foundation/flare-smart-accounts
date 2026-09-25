@@ -1,3 +1,5 @@
+version = 2
+
 [[dependencies]]
 name = "@layerzerolabs-lz-evm-protocol-v2"
 version = "3.0.159"
@@ -38,7 +40,7 @@ name = "flare-periphery"
 version = "0.1.52"
 url = "https://soldeer-revisions.s3.amazonaws.com/flare-periphery/0_1_52_30-06-2026_11:22:18_soldeer-flare-periphery.zip"
 checksum = "7cf6554b9cad9ac0c8c433c289253277b6b735ecc1cc705c098890e5629d00d1"
-integrity = "e909fff903223b6f2596fad61a916112050f40f9e1ae0068ac6244826a28bce5"
+integrity = "bdad6c0d431d1d2a8e5f66aa6c6358770b9f7a8b963e2d998d28d841b39ab226"
 
 [[dependencies]]
 name = "forge-std"

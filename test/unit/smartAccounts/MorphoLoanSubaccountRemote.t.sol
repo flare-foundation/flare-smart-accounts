@@ -5311,8 +5311,9 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
     function _flareSenderOnThisDiamond() private returns (address _sender) {
         flareAssetManager = new MockAssetManager(fxrp);
         uint256 senderType = 7;
+        address senderImpl = address(new LoanSubaccount());
         vm.prank(governance);
-        controller.setSubaccountImplementation(senderType, address(new LoanSubaccount()));
+        controller.setSubaccountImplementation(senderType, senderImpl);
         _sender = address(new SubaccountProxy(address(controller), parentPersonalAccount, senderType));
 
         vm.mockCall(
@@ -5360,8 +5361,9 @@ contract MorphoLoanSubaccountRemoteTest is Test, FacetsDeploy {
     /// implementation (Flare Personal Accounts created earlier on this diamond are not touched
     /// again).
     function _remotePaOnThisDiamond(string memory _xrplOwner) private returns (address) {
+        address remoteImpl = address(new PersonalAccountRemote());
         vm.prank(governance);
-        controller.setPersonalAccountImplementation(address(new PersonalAccountRemote()));
+        controller.setPersonalAccountImplementation(remoteImpl);
         return controller.createPersonalAccount(_xrplOwner);
     }
 

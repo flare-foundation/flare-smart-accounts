@@ -233,7 +233,7 @@ contract LoanOftRoundTripTest is FacetsDeploy {
         _sendWithdraw(bytes32("funding"), 20e6, 19_800_000);
         Delivery memory withdrawal = _receiveRemote(1);
         vm.expectRevert(abi.encodeWithSelector(
-            IMorphoLoanSubaccountRemote.InsufficientDeliveryValue.selector, FEE, FEE - 1
+            IMorphoLoanSubaccountRemote.InsufficientDeliveryValue.selector, FEE
         ));
         _composeRemote(withdrawal, FEE - 1);
         assertEq(_collateral(), NET);

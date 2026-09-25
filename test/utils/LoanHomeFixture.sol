@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 import {FacetsDeploy} from "./FacetsDeploy.t.sol";
 import {MockLzEndpoint} from "../../contracts/mock/MockLzEndpoint.sol";
 import {DiamondArgs} from "../../contracts/diamond/implementation/Diamond.sol";
+import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {IIMasterAccountController} from "../../contracts/smartAccounts/interface/IIMasterAccountController.sol";
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
@@ -84,9 +85,10 @@ abstract contract LoanHomeFixture is FacetsDeploy {
         );
         MasterAccountControllerInit init = new MasterAccountControllerInit();
         address personalImplementation = address(new PersonalAccount());
+        IDiamond.FacetCut[] memory cuts = deploySmartAccountsFacets();
         vm.prank(owner);
         controller.diamondCut(
-            deploySmartAccountsFacets(),
+            cuts,
             address(init),
             abi.encodeWithSelector(
                 MasterAccountControllerInit.init.selector,

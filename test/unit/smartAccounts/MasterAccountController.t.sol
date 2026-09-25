@@ -696,12 +696,7 @@ contract MasterAccountControllerTest is Test, FacetsDeploy {
         proof.data.sourceId = sourceId;
         proof.data.responseBody.standardPaymentReference = paymentReference;
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IInstructionsFacet.UnknownCollateralReservationId.selector,
-                0
-            )
-        );
+        vm.expectRevert(IInstructionsFacet.UnknownCollateralReservationId.selector);
         masterAccountController.executeDepositAfterMinting(1, proof, xrplAddress1);
     }
 

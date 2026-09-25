@@ -202,12 +202,7 @@ contract FAssetRedeemerAccountTest is Test {
         vm.deal(address(beacon), nativeValue);
         vm.prank(address(beacon));
 
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                IFAssetRedeemerAccount.RedeemWithTagNotSupported.selector,
-                destinationTag
-            )
-        );
+        vm.expectRevert(IFAssetRedeemerAccount.RedeemWithTagNotSupported.selector);
 
         account.redeemFAsset{value: nativeValue}(
             IAssetManager(assetManager),

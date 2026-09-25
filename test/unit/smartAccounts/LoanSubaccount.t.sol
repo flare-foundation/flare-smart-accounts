@@ -539,11 +539,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
 
     function testDispatchFromXrplInstructionReachesSubaccount() public {
         // the loan subaccount implementation for this type exposes a parent-restricted method
+        address mockImpl = address(new MockLoanSubaccount());
         vm.prank(governance);
-        controller.setSubaccountImplementation(
-            SUBACCOUNT_TYPE_MORPHO_LOAN,
-            address(new MockLoanSubaccount())
-        );
+        controller.setSubaccountImplementation(SUBACCOUNT_TYPE_MORPHO_LOAN, mockImpl);
 
         address personalAccount = _createPersonalAccount(xrplOwner);
         address subaccount = controller.getSubaccount(
@@ -580,11 +578,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testDispatchForwardsValueToSubaccount() public {
+        address mockImpl = address(new MockLoanSubaccount());
         vm.prank(governance);
-        controller.setSubaccountImplementation(
-            SUBACCOUNT_TYPE_MORPHO_LOAN,
-            address(new MockLoanSubaccount())
-        );
+        controller.setSubaccountImplementation(SUBACCOUNT_TYPE_MORPHO_LOAN, mockImpl);
         address personalAccount = _createPersonalAccount(xrplOwner);
         address subaccount = controller.getSubaccount(
             xrplOwner,
@@ -616,11 +612,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testDispatchToUncreatedSubaccountSilentlyDoesNothing() public {
+        address mockImpl = address(new MockLoanSubaccount());
         vm.prank(governance);
-        controller.setSubaccountImplementation(
-            SUBACCOUNT_TYPE_MORPHO_LOAN,
-            address(new MockLoanSubaccount())
-        );
+        controller.setSubaccountImplementation(SUBACCOUNT_TYPE_MORPHO_LOAN, mockImpl);
         address personalAccount = _createPersonalAccount(xrplOwner);
         address subaccount = controller.getSubaccount(
             xrplOwner,
@@ -643,11 +637,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testDispatchRevertWhenCallingAnotherAccountsSubaccount() public {
+        address mockImpl = address(new MockLoanSubaccount());
         vm.prank(governance);
-        controller.setSubaccountImplementation(
-            SUBACCOUNT_TYPE_MORPHO_LOAN,
-            address(new MockLoanSubaccount())
-        );
+        controller.setSubaccountImplementation(SUBACCOUNT_TYPE_MORPHO_LOAN, mockImpl);
         address personalAccount = _createPersonalAccount(xrplOwner);
 
         // another XRPL owner's subaccount, created and owned by their Personal Account
@@ -683,11 +675,9 @@ contract LoanSubaccountTest is Test, FacetsDeploy {
     }
 
     function testSubaccountMethodRevertOnlyParent() public {
+        address mockImpl = address(new MockLoanSubaccount());
         vm.prank(governance);
-        controller.setSubaccountImplementation(
-            SUBACCOUNT_TYPE_MORPHO_LOAN,
-            address(new MockLoanSubaccount())
-        );
+        controller.setSubaccountImplementation(SUBACCOUNT_TYPE_MORPHO_LOAN, mockImpl);
         _createPersonalAccount(xrplOwner);
         address subaccount = controller.createSubaccount(
             xrplOwner,
