@@ -162,7 +162,7 @@ If a compose call reverts at the *composer* level (e.g., `OnlyEndpoint`, `Invali
 
 ## Idempotent address derivation
 
-After a redeemer's first `lzCompose`, `redeemerToRedeemerAccount[redeemer]` is set. Subsequent calls re-use the same account address. Off-chain code can predict the address before any redemption with `getRedeemerAccountAddress(redeemer)` — the function returns the stored address if known, otherwise the CREATE2 prediction.
+After a redeemer's first `lzCompose`, `redeemerToRedeemerAccount[redeemer]` is set. Subsequent calls re-use the same account address. Off-chain code can predict the address before any redemption with `getRedeemerAccountAddress(redeemer)` — the function returns the stored address if known, otherwise the CREATE2 prediction. For an account not yet created, the prediction holds only until the composer's next implementation upgrade: an account first created after an upgrade can land at a different address than the one predicted before it (see [Address derivation](./RedeemerAccounts.md#address-derivation)), so do not send assets to a predicted address.
 
 ## Recovery user actions
 

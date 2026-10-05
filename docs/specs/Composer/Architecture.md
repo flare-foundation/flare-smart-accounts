@@ -116,7 +116,7 @@ IIFAssetRedeemerAccount(_redeemerAccount).setMaxAllowances(fAsset, stableCoin, w
 
 `salt = bytes32(0)`. Deployer = the composer itself (no singleton factory, unlike Smart Accounts). The redeemer-account address is therefore deterministic per `(composer-address, redeemer)` pair: `keccak256(0xff || composerAddress || 0 || keccak256(initcode))[12:]`.
 
-Unlike Smart Accounts' frozen `PROXY_CREATION_CODE`, the composer uses live `type(FAssetRedeemerAccountProxy).creationCode`. Cross-chain address parity is not a property the composer needs — the redeemer interacts only with the chain the composer is deployed on.
+Unlike Smart Accounts' frozen `PROXY_CREATION_CODE`, the composer uses live `type(FAssetRedeemerAccountProxy).creationCode`. Cross-chain address parity is not a property the composer needs — the redeemer interacts only with the chain the composer is deployed on. The live creation code also means a composer upgrade can move the predicted addresses of accounts not yet created; see [Address derivation](./RedeemerAccounts.md#address-derivation).
 
 Right after deployment, the composer calls `setMaxAllowances(fAsset, stableCoin, wNat)` on the new account. Inside the account this does three `forceApprove(owner, type(uint256).max)` calls — see [Redeemer accounts](./RedeemerAccounts.md).
 

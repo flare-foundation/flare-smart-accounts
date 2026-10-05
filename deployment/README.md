@@ -257,6 +257,8 @@ Diamond cut files can list all candidate facets. `ExecuteDiamondCut.s.sol` check
 
 Facets that inline `PersonalAccounts` address-derivation logic (`PersonalAccountsFacet`, `InstructionsFacet`, `ReaderFacet`, `MemoInstructionsFacet`, and `SubaccountsFacet`, which resolves the parent account) bake the frozen `PersonalAccounts.PROXY_CREATION_CODE` constant into their runtime bytecode, and `SubaccountsFacet` carries `Subaccounts.PROXY_CREATION_CODE` as well. Because it is a constant, those bytes do not drift across rebuilds, so `check_cut` does not flag these facets for redeployment on unrelated metadata churn — only genuine logic changes trigger a redeploy. The embedded bytes change only if one of the constants itself is edited, which is a cross-chain coordination event: predicted addresses for not-yet-deployed accounts of that kind shift and must be recomputed after such a cut.
 
+The composer is the exception. `FAssetRedeemComposer` derives redeemer accounts from the live `type(FAssetRedeemerAccountProxy).creationCode`, so a new composer implementation embeds whatever the current compiler and settings produce. Upgrading it moves the predicted address of every redeemer account not yet created; accounts already created are stored and unaffected. Before upgrading the composer on a network, either freeze the creation code to the one its live implementation embeds, or confirm that nothing was sent to a predicted address. See `docs/specs/Composer/RedeemerAccounts.md`.
+
 There are two valid ways to prepare the `facets` list:
 
 - For the safest review flow, list all candidate facets and let the script reuse unchanged deployments.
