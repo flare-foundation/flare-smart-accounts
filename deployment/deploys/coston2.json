@@ -107,7 +107,7 @@
   {
     "name": "LoanSubaccountImplementation",
     "contractName": "LoanSubaccount.sol",
-    "address": "0xAef2daA644C901CBC3dAF4D3B1E286cb1F6Ad5CA"
+    "address": "0xEDd9E8644057D39Cf976A1011b6aCf2Cbe8D645f"
   },
   {
     "name": "SubaccountsFacet",
