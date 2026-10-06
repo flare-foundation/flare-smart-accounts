@@ -485,9 +485,11 @@ upgrade behind the same adapter proxy keeps the balance, and is the subject of t
 > `decimalConversionRate`, `oftVersion`, and the per-route peers) are true when read and can
 > change afterwards, and re-reading them defends nothing: an upgrade can keep all five truthful
 > while forging compose instructions. This is an
-> accepted dependency on the upgrade authority. On Flare that authority is
+> accepted dependency on the upgrade authority, and both halves are Flare's. On Flare it is
 > `0xbe653C54DF337F13Fcb726101388F4a4803049F3`, the same Safe that owns the controller, so it is
-> the trust domain the protocol already rests on; the Ethereum OFT's owner is a different party.
+> the trust domain the protocol already rests on. On Ethereum it is
+> `0x42D660C6C871a9176cEb102E9ad9722459Aa67D3`, the OFT's owner, endpoint delegate and ProxyAdmin
+> owner: also Flare's, under a different address.
 >
 > Same authority is not the same safeguard, though. The diamond's upgrades and timelocked
 > configuration changes currently carry a 3,600-second delay — queued, visible and cancellable —
