@@ -32,7 +32,7 @@
   {
     "name": "InstructionsFacet",
     "contractName": "InstructionsFacet.sol",
-    "address": "0x82e9ea6664320fA07B39714420E5db5ED75b4C98"
+    "address": "0x5ce9b30503EA9eDe214f1a53B776732bF8Ff3A04"
   },
   {
     "name": "PaymentProofsFacet",
@@ -42,7 +42,7 @@
   {
     "name": "PersonalAccountsFacet",
     "contractName": "PersonalAccountsFacet.sol",
-    "address": "0x1E262a42336757F31428DAe1C852A04e0558145a"
+    "address": "0x8674E011Fffd6fdfDa9d664f6C9f562f397d22d6"
   },
   {
     "name": "TimelockFacet",
@@ -57,7 +57,7 @@
   {
     "name": "XrplProviderWalletsFacet",
     "contractName": "XrplProviderWalletsFacet.sol",
-    "address": "0xa4Baa23A503BF564A8b047ffC0fd4C5dd95c27be"
+    "address": "0x7024E43E792743C2741653f1A0fFe65ba3151eA6"
   },
   {
     "name": "MasterAccountControllerInit",
@@ -72,7 +72,7 @@
   {
     "name": "PersonalAccountImplementation",
     "contractName": "PersonalAccount.sol",
-    "address": "0x3eFab0Eb4c65163651BB1FC50d84D4AF0B782d09"
+    "address": "0xbFf59205860ba313dF7159aAF3363B53F22ab539"
   },
   {
     "name": "FAssetRedeemComposerImplementation",
@@ -92,16 +92,31 @@
   {
     "name": "MemoInstructionsFacet",
     "contractName": "MemoInstructionsFacet.sol",
-    "address": "0x96B1c3AffB76C2ca4b6BAd7F5a566aF19621466e"
+    "address": "0x443A91bBa4E4F3AcA50De278c825cBE23BC35322"
   },
   {
     "name": "PauseFacet",
     "contractName": "PauseFacet.sol",
-    "address": "0x588683acc6500cd9E08471F4D32a3BF40f71275f"
+    "address": "0xe24C296C789Cd6C001Fc3F37955Ae513a35be9Af"
   },
   {
     "name": "ReaderFacet",
     "contractName": "ReaderFacet.sol",
     "address": "0x0CD8cAa37BfB38B479f46030A896B50E4F48c093"
+  },
+  {
+    "name": "SubaccountsFacet",
+    "contractName": "SubaccountsFacet.sol",
+    "address": "0x24E2CBADe540A4A7158869795e5319B8BB2E3e07"
+  },
+  {
+    "name": "BridgeRoutesFacet",
+    "contractName": "BridgeRoutesFacet.sol",
+    "address": "0x2cc08dd631DCAD2dF006c96D7A53D045E42A23d1"
+  },
+  {
+    "name": "LoanSubaccountImplementation",
+    "contractName": "LoanSubaccount.sol",
+    "address": "0x19bc1031e62b8ae839e34C5259bE76b21787973f"
   }
 ]
