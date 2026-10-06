@@ -1,0 +1,16 @@
+{
+  "note": "The loan-origination release on Flare, prepared 2026-10-06 from loan-origination 0629641. check_cut against the live diamond: SubaccountsFacet and BridgeRoutesFacet are new, the other five replace live facets whose code differs, the remaining ten facets are reused unchanged, and no live selector is removed. No init: the diamond is already initialised and MasterAccountControllerInit.init would re-set its configuration. Re-run check_cut before executing, then follow the runbook from A2: the unpauser migration (A3) per the A0 inventory, the two implementations (A4, A5), and the routes last (Part D).",
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "SubaccountsFacet",
+    "BridgeRoutesFacet",
+    "PersonalAccountsFacet",
+    "PauseFacet",
+    "InstructionsFacet",
+    "MemoInstructionsFacet",
+    "XrplProviderWalletsFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "execute": false
+}

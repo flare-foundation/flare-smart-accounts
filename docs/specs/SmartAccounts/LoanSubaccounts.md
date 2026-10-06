@@ -1612,14 +1612,17 @@ ERC-165 interface flags and nothing else (the executor, payment-proof and instru
 belong to facets the Ethereum cut does not carry, and the Personal Account beacon and each type's
 implementation are timelocked governance calls made after the cut, never init writes; the cut plan
 names it as its `init` block with no arguments — see `deployment/cuts/ethereum/cut-example.json`)
-(the cut plan under `deployment/cuts/ethereum/` is authored at cut time;
+(the cut plan under `deployment/cuts/ethereum/` is drafted ahead and checked against the
+bootstrapped diamond before it is submitted;
 `deployment/deploys/ethereum.json` is written by the bootstrap when it runs — the record exists
 only once the contracts do, and the cut planner refuses to plan without it), and both
 implementations ship with `pnpm deploy_remote_account_implementations ethereum all` (the script
 refuses the Flare-family chain ids: a remote implementation recorded on Flare would look like a
-legitimate artifact and, registered there, corrupt every Personal Account's storage). There is
-deliberately no `deployment/chain-config/ethereum.json`: the generic full-deploy script must
-not run against Ethereum — operators go through the pinned bootstrap and the scripts above.
+legitimate artifact and, registered there, corrupt every Personal Account's storage).
+`deployment/chain-config/ethereum.json` holds what `configure_remote_controller` applies after the
+cut, as `sepolia.json` does. Its presence cannot point the generic full-deploy script at Ethereum,
+which refuses every chain outside the Flare family: operators go through the pinned bootstrap and
+the scripts above.
 
 ### Pre-first-cut invariants
 

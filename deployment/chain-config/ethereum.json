@@ -1,0 +1,32 @@
+{
+  "governance": "0x42D660C6C871a9176cEb102E9ad9722459Aa67D3",
+  "timelockDurationSeconds": 3600,
+  "pausers": [
+    "0x42D660C6C871a9176cEb102E9ad9722459Aa67D3",
+    "0x5719fD1AC6188a23aD2bb7686304391d0d46BdF5"
+  ],
+  "unpausers": [
+    "0x42D660C6C871a9176cEb102E9ad9722459Aa67D3",
+    "0x5719fD1AC6188a23aD2bb7686304391d0d46BdF5"
+  ],
+  "subaccountType": 1,
+  "composeTransport": {
+    "lzEndpoint": "0x1a44076050125825900e736c501f859c50fE728c",
+    "oft": "0xCE6170EA245dC8D1f275A710a062b70f125F0110",
+    "originEid": 30295,
+    "originPeer": "0xd70659a6396285BF7214d7Ea9673184e7C72E07E"
+  },
+  "loanMarket": {
+    "morpho": "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
+    "loanToken": "0x8292Bb45bf1Ee4d140127049757C2E0fF06317eD",
+    "collateralToken": "0xCE6170EA245dC8D1f275A710a062b70f125F0110",
+    "oracle": "0x5AC03061500E0C97862a466a38a7e87FAC4Ac39D",
+    "irm": "0x870aC11D48B15DB9a138Cf899d20F13F79Ba00BC",
+    "lltv": "770000000000000000"
+  },
+  "loanFeeTerms": {
+    "feeFloor": "70000000000000000",
+    "feeSpread": "10000000000000000",
+    "feeRecipient": "0x3390E1aDf46568cCC95c3571424937b042094ac2"
+  }
+}

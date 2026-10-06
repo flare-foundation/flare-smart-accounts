@@ -141,8 +141,8 @@ Pass `--expect-owner` when you know who should hold it. The default is the chain
 `governance`, which is the zero address on `coston2-staging` and therefore checks nothing. On a loan
 chain the default follows the stage: `--pre-cut` expects the pinned historical owner, since the
 bootstrap's diamond is still his, and every later run expects that network's configured governance,
-because B3 hands it over before the cut - falling back to the pin where no config names one, which is
-Ethereum today, so there a post-cut run without the flag cannot prove the handover happened. A
+because B3 hands it over before the cut - falling back to the pin where no config names one, where a
+post-cut run without the flag cannot prove the handover happened. A
 `governance` that is present but not an address stops the run rather than being read as "nothing to
 expect".
 

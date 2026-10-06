@@ -1,0 +1,20 @@
+{
+  "note": "The loan-chain cut for Ethereum mainnet, prepared 2026-10-06 from loan-origination 0629641: the six facets the pinned bootstrap does not carry, with EthereumControllerInit.init(), which sets the four ERC-165 flags and nothing else. It is the set Sepolia runs today (nine facets with the bootstrap's three). Submitted by the new owner after the handover (runbook B3, B4); run check_cut ethereum against the bootstrapped diamond first, and verify_diamond --expect-owner afterwards.",
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "SubaccountsFacet",
+    "TimelockFacet",
+    "PauseFacet",
+    "PersonalAccountsFacet",
+    "ComposeTransportFacet",
+    "MorphoLoanMarketsFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "init": {
+    "contract": "EthereumControllerInit",
+    "method": "init",
+    "args": []
+  },
+  "execute": false
+}

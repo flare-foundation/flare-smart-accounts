@@ -431,8 +431,8 @@ void test("after the cut a loan chain is held to its configured governance, not 
 });
 
 void test("a loan chain with no config, or a zero governance, falls back to the pin after the cut", async () => {
-  // Ethereum has no chain config yet, and a zero governance means the deployer kept the diamond: in
-  // both cases the pin is the only expectation there is, and the check must not vanish
+  // the fixture gives Ethereum no chain config, and a zero governance means the deployer kept the
+  // diamond: in both cases the pin is the only expectation there is, and the check must not vanish
   rpc.reset();
   rpc.state.chainId = "0x1";
   prepareLoanChain("ethereum");
