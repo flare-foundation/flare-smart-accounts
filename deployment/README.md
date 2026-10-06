@@ -414,7 +414,7 @@ metadata hashes, including the one embedded in the redeemer-proxy creation code,
 immutable), so an incompatible layout change fails with field-level diagnostics while a safe append
 passes. The remote
 Personal Account and both loan subaccounts were first deployed on 2026-09-14 and are checked against
-`deployment/build-info-2026-09-14/`, frozen at that deployment, so all six now run with
+the newest frozen build of each lineage (below), so all six now run with
 `--requireReference`; before re-laying a layout that has no proxy yet, check the lineage is still
 empty with
 `pnpm check_lineage_fresh <network> [subaccounts|personal-accounts]`. It is decisive on chain only through
@@ -432,7 +432,8 @@ the certainty of WHICH source a chain is running, which decays as branches move 
 
 The three lineages first deployed on 2026-09-14 — the remote Personal Account, the Flare loan
 subaccount and the remote one — are checked against `deployment/build-info-2026-09-14/`, frozen at
-that deployment, so all six now run with `--requireReference`. Each directory, its build command,
+that deployment, except the remote loan subaccount: its layout grew on 2026-10-06, and it is checked
+against `deployment/build-info-2026-10-06/`, frozen at that deployment. Each directory, its build command,
 its checksum and the addresses it matches are recorded in
 [`reference-builds.md`](./reference-builds.md); storage compatibility does not establish which
 compilation a chain is running, and that record does.
