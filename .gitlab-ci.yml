@@ -296,7 +296,7 @@ test:
   script:
   # Clear inherited RPC values in the command: project variables override YAML job variables.
   # The dedicated fork job owns the mainnet integration evidence.
-  - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' forge test -vvv
+  - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' FLARE_RPC_URL='' forge test -vvv
 
 # The Morpho integration, against the live FXRP/RLUSD market on canonical Morpho Blue. It is pinned
 # to one block, so it needs an ARCHIVE endpoint: a pruning node cannot serve it. Kept out of the
@@ -359,7 +359,7 @@ coverage:
   - forge build
   script:
   # Override inherited project variables here too, keeping coverage independent of public RPCs.
-  - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' pnpm coverage:forge
+  - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' FLARE_RPC_URL='' pnpm coverage:forge
   artifacts:
     expire_in: 30 days
     paths:

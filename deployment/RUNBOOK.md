@@ -515,6 +515,8 @@ alongside the rest.
    owner strings, native and token balances, standing allowances, existing vault behavior, and both
    newly added selectors through a proxy that predates them. Registration verification proves the
    code, the registry and one account's identity; it does not prove an upgrade preserves live state.
+   On Flare this is `test/integration/FlareUpgradeRehearsalFork.t.sol`; what it needs to run is in
+   [`test/README.md`](../test/README.md#integration-suites).
 2. **Canonical endpoint and OFT rehearsal** — the wire hop against the real contracts, not the
    mocked rail.
 3. **Measured delivery-option presets** — the gas and value figures clients will sign, measured

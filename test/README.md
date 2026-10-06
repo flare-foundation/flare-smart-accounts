@@ -48,6 +48,14 @@ a check go unmade.
 - **`SepoliaMarketFork.t.sol`** needs `SEPOLIA_RPC_URL`, any current endpoint since it forks the
   latest block, and drives the rehearsal market script's phases against Morpho's real oracle factory
   and Morpho itself.
+- **`FlareUpgradeRehearsalFork.t.sol`** is the runbook's Part C item 1. It needs `FLARE_RPC_URL` to
+  serve its pinned block, which takes an archive endpoint once the block ages: the public endpoint
+  already fails 1,000 blocks back. It applies the release to the live Flare controller as the runbook
+  does: `build-cut.ts` over the committed cut file, the implementations, and the routes for the
+  tests that need them, each through the owner Safe and the timelock. It then exercises live
+  accounts, which are named by address in the suite. Only FDC proof verification is mocked.
+  Re-pin the block and re-pick the accounts when the cut file changes. No CI job runs it, and
+  `REQUIRE_FLARE_FORK` turns its skip into a failure.
 
 **Three suites cover the OFT bridge** with LayerZero's own contracts rather than a model of them,
 built on `contracts/mock/FeeOftAdapter.sol` and `FeeOftToken.sol` (its `OFTAdapter`/`OFT` plus the
