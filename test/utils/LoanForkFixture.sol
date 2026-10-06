@@ -79,8 +79,9 @@ abstract contract LoanForkFixture is LoanRemoteFixture {
         _setUpRemoteFixture();
     }
 
-    /// @dev The same stack as the mocked fixture, over the real market contracts.
-    function _setUpRemoteDependencies() internal override {
+    /// @dev The same stack as the mocked fixture, over the real market contracts. A suite that
+    /// needs the real delivery rail too replaces the endpoint and the OFT after this.
+    function _setUpRemoteDependencies() internal virtual override {
         owner = makeAddr("remote owner");
         parent = makeAddr("remote parent");
         collector = makeAddr("fee collector");

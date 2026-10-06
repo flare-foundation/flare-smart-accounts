@@ -298,7 +298,8 @@ test:
   # The dedicated fork job owns the mainnet integration evidence.
   - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' FLARE_RPC_URL='' forge test -vvv
 
-# The Morpho integration, against the live FXRP/RLUSD market on canonical Morpho Blue. It is pinned
+# The Morpho integration, against the live FXRP/RLUSD market on canonical Morpho Blue, and the
+# delivery gas of each loan action through the live endpoint and FXRP OFT. Both are pinned
 # to one block, so it needs an ARCHIVE endpoint: a pruning node cannot serve it. Kept out of the
 # `test` job so that job stays hermetic and network-free - this is the only place a pipeline reaches
 # mainnet. Without `ETHEREUM_RPC_URL` the suite skips itself, which would make a missing endpoint
@@ -332,7 +333,7 @@ test-integration-fork:
   - forge install --no-git
   - forge build
   script:
-  - forge test -vvv --match-path "test/integration/MorphoLoanSubaccountRemoteFork.t.sol"
+  - forge test -vvv --match-path "test/integration/{MorphoLoanSubaccountRemoteFork,LoanDeliveryGasFork}.t.sol"
 
 ##
 ## COVERAGE

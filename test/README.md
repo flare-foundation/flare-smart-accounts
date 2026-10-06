@@ -45,6 +45,13 @@ a check go unmade.
   why it is separate from `test`. Most free tiers prune that far back. `https://eth-pokt.nodies.app`
   served it on 2026-09-09, and `cast block <FORK_BLOCK> --rpc-url <url>` plus one `eth_call` at that
   block is the quickest way to test a candidate before running the suite.
+- **`LoanDeliveryGasFork.t.sol`** is the runbook's Part C item 3 on Ethereum. On the same fixture
+  and block as the Morpho suite, it points the transport at the live endpoint and FXRP OFT. It
+  delivers each loan action in LayerZero's two steps, the OFT's `lzReceive` and then the endpoint's
+  `lzCompose`; the withdraw's return leg leaves through the OFT's real `send`. It prints the gas
+  each step took and holds each step under the delivery options clients sign. Each step is its own
+  top-level call, so it pays cold storage prices. It needs `ETHEREUM_RPC_URL`, and runs in
+  `test-integration-fork` beside the Morpho suite.
 - **`SepoliaMarketFork.t.sol`** needs `SEPOLIA_RPC_URL`, any current endpoint since it forks the
   latest block, and drives the rehearsal market script's phases against Morpho's real oracle factory
   and Morpho itself.

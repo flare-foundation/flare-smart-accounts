@@ -520,7 +520,9 @@ alongside the rest.
 2. **Canonical endpoint and OFT rehearsal** — the wire hop against the real contracts, not the
    mocked rail.
 3. **Measured delivery-option presets** — the gas and value figures clients will sign, measured
-   rather than estimated.
+   rather than estimated. The Ethereum figures come from
+   `test/integration/LoanDeliveryGasFork.t.sol`, which delivers each loan action through the live
+   endpoint and FXRP OFT; the Flare-side figures come from real testnet deliveries.
 4. **Full activation rehearsal** — the whole of Parts A, B and D, by the operators who will run
    it, from this document, split across the environments named above: the pinned bootstrap on a
    mainnet fork, the rest on the networks the transport plan names.
