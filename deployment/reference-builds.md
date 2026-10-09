@@ -141,6 +141,16 @@ kept) for byte-exact runtimes; the functional hash holds without a replay.
 |---|---|---|---|
 | Sepolia | `MorphoLoanSubaccountRemote` | `0x681465D7f6CCf6E5E1b59ef85f1F3b4a344658fD` | 2026-10-06, byte for byte with the snapshot, metadata trailer included |
 
+## Mainnet, 2026-10-06
+
+No new freeze: each mainnet implementation validated against its reference in both directions on
+2026-10-07, so the layouts are equal — Flare `PersonalAccount`
+`0xbFf59205860ba313dF7159aAF3363B53F22ab539` against `build-info-v2.0.0` (v2.0.0's constructor allowed),
+Flare `LoanSubaccount` `0x19bc1031e62b8ae839e34C5259bE76b21787973f` and Ethereum `PersonalAccountRemote`
+`0x8577D2D50827bCE2EC1dc9Cf9F1199826781D5AF` against `build-info-2026-09-14`, and Ethereum
+`MorphoLoanSubaccountRemote` `0x6D55E24Dc2d3bD2Fc5Ae1fcCD1A73bc5f18A8A30` against
+`build-info-2026-10-06`.
+
 ## The rule: freeze again whenever a DEPLOYED layout grows
 
 A reference protects the layout it holds, not the layout a chain is running. Once a deployment
