@@ -6,8 +6,8 @@ trustPolicy: no-downgrade
 #   - keccak/secp256k1 (transitive via @openzeppelin/upgrades-core): a compatible prebuild may
 #     still load, and the bundled JS fallback is used otherwise, so the upgrade-safety validator
 #     needs no native build or C++ toolchain.
-# Scoped to the resolved versions so a bump re-triggers this review; omitting an entry makes a
-# pnpm 11 install fail (unapproved build script).
+# Scoped to the resolved versions so a bump re-triggers this review; omitting an entry makes an
+# install fail (unapproved build script).
 allowBuilds:
   "esbuild@0.27.7": false
   "keccak@3.0.4": false
