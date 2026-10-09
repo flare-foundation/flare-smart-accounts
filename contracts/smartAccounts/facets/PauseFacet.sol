@@ -73,11 +73,14 @@ contract PauseFacet is IIPauseFacet, FacetBase {
     }
 
     /// @inheritdoc IIPauseFacet
+    /// @dev Immediate, unlike the other role changes: abusing it can only keep the system
+    /// paused, while delaying it would leave a compromised unpauser able to undo every pause
+    /// for the whole timelock window.
     function removeUnpausers(
         address[] calldata _unpausers
     )
         external
-        onlyOwnerWithTimelock
+        onlyOwner
     {
         Pause.State storage state = Pause.getState();
         for (uint256 i = 0; i < _unpausers.length; i++) {

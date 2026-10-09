@@ -296,6 +296,7 @@ resultInfo = {
 
 if (!process.argv[2]) {
   console.error("Usage: node scripts/slither-parse.js <slither.json>");
+  process.exit(2);
 }
 
 const json = fs.readFileSync(process.argv[2], "utf-8");
@@ -306,8 +307,17 @@ if (process.env.BADGE_URL) {
   BadgeStorageURL = process.env.BADGE_URL;
 }
 
+// Slither itself failed (a compile error, a crashed detector, a bad invocation). The report
+// carries no findings in that case, so returning success here would turn a broken analysis into
+// a green pipeline - exactly the state this job exists to rule out. Fail loudly instead; the
+// analyzer's own non-zero exit is swallowed upstream by `|| true`, because it also exits
+// non-zero merely for having found something.
 if (!data.success) {
-  process.exit(0);
+  console.error("slither did not complete; no analysis was performed.");
+  if (data.error) {
+    console.error(String(data.error).trim());
+  }
+  process.exit(2);
 }
 
 let detectors = (data.results && data.results.detectors) || [];
@@ -337,4 +347,6 @@ for (const [type, count] of Object.entries(counts)) {
   console.log(`    ${type}: ${count}`);
 }
 
-process.exit(counts["High"] || 0);
+// Fail on any high-impact finding. Not the count: exit codes are taken modulo 256, so a
+// hypothetical 256 would read as success.
+process.exit(counts["High"] ? 1 : 0);

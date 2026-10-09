@@ -3,8 +3,9 @@ pragma solidity ^0.8.27;
 // solhint-disable no-console
 
 import {Script, console2} from "forge-std/Script.sol";
-import {DeployConfigTypes} from "../types/DeployConfigTypes.sol";
+import {DeployConfigTypes} from "../lib/DeployConfigTypes.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {LoanSubaccount} from "../../contracts/smartAccounts/implementation/LoanSubaccount.sol";
 import {MasterAccountController} from "../../contracts/smartAccounts/implementation/MasterAccountController.sol";
 import {DiamondArgs} from "../../contracts/diamond/implementation/Diamond.sol";
 import {IISingletonFactory} from "../../contracts/smartAccounts/interface/IISingletonFactory.sol";
@@ -12,6 +13,7 @@ import {IIMasterAccountController} from "../../contracts/smartAccounts/interface
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IVaultsFacet} from "../../contracts/userInterfaces/facets/IVaultsFacet.sol";
+import {SUBACCOUNT_TYPE_MORPHO_LOAN} from "../lib/SubaccountTypes.sol";
 // facets
 import {MasterAccountControllerInit} from "../../contracts/smartAccounts/facets/MasterAccountControllerInit.sol";
 import {DiamondLoupeFacet} from "../../contracts/diamond/facets/DiamondLoupeFacet.sol";
@@ -22,6 +24,8 @@ import {ExecutorsFacet} from "../../contracts/smartAccounts/facets/ExecutorsFace
 import {InstructionFeesFacet} from "../../contracts/smartAccounts/facets/InstructionFeesFacet.sol";
 import {InstructionsFacet} from "../../contracts/smartAccounts/facets/InstructionsFacet.sol";
 import {MemoInstructionsFacet} from "../../contracts/smartAccounts/facets/MemoInstructionsFacet.sol";
+import {SubaccountsFacet} from "../../contracts/smartAccounts/facets/SubaccountsFacet.sol";
+import {BridgeRoutesFacet} from "../../contracts/smartAccounts/facets/BridgeRoutesFacet.sol";
 import {PaymentProofsFacet} from "../../contracts/smartAccounts/facets/PaymentProofsFacet.sol";
 import {PersonalAccountsFacet} from "../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol";
 import {TimelockFacet} from "../../contracts/smartAccounts/facets/TimelockFacet.sol";
@@ -29,6 +33,7 @@ import {VaultsFacet} from "../../contracts/smartAccounts/facets/VaultsFacet.sol"
 import {PauseFacet} from "../../contracts/smartAccounts/facets/PauseFacet.sol";
 import {ReaderFacet} from "../../contracts/smartAccounts/facets/ReaderFacet.sol";
 import {XrplProviderWalletsFacet} from "../../contracts/smartAccounts/facets/XrplProviderWalletsFacet.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 
 // solhint-disable no-console
 // solhint-disable-next-line max-line-length
@@ -56,6 +61,8 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
 
     PersonalAccount private personalAccountImpl;
     address private personalAccountImplAddress;
+    LoanSubaccount private loanSubaccountImpl;
+    address private loanSubaccountImplAddress;
     IIMasterAccountController private masterAccountController;
     address private masterAccountControllerAddress;
 
@@ -75,38 +82,47 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
     TimelockFacet private timelockFacet;
     PauseFacet private pauseFacet;
     ReaderFacet private readerFacet;
+    SubaccountsFacet private subaccountsFacet;
+    BridgeRoutesFacet private bridgeRoutesFacet;
     VaultsFacet private vaultsFacet;
     XrplProviderWalletsFacet private xrplProviderWalletsFacet;
 
-    function run(bool _fullDeploy, bool _staging) external {
+    function run(
+        string calldata _expectedNetwork,
+        bool _fullDeploy,
+        bool _staging
+    )
+        external
+    {
         // The VaultConfig/AgentVaultConfig decodes below rely on forge >= 1.5
         // encoding JSON objects in the declared field order of the matching
         // struct (foundry-rs/foundry#11612); older versions encode members
         // alphabetically and would silently swap ABI-compatible fields.
-        // test/DeployConfigDecode.t.sol pins the decode mapping.
+        // test/unit/deployment/DeployConfigDecode.t.sol pins the decode mapping.
         require(
             vm.foundryVersionAtLeast("1.5.0"),
             "forge >= 1.5.0 required: config struct decoding relies on declared field order"
         );
+        // never on a loan chain. Ethereum is reproduced from pinned historical bytes, not
+        // deployed from current source - the generic deployment would derive different
+        // addresses and its recorder would overwrite the pinned records - and Sepolia follows
+        // it. And this script deploys both home implementations whatever `_fullDeploy` says, so
+        // it is held to the home family like the implementation scripts are
+        require(
+            DeployNetworks.isFlareFamily(block.chainid),
+            "the generic deployment runs on a Flare-family chain; loan chains use the pinned bootstrap"
+        );
 
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+        // The signer is forge's, resolved from whatever the wrapper passed - a raw key, a keystore
+        // or a Ledger - and `msg.sender` is that account. Reading DEPLOYER_PRIVATE_KEY here would
+        // check one account and sign as another the moment the two differ, which is exactly what a
+        // hardware run is. Note this validates the sender forge was GIVEN; a device whose address
+        // is not that one fails later, at signing, rather than here.
+        address deployer = msg.sender;
 
         string memory configFile = "deployment/chain-config/";
-        string memory network;
-        uint256 chainId = block.chainid;
-
-        if (chainId == 14) {
-            network = "flare";
-        } else if (chainId == 19) {
-            network = "songbird";
-        } else if (chainId == 16) {
-            network = "coston";
-        } else if (chainId == 114) {
-            network = "coston2";
-        } else {
-            network = "scdev";
-        }
+        string memory network = DeployNetworks.networkName(block.chainid);
+        DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -134,11 +150,18 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
             params.initialOwner = deployer;
         }
 
-        vm.startBroadcast();
+        // Broadcast AS the validated account rather than leaving it implicit. In a script run the
+        // two are the same - forge resolves the signer and `msg.sender` is it - but naming it keeps
+        // the account this script checked and the account that signs from ever drifting apart.
+        vm.startBroadcast(msg.sender);
 
         // (re)deploy personal account implementation
         personalAccountImpl = new PersonalAccount();
         personalAccountImplAddress = address(personalAccountImpl);
+
+        // (re)deploy loan subaccount implementation
+        loanSubaccountImpl = new LoanSubaccount();
+        loanSubaccountImplAddress = address(loanSubaccountImpl);
 
         bytes32 salt = bytes32(0);
         // bytes32 salt = keccak256(abi.encodePacked("salt", block.timestamp)); // only for testing
@@ -295,6 +318,13 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
                 vm.toString(personalAccountImplAddress)
             )
         );
+        console2.log(
+            string.concat(
+                "DEPLOYED: LoanSubaccountImplementation, ",
+                "LoanSubaccount.sol: ",
+                vm.toString(loanSubaccountImplAddress)
+            )
+        );
 
         if (_fullDeploy) {
             console2.log("Adding XRPL provider wallets");
@@ -328,6 +358,12 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
                 console2.log("Adding unpausers");
                 masterAccountController.addUnpausers(params.unpausers);
             }
+
+            console2.log("Registering loan subaccount implementation");
+            // executes immediately: the timelock duration is still zero at this point
+            masterAccountController.setSubaccountImplementation(
+                SUBACCOUNT_TYPE_MORPHO_LOAN, loanSubaccountImplAddress
+            );
 
             console2.log("Setting timelock duration");
             masterAccountController.setTimelockDuration(params.timelockDurationSeconds);
@@ -370,7 +406,9 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
         });
     }
 
-    function _deploySmartAccountsFacets() internal {
+    function _deploySmartAccountsFacets()
+        internal
+    {
         agentVaultsFacet = new AgentVaultsFacet();
         executorsFacet = new ExecutorsFacet();
         instructionFeesFacet = new InstructionFeesFacet();
@@ -383,8 +421,10 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
         readerFacet = new ReaderFacet();
         vaultsFacet = new VaultsFacet();
         xrplProviderWalletsFacet = new XrplProviderWalletsFacet();
+        subaccountsFacet = new SubaccountsFacet();
+        bridgeRoutesFacet = new BridgeRoutesFacet();
 
-        smartAccountsFacets = new IDiamond.FacetCut[](12);
+        smartAccountsFacets = new IDiamond.FacetCut[](14);
         // v1.0.0 facets (keep original order)
         smartAccountsFacets[0] = _addFacet(address(agentVaultsFacet), "AgentVaultsFacet");
         smartAccountsFacets[1] = _addFacet(address(executorsFacet), "ExecutorsFacet");
@@ -399,9 +439,13 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
         smartAccountsFacets[9] = _addFacet(address(memoInstructionsFacet), "MemoInstructionsFacet");
         smartAccountsFacets[10] = _addFacet(address(pauseFacet), "PauseFacet");
         smartAccountsFacets[11] = _addFacet(address(readerFacet), "ReaderFacet");
+        smartAccountsFacets[12] = _addFacet(address(subaccountsFacet), "SubaccountsFacet");
+        smartAccountsFacets[13] = _addFacet(address(bridgeRoutesFacet), "BridgeRoutesFacet");
     }
 
-    function _logSmartAccountsFacetAddresses() internal view {
+    function _logSmartAccountsFacetAddresses()
+        internal view
+    {
         console2.log("Smart Accounts Facet Addresses:");
         console2.log(
             string.concat(
@@ -466,6 +510,19 @@ contract DeploySmartAccounts is Script, DeployConfigTypes {
                 vm.toString(address(xrplProviderWalletsFacet))
             )
         );
+        console2.log(
+            string.concat(
+                "DEPLOYED: SubaccountsFacet, ",
+                "SubaccountsFacet.sol: ",
+                vm.toString(address(subaccountsFacet))
+            )
+        );
+        console2.log(
+            string.concat(
+                "DEPLOYED: BridgeRoutesFacet, ",
+                "BridgeRoutesFacet.sol: ",
+                vm.toString(address(bridgeRoutesFacet))
+            )
+        );
     }
 }
-

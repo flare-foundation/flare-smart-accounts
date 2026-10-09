@@ -1,46 +1,37 @@
 #!/usr/bin/env node
 import { execFileSync, execSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, globSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import Web3, { type AbiFunctionFragment } from "web3";
 import { isFunctionFragment, loadAbi, toSelector } from "../utils/prep-cut";
-
-interface DeployedContract {
-  name: string;
-  contractName: string;
-  address: string;
-}
-
-interface CutConfig {
-  diamond: string;
-  facets?: string[];
-  deleteSelectorSigs?: string[];
-}
-
-interface BytecodeOutput {
-  object: string;
-}
-
-interface LoupeFacet {
-  facetAddress: string;
-  functionSelectors: string[];
-}
+import { loadPinnedEthereumAddresses, validateContractName } from "../utils/pinned-constants";
+import {
+  type DeployedContract,
+  type LoupeFacet,
+  assertRpcChain,
+  fetchLoupeFacets,
+  findDiamondAddress,
+  isDeployedContract,
+  loadCutConfig,
+  loadDeployedContracts,
+  normalizeCutFileName,
+} from "../utils/diamond-inspect";
+import { isLoanChainNetwork, resolveRpcUrl, validateNetwork } from "../utils/networks";
+import {
+  type FacetAction,
+  type FacetPlan,
+  ZERO_CODE,
+  artifactPathFor,
+  buildRepoFacetSourceSet,
+  compareFacet,
+  hexToBytes,
+  loadCreationCode,
+  loadDeployedCode,
+} from "../utils/facet-code";
 
 interface RepoSelectorInfo {
   contractName: string;
   signature: string;
-}
-
-type FacetAction = "ADD" | "REPLACE" | "REUSE" | "REMOVE";
-
-interface FacetPlan {
-  name: string;
-  address?: string;
-  action: FacetAction;
-  reason: string;
-  currentHash?: string;
-  deployedHash?: string;
 }
 
 interface StaleSelector {
@@ -52,16 +43,6 @@ interface StaleSelector {
   // Set when the selector still exists on another facet in the repo (moved, not removed).
   movedTo?: string;
 }
-
-const ZERO_CODE = "0x";
-const SUPPORTED_BASE_NETWORKS = ["coston2", "coston", "flare", "songbird", "scdev"];
-const FACETS_ABI = {
-  type: "tuple[]",
-  components: [
-    { name: "facetAddress", type: "address" },
-    { name: "functionSelectors", type: "bytes4[]" },
-  ],
-} as const;
 
 async function main() {
   const args = process.argv.slice(2);
@@ -84,10 +65,52 @@ async function main() {
   const diamond = cutConfig?.diamond ?? findDiamondAddress(deployedContracts);
   const rpcUrl = resolveRpcUrl(network);
   const web3 = new Web3(rpcUrl);
+  await assertRpcChain(web3, network);
 
   const deployedFacets = deployedContracts.filter((contract) => contract.name.endsWith("Facet"));
   const deployedByName = new Map(deployedFacets.map((contract) => [contract.name, contract]));
+  if (isLoanChainNetwork(network)) {
+    // the complete pin set (controller + three base facets) must be present and correctly
+    // recorded before any planning: an omitted or renamed record would otherwise dodge the
+    // pinned branch and let a same-named cut entry through the generic ADD path
+    const pins = loadPinnedEthereumAddresses();
+    for (const [pinnedName, pin] of pins.baseFacets) {
+      const record = deployedByName.get(pinnedName);
+      if (!record) {
+        throw new Error(
+          `${pinnedName}: pinned base facet missing from deployment/deploys/${network}.json — ` +
+            `run the pinned bootstrap (DeployRemoteControllerPinned) before planning a cut`
+        );
+      }
+      if (record.address.toLowerCase() !== pin.address) {
+        throw new Error(
+          `${pinnedName}: recorded address ${record.address} does not match the pinned ` +
+            `historical address ${pin.address} — investigate before cutting`
+        );
+      }
+    }
+    const controller = deployedContracts.find((c) => c.name === "MasterAccountController");
+    if (!controller || controller.address.toLowerCase() !== pins.controllerAddress) {
+      throw new Error(
+        `MasterAccountController: the deployment record is missing or does not match the ` +
+          `pinned historical address ${pins.controllerAddress} — investigate before cutting`
+      );
+    }
+    // the cut target is the pinned controller, nothing else: with all four record checks
+    // passing, a cut file could otherwise aim the cut at another diamond
+    if (diamond.toLowerCase() !== pins.controllerAddress) {
+      throw new Error(
+        `the loan-chain cut target ${diamond} must be the pinned MasterAccountController ` + `${pins.controllerAddress}`
+      );
+    }
+  }
   const cutFacetNames = cutConfig?.facets ?? [];
+  for (const name of cutFacetNames) {
+    // path aliases and non-canonical casings of protected names must never reach planning
+    if (validateContractName(name) === "MasterAccountController") {
+      throw new Error("MasterAccountController is not a facet");
+    }
+  }
 
   console.log(`Diamond cut plan for ${network}`);
   console.log(
@@ -99,7 +122,7 @@ async function main() {
   console.log(noBuild ? "Build: skipped (--no-build)" : "Build: forge build");
   console.log("");
 
-  const facetPlans = await buildFacetPlans(web3, deployedFacets, deployedByName, cutFacetNames);
+  const facetPlans = await buildFacetPlans(web3, network, deployedFacets, deployedByName, cutFacetNames);
   printFacetPlan(facetPlans);
 
   const staleSelectors = await buildStaleSelectors(
@@ -120,8 +143,17 @@ async function main() {
 
 // --- Section 1: which facet contracts need (re)deploying ---
 
+// The Ethereum bootstrap reproduces the diamond's base facets from pinned historical init
+// code, not from current-source artifacts (see deployment/lib/PinnedControllerInitCode.sol
+// and deployment/pinned-init-code/). Comparing them against today's build would wrongly
+// propose replacing them; instead they are verified against the pinned Flare runtime-code
+// hashes (keccak256 of the deployed code) and reported as intentional reuse. Applies only on
+// the loan chains, where the pinned bootstrap runs. The pinned values are parsed lazily from PinnedControllerInitCode.sol
+// via deployment/utils/pinned-constants.ts, shared with the recorder.
+
 async function buildFacetPlans(
   web3: Web3,
+  network: string,
   deployedFacets: DeployedContract[],
   deployedByName: Map<string, DeployedContract>,
   cutFacetNames: string[]
@@ -131,6 +163,39 @@ async function buildFacetPlans(
   const plans: FacetPlan[] = [];
 
   for (const facet of deployedFacets) {
+    // the pinned branch runs before all generic planning: a pinned base facet must never be
+    // classified by source/artifact/code heuristics, and missing on-chain code is a fatal
+    // bootstrap requirement, not an actionable ADD
+    const pinned = isLoanChainNetwork(network) ? loadPinnedEthereumAddresses().baseFacets.get(facet.name) : undefined;
+    if (pinned !== undefined) {
+      if (facet.address.toLowerCase() !== pinned.address) {
+        throw new Error(
+          `${facet.name}: recorded address ${facet.address} does not match the pinned ` +
+            `historical address ${pinned.address} — investigate before cutting`
+        );
+      }
+      const pinnedCodeHex = await web3.eth.getCode(facet.address);
+      if (pinnedCodeHex === ZERO_CODE) {
+        throw new Error(
+          `${facet.name}: no code at the pinned address — run the Ethereum bootstrap ` +
+            `(DeployRemoteControllerPinned) before planning a cut`
+        );
+      }
+      if (Web3.utils.keccak256(pinnedCodeHex).toLowerCase() !== pinned.runtimeCodeHash) {
+        throw new Error(
+          `${facet.name}: on-chain code does not match the pinned historical runtime hash — ` +
+            `investigate before cutting`
+        );
+      }
+      plans.push({
+        name: facet.name,
+        address: facet.address,
+        action: "REUSE",
+        reason: "pinned historical runtime (byte-identical to the Flare production deployment); intentional reuse",
+      });
+      continue;
+    }
+
     const artifactPath = artifactPathFor(facet.name);
     // Source presence — not artifact presence — is the source of truth for "still exists".
     // A stale artifact (forge does not prune artifacts of deleted sources) must not mask a removal.
@@ -186,165 +251,6 @@ async function buildFacetPlans(
   }
 
   return plans;
-}
-
-function compareFacet(
-  facetName: string,
-  address: string,
-  deployedCode: Buffer,
-  currentCode: Buffer,
-  proxyCreationCode: Buffer
-): FacetPlan {
-  const deployedRuntime = stripMetadata(deployedCode);
-  const currentRuntime = stripMetadata(currentCode);
-  const deployedHash = shortHash(deployedRuntime);
-  const currentHash = shortHash(currentRuntime);
-
-  if (deployedCode.equals(currentCode)) {
-    return {
-      name: facetName,
-      address,
-      action: "REUSE",
-      reason: "full deployed bytecode matches",
-      currentHash,
-      deployedHash,
-    };
-  }
-
-  if (deployedRuntime.equals(currentRuntime)) {
-    return {
-      name: facetName,
-      address,
-      action: "REUSE",
-      reason: "only the facet trailing Solidity metadata differs; would reuse",
-      currentHash,
-      deployedHash,
-    };
-  }
-
-  const onlyEmbeddedProxyMetadataChanged = hasOnlyEmbeddedProxyMetadataChange(
-    deployedRuntime,
-    currentRuntime,
-    proxyCreationCode
-  );
-  return {
-    name: facetName,
-    address,
-    action: "REPLACE",
-    reason: onlyEmbeddedProxyMetadataChanged
-      ? "embedded PersonalAccountProxy.creationCode metadata differs; would redeploy"
-      : "functional runtime bytecode differs; would redeploy",
-    currentHash,
-    deployedHash,
-  };
-}
-
-function hasOnlyEmbeddedProxyMetadataChange(
-  deployedRuntime: Buffer,
-  currentRuntime: Buffer,
-  proxyCreationCode: Buffer
-): boolean {
-  const normalizedDeployedRuntime = stripEmbeddedProxyMetadata(deployedRuntime, proxyCreationCode);
-  const normalizedCurrentRuntime = stripEmbeddedProxyMetadata(currentRuntime, proxyCreationCode);
-  return (
-    (!normalizedDeployedRuntime.equals(deployedRuntime) || !normalizedCurrentRuntime.equals(currentRuntime)) &&
-    normalizedDeployedRuntime.equals(normalizedCurrentRuntime)
-  );
-}
-
-function stripEmbeddedProxyMetadata(code: Buffer, proxyCreationCode: Buffer): Buffer {
-  const strippedProxyCreationCode = stripMetadata(proxyCreationCode);
-  if (strippedProxyCreationCode.length === proxyCreationCode.length) {
-    return code;
-  }
-
-  const chunks: Buffer[] = [];
-  let cursor = 0;
-  let changed = false;
-  while (cursor < code.length) {
-    const index = code.indexOf(strippedProxyCreationCode, cursor);
-    if (index < 0) {
-      chunks.push(code.subarray(cursor));
-      break;
-    }
-
-    const embeddedProxy = code.subarray(index, index + proxyCreationCode.length);
-    if (
-      embeddedProxy.length === proxyCreationCode.length &&
-      stripMetadata(embeddedProxy).equals(strippedProxyCreationCode)
-    ) {
-      chunks.push(code.subarray(cursor, index));
-      chunks.push(strippedProxyCreationCode);
-      cursor = index + proxyCreationCode.length;
-      changed = true;
-    } else {
-      chunks.push(code.subarray(cursor, index + 1));
-      cursor = index + 1;
-    }
-  }
-
-  return changed ? Buffer.concat(chunks) : code;
-}
-
-function loadDeployedCode(contractName: string): Buffer {
-  const artifact = loadArtifact(contractName);
-  if (isBytecodeOutput(artifact.deployedBytecode)) {
-    return hexToBytes(artifact.deployedBytecode.object);
-  }
-  throw new Error(`Missing deployed bytecode object for ${contractName}`);
-}
-
-function loadCreationCode(contractName: string): Buffer {
-  const artifact = loadArtifact(contractName);
-  if (isBytecodeOutput(artifact.bytecode)) {
-    return hexToBytes(artifact.bytecode.object);
-  }
-  throw new Error(`Missing creation bytecode object for ${contractName}`);
-}
-
-function isBytecodeOutput(value: unknown): value is BytecodeOutput {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "object" in value &&
-    typeof (value as { object?: unknown }).object === "string"
-  );
-}
-
-function loadArtifact(contractName: string): { bytecode?: unknown; deployedBytecode?: unknown } {
-  return JSON.parse(readFileSync(artifactPathFor(contractName), "utf8")) as {
-    bytecode?: unknown;
-    deployedBytecode?: unknown;
-  };
-}
-
-function stripMetadata(code: Buffer): Buffer {
-  const suffixLength = metadataSuffixLength(code);
-  return code.subarray(0, code.length - suffixLength);
-}
-
-function metadataSuffixLength(code: Buffer): number {
-  if (code.length < 2) {
-    return 0;
-  }
-  const metadataLength = ((code[code.length - 2] ?? 0) << 8) | (code[code.length - 1] ?? 0);
-  if (metadataLength === 0 || metadataLength + 2 > code.length) {
-    return 0;
-  }
-  const metadataStart = code.length - metadataLength - 2;
-  if ((code[metadataStart] ?? 0) >> 5 !== 5) {
-    return 0;
-  }
-  return metadataLength + 2;
-}
-
-function hexToBytes(hex: string): Buffer {
-  const normalized = hex.startsWith("0x") ? hex.slice(2) : hex;
-  return Buffer.from(normalized, "hex");
-}
-
-function shortHash(data: Buffer): string {
-  return createHash("sha256").update(data).digest("hex").slice(0, 16);
 }
 
 // --- Section 2: which live selectors are orphaned (deletion candidates) ---
@@ -408,21 +314,6 @@ function buildRepoSelectorMap(facetNames: string[]): Map<string, RepoSelectorInf
   return selectors;
 }
 
-// Names of every concrete facet implementation currently in the repo
-// (contracts/**/facets/*Facet.sol, interfaces excluded). Source presence — not artifact presence —
-// is the source of truth for whether a facet still exists; a stale artifact for a deleted facet
-// (forge does not prune artifacts of removed sources) must not mask its removal.
-function buildRepoFacetSourceSet(): Set<string> {
-  const names = new Set<string>();
-  for (const sourcePath of globSync("contracts/**/facets/*Facet.sol")) {
-    if (/interface/i.test(sourcePath)) {
-      continue;
-    }
-    names.add(basename(sourcePath).replace(/\.sol$/, ""));
-  }
-  return names;
-}
-
 // Selectors of every concrete facet implementation currently in the repo, regardless of deploy/cut
 // scope. Used to tell a MOVED selector (still defined on some facet) apart from a genuinely REMOVED one.
 function buildAllRepoFacetSelectorMap(): Map<string, RepoSelectorInfo> {
@@ -439,33 +330,6 @@ function buildAllRepoFacetSelectorMap(): Map<string, RepoSelectorInfo> {
     }
   }
   return selectors;
-}
-
-async function fetchLoupeFacets(web3: Web3, diamond: string): Promise<LoupeFacet[]> {
-  const data = web3.eth.abi.encodeFunctionSignature("facets()");
-  const encoded = await web3.eth.call({ to: diamond, data });
-  const decoded = web3.eth.abi.decodeParameter(FACETS_ABI, encoded);
-  if (!Array.isArray(decoded)) {
-    throw new Error("Could not decode DiamondLoupe facets()");
-  }
-
-  return decoded.map((item) => {
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      typeof (item as { facetAddress?: unknown }).facetAddress === "string" &&
-      Array.isArray((item as { functionSelectors?: unknown }).functionSelectors)
-    ) {
-      const functionSelectors = (item as { functionSelectors: unknown[] }).functionSelectors.map((selector) =>
-        String(selector).toLowerCase()
-      );
-      return {
-        facetAddress: (item as { facetAddress: string }).facetAddress,
-        functionSelectors,
-      };
-    }
-    throw new Error("Invalid DiamondLoupe facet item");
-  });
 }
 
 function findStaleSelectors(loupeFacets: LoupeFacet[], repoSelectors: Map<string, RepoSelectorInfo>) {
@@ -554,16 +418,6 @@ function readHistoricalDeployedContracts(commit: string, deployPath: string): De
   } catch {
     return [];
   }
-}
-
-function isDeployedContract(item: unknown): item is DeployedContract {
-  return (
-    typeof item === "object" &&
-    item !== null &&
-    typeof (item as { name?: unknown }).name === "string" &&
-    typeof (item as { contractName?: unknown }).contractName === "string" &&
-    typeof (item as { address?: unknown }).address === "string"
-  );
 }
 
 function buildHistoricalSelectorHints(staleSelectors: StaleSelector[]): Map<string, string> {
@@ -784,116 +638,6 @@ function functionSignature(fn: AbiFunctionFragment): string {
 }
 
 // --- shared input loading ---
-
-function validateNetwork(network: string) {
-  const baseNetwork = baseNetworkName(network);
-  if (!SUPPORTED_BASE_NETWORKS.includes(baseNetwork)) {
-    throw new Error(`Invalid network: ${network}`);
-  }
-}
-
-function baseNetworkName(network: string): string {
-  return network.endsWith("-staging") ? network.replace(/-staging$/, "") : network;
-}
-
-function loadDeployedContracts(network: string): DeployedContract[] {
-  const path = `deployment/deploys/${network}.json`;
-  const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-  if (!Array.isArray(raw)) {
-    throw new Error(`Invalid deployed contracts file: ${path}`);
-  }
-  return raw.map((item) => {
-    if (isDeployedContract(item)) {
-      return item;
-    }
-    throw new Error(`Invalid deployed contract item in ${path}`);
-  });
-}
-
-function loadCutConfig(network: string, cutFileName: string): CutConfig {
-  const path = `deployment/cuts/${network}/${normalizeCutFileName(cutFileName)}`;
-  const raw: unknown = JSON.parse(readFileSync(path, "utf8"));
-  if (typeof raw !== "object" || raw === null) {
-    throw new Error(`Invalid cut config: ${path}`);
-  }
-
-  const config = raw as { diamond?: unknown; facets?: unknown; deleteSelectorSigs?: unknown };
-  if (typeof config.diamond !== "string") {
-    throw new Error(`Invalid cut config ${path}: diamond must be a string`);
-  }
-  if (config.facets !== undefined && !isStringArray(config.facets)) {
-    throw new Error(`Invalid cut config ${path}: facets must be an array of strings`);
-  }
-  if (config.deleteSelectorSigs !== undefined && !isStringArray(config.deleteSelectorSigs)) {
-    throw new Error(`Invalid cut config ${path}: deleteSelectorSigs must be an array of strings`);
-  }
-
-  const cutConfig: CutConfig = { diamond: config.diamond };
-  if (config.facets !== undefined) {
-    cutConfig.facets = config.facets;
-  }
-  if (config.deleteSelectorSigs !== undefined) {
-    cutConfig.deleteSelectorSigs = config.deleteSelectorSigs;
-  }
-  return cutConfig;
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
-function findDiamondAddress(deployedContracts: DeployedContract[]): string {
-  const diamond = deployedContracts.find(
-    (contract) => contract.name === "MasterAccountController" || contract.contractName === "MasterAccountController.sol"
-  );
-  if (!diamond) {
-    throw new Error("Could not find MasterAccountController in deployment/deploys file");
-  }
-  return diamond.address;
-}
-
-function normalizeCutFileName(cutFileName: string): string {
-  return cutFileName.endsWith(".json") ? cutFileName : `${cutFileName}.json`;
-}
-
-function resolveRpcUrl(network: string): string {
-  const env = { ...readDotEnv(), ...process.env };
-  const baseNetwork = baseNetworkName(network);
-  const rpcEnvName = `${baseNetwork.toUpperCase()}_RPC_URL`;
-  const rpcUrl = env[rpcEnvName];
-  if (rpcUrl) {
-    return rpcUrl;
-  }
-  return `https://${baseNetwork}-api.flare.network/ext/C/rpc`;
-}
-
-function readDotEnv(): Record<string, string> {
-  if (!existsSync(".env")) {
-    return {};
-  }
-  const env: Record<string, string> = {};
-  for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-    const separator = trimmed.indexOf("=");
-    if (separator < 0) {
-      continue;
-    }
-    const key = trimmed.slice(0, separator).trim();
-    const value = trimmed
-      .slice(separator + 1)
-      .trim()
-      .replace(/^['"]|['"]$/g, "");
-    env[key] = value;
-  }
-  return env;
-}
-
-function artifactPathFor(contractName: string): string {
-  return `artifacts/${contractName}.sol/${contractName}.json`;
-}
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values));

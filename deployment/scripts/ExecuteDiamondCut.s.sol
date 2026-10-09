@@ -6,6 +6,8 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {IDiamond} from "../../contracts/diamond/interfaces/IDiamond.sol";
 import {IDiamondCut} from "../../contracts/diamond/interfaces/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../contracts/diamond/interfaces/IDiamondLoupe.sol";
+import {PinnedControllerInitCode} from "../lib/PinnedControllerInitCode.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 
 // solhint-disable no-console
 contract ExecuteDiamondCut is Script {
@@ -21,6 +23,7 @@ contract ExecuteDiamondCut is Script {
     string private configFileName;
 
     function run(
+        string calldata _expectedNetwork,
         string calldata _configFileName,
         bool _staging
     )
@@ -30,17 +33,11 @@ contract ExecuteDiamondCut is Script {
         uint256 chainId = block.chainid;
         configFileName = _configFileName;
 
-        if (chainId == 14) {
-            network = "flare";
-        } else if (chainId == 19) {
-            network = "songbird";
-        } else if (chainId == 16) {
-            network = "coston";
-        } else if (chainId == 114) {
-            network = "coston2";
-        } else {
-            network = "scdev";
-        }
+        network = DeployNetworks.networkName(chainId);
+        // the loan chains have only the pinned deployment: a staging alias would sidestep the
+        // mandatory check-cut-plan preview, which rejects it too
+        require(!(_staging && DeployNetworks.isLoanChain(chainId)), "the loan chains have no staging deployment");
+        DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
@@ -60,12 +57,23 @@ contract ExecuteDiamondCut is Script {
         }
 
         address diamond = abi.decode(json.parseRaw(".diamond"), (address));
+        _requirePermittedCutTarget(diamond);
         string[] memory facetNames = abi.decode(json.parseRaw(".facets"), (string[]));
 
         address[] memory facetAddrs = new address[](facetNames.length);
         // deploy facets
         vm.startBroadcast();
         for (uint256 i = 0; i < facetNames.length; i++) {
+            // on a loan chain the historical base facets are pinned: they are never deployed or
+            // replaced through the generic path, and their live code must match the Flare
+            // production runtime exactly (mirrors check-cut-plan; constants are shared via
+            // PinnedControllerInitCode)
+            _validateFacetName(facetNames[i]);
+            (address pinnedAddr, bool isPinned) = _pinnedFacetAddress(facetNames[i]);
+            if (isPinned) {
+                facetAddrs[i] = pinnedAddr;
+                continue;
+            }
             // check deployed facets; if bytecode matches, reuse; else deploy new
             address candidate = _findDeployedAddressFromFile(deployedContractsFile, facetNames[i]);
             string memory artifactPath = string.concat(
@@ -78,12 +86,7 @@ contract ExecuteDiamondCut is Script {
             } else {
                 console2.log("Deploying facet:", facetNames[i]);
                 facetAddrs[i] = _deployFacet(facetNames[i]);
-                // always update facet address in deploys file
-                _updateAddressInFile(
-                    deployedContractsFile,
-                    facetNames[i],
-                    facetAddrs[i]
-                );
+                _printDeployedRecord(facetNames[i], facetAddrs[i]);
             }
         }
 
@@ -121,7 +124,7 @@ contract ExecuteDiamondCut is Script {
         bytes memory rawInitName = _json.parseRaw(".init.contract");
         require(rawInitName.length > 0, "init.contract is required if init object exists");
         string memory initName = abi.decode(rawInitName, (string));
-        require(bytes(initName).length > 0, "init.contract cannot be empty");
+        _validateInitName(initName);
         for (uint256 i = 0; i < _facetNames.length; i++) {
             if (_stringEq(_facetNames[i], initName)) {
                 return _facetAddrs[i];
@@ -138,11 +141,7 @@ contract ExecuteDiamondCut is Script {
             return candidate;
         }
         address deployed = _deployFacet(initName);
-        _updateAddressInFile(
-            _deployedContractsFile,
-            initName,
-            deployed
-        );
+        _printDeployedRecord(initName, deployed);
         return deployed;
     }
 
@@ -312,23 +311,6 @@ contract ExecuteDiamondCut is Script {
         vm.writeFile(_path, data);
     }
 
-    function _updateAddressInFile(
-        string memory _contractsFilePath,
-        string memory _facetName,
-        address _facetAddress
-    )
-        internal
-    {
-        string[] memory cmd = new string[](6);
-        cmd[0] = "npx";
-        cmd[1] = "tsx";
-        cmd[2] = "deployment/utils/update-facet-address.ts";
-        cmd[3] = _contractsFilePath;
-        cmd[4] = _facetName;
-        cmd[5] = _addrToString(_facetAddress);
-        vm.ffi(cmd);
-    }
-
     function _deployFacet(
         string memory _name
     )
@@ -389,6 +371,65 @@ contract ExecuteDiamondCut is Script {
         return address(0);
     }
 
+    /// @dev On a loan chain the cut target is the pinned controller, nothing else: with all four
+    /// record checks passing, a cut file could otherwise aim the cut at another diamond. Every
+    /// other chain takes its target from the cut file, as the deployment record's own diamond.
+    function _requirePermittedCutTarget(
+        address _diamond
+    )
+        internal view
+    {
+        if (DeployNetworks.isLoanChain(block.chainid)) {
+            require(
+                _diamond == PinnedControllerInitCode.MASTER_ACCOUNT_CONTROLLER,
+                "the loan-chain cut target must be the pinned MasterAccountController"
+            );
+        }
+    }
+
+    /// @dev The address a pinned base facet must be cut at, and whether the name is one at all.
+    /// A pinned facet is never deployed or replaced through the generic path, and its live code
+    /// must be the Flare production runtime byte for byte, so a chain holding something else at
+    /// a pinned address cannot be cut until that is understood.
+    function _pinnedFacetAddress(
+        string memory _name
+    )
+        internal view
+        returns (address _addr, bool _isPinned)
+    {
+        (address pinnedAddr, bytes32 pinnedCodeHash, bool isPinned) = _pinnedBaseFacet(_name);
+        if (!isPinned) {
+            return (address(0), false);
+        }
+        require(
+            pinnedAddr.codehash == pinnedCodeHash,
+            string.concat(_name, ": on-chain code does not match the pinned historical runtime")
+        );
+        return (pinnedAddr, true);
+    }
+
+    /// @dev The record line every deploy script prints and the wrapper's recorder consumes once
+    /// forge has exited. Printing rather than writing is what keeps a run that never broadcast out
+    /// of the deployment record: a file written from here would outlive the simulation it was
+    /// computed in. A cut deploys facets and the initializer, whose record name is the contract
+    /// name, so one string serves as both halves of the line.
+    function _printDeployedRecord(
+        string memory _name,
+        address _address
+    )
+        internal pure
+    {
+        console2.log(
+            string.concat("DEPLOYED: ", _name, ", ", _name, ".sol: ", _addrToString(_address))
+        );
+    }
+
+    /// @dev Hashes the code without its CBOR metadata trailer. The trailer length is read from
+    /// the compared code itself, which is sound: REUSE requires the functional prefix to
+    /// hash-match the artifact's functional code, so a crafted trailer can only append
+    /// unreachable bytes to functionally identical code - a poisoned deploy record cannot route
+    /// selectors to different logic. The artifact side always carries a real trailer
+    /// (foundry.toml keeps the default CBOR metadata).
     function _runtimeCodeHash(
         bytes memory _code
     )
@@ -504,7 +545,91 @@ contract ExecuteDiamondCut is Script {
         return keccak256(bytes(_a)) == keccak256(bytes(_b));
     }
 
-    function _toHex(bytes4 _selector) internal pure returns (string memory) {
+    /// Facet and initializer names become artifact path components, so anything beyond a
+    /// plain Solidity identifier (`./OwnershipFacet`) could resolve a protected artifact
+    /// while evading the exact-match guards.
+    function _requireIdentifier(
+        string memory _name
+    )
+        internal pure
+    {
+        bytes memory b = bytes(_name);
+        require(b.length > 0, "contract names must be Solidity identifiers");
+        for (uint256 i = 0; i < b.length; i++) {
+            bytes1 c = b[i];
+            bool wordChar = (c >= "A" && c <= "Z") || (c >= "a" && c <= "z") || c == "_";
+            bool digit = c >= "0" && c <= "9";
+            require(wordChar || (i > 0 && digit), "contract names must be Solidity identifiers");
+        }
+    }
+
+    /// keccak256 of the ASCII-lowercased name: development filesystems are often
+    /// case-insensitive, so protected names must be recognized in any casing. Works on a
+    /// copy - `bytes(_name)` aliases the caller's string, which must stay unmodified.
+    function _lowercaseHash(
+        string memory _name
+    )
+        internal pure
+        returns (bytes32)
+    {
+        bytes memory source = bytes(_name);
+        bytes memory lowered = new bytes(source.length);
+        for (uint256 i = 0; i < source.length; i++) {
+            bytes1 c = source[i];
+            lowered[i] = (c >= "A" && c <= "Z") ? bytes1(uint8(c) + 32) : c;
+        }
+        return keccak256(lowered);
+    }
+
+    function _validateFacetName(
+        string memory _name
+    )
+        internal pure
+    {
+        _requireIdentifier(_name);
+        bytes32 lower = _lowercaseHash(_name);
+        // the controller itself is never a facet; rejecting the name in any casing closes a
+        // path that could rewrite its pinned deployment record through the generic recorder
+        require(
+            lower != keccak256("masteraccountcontroller"),
+            "MasterAccountController is not a facet"
+        );
+        // a non-canonical casing of a pinned base facet name would skip the pinned branch
+        // yet can resolve the same artifact on a case-insensitive filesystem
+        bool aliasOfPinned = (
+            lower == keccak256("diamondcutfacet") && !_stringEq(_name, "DiamondCutFacet")
+        ) || (
+            lower == keccak256("diamondloupefacet") && !_stringEq(_name, "DiamondLoupeFacet")
+        ) || (
+            lower == keccak256("ownershipfacet") && !_stringEq(_name, "OwnershipFacet")
+        );
+        require(!aliasOfPinned, "pinned base facet names must use their canonical spelling");
+    }
+
+    /// Pinned names must never pass through the generic initializer path, in any casing: it
+    /// can deploy today's artifact and rewrite the protected deployment record.
+    function _validateInitName(
+        string memory _name
+    )
+        internal pure
+    {
+        _requireIdentifier(_name);
+        bytes32 lower = _lowercaseHash(_name);
+        require(
+            lower != keccak256("masteraccountcontroller") &&
+                lower != keccak256("diamondcutfacet") &&
+                lower != keccak256("diamondloupefacet") &&
+                lower != keccak256("ownershipfacet"),
+            "pinned names cannot be used as the init contract"
+        );
+    }
+
+    function _toHex(
+        bytes4 _selector
+    )
+        internal pure
+        returns (string memory)
+    {
         bytes memory b = abi.encodePacked(_selector);
         bytes memory hexChars = "0123456789abcdef";
         bytes memory str = new bytes(8);
@@ -515,7 +640,12 @@ contract ExecuteDiamondCut is Script {
         return string(str);
     }
 
-    function _toHexBytes(bytes memory _data) internal pure returns (string memory) {
+    function _toHexBytes(
+        bytes memory _data
+    )
+        internal pure
+        returns (string memory)
+    {
         bytes memory hexChars = "0123456789abcdef";
         bytes memory str = new bytes(_data.length * 2);
         for (uint256 i = 0; i < _data.length; i++) {
@@ -523,5 +653,39 @@ contract ExecuteDiamondCut is Script {
             str[i * 2 + 1] = hexChars[uint8(_data[i] & 0x0f)];
         }
         return string(str);
+    }
+
+    function _pinnedBaseFacet(
+        string memory _name
+    )
+        private view
+        returns (address _addr, bytes32 _codeHash, bool _isPinned)
+    {
+        if (!DeployNetworks.isLoanChain(block.chainid)) {
+            return (address(0), bytes32(0), false);
+        }
+        bytes32 nameHash = keccak256(bytes(_name));
+        if (nameHash == keccak256("DiamondCutFacet")) {
+            return (
+                PinnedControllerInitCode.DIAMOND_CUT_FACET,
+                PinnedControllerInitCode.DIAMOND_CUT_FACET_RUNTIME_CODE_HASH,
+                true
+            );
+        }
+        if (nameHash == keccak256("DiamondLoupeFacet")) {
+            return (
+                PinnedControllerInitCode.DIAMOND_LOUPE_FACET,
+                PinnedControllerInitCode.DIAMOND_LOUPE_FACET_RUNTIME_CODE_HASH,
+                true
+            );
+        }
+        if (nameHash == keccak256("OwnershipFacet")) {
+            return (
+                PinnedControllerInitCode.OWNERSHIP_FACET,
+                PinnedControllerInitCode.OWNERSHIP_FACET_RUNTIME_CODE_HASH,
+                true
+            );
+        }
+        return (address(0), bytes32(0), false);
     }
 }

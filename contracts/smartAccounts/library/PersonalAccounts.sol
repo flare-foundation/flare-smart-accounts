@@ -3,7 +3,6 @@ pragma solidity ^0.8.27;
 
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 import {IISingletonFactory} from "../interface/IISingletonFactory.sol";
-import {IIPersonalAccount} from "../interface/IIPersonalAccount.sol";
 import {IPersonalAccountsFacet} from "../../userInterfaces/facets/IPersonalAccountsFacet.sol";
 
 library PersonalAccounts {
@@ -13,7 +12,7 @@ library PersonalAccounts {
         /// @notice PersonalAccount implementation used by BeaconProxy PA instances via IBeacon
         address personalAccountImplementation;
         /// Mapping from XRPL address to Personal Account
-        mapping(string xrplAddress => IIPersonalAccount) personalAccounts;
+        mapping(string xrplAddress => address) personalAccounts;
     }
 
     bytes32 internal constant STATE_POSITION = keccak256(
@@ -26,9 +25,14 @@ library PersonalAccounts {
     /**
      * @notice Frozen `PersonalAccountProxy` creation bytecode used for per-account CREATE2 derivation.
      *
-     * Equal to `type(PersonalAccountProxy).creationCode` as compiled at commit `2abb115` (the
-     * source commit used for the live Flare deployment on 2026-02-13). Burned in as a constant
-     * so the CREATE2 input is invariant across rebuilds.
+     * Equal to `type(PersonalAccountProxy).creationCode` as compiled at commit `2abb115` with
+     * solc 0.8.30 (the source commit used for the live Flare deployment on 2026-02-13). Burned in
+     * as a constant so the CREATE2 input is invariant across rebuilds.
+     *
+     * A current build differs in the CBOR metadata trailer alone — the compiler is now 0.8.35 and
+     * the proxy's own source has since been reformatted — so reproducing these exact bytes needs
+     * those historical inputs. What must keep holding is that the functional bytes still match the
+     * proxy source, which the tests named below assert on every pipeline.
      *
      * Why not `type(PersonalAccountProxy).creationCode`:
      *   Solc resolves that constant at compile time and inlines the proxy's full creation bytecode,
@@ -42,9 +46,9 @@ library PersonalAccounts {
      * makes the derivation `keccak256(constant || abi.encode(diamond, xrplOwner))`, which is purely
      * a function of inputs that don't change with project drift.
      *
-     * Hash of this constant is asserted in `test/PersonalAccountsLibrary.t.sol`. Do not edit without
-     * updating that fixture and acknowledging that all "predicted but not yet deployed" PA addresses
-     * will shift to a new derivation moment.
+     * Hash of this constant is asserted in `test/unit/smartAccounts/PersonalAccountsLibrary.t.sol`. Do not
+     * edit without updating that fixture and acknowledging that all "predicted but not yet deployed" PA
+     * addresses will shift to a new derivation moment.
      */
     bytes internal constant PROXY_CREATION_CODE =
         hex"60a08060405234610283575f6104a7803803809161001d82866102c0565b8439"
@@ -101,11 +105,11 @@ library PersonalAccounts {
         string memory _xrplOwner
     )
         internal
-        returns (IIPersonalAccount _personalAccount)
+        returns (address _personalAccount)
     {
         State storage state = getState();
         _personalAccount = state.personalAccounts[_xrplOwner];
-        if (address(_personalAccount) == address(0)) {
+        if (_personalAccount == address(0)) {
             // create new Personal Account
             _personalAccount = createPersonalAccount(_xrplOwner);
         }
@@ -115,7 +119,7 @@ library PersonalAccounts {
         string memory _xrplOwner
     )
         internal
-        returns (IIPersonalAccount _personalAccount)
+        returns (address _personalAccount)
     {
         bytes memory bytecode = generateBytecode(_xrplOwner);
         // check if already deployed
@@ -127,7 +131,7 @@ library PersonalAccounts {
             IISingletonFactory(SINGLETON_FACTORY).deploy(bytecode, bytes32(0));
         }
 
-        _personalAccount = IIPersonalAccount(payable(personalAccountProxyAddress));
+        _personalAccount = personalAccountProxyAddress;
 
         // ensure the proxy address is a contract
         codeSize = personalAccountProxyAddress.code.length;

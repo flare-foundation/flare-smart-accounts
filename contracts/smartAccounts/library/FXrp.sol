@@ -8,6 +8,8 @@ import {IInstructionsFacet} from "../../userInterfaces/facets/IInstructionsFacet
 
 library FXrp {
 
+    // false positive: msg.value comes from `InstructionsFacet.reserveCollateral`, which is `external payable`
+    // slither-disable-next-line msg-value-in-nonpayable
     function reserveCollateral(
         IIPersonalAccount _personalAccount,
         address _agentVault,
@@ -56,6 +58,8 @@ library FXrp {
         );
     }
 
+    // false positive: msg.value comes from `InstructionsFacet.executeInstruction`, which is `external payable`
+    // slither-disable-next-line msg-value-in-nonpayable
     function redeem(
         IIPersonalAccount _personalAccount,
         uint256 _lots

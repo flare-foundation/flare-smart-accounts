@@ -3,18 +3,36 @@ pragma solidity ^0.8.27;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {PersonalAccount} from "../../contracts/smartAccounts/implementation/PersonalAccount.sol";
+import {DeployNetworks} from "../lib/DeployNetworks.sol";
 
 // solhint-disable no-console
 contract DeployPersonalAccountImplementation is Script {
-    function run(bool _staging) external {
-        uint256 deployerPrivateKey = vm.envUint("DEPLOYER_PRIVATE_KEY");
+    function run(
+        string calldata _expectedNetwork,
+        bool _staging
+    )
+        external
+    {
 
-        string memory network = _getNetwork(block.chainid);
+        // the Flare Personal Account lays out storage for the Flare PA proxy lineage; the loan
+        // chains register PersonalAccountRemote instead (see DeployRemoteAccountImplementations)
+        require(
+            DeployNetworks.isFlareFamily(block.chainid),
+            "the Flare Personal Account belongs on a Flare-family chain"
+        );
+
+        string memory network = DeployNetworks.networkName(block.chainid);
+        DeployNetworks.requireExpectedNetwork(network, _expectedNetwork);
         if (_staging) {
             network = string.concat(network, "-staging");
         }
 
-        vm.startBroadcast(deployerPrivateKey);
+        // The signer is forge's, resolved from whatever the wrapper passed - a raw key, a keystore
+        // or a Ledger - and `msg.sender` is that account. Reading DEPLOYER_PRIVATE_KEY here would
+        // check one account and sign as another the moment the two differ, which is exactly what a
+        // hardware run is. Note this validates the sender forge was GIVEN; a device whose address
+        // is not that one fails later, at signing, rather than here.
+        vm.startBroadcast(msg.sender);
         PersonalAccount personalAccountImpl = new PersonalAccount();
         vm.stopBroadcast();
 
@@ -28,19 +46,5 @@ contract DeployPersonalAccountImplementation is Script {
                 vm.toString(personalAccountImplAddress)
             )
         );
-    }
-
-    function _getNetwork(uint256 _chainId) private pure returns (string memory) {
-        if (_chainId == 14) {
-            return "flare";
-        } else if (_chainId == 19) {
-            return "songbird";
-        } else if (_chainId == 16) {
-            return "coston";
-        } else if (_chainId == 114) {
-            return "coston2";
-        } else {
-            return "scdev";
-        }
     }
 }

@@ -1,0 +1,19 @@
+{
+  "morpho": "0xd011EE229E7459ba1ddd22631eF7bF528d424A14",
+  "irm": "0x8C5dDCD3F601c91D1BF51c8ec26066010ACAbA7c",
+  "lltv": "770000000000000000",
+  "oracleFactory": "0xa6c843fc53aAf6EF1d173C4710B26419667bF6CD",
+  "collateralToken": "0x81672c5d42F3573aD95A0bdfBE824FaaC547d4E6",
+  "collateralDecimals": 6,
+  "loanTokenName": "Sepolia Rehearsal USD",
+  "loanTokenSymbol": "rUSD",
+  "loanTokenDecimals": 18,
+  "feedDecimals": 8,
+  "collateralFeedDescription": "FXRP / USD (rehearsal feed)",
+  "collateralInitialPrice": "200000000",
+  "loanFeedDescription": "rUSD / USD (rehearsal feed)",
+  "loanInitialPrice": "100000000",
+  "expectedOraclePrice": "2000000000000000000000000000000000000000000000000",
+  "oracleSalt": "0x0000000000000000000000000000000000000000000000000000000000000001",
+  "liquidity": "1000000000000000000000000"
+}

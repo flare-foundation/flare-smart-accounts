@@ -9,7 +9,9 @@ import {IBeacon} from "@openzeppelin/contracts/proxy/beacon/IBeacon.sol";
 
 /**
  * @title PersonalAccountsFacet
- * @notice Facet for handling personal accounts.
+ * @notice Facet for handling Personal Accounts: the implementation behind the frozen PA proxies
+ * (controller-as-beacon), the explicit permissionless creation route, and the address lookup.
+ * Cut on every chain.
  */
 contract PersonalAccountsFacet is IIPersonalAccountsFacet, FacetBase {
 
@@ -24,6 +26,20 @@ contract PersonalAccountsFacet is IIPersonalAccountsFacet, FacetBase {
     }
 
     /// @inheritdoc IPersonalAccountsFacet
+    function createPersonalAccount(
+        string calldata _xrplOwner
+    )
+        external
+        returns (address)
+    {
+        // permissionless, idempotent and not pause-gated: the proxy's creation code is public and
+        // the singleton factory permissionless, so a gate would withhold the record, not the
+        // deployment - and the frozen derivation commits the account to its owner and this
+        // controller, leaving the caller nothing a pause would need to withhold
+        return PersonalAccounts.getOrCreatePersonalAccount(_xrplOwner);
+    }
+
+    /// @inheritdoc IPersonalAccountsFacet
     function getPersonalAccount(
         string calldata _xrplOwner
     )
@@ -31,7 +47,7 @@ contract PersonalAccountsFacet is IIPersonalAccountsFacet, FacetBase {
         returns (address _personalAccount)
     {
         PersonalAccounts.State storage state = PersonalAccounts.getState();
-        _personalAccount = address(state.personalAccounts[_xrplOwner]);
+        _personalAccount = state.personalAccounts[_xrplOwner];
         if (_personalAccount == address(0)) {
             _personalAccount = PersonalAccounts.computePersonalAccountAddress(_xrplOwner);
         }

@@ -43,6 +43,9 @@ contract FAssetRedeemerAccount is IIFAssetRedeemerAccount {
 
     /**
      * @notice Sets sentinel value to prevent using the implementation instance directly.
+     * @dev Intentional: it runs on the implementation only, never on a proxy, so the waiver below
+     * suppresses the upgrade-safety validator's constructor finding for it (see AGENTS.md).
+     * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor() {
         composer = EMPTY_ADDRESS;

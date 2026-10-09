@@ -1,43 +1,45 @@
 import fs from "node:fs";
+import { PROTECTED_ETHEREUM_NAMES, loadPinnedEthereumAddresses, validateContractName } from "../utils/pinned-constants";
+import {
+  type ContractInfo,
+  PROTECTED_RECORD_NAMES,
+  mergeDeployedRecords,
+  parseAllowedReplacements,
+  parseDeployOutput,
+} from "../utils/deploy-records";
+import { isLoanChainNetwork, validateNetwork } from "../utils/networks";
 
 // Read Forge output from a output file
 const outputPath = "forge-deploy-output.txt";
 const output = fs.readFileSync(outputPath, "utf8");
 
-const lines = output.split("\n");
-type ContractInfo = {
-  name: string;
-  contractName: string;
-  address: string;
-};
+const { network, contracts } = parseDeployOutput(output);
 
-const contracts: ContractInfo[] = [];
-let network: string = "unknown";
-
-lines.forEach((line: string) => {
-  const match = line.match(/^\s*DEPLOYED:\s*([^,]+),\s*([^:]+):\s*(0x[a-fA-F0-9]{40})$/);
-  const matchNetwork = line.match(/^\s*NETWORK:\s*([a-zA-Z0-9_-]+)/);
-  if (match && match[1] && match[2] && match[3]) {
-    contracts.push({
-      name: match[1].trim(),
-      contractName: match[2].trim(),
-      address: match[3].trim(),
-    });
-  } else if (matchNetwork && matchNetwork[1]) {
-    network = matchNetwork[1].trim();
-  }
-});
-
-if (network === "unknown") {
+if (network === undefined) {
   throw new Error("Network name not found in output");
 }
 
-const allowedBaseNetworks = ["coston2", "coston", "flare", "songbird", "scdev"];
-const isValidNetwork =
-  allowedBaseNetworks.includes(network) ||
-  (network.endsWith("-staging") && allowedBaseNetworks.includes(network.replace(/-staging$/, "")));
-if (!isValidNetwork) {
-  throw new Error(`Invalid network: ${network}`);
+validateNetwork(network);
+
+// the four pinned records are chain-recovered facts, not build outputs: on a loan chain -
+// Ethereum, or Sepolia reproducing it - a protected name (in any casing - development
+// filesystems can be case-insensitive) may only ever be recorded with its canonical spelling and
+// canonical pinned address, whether or not a record already exists - the pinned bootstrap records
+// through here too, so this is what keeps it from ever writing anything but the pins
+function checkProtectedEthereumRecord(record: ContractInfo): void {
+  const canonical = PROTECTED_ETHEREUM_NAMES.find(
+    (protectedName) => protectedName.toLowerCase() === record.name.toLowerCase()
+  );
+  if (!canonical) return;
+  const pins = loadPinnedEthereumAddresses();
+  const pinnedAddress =
+    canonical === "MasterAccountController" ? pins.controllerAddress : pins.baseFacets.get(canonical)?.address;
+  if (record.name !== canonical || record.address.toLowerCase() !== pinnedAddress) {
+    throw new Error(
+      `${record.name}: only the canonical pinned Ethereum record ` +
+        `(${canonical} @ ${pinnedAddress}) may be written — refusing ${record.address}`
+    );
+  }
 }
 
 fs.mkdirSync("deployment/deploys", { recursive: true });
@@ -69,14 +71,29 @@ if (fs.existsSync(filePath)) {
 }
 
 for (const deployed of contracts) {
-  const index = existingContracts.findIndex((item) => item.name === deployed.name);
-  if (index >= 0) {
-    existingContracts[index] = deployed;
-  } else {
-    existingContracts.push(deployed);
+  // every record name must be a plain identifier in canonical spelling on every network:
+  // record names become artifact path components downstream, and a path or case alias
+  // (`./OwnershipFacet`) would not equal a protected name under whole-string comparison
+  validateContractName(deployed.name);
+  // the canonical addresses bind the tracked record alone: a `_mock` run is a throwaway deployment
+  // from current source, which cannot reproduce them and is not resolved through by any tool
+  if (isLoanChainNetwork(network) && !isMock) {
+    checkProtectedEthereumRecord(deployed);
   }
 }
 
-fs.writeFileSync(filePath, JSON.stringify(existingContracts, null, 2));
+// records follow their redeployments freely, which is what the deploy scripts are for; the two
+// that name a live contract the tooling resolves through may not change quietly - deploy-records.ts
+//
+// the `_mock` files are exempt: throwaway records, gitignored rather than tracked, describing no
+// live deployment
+const isThrowawayRecord = isMock;
+const merged = mergeDeployedRecords(
+  existingContracts,
+  contracts,
+  isThrowawayRecord ? new Set(PROTECTED_RECORD_NAMES) : parseAllowedReplacements(process.env.ALLOW_RECORD_REPLACEMENT)
+);
+
+fs.writeFileSync(filePath, JSON.stringify(merged, null, 2));
 fs.unlinkSync(outputPath);
 console.log(`Saved deployed addresses to ${filePath}`);

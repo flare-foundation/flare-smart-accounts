@@ -30,7 +30,7 @@ This executor is paid in **wei** (native FLR), funded out of the `msg.value` the
 While set:
 - `handleMintedFAssets` requires `_executor == MemoInstructions.getExecutor(personalAccount)` before distribution.
 - The check is **bypassed** when the opcode is `0xD0` or `0xD1` themselves, so the user can never lock themselves out — re-keying or clearing the pin always succeeds.
-- The check is also bypassed when the memo is being **ignored** (a prior `0xE0` matched this `_transactionId`).
+- An **ignored** memo (a prior `0xE0` matched this `_transactionId`) does not bypass it: the call is treated as memo-less, so the pinned executor must submit it.
 
 The direct-mint executor is paid in **fAsset units**, deducted from the minted amount. The fee comes from one of three sources, in priority order:
 
@@ -64,5 +64,7 @@ The three are mutually exclusive: an instruction either takes the proof flow (pa
 2. Or send a `0xD0` memo with a new pinned executor — again, any executor can submit.
 
 After that, normal direct minting resumes against the new (or absent) pin.
+
+**Settings apply in delivery order**, not in XRPL ledger order. An older `0xD0` submitted after a `0xD1` or a newer `0xD0` sets its executor again — the management opcodes bypass the pin check, so the executor it names can submit it itself. Clearing the pin therefore does not invalidate older settings still in flight, and a wallet must not describe it that way; read `getExecutor(personalAccount)` once every earlier memo has landed, and clear again if needed.
 
 `0xE2` is the matching recovery path when the fee on a stuck transaction is too low. `0xE0` is the broader recovery path that ignores the memo wholesale.

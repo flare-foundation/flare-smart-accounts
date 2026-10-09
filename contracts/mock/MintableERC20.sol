@@ -30,4 +30,11 @@ contract MintableERC20 is ERC20 {
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
     }
+
+    /// @notice Call burn on ERC20 (open, for tests that model burn-on-redeem)
+    /// @param from address whose balance is burned
+    /// @param amount amount
+    function burn(address from, uint256 amount) external {
+        _burn(from, amount);
+    }
 }

@@ -41,7 +41,13 @@ The user can therefore sweep any of these three tokens from their redeemer accou
 
 `forceApprove` is the OZ helper that handles ERC-20s like USDT that revert on a re-approve from non-zero.
 
-`setMaxAllowances` is `onlyComposer` and is only invoked from `_getOrCreateRedeemerAccount` on the freshly-deployed branch. Existing accounts hit the early-return branch, so subsequent redemptions never re-prime allowances — there is no top-up path. In practice this never matters: each allowance starts at `type(uint256).max`, and ordinary `transferFrom` calls reduce it by amounts that are negligible compared to that ceiling.
+`setMaxAllowances` is `onlyComposer` and is only invoked from `_getOrCreateRedeemerAccount` on the freshly-deployed branch. Existing accounts hit the early-return branch, so subsequent redemptions never re-prime allowances — there is no top-up path. For the three approved tokens, ordinary recovery amounts are negligible compared to the initial `type(uint256).max` allowance; whether transfers reduce that allowance depends on the token.
+
+### Supported recovery tokens
+
+Recovery through these allowances covers only the account's three pre-approved tokens: `fAsset` (FXRP for the FXRP composer), the configured `stableCoin`, and `wNat`. It does not cover an arbitrary collateral token paid by FAssets or another token sent to the account. The owner has no general token-transfer or approval entry point, so a payout in a fourth token can remain inaccessible through the current owner API until governance provides a recovery path through an implementation upgrade.
+
+Before FAssets enables another payout collateral token, operators must compare the AssetManager's full payout-token set with the allowances on affected redeemer accounts and coordinate any necessary recovery upgrade. Check existing accounts as well as newly created ones: adding a collateral token to FAssets or making another redemption does not grant an allowance for it. Establish and test recovery before exposing composer redemptions to the new collateral.
 
 ## Redeem entry
 
@@ -103,7 +109,7 @@ _redeemerAccount = Create2.deploy(0, bytes32(0), bytecode);
 
 Because `composerAddress` is part of the derivation, two distinct composer deployments (e.g., on different chains) produce different per-redeemer account addresses for the same EVM redeemer. The composer does not aim for cross-chain account-address parity — there is only ever one composer per chain.
 
-The composer does **not** use a frozen `creationCode` constant like Smart Accounts does. That's fine because the composer never depends on cross-chain parity, and the per-redeemer account address is irrelevant to anyone but the composer (the user's identity is the EVM `redeemer` field they put in the compose message, not the account address).
+The composer does **not** use a frozen `creationCode` constant like Smart Accounts does: it embeds whatever the compiler emits for `FAssetRedeemerAccountProxy` when the composer implementation is built. That costs nothing for cross-chain parity, which the composer never needs, or for accounts already created, whose addresses are stored in `redeemerToRedeemerAccount`. It does cost the prediction. An upgraded implementation built with a different compiler or settings embeds different creation code, so the predicted address of every redeemer account not yet created moves: such an account is created at the new prediction, not at the address `getRedeemerAccountAddress` returned before the upgrade. No protocol flow sends funds to an account before it exists, since the first `lzCompose` creates it, but assets someone sends to a predicted address before an upgrade end up where the composer no longer deploys. Before upgrading the composer on a network, either freeze the creation code to the one that network's live implementation embeds (they need not match across networks), or confirm that nothing was sent to a predicted address.
 
 ## Verifying a redeemer account
 

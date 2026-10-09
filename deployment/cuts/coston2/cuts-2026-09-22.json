@@ -1,0 +1,12 @@
+{
+  "note": "EXECUTED on Coston2 2026-09-22; kept as the record of that cut. No init: the diamond is already initialised and MasterAccountControllerInit.init would re-set its configuration. The live removeVaults(uint256[]) (0xf36d999b, still served by the superseded VaultsFacet 0x1C56F0c852ea0db76ca329Ab12d5D3BeF1c89B6d) is deliberately left in place, as it was on 2026-09-14; check_cut reports it every run. Two implementations are NOT part of this cut and each needs its own deploy and timelocked registration: PersonalAccount and LoanSubaccount, both of which changed. After execution `verify_diamond coston2` reports 47 of 49 and exits non-zero: the two failures are this selector and its superseded facet, and they are expected for as long as the selector stays.",
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "PersonalAccountsFacet",
+    "SubaccountsFacet",
+    "BridgeRoutesFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "execute": false
+}

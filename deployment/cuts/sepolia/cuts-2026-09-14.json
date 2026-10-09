@@ -1,0 +1,19 @@
+{
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "SubaccountsFacet",
+    "TimelockFacet",
+    "PauseFacet",
+    "PersonalAccountsFacet",
+    "ComposeTransportFacet",
+    "MorphoLoanMarketsFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "init": {
+    "contract": "EthereumControllerInit",
+    "method": "init",
+    "args": []
+  },
+  "execute": false
+}

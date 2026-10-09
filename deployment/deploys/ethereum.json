@@ -1,0 +1,67 @@
+[
+  {
+    "name": "DiamondCutFacet",
+    "contractName": "DiamondCutFacet.sol",
+    "address": "0xbBfDC00D4a230eB2cBf2623f8ca67C23D31E094D"
+  },
+  {
+    "name": "DiamondLoupeFacet",
+    "contractName": "DiamondLoupeFacet.sol",
+    "address": "0x39Da5ec984c0E5797E0BD24706Ab35F21EB065d1"
+  },
+  {
+    "name": "OwnershipFacet",
+    "contractName": "OwnershipFacet.sol",
+    "address": "0x615eAdb82F2c3b84Ee4cd7ac5DefdF381d585978"
+  },
+  {
+    "name": "MasterAccountController",
+    "contractName": "MasterAccountController.sol",
+    "address": "0x434936d47503353f06750Db1A444DBDC5F0AD37c"
+  },
+  {
+    "name": "SubaccountsFacet",
+    "contractName": "SubaccountsFacet.sol",
+    "address": "0xCedB599Dd9e5c3559FE55Af92f0ef87eAC981e3e"
+  },
+  {
+    "name": "TimelockFacet",
+    "contractName": "TimelockFacet.sol",
+    "address": "0x9dA82C43bF652888cC4787158EF59C13AC28D6F3"
+  },
+  {
+    "name": "PauseFacet",
+    "contractName": "PauseFacet.sol",
+    "address": "0xE2eFaA5a52E4c86c2232577d30E007E82c03DB9e"
+  },
+  {
+    "name": "PersonalAccountsFacet",
+    "contractName": "PersonalAccountsFacet.sol",
+    "address": "0xf9c57F8c9ae3A8EF12F91C298Ca24daf9c42d874"
+  },
+  {
+    "name": "ComposeTransportFacet",
+    "contractName": "ComposeTransportFacet.sol",
+    "address": "0xbAF89d873d198FF78E72D2745B01cBA3c6e5BE6B"
+  },
+  {
+    "name": "MorphoLoanMarketsFacet",
+    "contractName": "MorphoLoanMarketsFacet.sol",
+    "address": "0x260371e0CF561887C6Da270CC3Be84C2FaB5444f"
+  },
+  {
+    "name": "EthereumControllerInit",
+    "contractName": "EthereumControllerInit.sol",
+    "address": "0xEfd7a680Db05F1dCD86EB5a074897F502C8601A0"
+  },
+  {
+    "name": "PersonalAccountRemoteImplementation",
+    "contractName": "PersonalAccountRemote.sol",
+    "address": "0x8577D2D50827bCE2EC1dc9Cf9F1199826781D5AF"
+  },
+  {
+    "name": "MorphoLoanSubaccountRemoteImplementation",
+    "contractName": "MorphoLoanSubaccountRemote.sol",
+    "address": "0x6D55E24Dc2d3bD2Fc5Ae1fcCD1A73bc5f18A8A30"
+  }
+]

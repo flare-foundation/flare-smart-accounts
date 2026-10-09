@@ -29,7 +29,7 @@ This document describes how the two modules in this repo are wired together on c
 
 The two modules share:
 
-- The Solidity toolchain (`^0.8.27`, solc `0.8.30`, optimizer 200, `via_ir`, Cancun).
+- The Solidity toolchain (`^0.8.27`, solc `0.8.35`, optimizer 200, `via_ir`, Cancun).
 - The [`OwnableWithTimelock`](../../contracts/utils/implementation/OwnableWithTimelock.sol) governance utility — timelocked owner operations with `executeTimelockedCall`, identical semantics in [`TimelockFacet`](../../contracts/smartAccounts/facets/TimelockFacet.sol) and `OwnableWithTimelock`.
 - The FAsset and FDC interfaces from `flare-periphery`.
 
@@ -81,7 +81,7 @@ Even the diamond's own ownership / selector map lives in an ERC-7201 namespace: 
 
 Each XRPL address gets a [`PersonalAccount`](../../contracts/smartAccounts/implementation/PersonalAccount.sol) deployed as a [`PersonalAccountProxy`](../../contracts/smartAccounts/proxy/PersonalAccountProxy.sol) — an OpenZeppelin `BeaconProxy` whose beacon is the diamond itself. The diamond's [`PersonalAccountsFacet.implementation()`](../../contracts/smartAccounts/facets/PersonalAccountsFacet.sol) returns the current Personal Account implementation. Upgrading every Personal Account is therefore one timelocked call to `setPersonalAccountImplementation`.
 
-Personal Accounts are deployed via the [EIP-2470 Singleton Factory](https://eips.ethereum.org/EIPS/eip-2470) at `0xce0042B868300000d44A59004Da54A005ffdcf9f`. CREATE2 derivation uses a **frozen** copy of `type(PersonalAccountProxy).creationCode` in [`PersonalAccounts.PROXY_CREATION_CODE`](../../contracts/smartAccounts/library/PersonalAccounts.sol). The hash of that constant is pinned in [`test/PersonalAccountsLibrary.t.sol`](../../test/PersonalAccountsLibrary.t.sol):
+Personal Accounts are deployed via the [EIP-2470 Singleton Factory](https://eips.ethereum.org/EIPS/eip-2470) at `0xce0042B868300000d44A59004Da54A005ffdcf9f`. CREATE2 derivation uses a **frozen** copy of `type(PersonalAccountProxy).creationCode` in [`PersonalAccounts.PROXY_CREATION_CODE`](../../contracts/smartAccounts/library/PersonalAccounts.sol). The hash of that constant is pinned in [`test/unit/smartAccounts/PersonalAccountsLibrary.t.sol`](../../test/unit/smartAccounts/PersonalAccountsLibrary.t.sol):
 
 ```text
 EXPECTED_PROXY_CREATION_CODE_HASH = 0x309250c8635e70dc667c1239a7bb73386e767b7084e9328b70de2c1f505b9b4a
@@ -120,9 +120,10 @@ The on-chain code separates into three layers:
 interface IMasterAccountController is
     IDiamondCut, IDiamondLoupe, IERC165, IERC173,
     IAgentVaultsFacet, IExecutorsFacet, IInstructionFeesFacet,
-    IInstructionsFacet, IMemoInstructionsFacet, IPauseFacet,
-    IPaymentProofsFacet, IPersonalAccountsFacet, IReaderFacet,
-    ITimelockFacet, IVaultsFacet, IXrplProviderWalletsFacet
+    IInstructionsFacet, IComposeTransportFacet, ISubaccountsFacet,
+    IMorphoLoanMarketsFacet, IBridgeRoutesFacet, IMemoInstructionsFacet,
+    IPauseFacet, IPaymentProofsFacet, IPersonalAccountsFacet,
+    IReaderFacet, ITimelockFacet, IVaultsFacet, IXrplProviderWalletsFacet
 {}
 ```
 
@@ -152,7 +153,7 @@ Both expose `setTimelockDuration` (clamped to 7 days), `executeTimelockedCall`, 
 
 The pattern: an `onlyOwnerWithTimelock` modifier either *records* the call (when timelock > 0 and not currently executing) by storing `keccak256(msg.data) → block.timestamp + duration`, or *executes immediately* (when timelock == 0, or when the call comes from `executeTimelockedCall`, which sets a transient `executing` flag and re-enters). Anyone can call `executeTimelockedCall` once the delay has passed — the timelock controls *when* but not *who*.
 
-The Smart Accounts pause role split (`pauser` vs. `unpauser`, in [`Pause` lib](../../contracts/smartAccounts/library/Pause.sol)) sits on top of this: both role sets are managed by `onlyOwnerWithTimelock`, but `pause()` / `unpause()` themselves only check the role and skip the timelock so an attacker-detected incident can be stopped immediately.
+The Smart Accounts pause role split (`pauser` vs. `unpauser`, in [`Pause` lib](../../contracts/smartAccounts/library/Pause.sol)) sits on top of this: both role sets are managed by `onlyOwnerWithTimelock` (except `removeUnpausers`, which is immediate), but `pause()` / `unpause()` themselves only check the role and skip the timelock so an attacker-detected incident can be stopped immediately.
 
 ## Replay protection
 

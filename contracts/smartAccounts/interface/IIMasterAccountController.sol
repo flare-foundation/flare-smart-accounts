@@ -7,9 +7,13 @@ import {IERC165} from "../../diamond/interfaces/IERC165.sol";
 import {IERC173} from "../../diamond/interfaces/IERC173.sol";
 
 import {IIAgentVaultsFacet} from "./IIAgentVaultsFacet.sol";
+import {IIComposeTransportFacet} from "./IIComposeTransportFacet.sol";
 import {IIExecutorsFacet} from "./IIExecutorsFacet.sol";
 import {IIInstructionFeesFacet} from "./IIInstructionFeesFacet.sol";
 import {IIInstructionsFacet} from "./IIInstructionsFacet.sol";
+import {IISubaccountsFacet} from "./IISubaccountsFacet.sol";
+import {IIMorphoLoanMarketsFacet} from "./IIMorphoLoanMarketsFacet.sol";
+import {IIBridgeRoutesFacet} from "./IIBridgeRoutesFacet.sol";
 import {IIMemoInstructionsFacet} from "./IIMemoInstructionsFacet.sol";
 import {IIPauseFacet} from "./IIPauseFacet.sol";
 import {IIPaymentProofsFacet} from "./IIPaymentProofsFacet.sol";
@@ -30,9 +34,13 @@ interface IIMasterAccountController is
     IERC165,
     IERC173,
     IIAgentVaultsFacet,
+    IIComposeTransportFacet,
     IIExecutorsFacet,
     IIInstructionFeesFacet,
     IIInstructionsFacet,
+    IISubaccountsFacet,
+    IIMorphoLoanMarketsFacet,
+    IIBridgeRoutesFacet,
     IIMemoInstructionsFacet,
     IIPauseFacet,
     IIPaymentProofsFacet,

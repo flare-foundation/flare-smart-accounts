@@ -162,17 +162,17 @@ If a compose call reverts at the *composer* level (e.g., `OnlyEndpoint`, `Invali
 
 ## Idempotent address derivation
 
-After a redeemer's first `lzCompose`, `redeemerToRedeemerAccount[redeemer]` is set. Subsequent calls re-use the same account address. Off-chain code can predict the address before any redemption with `getRedeemerAccountAddress(redeemer)` — the function returns the stored address if known, otherwise the CREATE2 prediction.
+After a redeemer's first `lzCompose`, `redeemerToRedeemerAccount[redeemer]` is set. Subsequent calls re-use the same account address. Off-chain code can predict the address before any redemption with `getRedeemerAccountAddress(redeemer)` — the function returns the stored address if known, otherwise the CREATE2 prediction. For an account not yet created, the prediction holds only until the composer's next implementation upgrade: an account first created after an upgrade can land at a different address than the one predicted before it (see [Address derivation](./RedeemerAccounts.md#address-derivation)), so do not send assets to a predicted address.
 
 ## Recovery user actions
 
-The redeemer account has two `onlyOwner`-gated recovery surfaces. They apply to different scenarios.
+Recovery uses either the owner's ERC-20 allowances or the account's `onlyOwner` payment-default entry points, depending on the scenario.
 
 ### After `FAssetRedeemFailed` — sweep residuals
 
 When `redeemFAsset` reverts, the AssetManager's `redeemAmount` / `redeemWithTag` reverted with it, so **no redemption request was created**. There is no `redemptionRequestId` to default on. The composer has, however, already transferred the post-fee fAsset to the redeemer account (step 4) and wrapped all of `msg.value` to wNat in the redeemer account (step 7b). Both transfers stay put — they aren't unwound because the `try/catch` swallows the revert at the composer level.
 
-The `setMaxAllowances` call performed at account creation set `forceApprove(owner, type(uint256).max)` on fAsset, stableCoin, and wNat. So the user recovers funds with a single `transferFrom(redeemerAccount, theirAddress, amount)` on whichever token they care about — no composer interaction needed.
+The `setMaxAllowances` call performed at account creation set `forceApprove(owner, type(uint256).max)` on fAsset, stableCoin, and wNat. The user recovers any of those three tokens with a single `transferFrom(redeemerAccount, theirAddress, amount)` — no composer interaction needed. This allowance does not cover other tokens; see [Supported recovery tokens](./RedeemerAccounts.md#supported-recovery-tokens).
 
 ### After `FAssetRedeemed` — redemption payment default
 
@@ -181,4 +181,4 @@ This applies to the **success** path: the redemption request was created, but th
 - `FAssetRedeemerAccount.redemptionPaymentDefault(proof, requestId)` — generic variant.
 - `FAssetRedeemerAccount.xrpRedemptionPaymentDefault(proof, requestId)` — XRP-specific variant.
 
-Both are `onlyOwner` (the user's EVM redeemer address). The asset manager handles the actual payment-default accounting and returns the collateral payout into the redeemer account, from where the user sweeps it via the same pre-approved allowance.
+Both are `onlyOwner` (the user's EVM redeemer address). The asset manager handles the actual payment-default accounting and returns the collateral payout into the redeemer account. The user can sweep it via the pre-approved allowance only when the payout token is one of that account's three approved tokens. Before FAssets adds another collateral token, operators must establish recovery for affected accounts as described in [Supported recovery tokens](./RedeemerAccounts.md#supported-recovery-tokens).

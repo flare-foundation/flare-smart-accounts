@@ -5,7 +5,7 @@ cache_path = 'cache'
 evm_version = 'cancun'
 optimizer = true
 optimizer_runs = 200
-solc_version = '0.8.30'
+solc_version = '0.8.35'
 libs = [
     "lib",
     "node_modules",
@@ -14,12 +14,22 @@ libs = [
 fs_permissions = [
     { access = "read", path = "deployment/chain-config/" },
     { access = "read", path = "deployment/deploys/" },
+    { access = "read", path = "deployment/pinned-init-code/" },
     { access = "read-write", path = "deployment/output-internal" },
     { access = "read", path = "deployment/cuts/" },
-    { access = "read", path = "artifacts/" }
+    { access = "read", path = "artifacts/" },
+    { access = "read", path = "deployment/market-config/" }
 ]
 ffi = true
 via_ir = true
+
+# Isolated build for the OpenZeppelin upgrade-safety validator (`pnpm build:upgrade-info` then
+# `pnpm validate-upgrade`): full build-info plus storage layouts, in its own out and cache dirs.
+[profile.upgrade_validation]
+out = "artifacts-upgrades"
+cache_path = "cache-upgrades"
+build_info = true
+extra_output = ["storageLayout"]
 
 [dependencies]
 "@openzeppelin-contracts" = "5.5.0"
@@ -28,6 +38,7 @@ forge-std = "1.10.0"
 flare-periphery = "0.1.52"
 "@layerzerolabs-oft-evm" = "4.0.1"
 "@layerzerolabs-lz-evm-protocol-v2" = "3.0.159"
+"@layerzerolabs-oapp-evm" = "0.4.1"
 
 
 [soldeer]

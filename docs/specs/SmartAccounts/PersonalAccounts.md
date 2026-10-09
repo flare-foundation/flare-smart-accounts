@@ -39,6 +39,8 @@ So a given XRPL owner string maps to the **same EVM address on every chain** the
 
 `getOrCreatePersonalAccount(xrplOwner)` returns the existing PA if one is recorded, otherwise computes the deterministic address, deploys the proxy via the singleton factory if no contract is yet at that address, and records the mapping. It is idempotent — repeated calls with the same `xrplOwner` return the same address.
 
+`PersonalAccountsFacet.createPersonalAccount(xrplOwner)` exposes the same routine as a permissionless, idempotent public call on every chain: it can materialize the deterministic proxy before any owner activity without granting the caller authority (the proxy commits to the owner and the controller), so `PersonalAccountCreated` proves deployment only, not that an XRPL instruction or the owner acted. It is deliberately **not** pause-gated: the proxy's creation code is public and the EIP-2470 factory permissionless, so a gate would withhold the registry entry rather than the deployment, while the ungated `sweepRedeem` needs this account to exist. The library records and returns a plain `address` because the implementation is chain-specific (the Flare `PersonalAccount` here, `PersonalAccountRemote` on a remote diamond), and the Flare facets cast to `IIPersonalAccount` where they need Flare behavior.
+
 `computePersonalAccountAddress(xrplOwner)` is the pure view variant, used by `PersonalAccountsFacet.getPersonalAccount` and `ReaderFacet.isSmartAccount` to predict the address before deployment.
 
 ## Frozen `PROXY_CREATION_CODE`
@@ -47,7 +49,7 @@ The CREATE2 input on the proxy side is **not** `type(PersonalAccountProxy).creat
 
 `type(...).creationCode` is resolved at compile time and includes the trailing CBOR metadata IPFS hash. That IPFS hash is recomputed from the entire compilation context of `PersonalAccountProxy` — its source, its imports' sources, compiler settings. Any drift there (even a comment edit in a transitively-imported file) shifts the CREATE2 address of every future PA.
 
-Freezing the constant makes the derivation purely a function of `(controller, xrplOwner)`, immune to project drift. The hash is pinned in [`test/PersonalAccountsLibrary.t.sol`](../../../test/PersonalAccountsLibrary.t.sol):
+Freezing the constant makes the derivation purely a function of `(controller, xrplOwner)`, immune to project drift. The hash is pinned in [`test/unit/smartAccounts/PersonalAccountsLibrary.t.sol`](../../../test/unit/smartAccounts/PersonalAccountsLibrary.t.sol):
 
 ```text
 EXPECTED_PROXY_CREATION_CODE_HASH = 0x309250c8635e70dc667c1239a7bb73386e767b7084e9328b70de2c1f505b9b4a
@@ -61,7 +63,7 @@ That test contract holds three checks:
 
 Editing the constant is a **cross-chain coordination event**: every PA that has been *predicted but not yet deployed* will move to a new address. The first two tests are excluded from coverage runs (coverage disables `via_ir`, which changes the bytes); the third is the load-bearing pin and runs everywhere.
 
-The frozen constant also keeps `diamondCut` redeployment decisions stable. Facets that inline `PersonalAccounts` address-derivation logic — `PersonalAccountsFacet`, `InstructionsFacet`, `ReaderFacet`, and `MemoInstructionsFacet` — bake `PROXY_CREATION_CODE` into their runtime bytecode. Because it is a constant, those bytes do not drift across rebuilds, so `pnpm check_cut` flags these facets for redeployment only when their own logic actually changed, not because of unrelated metadata churn in `PersonalAccountProxy` or its imports. The embedded bytes shift only if the constant itself is edited (the guarded cross-chain event above); `check_cut` detects that specific case and reports it as a redeploy. See the deployment notes in `AGENTS.md` for the full workflow.
+The frozen constant also keeps `diamondCut` redeployment decisions stable. Facets that inline `PersonalAccounts` address-derivation logic — `PersonalAccountsFacet`, `InstructionsFacet`, `ReaderFacet`, `MemoInstructionsFacet`, and `SubaccountsFacet`, which resolves a subaccount's parent — bake `PROXY_CREATION_CODE` into their runtime bytecode. Because it is a constant, those bytes do not drift across rebuilds, so `pnpm check_cut` flags these facets for redeployment only when their own logic actually changed, not because of unrelated metadata churn in `PersonalAccountProxy` or its imports. The embedded bytes shift only if the constant itself is edited (the guarded cross-chain event above); `check_cut` detects that specific case and reports it as a redeploy. See [`deployment/README.md`](../../../deployment/README.md) for the full workflow.
 
 ## PersonalAccount surface
 

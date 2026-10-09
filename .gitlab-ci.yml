@@ -23,7 +23,9 @@ default:
 .partials:
   cache-nodejs:
     key:
-      files: [ pnpm-lock.yaml ]
+      # pnpm-workspace.yaml governs build-script permissions, so a change to it must not reuse
+      # node_modules prepared under the previous policy.
+      files: [ pnpm-lock.yaml, pnpm-workspace.yaml ]
     paths:
     - node_modules/
     policy: pull
@@ -64,7 +66,9 @@ build-node-modules:
   - pnpm exec tsx --eval 'const value = 1 as number; if (value !== 1) process.exit(1)'
   cache:
   - key:
-      files: [ pnpm-lock.yaml ]
+      # pnpm-workspace.yaml governs build-script permissions, so a change to it must not reuse
+      # node_modules prepared under the previous policy.
+      files: [ pnpm-lock.yaml, pnpm-workspace.yaml ]
     paths:
     - node_modules/
     policy: pull-push
@@ -129,6 +133,98 @@ typecheck:
   - corepack enable pnpm
   - pnpm typecheck
 
+test-tooling:
+  image: node:24
+  stage: test
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm test:tooling
+
+# The tooling tests that need Foundry: one runs the Sepolia market script against a local anvil
+# chain and reads back what it deployed; the second decodes prepared governance calls against the
+# COMPILED ABI, so it needs a build rather than a chain; the third drives the loan account and OFT
+# round trip over two independent forks of its own anvil, which is the only place the compose
+# credit reaches a real account action; the fourth runs the cut executor against its own anvil and
+# reads its stdout, which is the only place the record lines it hands the recorder are observed at
+# all - forge swallows console output before a cheatcode can see it. All four skip in the node-only
+# job above, which has neither. `REQUIRE_FORGE_TOOLING` turns those skips into a failure, so a missing prerequisite
+# here is reported rather than passed over silently, and the round trip additionally sets
+# `REQUIRE_LOAN_OFT_ROUNDTRIP` for its own Solidity suite so no case inside it can skip.
+test-tooling-forge:
+  image: flarefoundation/foundry-custom:latest
+  stage: test
+  tags: [ flarenetwork-md ]
+  timeout: 20 minutes
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  variables:
+    REQUIRE_FORGE_TOOLING: "1"
+  before_script:
+  - corepack enable pnpm
+  - pnpm install --frozen-lockfile
+  - forge soldeer install
+  - forge install --no-git
+  - forge build
+  # the phase deploys only what the record lacks, and once Sepolia is deployed the record names
+  # three contracts that are on Sepolia and not on the local chain. This checkout is disposable,
+  # so it is cleared here; the test itself never touches a record it finds.
+  - rm -f deployment/deploys/sepolia.json
+  script:
+  - npx tsx --test test/tooling/deploy-sepolia-market.output.test.ts test/tooling/decode-calls.test.ts
+    test/tooling/loan-oft-roundtrip.test.ts test/tooling/execute-diamond-cut.output.test.ts
+
+# Builds the isolated upgrade-validation profile (full build-info + storage layout) and hands
+# it to the validator job as an artifact. A clean build is required: the validator needs a full
+# compilation and rejects a directory that also holds stale build-info from earlier runs.
+upgrade-build-info:
+  image: flarefoundation/foundry-custom:latest
+  stage: test
+  tags: [ flarenetwork-md ]
+  timeout: 10 minutes
+  needs: []
+  variables:
+    FOUNDRY_PROFILE: upgrade_validation
+  before_script:
+  - forge soldeer install
+  - forge install --no-git
+  script:
+  - forge clean
+  # tests and scripts are most of the file by volume and none of what the validator reads. This is
+  # the CANDIDATE build and must hold all six validated contracts, so it is not built as narrowly
+  # as a reference, which needs only the contracts it is a reference for; the two share the
+  # compiler profile rather than the command
+  - forge build --skip test --skip script
+  artifacts:
+    expire_in: 1 day
+    paths:
+    - artifacts-upgrades/build-info/
+
+# Blocking: the OpenZeppelin upgrade-safety validator over the six proxy-backed implementations.
+# All six now have a frozen reference and run with --requireReference: the three live before this
+# release against deployment/build-info-v2.0.0, and the three first deployed 2026-09-14 against
+# deployment/build-info-2026-09-14 - except the remote loan subaccount, re-frozen in
+# deployment/build-info-2026-10-06 when its layout grew. An incompatible layout change fails with field-level
+# diagnostics, a safe append passes. A reference protects the layout it HOLDS, so a deployment that
+# changes a lineage's layout needs a new one; see deployment/reference-builds.md.
+validate-upgrade:
+  image: node:24
+  stage: test
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  - job: upgrade-build-info
+    artifacts: true
+  cache: [ !reference [.partials, cache-nodejs] ]
+  script:
+  - corepack enable pnpm
+  - pnpm validate-upgrade
+
 format-check:
   image: node:24
   needs:
@@ -139,18 +235,36 @@ format-check:
   - corepack enable pnpm
   - pnpm format:check
 
+spellcheck:
+  image: node:24
+  stage: test
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [.partials, cache-nodejs] ]
+  # Advisory: a stray or new word surfaces in the pipeline but does not block.
+  allow_failure: true
+  script:
+  - corepack enable pnpm
+  - pnpm spellcheck
+
 slither:
   image: flarefoundation/foundry-custom:latest
   stage: test
   tags: [ flarenetwork-md ]
-  timeout: 10 minutes
+  # The via_ir build in before_script is 340-410s of this job on a loaded runner, so a
+  # 10-minute ceiling leaves the job's own work no room to absorb that variance.
+  timeout: 20 minutes
   needs:
   - job: build-node-modules
     artifacts: false
   cache: [ !reference [.partials, cache-nodejs] ]
   before_script:
   - apt-get update 1>/dev/null && apt-get install -y python3-pip 1>/dev/null
+  # deliberately unpinned: new detectors are wanted. The version is printed so a change in
+  # findings can be attributed to the analyzer rather than to the commit under test.
   - pip3 install slither-analyzer --break-system-packages 1>/dev/null
+  - slither --version
   - forge soldeer install
   - forge install --no-git
   - forge build
@@ -163,7 +277,9 @@ slither:
 ##  TESTS
 ##
 test:
-  timeout: 10 minutes
+  # The via_ir build in before_script is 340-410s of this job on a loaded runner, so a
+  # 10-minute ceiling leaves the job's own work no room to absorb that variance.
+  timeout: 20 minutes
   stage: test
   tags: [ flarenetwork-md ]
   image: flarefoundation/foundry-custom:latest
@@ -178,7 +294,46 @@ test:
   - forge install --no-git
   - forge build
   script:
-  - forge test -vvv
+  # Clear inherited RPC values in the command: project variables override YAML job variables.
+  # The dedicated fork job owns the mainnet integration evidence.
+  - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' FLARE_RPC_URL='' forge test -vvv
+
+# The Morpho integration, against the live FXRP/RLUSD market on canonical Morpho Blue, and the
+# delivery gas of each loan action through the live endpoint and FXRP OFT. Both are pinned
+# to one block, so it needs an ARCHIVE endpoint: a pruning node cannot serve it. Kept out of the
+# `test` job so that job stays hermetic and network-free - this is the only place a pipeline reaches
+# mainnet. Without `ETHEREUM_RPC_URL` the suite skips itself, which would make a missing endpoint
+# indistinguishable from a passing run; `REQUIRE_FORK` turns that skip into a failure, as
+# `REQUIRE_FORGE_TOOLING` does for the tooling suites.
+#
+# `ETHEREUM_RPC_URL` is a project CI/CD variable, not a value in this file. Set it masked, and leave
+# it UNPROTECTED, or merge-request pipelines on unprotected branches - the ones a review actually
+# reads - will not receive it.
+#
+# The block's state is not cached between runs. Foundry keeps it under the user's own Foundry home,
+# and neither `FOUNDRY_CACHE_PATH` (which moves only the compiler cache) nor `FOUNDRY_DIR` relocates
+# it into `$CI_PROJECT_DIR`, which is the only place a GitLab cache may live. The cost of refetching
+# was measured rather than guessed: about 56 KB, and roughly 14 seconds against 3 with a warm cache.
+# That is not worth copying the directory in and out of the cache around every job.
+test-integration-fork:
+  image: flarefoundation/foundry-custom:latest
+  stage: test
+  tags: [ flarenetwork-md ]
+  timeout: 15 minutes
+  needs:
+  - job: build-node-modules
+    artifacts: false
+  cache: [ !reference [ .partials, cache-nodejs ] ]
+  variables:
+    REQUIRE_FORK: "1"
+  before_script:
+  - corepack enable pnpm
+  - pnpm install --frozen-lockfile
+  - forge soldeer install
+  - forge install --no-git
+  - forge build
+  script:
+  - forge test -vvv --match-path "test/integration/{MorphoLoanSubaccountRemoteFork,LoanDeliveryGasFork}.t.sol"
 
 ##
 ## COVERAGE
@@ -188,7 +343,9 @@ coverage:
   image: flarefoundation/foundry-custom:latest
   stage: test
   tags: [ flarenetwork-md ]
-  timeout: 10 minutes
+  # The via_ir build in before_script is 340-410s of this job on a loaded runner, so a
+  # 10-minute ceiling leaves the job's own work no room to absorb that variance.
+  timeout: 20 minutes
   needs:
   - job: build-node-modules
     artifacts: false
@@ -198,9 +355,12 @@ coverage:
   - pnpm install --frozen-lockfile
   - forge soldeer install
   - forge install --no-git
+  # `forge coverage` compiles its own instrumented tree and writes no artifacts, so this build is
+  # what puts `artifacts/` on disk for the selector script the facet fixture calls over FFI.
   - forge build
   script:
-  - forge coverage --report summary --report lcov --no-match-test 'testProxyCreationCode(LengthMatchesFreshCompilation|MatchesFreshCompilationModuloMetadata)'
+  # Override inherited project variables here too, keeping coverage independent of public RPCs.
+  - ETHEREUM_RPC_URL='' SEPOLIA_RPC_URL='' FLARE_RPC_URL='' pnpm coverage:forge
   artifacts:
     expire_in: 30 days
     paths:

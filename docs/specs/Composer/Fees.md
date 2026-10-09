@@ -36,6 +36,10 @@ Administration (all `onlyOwnerWithTimelock`):
 
 Reads: `getComposerFeePPM(srcEid)` returns the effective PPM (override or default).
 
+### Priced at delivery
+
+The PPM is read when `lzCompose` runs, not when the message was sent, and the message carries no fee ceiling and no minimum after-fee amount — the OFT's `minAmountLD` protects the arrival at the composer, not this deduction. So a fee change executed while a message is in flight applies to it, timelock or not: a change that matures and is executed at 13:00 hits a message sent at 12:59 and delivered at 13:01, and a message stuck long enough outlives the whole delay. Wallets quote the fee as the current rate, not a guarantee.
+
 ### Enforcement
 
 In `lzCompose` (see [Redeem flow](./RedeemFlow.md)):

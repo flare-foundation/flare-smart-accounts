@@ -1,12 +1,31 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.27;
+pragma solidity ^0.8.35;
 
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {IOwnableWithTimelock} from "../../userInterfaces/IOwnableWithTimelock.sol";
 
 /**
  * @title OwnableWithTimelock
- * @notice Ownable extension that timelocks selected owner calls using dedicated storage slot.
+ * @notice Ownable extension that timelocks selected owner calls using a dedicated storage slot.
+ * @dev Upgradeable: built on `OwnableUpgradeable`; the concrete contract calls
+ *      `__Ownable_init` from its `initialize`. Ownership transfer is guarded like every other
+ *      owner call, so while a nonzero duration is configured no owner action can take effect
+ *      without passing through the public queue-and-wait window; a zero duration disarms the
+ *      timelock for every guarded call, transfers included. The one owner power that stays
+ *      immediate with the timelock armed is `cancelTimelockedCall`, which can only withdraw a
+ *      pending action, never enact one - so the outgoing owner keeps it until execution and may
+ *      cancel a queued transfer with it. There is no propose/accept handshake and no
+ *      pending-owner state: when the call applies the role moves in one write, and a reverted
+ *      execution moves nothing. Callers must validate the nonzero target because an incorrect
+ *      target cannot be recovered by this contract. Its own state lives at a fixed ERC-7201
+ *      slot, independent of the inherited namespaced storage.
+ *
+ *      Queued calls are keyed by calldata hash alone: they carry no proposer and are not
+ *      cleared by `transferOwnership`, so a call queued by a previous owner stays executable
+ *      under the new owner - anyone can execute that exact operation, carrying its original
+ *      owner authorization. Cancel every outstanding queued call before transferring
+ *      ownership; the queue is not enumerable on-chain, so finding them means replaying
+ *      `CallTimelocked` off-chain.
  */
 abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimelock {
 
@@ -19,9 +38,7 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
 
     uint256 internal constant MAX_TIMELOCK_DURATION_SECONDS = 7 days;
 
-    bytes32 internal constant STATE_POSITION = keccak256(
-        abi.encode(uint256(keccak256("utils.OwnableWithTimelock.State")) - 1)
-    ) & ~bytes32(uint256(0xff));
+    bytes32 internal constant STATE_POSITION = bytes32(erc7201("utils.OwnableWithTimelock.State"));
 
     modifier onlyOwnerWithTimelock() {
         if (_timeToExecuteTimelockedCall()) {
@@ -82,6 +99,31 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
         emit TimelockDurationSet(_timelockDurationSeconds);
     }
 
+    /**
+     * @notice Transfers ownership, under the timelock like every other guarded call.
+     * @param _newOwner The new owner. Must be nonzero; an incorrect target cannot be recovered.
+     * @dev Not `super.transferOwnership`: on the execute path the call arrives as a self-call
+     *      from `executeTimelockedCall`, `_beforeExecuteTimelockedCall` deliberately skips the
+     *      owner check, and `Ownable`'s own `onlyOwner` would then reject
+     *      `msg.sender == address(this)`. The internal `_transferOwnership` has no such check,
+     *      so the zero-address guard is reapplied here - as OpenZeppelin's own
+     *      `OwnableInvalidOwner`, leaving the ABI unchanged. Queueing validates nothing, so a
+     *      zero target is refused when the queued call executes, like every other guarded
+     *      setter; with a zero duration this still applies at once. While a transfer is queued
+     *      the caller remains the owner and may cancel it.
+     */
+    function transferOwnership(
+        address _newOwner
+    )
+        public
+        virtual
+        override
+        onlyOwnerWithTimelock
+    {
+        require(_newOwner != address(0), OwnableInvalidOwner(address(0)));
+        _transferOwnership(_newOwner);
+    }
+
     /// @inheritdoc IOwnableWithTimelock
     function getTimelockDurationSeconds()
         public
@@ -108,6 +150,18 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
         require(_allowedAfterTimestamp != 0, TimelockInvalidSelector());
     }
 
+    /**
+     * @notice Disabled to prevent permanently frozen administration; rotate
+     *         governance through `transferOwnership`, itself a guarded call.
+     */
+    function renounceOwnership()
+        public
+        pure
+        override
+    {
+        revert RenounceDisabled();
+    }
+
     function _beforeExecuteTimelockedCall()
         internal
         virtual
@@ -121,6 +175,15 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
         }
     }
 
+    /// @dev An upsert keyed solely by `keccak256(_encodedCall)`: queuing
+    ///      calldata that is already pending replaces its ETA — including
+    ///      pushing a matured call's ETA forward — and emits a regular
+    ///      `CallTimelocked`, indistinguishable from a fresh queueing. The
+    ///      latest emitted (and stored) ETA is the authoritative one, and two
+    ///      identical calls can never be pending concurrently. Only the owner
+    ///      queues, so an overwrite is always governance's own act — a double
+    ///      submission or a deliberate re-schedule — never a third party's,
+    ///      and no normal workflow queues identical calldata twice.
     function _recordTimelockedCall(
         bytes calldata _encodedCall
     )
@@ -129,6 +192,9 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
     {
         State storage state = getState();
         _checkOwner();
+        // Execution replays only calldata via a zero-value self-call, so value
+        // sent when queuing would be trapped; duration 0 still forwards it.
+        require(msg.value == 0, TimelockValueNotAllowed());
         bytes32 encodedCallHash = keccak256(_encodedCall);
         uint256 allowedAt = block.timestamp + state.timelockDurationSeconds;
         state.timelockedCalls[encodedCallHash] = allowedAt;
@@ -153,7 +219,7 @@ abstract contract OwnableWithTimelock is OwnableUpgradeable, IOwnableWithTimeloc
         virtual
     {
         //solhint-disable-next-line no-inline-assembly
-        assembly {
+        assembly ("memory-safe") {
             let size := returndatasize()
             let ptr := mload(0x40)
             mstore(0x40, add(ptr, size))

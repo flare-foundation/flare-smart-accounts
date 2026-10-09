@@ -1,0 +1,87 @@
+[
+  {
+    "name": "TestnetLoanToken",
+    "contractName": "TestnetLoanToken.sol",
+    "address": "0x1B5A184869aD208E736BFecF53560e9940c3E67f"
+  },
+  {
+    "name": "TestnetFeedCollateralUsd",
+    "contractName": "TestnetPriceFeed.sol",
+    "address": "0xB1C5628fdd4Cd7591d1df753388003D55a2404D4"
+  },
+  {
+    "name": "TestnetFeedLoanUsd",
+    "contractName": "TestnetPriceFeed.sol",
+    "address": "0x73346B7971780AD0d02F02c8f8088D2840cd1410"
+  },
+  {
+    "name": "RehearsalMarketOracle",
+    "contractName": "MorphoChainlinkOracleV2.sol",
+    "address": "0x38866de4F3e3Ec99F02a5E169713729D6C8a29F0"
+  },
+  {
+    "name": "DiamondCutFacet",
+    "contractName": "DiamondCutFacet.sol",
+    "address": "0xbBfDC00D4a230eB2cBf2623f8ca67C23D31E094D"
+  },
+  {
+    "name": "DiamondLoupeFacet",
+    "contractName": "DiamondLoupeFacet.sol",
+    "address": "0x39Da5ec984c0E5797E0BD24706Ab35F21EB065d1"
+  },
+  {
+    "name": "OwnershipFacet",
+    "contractName": "OwnershipFacet.sol",
+    "address": "0x615eAdb82F2c3b84Ee4cd7ac5DefdF381d585978"
+  },
+  {
+    "name": "MasterAccountController",
+    "contractName": "MasterAccountController.sol",
+    "address": "0x434936d47503353f06750Db1A444DBDC5F0AD37c"
+  },
+  {
+    "name": "SubaccountsFacet",
+    "contractName": "SubaccountsFacet.sol",
+    "address": "0xEdD0dDc68F4ED65050Ef5164431a28F1E633bACC"
+  },
+  {
+    "name": "TimelockFacet",
+    "contractName": "TimelockFacet.sol",
+    "address": "0x05ad5ABCA6738f94C7b6CdFd9Da7E47F34966F01"
+  },
+  {
+    "name": "PauseFacet",
+    "contractName": "PauseFacet.sol",
+    "address": "0x13bD1F2cFf4237df3F1C7D7B8C9BF682940297AE"
+  },
+  {
+    "name": "PersonalAccountsFacet",
+    "contractName": "PersonalAccountsFacet.sol",
+    "address": "0xcB27F9ddA6211E1b0e13d4B188AAc4d1cb866ccc"
+  },
+  {
+    "name": "ComposeTransportFacet",
+    "contractName": "ComposeTransportFacet.sol",
+    "address": "0xACdf54b0B74F941B9e57aE41150d0c73C18fCE77"
+  },
+  {
+    "name": "MorphoLoanMarketsFacet",
+    "contractName": "MorphoLoanMarketsFacet.sol",
+    "address": "0x6056366c7a5Cec3e3b79B9Cb1a8c588ECDdba5bc"
+  },
+  {
+    "name": "EthereumControllerInit",
+    "contractName": "EthereumControllerInit.sol",
+    "address": "0x767b25A658E8FC8ab6eBbd52043495dB61b4ea91"
+  },
+  {
+    "name": "MorphoLoanSubaccountRemoteImplementation",
+    "contractName": "MorphoLoanSubaccountRemote.sol",
+    "address": "0x681465D7f6CCf6E5E1b59ef85f1F3b4a344658fD"
+  },
+  {
+    "name": "PersonalAccountRemoteImplementation",
+    "contractName": "PersonalAccountRemote.sol",
+    "address": "0xf4Cb397e97a99788014c74bA5B0356D1BcfDc84b"
+  }
+]

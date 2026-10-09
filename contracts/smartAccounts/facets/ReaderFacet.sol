@@ -39,7 +39,7 @@ contract ReaderFacet is IIReaderFacet {
         returns (AccountBalances memory _balances)
     {
         PersonalAccounts.State storage paState = PersonalAccounts.getState();
-        address personalAccount = address(paState.personalAccounts[_xrplOwner]);
+        address personalAccount = paState.personalAccounts[_xrplOwner];
         if (personalAccount == address(0)) {
             personalAccount = PersonalAccounts.computePersonalAccountAddress(_xrplOwner);
         }

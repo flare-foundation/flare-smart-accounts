@@ -1,0 +1,10 @@
+{
+  "note": "Test fixture, not a cut. test/unit/deployment/ExecuteDiamondCutGuards.t.sol runs the executor against this file to prove a pinned base facet is refused while the pinned address does not hold the production runtime - the state of a loan chain whose bootstrap has not yet run. It can never execute.",
+  "diamond": "0x434936d47503353f06750Db1A444DBDC5F0AD37c",
+  "facets": [
+    "OwnershipFacet"
+  ],
+  "deleteAllOldMethods": false,
+  "deleteSelectorSigs": [],
+  "execute": false
+}

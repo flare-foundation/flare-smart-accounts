@@ -95,8 +95,9 @@ Every argument is sanity-checked:
 | `setDefaultExecutor(address payable)` | `onlyOwnerWithTimelock` | Executor used when a compose message doesn't specify one. Non-zero. |
 | `upgradeToAndCall(address, bytes)` | `onlyOwnerWithTimelock` | UUPS upgrade (overridden to compose with the timelock). |
 | `setTimelockDuration(uint256)` | `onlyOwnerWithTimelock` (inherited) | Capped at 7 days. |
+| `transferOwnership(address)` | `onlyOwnerWithTimelock` (inherited) | The owner role, moved in one write. Non-zero, checked when the queued call executes. |
 
-Owner-level mutation that is **not** timelocked: `transferOwnership` (from OpenZeppelin's `Ownable`) and `cancelTimelockedCall` (mirroring the diamond's behavior).
+Owner-level mutation that is **not** timelocked: `cancelTimelockedCall` alone (mirroring the diamond's behavior). It can only withdraw a pending action, never enact one, so the outgoing owner keeps it until a queued transfer executes and may cancel that transfer with it. `renounceOwnership` reverts.
 
 ## Per-redeemer accounts
 
@@ -115,7 +116,7 @@ IIFAssetRedeemerAccount(_redeemerAccount).setMaxAllowances(fAsset, stableCoin, w
 
 `salt = bytes32(0)`. Deployer = the composer itself (no singleton factory, unlike Smart Accounts). The redeemer-account address is therefore deterministic per `(composer-address, redeemer)` pair: `keccak256(0xff || composerAddress || 0 || keccak256(initcode))[12:]`.
 
-Unlike Smart Accounts' frozen `PROXY_CREATION_CODE`, the composer uses live `type(FAssetRedeemerAccountProxy).creationCode`. Cross-chain address parity is not a property the composer needs — the redeemer interacts only with the chain the composer is deployed on.
+Unlike Smart Accounts' frozen `PROXY_CREATION_CODE`, the composer uses live `type(FAssetRedeemerAccountProxy).creationCode`. Cross-chain address parity is not a property the composer needs — the redeemer interacts only with the chain the composer is deployed on. The live creation code also means a composer upgrade can move the predicted addresses of accounts not yet created; see [Address derivation](./RedeemerAccounts.md#address-derivation).
 
 Right after deployment, the composer calls `setMaxAllowances(fAsset, stableCoin, wNat)` on the new account. Inside the account this does three `forceApprove(owner, type(uint256).max)` calls — see [Redeemer accounts](./RedeemerAccounts.md).
 
@@ -133,7 +134,9 @@ Right after deployment, the composer calls `setMaxAllowances(fAsset, stableCoin,
 
 ## Governance
 
-Owner gating uses [`OwnableWithTimelock`](../../../contracts/utils/implementation/OwnableWithTimelock.sol) — semantically identical to the diamond's `TimelockFacet`. See [SmartAccounts/Timelock](../SmartAccounts/Timelock.md) for the timelock pattern; only the storage slot (`erc7201:utils.OwnableWithTimelock.State`) and the owner-check source differ.
+Owner gating uses [`OwnableWithTimelock`](../../../contracts/utils/implementation/OwnableWithTimelock.sol) — the same timelock pattern as the diamond's `TimelockFacet`. See [SmartAccounts/Timelock](../SmartAccounts/Timelock.md); the storage slot (`erc7201:utils.OwnableWithTimelock.State`) and the owner-check source differ, and so does one gate: the composer's `transferOwnership` is timelocked, while the diamond's `OwnershipFacet.transferOwnership` is immediate.
+
+Because the transfer is itself guarded, the deploy never uses one: the proxy is initialized with governance as owner from its first block, since every setting is applied by `initialize` and the deployer needs the role for nothing. Arming the timelock is then governance's own first call, immediate because the duration starts at zero, and the deploy script prints exactly that call. The other order — initializing with the deployer, arming the timelock, then handing over — would queue the transfer, since it is guarded too, leaving the deployer owning the composer and able to cancel the handover until someone executed it. Before the timelock is armed a transfer still applies immediately, like every other guarded call. Only a deploy with no governance address configured leaves the deployer as owner, and it then arms the timelock itself.
 
 There is **no** pause mechanism on the composer. The two emergency knobs are:
 

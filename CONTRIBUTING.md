@@ -80,9 +80,11 @@ The following networks are supported for deployment and verification:
 - coston
 - flare
 - songbird
-- scdev
+- ethereum
+- sepolia
 
-You can also use staging variants by appending `-staging` to any base network (e.g., `coston2-staging`).
+You can also use staging variants by appending `-staging` to any Flare-family network (e.g., `coston2-staging`);
+the loan chains, `ethereum` and `sepolia`, have only the pinned deployment.
 
 ### Prerequisites
 
